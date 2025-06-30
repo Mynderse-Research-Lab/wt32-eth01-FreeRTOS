@@ -28,7 +28,7 @@ void WiFiEvent(WiFiEvent_t event) {
 }
 
 // Send a message every 5 seconds
-void connectionTest(){
+void sanityCheck(){
 
 
   static unsigned long lastMsg = 0;

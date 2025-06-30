@@ -12,6 +12,6 @@ void WiFiEvent(WiFiEvent_t event);
 // Reconnect logic for MQTT
 void reconnect();
 
-void connectionTest();
+void sanityCheck();
 
 void enableLAN8720A();

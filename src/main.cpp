@@ -44,7 +44,7 @@ void loop() {
   client.loop();
 
   // Send a message every 5 seconds
-  connectionTest();
+  sanityCheck();
 
 }
 
