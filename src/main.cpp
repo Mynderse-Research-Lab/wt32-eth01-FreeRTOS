@@ -36,11 +36,12 @@ void setup() {
 }
 
 void loop() {
-  
+  // checks connection
   if (!client.connected()) {
     reconnect();
   }
 
+  // Maintains the connection to the broker-- call often
   client.loop();
 
   // Send a message every 5 seconds
