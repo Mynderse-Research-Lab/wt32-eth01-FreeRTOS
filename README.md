@@ -1,4 +1,4 @@
-WT32-ETH01 MQTT Client Node Setup
+## WT32-ETH01 MQTT Client Node Setup
 This repository provides a basic setup for an MQTT client node designed to communicate over TCP using the WT32-ETH01 module.
 
 Entering Programming Mode on the WT32-ETH01
