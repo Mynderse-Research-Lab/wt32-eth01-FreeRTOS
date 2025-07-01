@@ -49,5 +49,5 @@ void loop()
   // Send a message every 5 seconds
   // sanityCheck();
 
-  // Add your code here
+  // Add your code here!
 }
