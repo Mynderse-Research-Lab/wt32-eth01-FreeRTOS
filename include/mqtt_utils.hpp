@@ -1,17 +1,17 @@
-#pragma once
+// #pragma once
 
-#include <ETH.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
+// #include <ETH.h>
+// #include <WiFi.h>
+// #include <PubSubClient.h>
 
-extern PubSubClient client;
+// extern PubSubClient client;
 
-// Event Handler for Ethernet IP
-void WiFiEvent(WiFiEvent_t event);
+// // Event Handler for Ethernet IP
+// void WiFiEvent(WiFiEvent_t event);
 
-// Reconnect logic for MQTT
-void reconnect();
+// // Reconnect logic for MQTT
+// void reconnect();
 
-void sanityCheck();
+// void sanityCheck();
 
-void enableLAN8720A();
+// void enableLAN8720A();
