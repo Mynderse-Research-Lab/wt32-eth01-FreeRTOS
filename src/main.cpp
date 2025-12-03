@@ -58,7 +58,7 @@ void EthEvent(WiFiEvent_t event) {
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("[ETH] link up");
-      // (moved ETH.config out of here)
+      
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.printf("[ETH] IP: %s\n", ETH.localIP().toString().c_str());
@@ -113,7 +113,7 @@ void setup() {
     ETH_PHY_LAN8720, ETH_CLOCK_GPIO17_OUT
   );
 
-  // ✅ apply static IP right after begin (fixes config error 20487)
+  // apply static IP right after begin (fixes config error 20487)
   delay(50); // tiny settle
   if (!ETH.config(local_IP, gateway, subnet, dns)) {
     Serial.println("[ETH] static IP config FAILED");
