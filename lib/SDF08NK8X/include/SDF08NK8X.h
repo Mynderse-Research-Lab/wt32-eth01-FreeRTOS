@@ -116,6 +116,233 @@ using AlarmCallback = std::function<void(const std::string &alarm_code)>;
 using PositionReachedCallback = std::function<void(uint32_t position)>;
 using StatusUpdateCallback = std::function<void(const DriveStatus &status)>;
 
+/**
+ * @class ServoDriver
+ * @brief Main class for controlling Bergerda F series servo drivers via CN1
+ */
+class ServoDriver {
+public:
+  // ====================================================================
+  // INITIALIZATION
+  // ====================================================================
+
+  /**
+   * @brief Constructor
+   * @param config Driver configuration structure
+   */
+  explicit ServoDriver(const DriverConfig &config);
+
+  /**
+   * @brief Destructor
+   */
+  ~ServoDriver();
+
+  /**
+   * @brief Initialize hardware GPIO pins and driver state
+   * @return true if initialization successful, false otherwise
+   */
+  bool initialize();
+
+  // ====================================================================
+  // DIGITAL I/O CONTROL
+  // ====================================================================
+
+  /**
+   * @brief Set digital input state (for external signal simulation)
+   * @param input_number Input number (0-6 for IN0-IN6)
+   * @param state true=active (sink to COM+), false=inactive
+   */
+  void setDigitalInput(uint8_t input_number, bool state);
+
+  /**
+   * @brief Get current state of digital output
+   * @param output_number Output number (1-3 for OUT1-OUT3)
+   * @return true=sink path open (HIGH when pulled up), false=sink path closed
+   * (LOW)
+   */
+  bool getDigitalOutput(uint8_t output_number) const;
+
+  // ====================================================================
+  // SERVO CONTROL
+  // ====================================================================
+
+  /**
+   * @brief Enable servo motor (set SON signal HIGH)
+   * @return true if successful, false if already enabled or error
+   */
+  bool enable();
+
+  /**
+   * @brief Disable servo motor (set SON signal LOW, motor freewheels)
+   * @return true if successful, false if already disabled
+   */
+  bool disable();
+
+  /**
+   * @brief Check if servo is currently enabled
+   * @return true if enabled, false otherwise
+   */
+  bool isEnabled() const;
+
+  /**
+   * @brief Move motor to absolute position
+   * @param target_position Target position in encoder counts
+   * @param max_speed Maximum speed during movement (pps - pulses per second)
+   * @param acceleration Acceleration rate (pps²)
+   * @param deceleration Deceleration rate (pps²)
+   * @return true if command accepted, false on error or motor disabled
+   */
+  bool moveToPosition(uint32_t target_position, uint32_t max_speed = 10000,
+                      uint32_t acceleration = 5000,
+                      uint32_t deceleration = 5000);
+
+  /**
+   * @brief Move motor by relative distance
+   * @param delta_counts Relative distance in encoder counts
+   * @param max_speed Maximum speed during movement (pps)
+   * @param acceleration Acceleration rate (pps²)
+   * @param deceleration Deceleration rate (pps²)
+   * @return true if command accepted, false on error
+   */
+  bool moveRelative(int32_t delta_counts, uint32_t max_speed = 10000,
+                    uint32_t acceleration = 5000, uint32_t deceleration = 5000);
+
+  /**
+   * @brief Generate N pulses at specified frequency and direction
+   * @param pulse_count Number of pulses to generate
+   * @param frequency Pulse frequency (Hz)
+   * @param direction true=forward, false=backward
+   * @return true if successful, false on error
+   */
+  bool generatePulses(uint32_t pulse_count, uint32_t frequency,
+                      bool direction = true);
+
+  /**
+   * @brief Stop all motor motion with deceleration
+   * @param deceleration Deceleration rate (pps²)
+   * @return true if successful
+   */
+  bool stopMotion(uint32_t deceleration = 50000);
+
+  /**
+   * @brief Emergency stop - immediately disable motor
+   * @return true if successful
+   */
+  bool eStop();
+
+  // ====================================================================
+  // REAL-TIME MONITORING
+  // ====================================================================
+
+  /**
+   * @brief Get current motor status
+   * @return DriveStatus structure with current state
+   */
+  DriveStatus getStatus() const;
+
+  /**
+   * @brief Get current position (encoder counts)
+   * @return Current position from encoder feedback
+   */
+  uint32_t getPosition() const;
+
+  /**
+   * @brief Set current position (for position calibration)
+   * @param position New position value to set as reference
+   */
+  void setPosition(uint32_t position);
+
+  /**
+   * @brief Get current motor speed (rpm or pps depending on mode)
+   * @return Current speed from encoder frequency
+   */
+  uint16_t getSpeed() const;
+
+  /**
+   * @brief Check if alarm condition is active
+   * @return true if ALM=LOW (alarm active), false if ALM=HIGH (no alarm)
+   */
+  bool isAlarmActive() const;
+
+  /**
+   * @brief Clear alarm condition by toggling IN1 (ARST)
+   * @return true if alarm cleared, false if persistent
+   */
+  bool clearAlarm();
+
+  // ====================================================================
+  // CALLBACKS AND EVENT HANDLING
+  // ====================================================================
+
+  /**
+   * @brief Register alarm event callback
+   * @param callback Function to call when alarm occurs
+   */
+  void setAlarmCallback(AlarmCallback callback);
+
+  /**
+   * @brief Register position reached callback
+   * @param callback Function to call when target position reached
+   */
+  void setPositionReachedCallback(PositionReachedCallback callback);
+
+  /**
+   * @brief Register status update callback
+   * @param callback Function to call on status updates
+   */
+  void setStatusUpdateCallback(StatusUpdateCallback callback);
+
+  // ====================================================================
+  // CONFIGURATION MANAGEMENT
+  // ====================================================================
+
+  /**
+   * @brief Get current driver configuration
+   * @return Reference to config structure
+   */
+  const DriverConfig &getConfig() const;
+
+  /**
+   * @brief Update driver configuration (may require re-initialization)
+   * @param config New configuration
+   */
+  void setConfig(const DriverConfig &config);
+
+  /**
+   * @brief Get configuration status string
+   * @return Formatted configuration information
+   */
+  std::string getConfigStatus() const;
+
+private:
+  // Private implementation
+  DriverConfig config_;
+  DriveStatus status_;
+  bool initialized_;
+  bool enabled_;
+
+  // Callbacks
+  AlarmCallback alarm_callback_;
+  PositionReachedCallback position_reached_callback_;
+  StatusUpdateCallback status_update_callback_;
+
+  // State variables
+  uint32_t current_position_;
+  uint32_t target_position_;
+  uint32_t encoder_frequency_;
+  bool motion_active_;
+  uint32_t current_speed_pps_;
+  bool current_direction_;
+
+  // Private methods
+  void updateStatus();
+  void readEncoderSignals();
+  void setPulsePin(bool state);
+  void setDirectionPin(bool state);
+  void setEnablePin(bool state);
+  void calculateSpeed();
+}; // class ServoDriver
+
 } // namespace BergerdaServo
 
 #endif // SDF08NK8X_H
