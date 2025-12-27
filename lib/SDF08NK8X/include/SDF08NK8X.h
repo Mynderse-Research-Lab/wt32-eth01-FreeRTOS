@@ -314,6 +314,22 @@ public:
    */
   std::string getConfigStatus() const;
 
+  // ====================================================================
+  // ADVANCED FEATURES
+  // ====================================================================
+
+  /**
+   * @brief Get library version
+   * @return Version string "X.Y.Z"
+   */
+  static std::string getVersion();
+
+  /**
+   * @brief Get detailed driver information
+   * @return Driver info string including pinout and configuration
+   */
+  std::string getDriverInfo() const;
+
 private:
   // Private implementation
   DriverConfig config_;
