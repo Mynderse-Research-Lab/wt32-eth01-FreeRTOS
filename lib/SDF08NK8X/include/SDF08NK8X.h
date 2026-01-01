@@ -86,8 +86,8 @@ struct DriverConfig {
       : pulse_pin(-1), direction_pin(-1), enable_pin(-1), alarm_input_pin(-1),
         encoder_a_pin(-1), encoder_b_pin(-1), encoder_z_pin(-1),
         pulse_mode(PulseMode::PULSE_DIRECTION),
-        control_mode(ControlMode::POSITION), max_pulse_freq(1000000),
-        encoder_ppr(131072), gear_numerator(1.0), gear_denominator(1.0),
+        control_mode(ControlMode::POSITION), max_pulse_freq(600000),
+        encoder_ppr(12000), gear_numerator(1.0), gear_denominator(1.0),
         enable_encoder_feedback(false), inverted_direction(false) {}
 };
 
