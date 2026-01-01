@@ -1,10 +1,8 @@
 #ifndef SDF08NK8X_H
 #define SDF08NK8X_H
 
-#include <chrono>     // For std::chrono::system_clock
-#include <cstdint>    // For uint8_t, uint16_t, uint32_t, int32_t
-#include <functional> // For std::function
-#include <string>     // For std::string
+#include <Arduino.h>
+
 namespace BergerdaServo {
 /**
  * @enum PulseMode
@@ -106,15 +104,15 @@ struct DriveStatus {
   uint32_t current_position; // Current position (encoder counts)
   int32_t position_error;    // Position error (target - current)
   uint16_t current_speed;    // Current motor speed (rpm)
+  uint8_t load_percentage;   // Load percentage (0-100)
 
-  std::chrono::system_clock::time_point
-      last_update; // Timestamp of last status update
+  uint32_t last_update_ms; // Timestamp of last status update (millis)
 };
 
 // Callback type definitions
-using AlarmCallback = std::function<void(const std::string &alarm_code)>;
-using PositionReachedCallback = std::function<void(uint32_t position)>;
-using StatusUpdateCallback = std::function<void(const DriveStatus &status)>;
+using AlarmCallback = void (*)(const String &alarm_code);
+using PositionReachedCallback = void (*)(uint32_t position);
+using StatusUpdateCallback = void (*)(const DriveStatus &status);
 
 /**
  * @class ServoDriver
@@ -157,8 +155,7 @@ public:
   /**
    * @brief Get current state of digital output
    * @param output_number Output number (1-3 for OUT1-OUT3)
-   * @return true=sink path open (HIGH when pulled up), false=sink path closed
-   * (LOW)
+   * @return true=HIGH, false=LOW
    */
   bool getDigitalOutput(uint8_t output_number) const;
 
@@ -312,7 +309,7 @@ public:
    * @brief Get configuration status string
    * @return Formatted configuration information
    */
-  std::string getConfigStatus() const;
+  String getConfigStatus() const;
 
   // ====================================================================
   // ADVANCED FEATURES
@@ -322,13 +319,13 @@ public:
    * @brief Get library version
    * @return Version string "X.Y.Z"
    */
-  static std::string getVersion();
+  static String getVersion();
 
   /**
    * @brief Get detailed driver information
    * @return Driver info string including pinout and configuration
    */
-  std::string getDriverInfo() const;
+  String getDriverInfo() const;
 
 private:
   // Private implementation
@@ -349,6 +346,8 @@ private:
   bool motion_active_;
   uint32_t current_speed_pps_;
   bool current_direction_;
+  uint32_t last_pulse_time_us_;
+  uint32_t last_status_update_ms_;
 
   // Private methods
   void updateStatus();
