@@ -45,6 +45,7 @@ ServoDriver::ServoDriver(const DriverConfig &config)
   status_.alarm_active = false;
   status_.servo_enabled = false;
   status_.current_position = 0;
+  status_.encoder_position = 0;
   status_.position_error = 0;
   status_.current_speed = 0;
   status_.last_update_ms = 0;
@@ -119,6 +120,9 @@ bool ServoDriver::initialize() {
 
   // Initialize LEDC channel for pulse output
   if (config_.output_pin_nos[6] >= 0) {
+    // Ensure ledc_pulse_pin is synced with output_pin_nos[6] for internal use
+    config_.ledc_pulse_pin = config_.output_pin_nos[6];
+
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     // Arduino ESP32 v3.0+ API - attach with initial frequency
     if (!ledcAttach(config_.output_pin_nos[6], 1000, config_.ledc_resolution)) {
@@ -384,6 +388,13 @@ void ServoDriver::updateMotionProfile() {
   // Sync status structure
   status_.current_position = current_position_;
   status_.current_speed = current_speed_pps_;
+  if (config_.enable_encoder_feedback) {
+    int16_t count = 0;
+    pcnt_get_counter_value(config_.pcnt_unit, &count);
+    status_.encoder_position = static_cast<int32_t>(count);
+  } else {
+    status_.encoder_position = 0;
+  }
   status_.position_error =
       (int32_t)profile_.target_position - (int32_t)current_position_;
   status_.last_update_ms = millis();
