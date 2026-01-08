@@ -10,7 +10,7 @@ using namespace BergerdaServo;
 
 // version constants
 #define SDF08NK8X_VERSION_MAJOR "1"
-#define SDF08NK8X_VERSION_MINOR "0"
+#define SDF08NK8X_VERSION_MINOR "1"
 #define SDF08NK8X_VERSION_PATCH "0"
 #define SERVO_DRIVER_VERSION                                                   \
   SDF08NK8X_VERSION_MAJOR "." SDF08NK8X_VERSION_MINOR                          \
@@ -37,8 +37,8 @@ ServoDriver::ServoDriver(const DriverConfig &config)
     : config_(config), initialized_(false), enabled_(false),
       current_position_(0), motion_active_(false), current_speed_pps_(0),
       current_direction_(true), last_status_update_ms_(0),
-      alarm_callback_(NULL), position_reached_callback_(NULL),
-      status_update_callback_(NULL) {
+      encoder_accumulator_(0), last_pcnt_count_(0), alarm_callback_(NULL),
+      position_reached_callback_(NULL), status_update_callback_(NULL) {
   // Initialize status structure
   status_.position_reached = false;
   status_.brake_released = false;
@@ -391,7 +391,19 @@ void ServoDriver::updateMotionProfile() {
   if (config_.enable_encoder_feedback) {
     int16_t count = 0;
     pcnt_get_counter_value(config_.pcnt_unit, &count);
-    status_.encoder_position = static_cast<int32_t>(count);
+
+    // Calculate delta and handle 16-bit wrap-around
+    int32_t delta = count - last_pcnt_count_;
+    if (delta < -16000) {
+      delta += 32768 * 2; // Underflow wrapped to high positive
+    } else if (delta > 16000) {
+      delta -= 32768 * 2; // Overflow wrapped to low negative
+    }
+
+    encoder_accumulator_ += delta;
+    last_pcnt_count_ = count;
+
+    status_.encoder_position = (int32_t)encoder_accumulator_;
   } else {
     status_.encoder_position = 0;
   }
@@ -558,9 +570,9 @@ bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
 }
 
 bool ServoDriver::stopMotion(uint32_t deceleration) {
-  // TODO: Currently stops abruptly. Future: implement gradual decel using
-  // 'deceleration' parameter by transitioning to DECEL phase.
-  (void)deceleration; // Suppress unused warning
+  // Gracefully stop motion. If deceleration > 0, ramps down.
+  // Otherwise stops immediately.
+  (void)deceleration; // Suppress unused warning if logic below skipped
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
@@ -571,6 +583,23 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
     return false;
   }
 
+  if (motion_active_ && deceleration > 0 && current_speed_pps_ > 0) {
+    // Smooth stop: Transition directly to DECEL phase
+    profile_.decel_rate = (double)deceleration;
+    profile_.phase = MotionProfile::DECEL;
+    // We don't care about target position anymore, just stopping.
+    // The update loop will stop when freq hits 0.
+    // Ensure we don't clamp to the OLD target position if we stop early.
+    profile_.target_position = current_position_; // Will be updated as we move
+
+    DEBUG_PRINTLN("ServoDriver: Ramping down...");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return true;
+  }
+
+  // Hard stop (or already stopped)
   motion_active_ = false;
   current_speed_pps_ = 0;
   profile_.phase = MotionProfile::IDLE;
@@ -583,7 +612,7 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
   xSemaphoreGive(mutex_);
 #endif
 
-  DEBUG_PRINTLN("ServoDriver: Motion stopped");
+  DEBUG_PRINTLN("ServoDriver: Motion stopped immediately");
   return true;
 }
 
@@ -628,9 +657,7 @@ int32_t ServoDriver::getEncoderPosition() const {
   if (!config_.enable_encoder_feedback) {
     return 0;
   }
-  int16_t count = 0;
-  pcnt_get_counter_value(config_.pcnt_unit, &count);
-  return static_cast<int32_t>(count);
+  return (int32_t)encoder_accumulator_;
 }
 
 void ServoDriver::resetEncoderPosition() {
@@ -638,6 +665,8 @@ void ServoDriver::resetEncoderPosition() {
     pcnt_counter_pause(config_.pcnt_unit);
     pcnt_counter_clear(config_.pcnt_unit);
     pcnt_counter_resume(config_.pcnt_unit);
+    encoder_accumulator_ = 0;
+    last_pcnt_count_ = 0;
   }
 }
 

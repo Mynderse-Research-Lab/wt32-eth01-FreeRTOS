@@ -1,7 +1,7 @@
 /**
  * @file SDF08NK8X.h
  * @brief Bergerda SDF-08-N-K-8X Servo Driver Library for ESP32
- * @version 1.0.0
+ * @version 1.1.0
  *
  * FEATURES:
  * - Pulse/Direction Position Control (Deterministic)
@@ -11,10 +11,6 @@
  * - Thread-safe (FreeRTOS Mutex support)
  *
  * LIMITATIONS:
- * - Encoder Feedback is raw 16-bit PCNT (wraps at +/-32767).
- *   User must handle overflow for multi-turn tracking.
- * - stopMotion() currently forces an immediate stop (abrupt),
- *   ignoring the deceleration parameter.
  * - Only supports PULSE_DIRECTION mode and POSITION control mode.
  */
 
@@ -443,6 +439,10 @@ private:
   uint32_t current_position_, target_position_, current_speed_pps_,
       last_status_update_ms_;
   bool motion_active_, current_direction_;
+
+  // Encoder Tracking
+  int64_t encoder_accumulator_;
+  int16_t last_pcnt_count_;
 
   // Private helper methods
   void setDirectionPin(bool state), setEnablePin(bool state), stopLEDC();
