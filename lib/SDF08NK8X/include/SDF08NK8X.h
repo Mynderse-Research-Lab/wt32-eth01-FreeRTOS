@@ -2,8 +2,21 @@
 #define SDF08NK8X_H
 
 #include <Arduino.h>
+#include <driver/pcnt.h>
+#include <esp_timer.h>
+
+// Optional FreeRTOS support - define SDF08NK8X_USE_FREERTOS=1 for thread safety
+#ifndef SDF08NK8X_USE_FREERTOS
+#define SDF08NK8X_USE_FREERTOS 1 // Enabled by default on ESP32
+#endif
+
+#if SDF08NK8X_USE_FREERTOS
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
 
 namespace BergerdaServo {
+
 /**
  * @enum PulseMode
  * @brief Pulse input mode selection (PN8 parameter)
@@ -26,69 +39,92 @@ enum class ControlMode : uint8_t {
 };
 
 /**
- * @enum InputFunction
- * @brief Programmable digital input functions (PN110-PN116)
- */
-enum class InputFunction : uint8_t {
-  SERVO_ON = 1,       // IN0 (SON) - Servo enable
-  ALARM_RESET = 2,    // IN1 (ARST) - Alarm reset
-  CW_PROHIBIT = 16,   // IN3 (CW) - Reverse drive prohibit
-  POSITION_CLEAR = 8, // IN4 (CLE) - Position deviation clear
-  INHIBIT = 4,        // IN5 (INH) - Pulse inhibit
-  GEAR_SELECT = 32,   // IN6 (GEARI) - Electronic gear selection
-  // IN2 is NC per datasheet
-};
-
-/**
- * @enum OutputFunction
- * @brief Programmable digital output functions (PN70-PN72)
- */
-enum class OutputFunction : uint8_t {
-  POSITION_REACH = 1, // OUT1 (COIN) - Position reached
-  BRAKE_RELEASE = 2,  // OUT2 (HOLD) - Brake release (servo enabled)
-  ALARM = 3           // OUT3 (ALM) - Servo alarm status
-};
-
-/**
  * @struct DriverConfig
  * @brief Configuration structure for servo driver initialization
  */
 struct DriverConfig {
-  // GPIO Pins
-  int pulse_pin;       // GPIO pin for pulse output
-  int direction_pin;   // GPIO pin for direction output
-  int enable_pin;      // GPIO pin for servo enable (sinks to COM+)
-  int alarm_input_pin; // GPIO pin for alarm input (read from OUT3)
-  int encoder_a_pin;   // GPIO pin for encoder A+ signal (optional)
-  int encoder_b_pin;   // GPIO pin for encoder B+ signal (optional)
-  int encoder_z_pin;   // GPIO pin for encoder Z+ signal (optional)
 
-  // Control Modes
-  PulseMode pulse_mode;     // Pulse input mode (PN8)
-  ControlMode control_mode; // Control mode (PN4)
+  /**
+   * @brief GPIO inputs from servo driver
+   * @param [0]: OUT1/1(POS_reached)
+   * @param [1]: OUT2/14(BRAKE)
+   * @param [2]: OUT3/15(ALM)
+   * @param [3]: A+/23 (Encoder A+ signal)
+   * @param [4]: B+/24 (Encoder B+ signal)
+   * @param [5]: Z+/25 (Encoder Z+ signal)
+   */
+  static constexpr size_t INPUT_PIN_COUNT = 6;
+  int input_pin_nos[INPUT_PIN_COUNT];
 
-  // Parameters
-  uint32_t max_pulse_freq; // Maximum pulse frequency (Hz)
-  uint32_t encoder_ppr;    // Encoder pulses per revolution
+  /**
+   * @brief GPIO outputs to servo driver
+   * @param [0]: IN0/21 (SON)
+   * @param [1]: IN1/9 (ARST)
+   * @param [2]: IN3/17 (CW/CCW prohibition)
+   * @param [3]: IN4/22 (CLE - deviation counter clear)
+   * @param [4]: IN5/10 (INH - command pulse prohibition)
+   * @param [5]: IN6/4 (GEARI)
+   * @param [6]: PULS/18 (Pulse input)
+   * @param [7]: SIGN/19 (Direction input)
+   */
+  static constexpr size_t OUTPUT_PIN_COUNT = 8;
+  int output_pin_nos[OUTPUT_PIN_COUNT];
 
-  // Electronic Gear Ratio
-  double gear_numerator;   // Electronic gear ratio numerator (PN9)
-  double gear_denominator; // Electronic gear ratio denominator (PN10)
+  /**
+   * @brief Control Modes
+   * @param pulse_mode: Pulse input mode (PN8)
+   * @param control_mode: Control mode (PN4)
+   */
+  PulseMode pulse_mode;
+  ControlMode control_mode;
 
-  // Feature Flags
-  bool enable_encoder_feedback; // Enable encoder signal monitoring
-  bool inverted_direction;      // Invert direction logic
+  /**
+   * @brief Parameters
+   * @param max_pulse_freq: Maximum pulse frequency (Hz)
+   * @param encoder_ppr: Encoder pulses per revolution
+   */
+  uint32_t max_pulse_freq;
+  uint32_t encoder_ppr;
+
+  /**
+   * @brief Electronic Gear Ratio
+   * @param gear_numerator: Electronic gear ratio numerator (PN9)
+   * @param gear_denominator: Electronic gear ratio denominator (PN10)
+   */
+  double gear_numerator;
+  double gear_denominator;
+
+  /**
+   * @brief LEDC Configuration for pulse output
+   * @param ledc_channel: LEDC channel (0-15) for PWM generation
+   * @param ledc_pulse_pin: GPIO pin for LEDC PWM output (typically same as
+   * output_pins_nos[6])
+   * @param ledc_resolution: PWM resolution in bits (1-14, default
+   * 2 for high freq)
+   */
+  int ledc_channel;
+  int ledc_pulse_pin;
+  uint8_t ledc_resolution;
+
+  /**
+   * @brief Feature Flags
+   * @param enable_encoder_feedback: Enable encoder signal monitoring
+   * @param pcnt_unit: ESP32 PCNT unit (0-7) for encoder counting
+   */
+  bool enable_encoder_feedback;
+  pcnt_unit_t pcnt_unit;
 
   /**
    * @brief Default constructor with defaults
    */
   DriverConfig()
-      : pulse_pin(-1), direction_pin(-1), enable_pin(-1), alarm_input_pin(-1),
-        encoder_a_pin(-1), encoder_b_pin(-1), encoder_z_pin(-1),
-        pulse_mode(PulseMode::PULSE_DIRECTION),
+      : pulse_mode(PulseMode::PULSE_DIRECTION),
+        input_pin_nos{-1, -1, -1, -1, -1, -1},
+        output_pin_nos{-1, -1, -1, -1, -1, -1, -1, -1},
         control_mode(ControlMode::POSITION), max_pulse_freq(600000),
         encoder_ppr(12000), gear_numerator(1.0), gear_denominator(1.0),
-        enable_encoder_feedback(false), inverted_direction(false) {}
+        ledc_channel(0), ledc_pulse_pin(-1), ledc_resolution(2),
+        enable_encoder_feedback(false), pcnt_unit(PCNT_UNIT_0) {}
 };
 
 /**
@@ -96,20 +132,70 @@ struct DriverConfig {
  * @brief Real-time status information from the servo drive
  */
 struct DriveStatus {
-  bool servo_enabled;    // True if servo is enabled (SON=HIGH)
-  bool alarm_active;     // True if alarm condition exists (ALM=LOW)
-  bool position_reached; // True if target position reached (OUT1=HIGH)
-  bool brake_released;   // True if brake released (OUT2=HIGH)
+  bool servo_enabled; // True if servo is enabled (SON)
 
-  uint32_t current_position; // Current position (encoder counts)
-  int32_t position_error;    // Position error (target - current)
-  uint16_t current_speed;    // Current motor speed (rpm)
-  uint8_t load_percentage;   // Load percentage (0-100)
+  /**
+   * @brief Status signals
+   * @param position_reached: True if target position reached (OUT1/POS_reached)
+   * @param brake_released:   True if brake released (OUT2/BRAKE)
+   * @param alarm_active:     True if alarm condition exists (OUT3/ALM)
+   *  signals are all active-low
+   */
+  uint8_t position_reached;
+  uint8_t brake_released;
+  uint8_t alarm_active;
 
-  uint32_t last_update_ms; // Timestamp of last status update (millis)
+  /**
+   * @brief Position and Error
+   * @param current_position: Current position (encoder counts)
+   * @param position_error: Position error (target - current)
+   */
+  uint32_t current_position;
+  int32_t position_error;
+
+  /**
+   * @brief Speed
+   * @param current_speed: Current motor speed (pps)
+   */
+  uint32_t current_speed;
+
+  /**
+   * @brief Timestamp
+   * @param last_update_ms: Timestamp of last status update (millis)
+   */
+  uint32_t last_update_ms;
 };
 
-// Callback type definitions
+/**
+ * @struct MotionProfile
+ * @brief State for trapezoidal velocity profile execution
+ */
+struct MotionProfile {
+  enum Phase : uint8_t { IDLE = 0, ACCEL, CRUISE, DECEL };
+
+  uint32_t total_pulses;     // Total pulses for move
+  uint32_t accel_pulses;     // Pulses during acceleration
+  uint32_t decel_pulses;     // Pulses during deceleration
+  uint32_t cruise_pulses;    // Pulses at max speed
+  uint32_t pulses_generated; // Running count of pulses generated
+  uint32_t target_position;  // Target position for clamping on completion
+  double current_freq;       // Current frequency (Hz)
+  double max_freq;           // Target max frequency (Hz)
+  double accel_rate;         // Acceleration (Hz/s = pps/s)
+  double decel_rate;         // Deceleration (Hz/s)
+  double fractional_pulses; // Accumulated fractional pulses (reduces truncation
+                            // error)
+  int64_t last_update_us;   // Timestamp of last ramp update (64-bit)
+  Phase phase;              // Current motion phase
+  bool direction;           // Direction for position clamping
+};
+
+/**
+ * @brief Callback type definitions
+ * @note Callbacks are invoked from timer ISR context. Keep them short and
+ *       ISR-safe. Avoid blocking operations, heap allocations, or FreeRTOS
+ *       API calls that are not ISR-safe (use FromISR variants if needed).
+ */
 using AlarmCallback = void (*)(const String &alarm_code);
 using PositionReachedCallback = void (*)(uint32_t position);
 using StatusUpdateCallback = void (*)(const DriveStatus &status);
@@ -142,24 +228,6 @@ public:
   bool initialize();
 
   // ====================================================================
-  // DIGITAL I/O CONTROL
-  // ====================================================================
-
-  /**
-   * @brief Set digital input state (for external signal simulation)
-   * @param input_number Input number (0-6 for IN0-IN6)
-   * @param state true=active (sink to COM+), false=inactive
-   */
-  void setDigitalInput(uint8_t input_number, bool state);
-
-  /**
-   * @brief Get current state of digital output
-   * @param output_number Output number (1-3 for OUT1-OUT3)
-   * @return true=HIGH, false=LOW
-   */
-  bool getDigitalOutput(uint8_t output_number) const;
-
-  // ====================================================================
   // SERVO CONTROL
   // ====================================================================
 
@@ -182,6 +250,12 @@ public:
   bool isEnabled() const;
 
   /**
+   * @brief Check if motion is currently in progress
+   * @return true if moving, false otherwise
+   */
+  bool isMotionActive() const;
+
+  /**
    * @brief Move motor to absolute position
    * @param target_position Target position in encoder counts
    * @param max_speed Maximum speed during movement (pps - pulses per second)
@@ -201,18 +275,8 @@ public:
    * @param deceleration Deceleration rate (pps²)
    * @return true if command accepted, false on error
    */
-  bool moveRelative(int32_t delta_counts, uint32_t max_speed = 10000,
+  bool moveRelative(int64_t delta_counts, uint32_t max_speed = 10000,
                     uint32_t acceleration = 5000, uint32_t deceleration = 5000);
-
-  /**
-   * @brief Generate N pulses at specified frequency and direction
-   * @param pulse_count Number of pulses to generate
-   * @param frequency Pulse frequency (Hz)
-   * @param direction true=forward, false=backward
-   * @return true if successful, false on error
-   */
-  bool generatePulses(uint32_t pulse_count, uint32_t frequency,
-                      bool direction = true);
 
   /**
    * @brief Stop all motor motion with deceleration
@@ -228,7 +292,7 @@ public:
   bool eStop();
 
   // ====================================================================
-  // REAL-TIME MONITORING
+  // MONITORING
   // ====================================================================
 
   /**
@@ -250,10 +314,10 @@ public:
   void setPosition(uint32_t position);
 
   /**
-   * @brief Get current motor speed (rpm or pps depending on mode)
-   * @return Current speed from encoder frequency
+   * @brief Get current motor speed (pps)
+   * @return Current speed in pulses per second
    */
-  uint16_t getSpeed() const;
+  uint32_t getSpeed() const;
 
   /**
    * @brief Check if alarm condition is active
@@ -266,6 +330,21 @@ public:
    * @return true if alarm cleared, false if persistent
    */
   bool clearAlarm();
+
+  // ====================================================================
+  // ENCODER FEEDBACK
+  // ====================================================================
+
+  /**
+   * @brief Get encoder position (hardware quadrature count)
+   * @return Current encoder count (signed, supports bidirectional)
+   */
+  int32_t getEncoderPosition() const;
+
+  /**
+   * @brief Reset encoder position counter to zero
+   */
+  void resetEncoderPosition();
 
   // ====================================================================
   // CALLBACKS AND EVENT HANDLING
@@ -331,8 +410,7 @@ private:
   // Private implementation
   DriverConfig config_;
   DriveStatus status_;
-  bool initialized_;
-  bool enabled_;
+  bool initialized_, enabled_;
 
   // Callbacks
   AlarmCallback alarm_callback_;
@@ -340,22 +418,30 @@ private:
   StatusUpdateCallback status_update_callback_;
 
   // State variables
-  uint32_t current_position_;
-  uint32_t target_position_;
-  uint32_t encoder_frequency_;
-  bool motion_active_;
-  uint32_t current_speed_pps_;
-  bool current_direction_;
-  uint32_t last_pulse_time_us_;
-  uint32_t last_status_update_ms_;
+  uint32_t current_position_, target_position_, current_speed_pps_,
+      last_status_update_ms_;
+  bool motion_active_, current_direction_;
 
-  // Private methods
-  void updateStatus();
-  void readEncoderSignals();
-  void setPulsePin(bool state);
-  void setDirectionPin(bool state);
-  void setEnablePin(bool state);
-  void calculateSpeed();
+  // Private helper methods
+  void setDirectionPin(bool state), setEnablePin(bool state), stopLEDC();
+
+  void handleMoveComplete();
+
+  // Motion Profile (Accel/Decel)
+  MotionProfile profile_;
+  esp_timer_handle_t ramp_timer_ = NULL;
+  static constexpr uint32_t RAMP_INTERVAL_US = 5000; // 5ms update interval
+
+  static void rampTimerCallback(void *arg);
+  void updateMotionProfile();
+  void startMotionProfile(uint32_t total_pulses, double max_freq,
+                          double accel_rate, double decel_rate, bool direction);
+
+  // FreeRTOS Thread Safety (only when SDF08NK8X_USE_FREERTOS is enabled)
+#if SDF08NK8X_USE_FREERTOS
+  SemaphoreHandle_t mutex_ = NULL;
+#endif
+
 }; // class ServoDriver
 
 } // namespace BergerdaServo
