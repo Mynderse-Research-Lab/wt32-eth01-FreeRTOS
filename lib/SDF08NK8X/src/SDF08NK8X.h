@@ -157,9 +157,9 @@ struct DriveStatus {
    * @param alarm_active:     True if alarm condition exists (OUT3/ALM)
    *  signals are all active-low
    */
-  uint8_t position_reached;
-  uint8_t brake_released;
-  uint8_t alarm_active;
+  bool position_reached;
+  bool brake_released;
+  bool alarm_active;
 
   /**
    * @brief Position and Error
@@ -213,8 +213,10 @@ struct MotionProfile {
  * @note Callbacks are invoked from timer ISR context. Keep them short and
  *       ISR-safe. Avoid blocking operations, heap allocations, or FreeRTOS
  *       API calls that are not ISR-safe (use FromISR variants if needed).
+ * @note AlarmCallback uses const char* instead of String to avoid heap
+ *       allocation in ISR context.
  */
-using AlarmCallback = void (*)(const String &alarm_code);
+using AlarmCallback = void (*)(const char *alarm_code);
 using PositionReachedCallback = void (*)(uint32_t position);
 using StatusUpdateCallback = void (*)(const DriveStatus &status);
 

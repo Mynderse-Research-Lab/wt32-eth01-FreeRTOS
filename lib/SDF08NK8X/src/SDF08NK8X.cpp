@@ -5,6 +5,7 @@
  */
 
 #include "SDF08NK8X.h"
+#include <cmath>
 
 using namespace BergerdaServo;
 
@@ -55,7 +56,11 @@ ServoDriver::ServoDriver(const DriverConfig &config)
   ramp_args.callback = &ServoDriver::rampTimerCallback;
   ramp_args.arg = this;
   ramp_args.name = "servo_ramp_timer";
-  esp_timer_create(&ramp_args, &ramp_timer_);
+  esp_err_t timer_err = esp_timer_create(&ramp_args, &ramp_timer_);
+  if (timer_err != ESP_OK) {
+    DEBUG_PRINTLN("ServoDriver: Failed to create timer!");
+    ramp_timer_ = NULL;
+  }
 
   // Initialize motion profile
   profile_.phase = MotionProfile::IDLE;
@@ -63,21 +68,43 @@ ServoDriver::ServoDriver(const DriverConfig &config)
 #if SDF08NK8X_USE_FREERTOS
   // Create FreeRTOS mutex for thread safety
   mutex_ = xSemaphoreCreateMutex();
+  if (mutex_ == NULL) {
+    DEBUG_PRINTLN("ServoDriver: Failed to create mutex!");
+  }
 #endif
 }
 
 ServoDriver::~ServoDriver() {
+  // Stop any active motion
+  if (motion_active_) {
+    stopMotion(0);  // Hard stop
+  }
+
+  // Disable motor
+  if (enabled_) {
+    disable();
+  }
+
+  // Clean up timer
   if (ramp_timer_) {
     esp_timer_stop(ramp_timer_);
     esp_timer_delete(ramp_timer_);
+    ramp_timer_ = NULL;
   }
+
+  // Stop LEDC output
+  stopLEDC();
+
+  // Stop encoder counting
   if (config_.enable_encoder_feedback) {
     pcnt_counter_pause(config_.pcnt_unit);
     // Legacy driver doesn't have explicit deinit, but pause is good practice
   }
+
 #if SDF08NK8X_USE_FREERTOS
   if (mutex_) {
     vSemaphoreDelete(mutex_);
+    mutex_ = NULL;
   }
 #endif
 }
@@ -92,6 +119,20 @@ bool ServoDriver::initialize() {
     return false;
   }
 
+  // Check that timer was created successfully
+  if (!ramp_timer_) {
+    DEBUG_PRINTLN("ServoDriver: Timer not created - initialization failed");
+    return false;
+  }
+
+#if SDF08NK8X_USE_FREERTOS
+  // Check that mutex was created successfully
+  if (!mutex_) {
+    DEBUG_PRINTLN("ServoDriver: Mutex not created - initialization failed");
+    return false;
+  }
+#endif
+
   // Validate configuration (Library currently only supports Pulse+Dir Position
   // Mode)
   if (config_.pulse_mode != PulseMode::PULSE_DIRECTION) {
@@ -103,6 +144,31 @@ bool ServoDriver::initialize() {
     DEBUG_PRINTLN("ServoDriver: Error - Only POSITION control mode is "
                   "supported in this version.");
     return false;
+  }
+
+  // Validate required pins are configured
+  if (config_.output_pin_nos[6] < 0) {
+    DEBUG_PRINTLN("ServoDriver: Error - Pulse pin (output_pin_nos[6]) must be configured");
+    return false;
+  }
+  if (config_.output_pin_nos[7] < 0) {
+    DEBUG_PRINTLN("ServoDriver: Error - Direction pin (output_pin_nos[7]) must be configured");
+    return false;
+  }
+  if (config_.output_pin_nos[0] < 0) {
+    DEBUG_PRINTLN("ServoDriver: Error - Enable pin (output_pin_nos[0]) must be configured");
+    return false;
+  }
+
+  // Validate LEDC channel is in valid range (0-15 for ESP32)
+  if (config_.ledc_channel < 0 || config_.ledc_channel > 15) {
+    DEBUG_PRINTLN("ServoDriver: Error - LEDC channel must be 0-15");
+    return false;
+  }
+
+  // Validate encoder PPR
+  if (config_.encoder_ppr == 0 && config_.enable_encoder_feedback) {
+    DEBUG_PRINTLN("ServoDriver: Warning - encoder_ppr is 0 but encoder feedback enabled");
   }
 
   // Configure GPIO pins
@@ -260,15 +326,26 @@ bool ServoDriver::isAlarmActive() const {
 }
 
 bool ServoDriver::clearAlarm() {
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
   if (!initialized_ || config_.output_pin_nos[1] < 0) {
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
     return false;
   }
 
   // Pulse alarm reset pin to clear alarm
+  // Note: delayMicroseconds is blocking but acceptable here as this function
+  // should not be called from ISR context. If needed, use non-blocking delay.
   digitalWrite(config_.output_pin_nos[1], LOW);
   delayMicroseconds(100);
   digitalWrite(config_.output_pin_nos[1], HIGH);
 
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreGive(mutex_);
+#endif
   DEBUG_PRINTLN("ServoDriver: Alarm clear signal sent");
   return true;
 }
@@ -301,6 +378,12 @@ void ServoDriver::rampTimerCallback(void *arg) {
   driver->updateMotionProfile();
 }
 
+/**
+ * @brief Update motion profile state machine
+ * @note This function runs from ESP timer ISR context. All operations must be
+ *       ISR-safe. GPIO reads (digitalRead) are safe on ESP32 from ISR context.
+ *       Callbacks are invoked here, so they must also be ISR-safe.
+ */
 void ServoDriver::updateMotionProfile() {
   if (profile_.phase == MotionProfile::IDLE) {
     return;
@@ -360,7 +443,12 @@ void ServoDriver::updateMotionProfile() {
       profile_.current_freq = 0;
       profile_.phase = MotionProfile::IDLE;
       // Clamp position to exact target to eliminate accumulated drift
-      current_position_ = profile_.target_position;
+      // Only clamp if we completed normally (not stopped early)
+      // Check if target_position was set by normal move completion
+      if (profile_.pulses_generated >= profile_.total_pulses) {
+        current_position_ = profile_.target_position;
+      }
+      // Otherwise keep current_position_ as-is (stopped early via stopMotion)
       esp_timer_stop(ramp_timer_);
       stopLEDC();
       handleMoveComplete();
@@ -393,11 +481,14 @@ void ServoDriver::updateMotionProfile() {
     pcnt_get_counter_value(config_.pcnt_unit, &count);
 
     // Calculate delta and handle 16-bit wrap-around
+    // PCNT counter limits: -32768 to 32767
+    static constexpr int32_t PCNT_HALF_RANGE = 32768 / 2;
+    static constexpr int32_t PCNT_FULL_RANGE = 32768 * 2;
     int32_t delta = count - last_pcnt_count_;
-    if (delta < -16000) {
-      delta += 32768 * 2; // Underflow wrapped to high positive
-    } else if (delta > 16000) {
-      delta -= 32768 * 2; // Overflow wrapped to low negative
+    if (delta < -PCNT_HALF_RANGE) {
+      delta += PCNT_FULL_RANGE; // Underflow wrapped to high positive
+    } else if (delta > PCNT_HALF_RANGE) {
+      delta -= PCNT_FULL_RANGE; // Overflow wrapped to low negative
     }
 
     encoder_accumulator_ += delta;
@@ -420,9 +511,10 @@ void ServoDriver::updateMotionProfile() {
   }
 
   // Check for alarm condition and invoke callback
+  // Note: isAlarmActive() reads GPIO which is safe from ISR context on ESP32
   bool alarm_now = isAlarmActive();
   if (alarm_now && !status_.alarm_active && alarm_callback_) {
-    alarm_callback_("ALM");
+    alarm_callback_("ALM");  // const char* is ISR-safe
   }
   status_.alarm_active = alarm_now;
 
@@ -435,6 +527,12 @@ void ServoDriver::updateMotionProfile() {
 void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
                                      double accel_rate, double decel_rate,
                                      bool direction) {
+  // Validate rates to avoid division by zero
+  if (accel_rate <= 0.0 || decel_rate <= 0.0) {
+    DEBUG_PRINTLN("ServoDriver: Invalid accel/decel rates in startMotionProfile");
+    return;
+  }
+
   // Calculate kinematic profile
   // Time to accelerate to max_freq: t_accel = max_freq / accel_rate
   // Pulses during accel: P_accel = 0.5 * accel_rate * t_accel^2
@@ -476,6 +574,8 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   motion_active_ = true;
   current_direction_ = direction;
   setDirectionPin(direction);
+  // Small delay to ensure direction pin settles before starting pulses
+  // This is called from moveToPosition which already holds mutex, so blocking is OK
   delayMicroseconds(10);
 
   // Start LEDC at initial low frequency
@@ -528,9 +628,32 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
     return false;
   }
 
+  // Validate parameters
+  if (speed == 0) {
+    DEBUG_PRINTLN("ServoDriver: Invalid speed (must be > 0)");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+  if (acceleration == 0) {
+    DEBUG_PRINTLN("ServoDriver: Invalid acceleration (must be > 0)");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+  if (deceleration == 0) {
+    DEBUG_PRINTLN("ServoDriver: Invalid deceleration (must be > 0)");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+
   target_position_ = target_position;
   int64_t delta = (int64_t)target_position - (int64_t)current_position_;
-  uint32_t pulse_count = std::abs(delta);
+  uint32_t pulse_count = (uint32_t)std::abs(delta);
   bool direction = (delta >= 0);
 
   if (pulse_count == 0) {
@@ -560,12 +683,38 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
 
 bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
                                uint32_t acceleration, uint32_t deceleration) {
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
   if (!initialized_ || !enabled_) {
     DEBUG_PRINTLN("ServoDriver: Motor not enabled");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
     return false;
   }
 
-  uint32_t target = (uint32_t)((int64_t)current_position_ + delta_counts);
+  // Calculate target position and validate it doesn't overflow
+  int64_t target_signed = (int64_t)current_position_ + delta_counts;
+  if (target_signed < 0) {
+    DEBUG_PRINTLN("ServoDriver: moveRelative would result in negative position");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+  if (target_signed > UINT32_MAX) {
+    DEBUG_PRINTLN("ServoDriver: moveRelative would overflow position");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+
+  uint32_t target = (uint32_t)target_signed;
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreGive(mutex_);
+#endif
   return moveToPosition(target, speed, acceleration, deceleration);
 }
 
@@ -587,10 +736,10 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
     // Smooth stop: Transition directly to DECEL phase
     profile_.decel_rate = (double)deceleration;
     profile_.phase = MotionProfile::DECEL;
-    // We don't care about target position anymore, just stopping.
-    // The update loop will stop when freq hits 0.
-    // Ensure we don't clamp to the OLD target position if we stop early.
-    profile_.target_position = current_position_; // Will be updated as we move
+    // Don't modify total_pulses or target_position - let decel complete naturally
+    // updateMotionProfile() will check if we actually completed all pulses
+    // (pulses_generated >= total_pulses) before clamping to target_position.
+    // If we stopped early, pulses_generated < total_pulses, so we won't clamp.
 
     DEBUG_PRINTLN("ServoDriver: Ramping down...");
 #if SDF08NK8X_USE_FREERTOS
@@ -617,10 +766,19 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
 }
 
 bool ServoDriver::eStop() {
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
   if (!initialized_) {
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
     return false;
   }
-  stopMotion();
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreGive(mutex_);
+#endif
+  stopMotion(0);  // Hard stop immediately
   disable();
 
   DEBUG_PRINTLN("ServoDriver: EMERGENCY STOP");
@@ -636,8 +794,14 @@ DriveStatus ServoDriver::getStatus() const { return status_; }
 uint32_t ServoDriver::getPosition() const { return current_position_; }
 
 void ServoDriver::setPosition(uint32_t position) {
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
   current_position_ = position;
   status_.current_position = position;
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreGive(mutex_);
+#endif
 }
 
 uint32_t ServoDriver::getSpeed() const {
@@ -661,6 +825,9 @@ int32_t ServoDriver::getEncoderPosition() const {
 }
 
 void ServoDriver::resetEncoderPosition() {
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
   if (config_.enable_encoder_feedback) {
     pcnt_counter_pause(config_.pcnt_unit);
     pcnt_counter_clear(config_.pcnt_unit);
@@ -668,6 +835,9 @@ void ServoDriver::resetEncoderPosition() {
     encoder_accumulator_ = 0;
     last_pcnt_count_ = 0;
   }
+#if SDF08NK8X_USE_FREERTOS
+  xSemaphoreGive(mutex_);
+#endif
 }
 
 // ============================================================================
