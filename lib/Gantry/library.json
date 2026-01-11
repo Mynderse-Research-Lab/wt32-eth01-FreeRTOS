@@ -1,0 +1,39 @@
+{
+  "name": "Gantry",
+  "version": "1.0.0",
+  "description": "Multi-axis gantry control library for ESP32 (WT32-ETH01) with 3-axis support (X, Y, Theta)",
+  "keywords": [
+    "gantry",
+    "motion-control",
+    "esp32",
+    "servo",
+    "kinematics",
+    "robotics",
+    "3-axis",
+    "prismatic",
+    "rotational"
+  ],
+  "authors": {
+    "name": "Gantry Library Authors"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/gantry-library"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/yourusername/gantry-library",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "SDF08NK8X": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  },
+  "examples": [
+    "examples/BasicMotion/BasicMotion.ino",
+    "examples/HomingExample/HomingExample.ino",
+    "examples/MultiWaypoint/MultiWaypoint.ino",
+    "examples/FreeRTOSExample/FreeRTOSExample.ino"
+  ]
+}
