@@ -185,6 +185,48 @@ public:
      */
     int getCurrentTheta() const;
 
+    // ============================================================================
+    // ENHANCED KINEMATICS API (Phase 1.2)
+    // ============================================================================
+    
+    /**
+     * @brief Forward kinematics: Joint space -> Workspace
+     * @param joint Joint configuration in joint space
+     * @return End-effector pose in workspace coordinates
+     */
+    EndEffectorPose forwardKinematics(const JointConfig& joint) const;
+    
+    /**
+     * @brief Inverse kinematics: Workspace -> Joint space
+     * @param pose Desired end-effector pose in workspace coordinates
+     * @return Required joint configuration
+     */
+    JointConfig inverseKinematics(const EndEffectorPose& pose) const;
+    
+    /**
+     * @brief Get current joint configuration
+     * @return Current joint positions in joint space
+     */
+    JointConfig getCurrentJointConfig() const;
+    
+    /**
+     * @brief Get target joint configuration
+     * @return Target joint positions in joint space
+     */
+    JointConfig getTargetJointConfig() const;
+    
+    /**
+     * @brief Get current end-effector pose
+     * @return Current end-effector pose in workspace coordinates
+     */
+    EndEffectorPose getCurrentEndEffectorPose() const;
+    
+    /**
+     * @brief Get target end-effector pose
+     * @return Target end-effector pose in workspace coordinates
+     */
+    EndEffectorPose getTargetEndEffectorPose() const;
+
 private:
     BergerdaServo::ServoDriver axisX_;
     int gripperPin_;
@@ -195,9 +237,20 @@ private:
     bool enabled_;
     bool gripperActive_;
     
+    // Position tracking
     int32_t currentY_;
     int32_t currentTheta_;
+    int32_t targetY_;
+    int32_t targetTheta_;
     int32_t axisLength_;
+    
+    // Configuration
+    GantryConfig config_;
+    KinematicParameters kinematicParams_;
+    
+    // Helper methods for unit conversion
+    float pulsesToMm(int32_t pulses) const;
+    int32_t mmToPulses(float mm) const;
 };
 
 } // namespace Gantry
