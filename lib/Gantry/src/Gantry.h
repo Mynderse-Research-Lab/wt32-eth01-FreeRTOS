@@ -151,6 +151,36 @@ public:
     void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed);
     
     /**
+     * @brief Move to joint configuration
+     * @param joint Target joint configuration
+     * @param speed_mm_per_s Motion speed in mm/s (for X and Y axes)
+     * @param speed_deg_per_s Motion speed in deg/s (for Theta axis)
+     * @param acceleration_mm_per_s2 Acceleration in mm/s² (0 = use default)
+     * @param deceleration_mm_per_s2 Deceleration in mm/s² (0 = use default)
+     * @return GantryError code
+     */
+    GantryError moveTo(const JointConfig& joint,
+                      uint32_t speed_mm_per_s = 50,
+                      uint32_t speed_deg_per_s = 30,
+                      uint32_t acceleration_mm_per_s2 = 0,
+                      uint32_t deceleration_mm_per_s2 = 0);
+    
+    /**
+     * @brief Move to end-effector pose
+     * @param pose Target end-effector pose in workspace coordinates
+     * @param speed_mm_per_s Motion speed in mm/s (for X and Y axes)
+     * @param speed_deg_per_s Motion speed in deg/s (for Theta axis)
+     * @param acceleration_mm_per_s2 Acceleration in mm/s² (0 = use default)
+     * @param deceleration_mm_per_s2 Deceleration in mm/s² (0 = use default)
+     * @return GantryError code
+     */
+    GantryError moveTo(const EndEffectorPose& pose,
+                      uint32_t speed_mm_per_s = 50,
+                      uint32_t speed_deg_per_s = 30,
+                      uint32_t acceleration_mm_per_s2 = 0,
+                      uint32_t deceleration_mm_per_s2 = 0);
+    
+    /**
      * @brief Check if gantry is busy (moving)
      * @return bool true if busy
      */

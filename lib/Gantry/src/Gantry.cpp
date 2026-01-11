@@ -109,6 +109,66 @@ void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
     // This is a minimal implementation to maintain API compatibility
 }
 
+GantryError Gantry::moveTo(const JointConfig& joint,
+                           uint32_t speed_mm_per_s,
+                           uint32_t speed_deg_per_s,
+                           uint32_t acceleration_mm_per_s2,
+                           uint32_t deceleration_mm_per_s2) {
+    if (!initialized_) {
+        return GantryError::NOT_INITIALIZED;
+    }
+    if (!enabled_) {
+        return GantryError::MOTOR_NOT_ENABLED;
+    }
+    if (isBusy()) {
+        return GantryError::ALREADY_MOVING;
+    }
+    
+    // Validate joint limits
+    if (!Kinematics::validate(joint, config_.limits)) {
+        return GantryError::INVALID_POSITION;
+    }
+    
+    // Store target positions
+    targetY_ = (int32_t)joint.y;
+    targetTheta_ = (int32_t)joint.theta;
+    
+    // Convert speed: mm/s to pulses/s for X-axis
+    uint32_t speed_pps = (uint32_t)(speed_mm_per_s * 100.0f); // Approximate conversion
+    
+    // Call existing moveTo method
+    moveTo((int32_t)joint.x, (int32_t)joint.y, (int32_t)joint.theta, speed_pps);
+    
+    return GantryError::OK;
+}
+
+GantryError Gantry::moveTo(const EndEffectorPose& pose,
+                           uint32_t speed_mm_per_s,
+                           uint32_t speed_deg_per_s,
+                           uint32_t acceleration_mm_per_s2,
+                           uint32_t deceleration_mm_per_s2) {
+    if (!initialized_) {
+        return GantryError::NOT_INITIALIZED;
+    }
+    if (!enabled_) {
+        return GantryError::MOTOR_NOT_ENABLED;
+    }
+    if (isBusy()) {
+        return GantryError::ALREADY_MOVING;
+    }
+    
+    // Use inverse kinematics to get joint configuration
+    JointConfig joint = inverseKinematics(pose);
+    
+    // Validate joint limits
+    if (!Kinematics::validate(joint, config_.limits)) {
+        return GantryError::INVALID_POSITION;
+    }
+    
+    // Call moveTo with joint configuration
+    return moveTo(joint, speed_mm_per_s, speed_deg_per_s, acceleration_mm_per_s2, deceleration_mm_per_s2);
+}
+
 bool Gantry::isBusy() const {
     if (!initialized_) {
         return false;
