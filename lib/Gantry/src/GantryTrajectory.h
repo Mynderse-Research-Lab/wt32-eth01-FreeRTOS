@@ -39,16 +39,20 @@ struct TrapezoidalProfile {
 };
 
 /**
- * @struct Waypoint
- * @brief Single waypoint in a trajectory
+ * @struct TrajectoryWaypoint
+ * @brief Internal waypoint structure for trajectory planning
+ * @deprecated Use Gantry::Waypoint instead for public API
+ * 
+ * Note: This structure is kept for internal trajectory planning use.
+ * For public API, use the Waypoint struct in Gantry.h which uses EndEffectorPose.
  */
-struct Waypoint {
+struct TrajectoryWaypoint {
     JointConfig position;
     float speed_mm_per_s;
     float acceleration_mm_per_s2;
     float deceleration_mm_per_s2;
     
-    Waypoint() 
+    TrajectoryWaypoint() 
         : speed_mm_per_s(200.0f), 
           acceleration_mm_per_s2(1000.0f),
           deceleration_mm_per_s2(1000.0f) {}

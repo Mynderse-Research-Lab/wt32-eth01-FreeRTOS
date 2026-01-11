@@ -27,6 +27,12 @@
 
 namespace Gantry {
 
+// ============================================================================
+// FORWARD DECLARATIONS
+// ============================================================================
+
+struct EndEffectorPose;  // Forward declaration
+
 /**
  * @enum GantryError
  * @brief Error codes for Gantry operations
@@ -281,6 +287,117 @@ private:
     // Helper methods for unit conversion
     float pulsesToMm(int32_t pulses) const;
     int32_t mmToPulses(float mm) const;
+};
+
+// ============================================================================
+// WAYPOINT AND TRAJECTORY PLANNING (Phase 2.1)
+// ============================================================================
+
+/**
+ * @struct Waypoint
+ * @brief Waypoint for trajectory planning
+ * 
+ * Represents a point in a trajectory with associated motion parameters.
+ * Uses EndEffectorPose for workspace coordinates.
+ */
+struct Waypoint {
+    EndEffectorPose pose;                    // Target pose in workspace coordinates
+    uint32_t speed_mm_per_s;                 // Speed for this segment (mm/s)
+    uint32_t speed_deg_per_s;                // Speed for theta (deg/s)
+    uint32_t acceleration_mm_per_s2;         // Acceleration (mm/s², 0 = use default)
+    uint32_t deceleration_mm_per_s2;         // Deceleration (mm/s², 0 = use default)
+    
+    /**
+     * @brief Default constructor
+     */
+    Waypoint() 
+        : speed_mm_per_s(50), speed_deg_per_s(30),
+          acceleration_mm_per_s2(0), deceleration_mm_per_s2(0) {}
+    
+    /**
+     * @brief Constructor with pose
+     * @param p End-effector pose
+     */
+    Waypoint(const EndEffectorPose& p) 
+        : pose(p), speed_mm_per_s(50), speed_deg_per_s(30),
+          acceleration_mm_per_s2(0), deceleration_mm_per_s2(0) {}
+};
+
+/**
+ * @class WaypointQueue
+ * @brief Circular buffer queue for waypoints
+ * @tparam MAX_WAYPOINTS Maximum number of waypoints (default: 16)
+ * 
+ * Thread-safe queue for managing trajectory waypoints.
+ * Uses a circular buffer implementation for efficient storage.
+ */
+template<size_t MAX_WAYPOINTS = 16>
+class WaypointQueue {
+private:
+    Waypoint waypoints_[MAX_WAYPOINTS];
+    size_t head_ = 0;
+    size_t tail_ = 0;
+    size_t count_ = 0;
+    
+public:
+    /**
+     * @brief Add waypoint to queue
+     * @param wp Waypoint to add
+     * @return true if added, false if queue is full
+     */
+    bool push(const Waypoint& wp) {
+        if (count_ >= MAX_WAYPOINTS) {
+            return false;  // Queue is full
+        }
+        
+        waypoints_[tail_] = wp;
+        tail_ = (tail_ + 1) % MAX_WAYPOINTS;
+        count_++;
+        return true;
+    }
+    
+    /**
+     * @brief Remove waypoint from queue
+     * @param wp Reference to store popped waypoint
+     * @return true if waypoint was popped, false if queue is empty
+     */
+    bool pop(Waypoint& wp) {
+        if (count_ == 0) {
+            return false;  // Queue is empty
+        }
+        
+        wp = waypoints_[head_];
+        head_ = (head_ + 1) % MAX_WAYPOINTS;
+        count_--;
+        return true;
+    }
+    
+    /**
+     * @brief Get number of waypoints in queue
+     * @return Number of waypoints
+     */
+    size_t size() const { return count_; }
+    
+    /**
+     * @brief Check if queue is empty
+     * @return true if empty
+     */
+    bool empty() const { return count_ == 0; }
+    
+    /**
+     * @brief Check if queue is full
+     * @return true if full
+     */
+    bool full() const { return count_ >= MAX_WAYPOINTS; }
+    
+    /**
+     * @brief Clear all waypoints from queue
+     */
+    void clear() {
+        head_ = 0;
+        tail_ = 0;
+        count_ = 0;
+    }
 };
 
 } // namespace Gantry
