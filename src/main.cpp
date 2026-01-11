@@ -1,7 +1,10 @@
-#include "SDF08NK8X.h"
+#include "Gantry.h"
 #include <AsyncMqttClient.h>
 #include <ETH.h>
 #include <Ticker.h>
+#include <driver/pcnt.h>
+
+using Gantry::Gantry;
 
 // ---------- Logging Helper ----------
 #define LOG_INFO(tag, format, ...)                                             \
@@ -17,24 +20,36 @@
 static const char *TAG_SYS = "System";
 static const char *TAG_ETH = "Ethernet";
 static const char *TAG_MQTT = "MQTT";
-static const char *TAG_MOTION = "Motion";
+static const char *TAG_GANTRY = "Gantry";
 
 // ---------- Pin Definitions (WT32-ETH01 Safe) ----------
-// Avoid: 16, 17, 18, 23 (MDC/MDIO/CLK/PWR)
-// Avoid: 19, 21, 22, 25, 26, 27 (EMAC/RMII)
-// Available: 2, 4, 12, 14, 15, 32, 33, 35(I), 36(I), 39(I)
-
 #define PIN_SERVO_PULSE 2   // Output
 #define PIN_SERVO_DIR 4     // Output
 #define PIN_SERVO_ENABLE 12 // Output
 #define PIN_ENC_A 35        // Input Only
 #define PIN_ENC_B 36        // Input Only
+#define PIN_GRIPPER 33      // Output for Gripper
+#define PIN_LIMIT_MIN 14    // Input Pullup (X Home)
+#define PIN_LIMIT_MAX 32    // Input Pullup (X End)
 
 // ---------- MQTT Config ----------
 #define MQTT_HOST "192.168.2.1"
 #define MQTT_PORT 1883
 #define MQTT_CLIENT_ID "esp32-ether-01"
 #define MQTT_PUB_TOPIC "lab/outbox"
+#define MQTT_SUB_TOPIC "lab/gantry/cmd"
+
+// ---------- Command Layout ----------
+struct GantryCommand {
+  int32_t x;
+  int32_t y;
+  int32_t theta;
+  uint32_t speed;
+  bool home;
+  bool calibrate;
+};
+
+QueueHandle_t commandQueue = nullptr;
 
 // ---------- Network Config ----------
 IPAddress local_IP(192, 168, 2, 2);
@@ -45,15 +60,15 @@ IPAddress dns(8, 8, 8, 8);
 AsyncMqttClient mqttClient;
 bool netUp = false;
 Ticker mqttReconnectTimer;
-Ticker ethRetryTimer;
 
 // ---------- Objects ----------
-BergerdaServo::DriverConfig servoConfig;
-BergerdaServo::ServoDriver *servoDriver = nullptr;
+BergerdaServo::DriverConfig xConfig;
+Gantry::Gantry *gantrySystem = nullptr;
 
 // ---------- MQTT Functions ----------
 void onMqttConnect(bool sessionPresent) {
   LOG_INFO(TAG_MQTT, "Connected. Session: %d", sessionPresent);
+  mqttClient.subscribe(MQTT_SUB_TOPIC, 1);
   mqttClient.publish(MQTT_PUB_TOPIC, 1, true, "online");
 }
 
@@ -61,6 +76,54 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   LOG_WARN(TAG_MQTT, "Disconnected (Reason: %d)", (int)reason);
   if (netUp)
     mqttReconnectTimer.once(2, []() { mqttClient.connect(); });
+}
+
+void onMqttMessage(char *topic, char *payload,
+                   AsyncMqttClientMessageProperties properties, size_t len,
+                   size_t index, size_t total) {
+  // Basic Parsing: Expecting JSON-like string
+  // "x:1000,y:200,t:90,s:5000,h:1,c:1"
+  char buf[128];
+  size_t copyLen = (len < sizeof(buf) - 1) ? len : (sizeof(buf) - 1);
+  memcpy(buf, payload, copyLen);
+  buf[copyLen] = '\0';
+
+  LOG_INFO(TAG_MQTT, "Msg Received: %s", buf);
+
+  GantryCommand cmd = {0, 0, 0, 5000, false, false}; // Defaults
+
+  char *xPtr = strstr(buf, "x:");
+  if (xPtr)
+    cmd.x = atoi(xPtr + 2);
+
+  char *yPtr = strstr(buf, "y:");
+  if (yPtr)
+    cmd.y = atoi(yPtr + 2);
+
+  char *tPtr = strstr(buf, "t:");
+  if (tPtr)
+    cmd.theta = atoi(tPtr + 2);
+
+  char *sPtr = strstr(buf, "s:");
+  if (sPtr)
+    cmd.speed = atoi(sPtr + 2);
+
+  char *hPtr = strstr(buf, "h:");
+  if (hPtr)
+    cmd.home = (atoi(hPtr + 2) == 1);
+
+  char *cPtr = strstr(buf, "c:");
+  if (cPtr)
+    cmd.calibrate = (atoi(cPtr + 2) == 1);
+
+  // Enqueue
+  if (commandQueue) {
+    if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
+      LOG_ERROR(TAG_MQTT, "Queue Full! Dropped command.");
+    } else {
+      LOG_INFO(TAG_MQTT, "QueuedCmd");
+    }
+  }
 }
 
 void EthEvent(WiFiEvent_t event) {
@@ -89,82 +152,97 @@ void EthEvent(WiFiEvent_t event) {
 // ---------- FreeRTOS Tasks ----------
 
 void blinkTask(void *param) {
-  pinMode(15,
-          OUTPUT); // WT32-ETH01 often has no onboard LED, using IO15 as status
+  pinMode(15, OUTPUT);
   while (1) {
     digitalWrite(15, !digitalRead(15));
     vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
 
-void motionTask(void *param) {
-  LOG_INFO(TAG_MOTION, "Task Started");
+void gantryTask(void *param) {
+  LOG_INFO(TAG_GANTRY, "Task Started");
 
-  // 1. Configure Safe Pins
-  servoConfig.output_pin_nos[6] = PIN_SERVO_PULSE;
-  servoConfig.output_pin_nos[7] = PIN_SERVO_DIR;
-  servoConfig.output_pin_nos[0] = PIN_SERVO_ENABLE;
+  // 1. Configure X Axis Pins
+  xConfig.output_pin_nos[6] = PIN_SERVO_PULSE;
+  xConfig.output_pin_nos[7] = PIN_SERVO_DIR;
+  xConfig.output_pin_nos[0] = PIN_SERVO_ENABLE;
+  xConfig.input_pin_nos[3] = PIN_ENC_A;
+  xConfig.input_pin_nos[4] = PIN_ENC_B;
+  xConfig.enable_encoder_feedback = true;
+  xConfig.pcnt_unit = PCNT_UNIT_0;
 
-  // Encoder (Input Only pins are fine)
-  servoConfig.input_pin_nos[3] = PIN_ENC_A;
-  servoConfig.input_pin_nos[4] = PIN_ENC_B;
-  servoConfig.enable_encoder_feedback = true;
-  servoConfig.pcnt_unit = PCNT_UNIT_0;
+  // 2. Initialize Gantry
+  static Gantry::Gantry gantry(xConfig, PIN_GRIPPER);
+  gantry.setLimitPins(PIN_LIMIT_MIN, PIN_LIMIT_MAX); // Limit Pins
+  gantrySystem = &gantry;
 
-  // 2. Initialize Driver
-  static BergerdaServo::ServoDriver driver(servoConfig);
-  servoDriver = &driver; // Export pointer if needed globally
-
-  if (!driver.initialize()) {
-    LOG_ERROR(TAG_MOTION, "Driver Init Failed!");
+  if (!gantry.begin()) {
+    LOG_ERROR(TAG_GANTRY, "Init Failed!");
     vTaskDelete(NULL);
   }
-  LOG_INFO(TAG_MOTION, "Driver Initialized");
+  LOG_INFO(TAG_GANTRY, "Initialized");
 
-  // 3. Enable & Loop
-  driver.enable();
+  gantry.enable();
 
+  GantryCommand cmd;
+
+  // 3. Command Loop
   while (1) {
-    static bool toggle = false;
-    uint32_t target_pos = toggle ? 10000 : 0;
-    toggle = !toggle;
+    // Block until command available
+    if (xQueueReceive(commandQueue, &cmd, portMAX_DELAY) == pdTRUE) {
 
-    LOG_INFO(TAG_MOTION, "Moving to %u", target_pos);
-    driver.moveToPosition(target_pos, 8000, 3000, 3000);
+      if (cmd.home) {
+        LOG_INFO(TAG_GANTRY, "Executing Homing...");
+        gantry.home();
+      } else if (cmd.calibrate) {
+        LOG_INFO(TAG_GANTRY, "Executing Calibration...");
+        int len = gantry.calibrate();
+        LOG_INFO(TAG_GANTRY, "Calibrated Length: %d", len);
+      } else {
+        // Normal Move
+        LOG_INFO(TAG_GANTRY, "Moving: X=%d Y=%d T=%d", cmd.x, cmd.y, cmd.theta);
+        gantry.moveTo(cmd.x, cmd.y, cmd.theta, cmd.speed);
 
-    // Blocking wait for move to complete (sampling feedback)
-    while (driver.isMotionActive()) {
-      BergerdaServo::DriveStatus status = driver.getStatus();
-      // Logging here can be spammy, maybe skip or throttle
-      // LOG_INFO(TAG_MOTION, "Pos:%u", status.current_position);
-      vTaskDelay(pdMS_TO_TICKS(100));
+        while (gantry.isBusy()) {
+          gantry.update();
+          vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
+        // Simple Pick Sequence check (could normally require separate command)
+        // For now, assume positioning implies pick/place logic is handled
+        // elsewhere or via next command But strict requirement was "belt speed
+        // ... fed over MQTT" -> likely one-shot. Let's keep the simple grip
+        // sequence if it's a move command.
+        if (cmd.speed > 0) { // Naive check
+          LOG_INFO(TAG_GANTRY, "Gripping...");
+          gantry.grip(true);
+          vTaskDelay(pdMS_TO_TICKS(500));
+          gantry.grip(false);
+        }
+      }
+      LOG_INFO(TAG_GANTRY, "Cmd Done");
     }
-
-    LOG_INFO(TAG_MOTION, "Move Complete. Enc: %d", driver.getEncoderPosition());
-    vTaskDelay(pdMS_TO_TICKS(2000)); // Hold for 2s
   }
 }
 
 void mqttLoopTask(void *param) {
   while (1) {
     if (netUp && mqttClient.connected()) {
-      // Periodic publish example
       static uint32_t count = 0;
+      // Heartbeat
       char msg[64];
       snprintf(msg, sizeof(msg), "Count: %u", count++);
       mqttClient.publish(MQTT_PUB_TOPIC, 0, false, msg);
 
-      // Also publish servo status if available
-      if (servoDriver) {
-        BergerdaServo::DriveStatus s = servoDriver->getStatus();
-        char sMsg[64];
-        snprintf(sMsg, sizeof(sMsg), "Pos:%u Enc:%d", s.current_position,
-                 s.encoder_position);
-        mqttClient.publish("lab/servo", 0, false, sMsg);
-        LOG_INFO(TAG_MQTT, "Published status: %s", sMsg);
+      if (gantrySystem) {
+        char sMsg[128];
+        snprintf(sMsg, sizeof(sMsg), "X:%d Y:%d Th:%d",
+                 gantrySystem->getXEncoder(), gantrySystem->getCurrentY(),
+                 gantrySystem->getCurrentTheta());
+        mqttClient.publish("lab/gantry", 0, false, sMsg);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Publish every 5s
+    vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
 
@@ -174,29 +252,30 @@ void setup() {
   Serial.begin(115200);
   LOG_INFO(TAG_SYS, "Booting...");
 
-  // 1. Start Ethernet
+  // 1. Create Queue
+  commandQueue = xQueueCreate(10, sizeof(GantryCommand));
+  if (commandQueue == NULL) {
+    LOG_ERROR(TAG_SYS, "Queue Create Failed!");
+  }
+
+  // 2. Start Ethernet
   WiFi.onEvent(EthEvent);
   ETH.begin(1, 16, 23, 18, ETH_PHY_LAN8720, ETH_CLOCK_GPIO17_OUT);
   ETH.config(local_IP, gateway, subnet, dns);
 
-  // 2. Setup MQTT
+  // 3. Setup MQTT
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onMessage(onMqttMessage);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setClientId(MQTT_CLIENT_ID);
 
-  // 3. Create Tasks
-  // Motion Task on Core 1 (App Core) - High Priority, Deterministic
-  xTaskCreatePinnedToCore(motionTask, "Motion", 4096, NULL, 5, NULL, 1);
-
-  // MQTT & Blink on Core 0 (Pro Core) - Handles WiFi/ETH stack
+  // 4. Create Tasks
+  xTaskCreatePinnedToCore(gantryTask, "Gantry", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(mqttLoopTask, "MqttLoop", 4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(blinkTask, "Blink", 1024, NULL, 1, NULL, 0);
 
-  LOG_INFO(TAG_SYS, "Tasks created. Core pinning applied.");
+  LOG_INFO(TAG_SYS, "Tasks created.");
 }
 
-void loop() {
-  // Main loop unused in FreeRTOS
-  vTaskDelete(NULL);
-}
+void loop() { vTaskDelete(NULL); }
