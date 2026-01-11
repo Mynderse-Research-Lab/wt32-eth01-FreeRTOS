@@ -16,7 +16,8 @@ namespace Gantry {
 Gantry::Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)
     : axisX_(xConfig), gripperPin_(gripperPin), xMinPin_(-1), xMaxPin_(-1),
       initialized_(false), enabled_(false), gripperActive_(false),
-      currentY_(0), currentTheta_(0), axisLength_(0) {
+      currentY_(0), currentTheta_(0), targetY_(0), targetTheta_(0),
+      axisLength_(0), config_(), kinematicParams_() {
 }
 
 // ============================================================================
@@ -188,6 +189,78 @@ int Gantry::getCurrentY() const {
 
 int Gantry::getCurrentTheta() const {
     return currentTheta_;
+}
+
+// ============================================================================
+// ENHANCED KINEMATICS API (Phase 1.2)
+// ============================================================================
+
+EndEffectorPose Gantry::forwardKinematics(const JointConfig& joint) const {
+    return Kinematics::forward(joint, kinematicParams_);
+}
+
+JointConfig Gantry::inverseKinematics(const EndEffectorPose& pose) const {
+    return Kinematics::inverse(pose, kinematicParams_);
+}
+
+JointConfig Gantry::getCurrentJointConfig() const {
+    JointConfig joint;
+    
+    // Get X position from encoder and convert to mm
+    int32_t xPulses = getXEncoder();
+    joint.x = pulsesToMm(xPulses);
+    
+    // Y and Theta are stored directly in mm/degrees
+    joint.y = (float)currentY_;
+    joint.theta = (float)currentTheta_;
+    
+    return joint;
+}
+
+JointConfig Gantry::getTargetJointConfig() const {
+    JointConfig joint;
+    
+    // Target X position (for now, use current - will be updated when moveTo is implemented)
+    int32_t xPulses = getXEncoder();
+    joint.x = pulsesToMm(xPulses);
+    
+    // Y and Theta targets
+    joint.y = (float)targetY_;
+    joint.theta = (float)targetTheta_;
+    
+    return joint;
+}
+
+EndEffectorPose Gantry::getCurrentEndEffectorPose() const {
+    JointConfig joint = getCurrentJointConfig();
+    return forwardKinematics(joint);
+}
+
+EndEffectorPose Gantry::getTargetEndEffectorPose() const {
+    JointConfig joint = getTargetJointConfig();
+    return forwardKinematics(joint);
+}
+
+// ============================================================================
+// HELPER METHODS
+// ============================================================================
+
+float Gantry::pulsesToMm(int32_t pulses) const {
+    // Convert encoder pulses to mm
+    // For a ball screw: mm = pulses * (pitch_mm / encoder_ppr)
+    // Using default kinematic parameter for ball screw pitch (40mm)
+    // Note: encoder_ppr should come from axisX_ config, but using default for now
+    // This will need to be updated when encoder configuration is available
+    const float defaultEncoderPPR = 2500.0f; // Default encoder PPR
+    const float pitch = kinematicParams_.x_axis_ball_screw_pitch_mm;
+    return (float)pulses * (pitch / defaultEncoderPPR);
+}
+
+int32_t Gantry::mmToPulses(float mm) const {
+    // Convert mm to encoder pulses
+    const float defaultEncoderPPR = 2500.0f; // Default encoder PPR
+    const float pitch = kinematicParams_.x_axis_ball_screw_pitch_mm;
+    return (int32_t)(mm * (defaultEncoderPPR / pitch));
 }
 
 } // namespace Gantry
