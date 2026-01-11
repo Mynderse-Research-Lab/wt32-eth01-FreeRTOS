@@ -72,6 +72,83 @@ struct GantryStatus {
 };
 
 /**
+ * @struct JointConfig
+ * @brief Joint space configuration for 3-axis gantry
+ * 
+ * Represents the gantry configuration in joint space (joint positions).
+ * Joint space coordinates use mm for X/Y positions and degrees for Theta rotation.
+ * 
+ * Coordinate System:
+ * - q_x: X-axis position (mm) - horizontal (right-to-left), in home coordinates
+ * - q_y: Y-axis position (mm) - vertical (down-to-up)
+ * - q_theta: Theta angle (degrees) - rotation around Y-axis
+ */
+struct JointConfig {
+    float q_x;      // X-axis position (mm) - horizontal (right-to-left)
+    float q_y;      // Y-axis position (mm) - vertical (down-to-up)
+    float q_theta;  // Theta angle (degrees) - rotation around Y-axis
+    
+    // Default constructor
+    JointConfig() : q_x(0.0f), q_y(0.0f), q_theta(0.0f) {}
+    
+    // Constructor with values
+    JointConfig(float x, float y, float theta) : q_x(x), q_y(y), q_theta(theta) {}
+    
+    /**
+     * @brief Check if joint configuration is within default limits
+     * @return true if all joints are within valid range
+     * @note X limits are approximate (actual X limit depends on axisLength_ after calibration)
+     */
+    bool isValid() const;
+    
+    /**
+     * @brief Get default joint limits
+     * @param x_min, x_max X-axis limits (mm) - x_max is default maximum
+     * @param y_min, y_max Y-axis limits (mm)
+     * @param theta_min, theta_max Theta limits (degrees)
+     * @note Actual X limits depend on axisLength_ after calibration (check via Gantry::getAxisLength())
+     */
+    static void getLimits(float& x_min, float& x_max,
+                         float& y_min, float& y_max,
+                         float& theta_min, float& theta_max);
+    
+    // Default joint limits (static constants)
+    static constexpr float X_MIN = 0.0f;
+    static constexpr float X_MAX_DEFAULT = 10000.0f;  // Default maximum (actual limit depends on calibration)
+    static constexpr float Y_MIN = 0.0f;
+    static constexpr float Y_MAX = 150.0f;  // Y_AXIS_STROKE_LENGTH_MM
+    static constexpr float THETA_MIN = -90.0f;  // THETA_MIN_DEGREES
+    static constexpr float THETA_MAX = 90.0f;   // THETA_MAX_DEGREES
+};
+
+/**
+ * @struct EndEffectorPose
+ * @brief End-effector pose in workspace/cartesian space
+ * 
+ * Represents the end-effector position and orientation in workspace coordinates.
+ * Workspace coordinates use mm for positions and degrees for orientation.
+ * 
+ * Coordinate System:
+ * - x: X position (mm) - workspace coordinates
+ * - y: Y position (mm) - workspace coordinates
+ * - z: Z position (mm) - typically constant for gantry
+ * - theta: Orientation (degrees) - rotation around Y-axis
+ */
+struct EndEffectorPose {
+    float x;      // X position (mm) - workspace coordinates
+    float y;      // Y position (mm) - workspace coordinates
+    float z;      // Z position (mm) - typically constant for gantry
+    float theta;  // Orientation (degrees)
+    
+    // Default constructor
+    EndEffectorPose() : x(0.0f), y(0.0f), z(0.0f), theta(0.0f) {}
+    
+    // Constructor with values
+    EndEffectorPose(float x_val, float y_val, float z_val, float theta_val)
+        : x(x_val), y(y_val), z(z_val), theta(theta_val) {}
+};
+
+/**
  * @class Gantry
  * @brief XY Gantry control system for multi-axis motion control
  * 

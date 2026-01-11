@@ -47,6 +47,27 @@ int32_t Gantry::pulsesToMm(int32_t pulses, uint32_t encoder_ppr) {
 }
 
 // ============================================================================
+// JOINT CONFIG IMPLEMENTATION
+// ============================================================================
+
+bool JointConfig::isValid() const {
+  return (q_x >= X_MIN && q_x <= X_MAX_DEFAULT) &&
+         (q_y >= Y_MIN && q_y <= Y_MAX) &&
+         (q_theta >= THETA_MIN && q_theta <= THETA_MAX);
+}
+
+void JointConfig::getLimits(float& x_min, float& x_max,
+                            float& y_min, float& y_max,
+                            float& theta_min, float& theta_max) {
+  x_min = X_MIN;
+  x_max = X_MAX_DEFAULT;
+  y_min = Y_MIN;
+  y_max = Y_MAX;
+  theta_min = THETA_MIN;
+  theta_max = THETA_MAX;
+}
+
+// ============================================================================
 // CONSTRUCTOR
 // ============================================================================
 
