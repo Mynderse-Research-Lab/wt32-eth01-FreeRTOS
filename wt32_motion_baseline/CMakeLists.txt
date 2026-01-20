@@ -1,0 +1,13 @@
+\
+idf_component_register(
+    SRCS
+        "main.c"
+        "supervisory_layer.c"
+        "subordinate_layer.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        freertos
+        esp_driver_gpio
+        esp_log
+)

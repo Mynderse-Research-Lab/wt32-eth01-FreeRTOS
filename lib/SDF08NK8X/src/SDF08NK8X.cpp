@@ -119,6 +119,16 @@ bool ServoDriver::initialize() {
     return false;
   }
 
+#if SDF08NK8X_DEBUG
+  DEBUG_PRINT("ServoDriver: ESP_ARDUINO_VERSION=");
+  DEBUG_PRINTLN(ESP_ARDUINO_VERSION);
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  DEBUG_PRINTLN("ServoDriver: LEDC API v3+");
+#else
+  DEBUG_PRINTLN("ServoDriver: LEDC API v2");
+#endif
+#endif
+
   // Check that timer was created successfully
   if (!ramp_timer_) {
     DEBUG_PRINTLN("ServoDriver: Timer not created - initialization failed");
@@ -169,6 +179,12 @@ bool ServoDriver::initialize() {
   // Validate encoder PPR
   if (config_.encoder_ppr == 0 && config_.enable_encoder_feedback) {
     DEBUG_PRINTLN("ServoDriver: Warning - encoder_ppr is 0 but encoder feedback enabled");
+  }
+
+  // Validate closed-loop control requires encoder feedback
+  if (config_.enable_closed_loop_control && !config_.enable_encoder_feedback) {
+    DEBUG_PRINTLN("ServoDriver: Error - closed-loop control requires encoder feedback to be enabled");
+    return false;
   }
 
   // Configure GPIO pins
@@ -413,6 +429,16 @@ void ServoDriver::updateMotionProfile() {
           ? 0
           : (profile_.total_pulses - profile_.pulses_generated);
 
+  // CRITICAL: Absolute minimum frequency to prevent LEDC errors
+  // Based on div_param <= 262143 with 80MHz APB clock:
+  // 1-bit min ≈ 152.6 Hz, 2-bit min ≈ 76.3 Hz, 3-bit min ≈ 38.1 Hz, 4-bit min ≈ 19.1 Hz
+  // We enforce the strictest (1-bit) minimum to avoid underflow in all cases.
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  const double ABSOLUTE_MIN_FREQ = 5000.0;
+#else
+  const double ABSOLUTE_MIN_FREQ = 40000.0;
+#endif
+
   // Phase state machine
   switch (profile_.phase) {
   case MotionProfile::ACCEL:
@@ -439,6 +465,10 @@ void ServoDriver::updateMotionProfile() {
 
   case MotionProfile::DECEL:
     profile_.current_freq -= profile_.decel_rate * dt_s;
+    // CRITICAL: Clamp frequency to minimum safe value during deceleration
+    if (profile_.current_freq > 0 && profile_.current_freq < ABSOLUTE_MIN_FREQ) {
+      profile_.current_freq = ABSOLUTE_MIN_FREQ;
+    }
     if (profile_.current_freq <= 0 || remaining == 0) {
       profile_.current_freq = 0;
       profile_.phase = MotionProfile::IDLE;
@@ -446,7 +476,15 @@ void ServoDriver::updateMotionProfile() {
       // Only clamp if we completed normally (not stopped early)
       // Check if target_position was set by normal move completion
       if (profile_.pulses_generated >= profile_.total_pulses) {
-        current_position_ = profile_.target_position;
+        // In closed-loop mode, keep current_position_ as commanded (for tracking)
+        // but don't force it to target since encoder may show different position
+        // In open-loop mode, clamp to target position
+        if (!config_.enable_closed_loop_control || !config_.enable_encoder_feedback) {
+          // Open-loop: clamp to target position
+          current_position_ = profile_.target_position;
+        }
+        // Closed-loop: current_position_ remains as commanded, encoder_position
+        // reflects actual position (allows for error monitoring)
       }
       // Otherwise keep current_position_ as-is (stopped early via stopMotion)
       esp_timer_stop(ramp_timer_);
@@ -462,15 +500,61 @@ void ServoDriver::updateMotionProfile() {
   }
 
   // Update LEDC frequency
+  // CRITICAL: profile_.current_freq can be very low (even < 1 Hz) during acceleration/deceleration
+  // We must always clamp it to a safe minimum and select appropriate resolution
   if (profile_.current_freq > 0) {
+    // LEDC minimum frequency depends on resolution:
+    // Resolution 1: min ~122 Hz, Resolution 2: min ~30.5 Hz, Resolution 3: min ~7.6 Hz
+    // ESP32 APB clock is 80 MHz, so div_param = (80e6 / freq) / (1 << resolution)
+    // div_param must be <= 0x3FFFF (262143) for ESP32
+    // Maximum div_param = 262143, so: freq_min = 80e6 / (262143 * (1 << resolution))
+    
+    double freq = profile_.current_freq;
+    uint8_t resolution;
+    
+    // Calculate minimum frequencies for each resolution
+    const double MIN_FREQ_1BIT = 80e6 / (262143.0 * 2.0);   // ≈ 152.6 Hz
+    const double MIN_FREQ_2BIT = 80e6 / (262143.0 * 4.0);   // ≈ 76.3 Hz
+    const double MIN_FREQ_3BIT = 80e6 / (262143.0 * 8.0);  // ≈ 38.1 Hz
+    const double MIN_FREQ_4BIT = 80e6 / (262143.0 * 16.0);  // ≈ 19.1 Hz
+    
+    // Simplify: always use 1-bit resolution at a safe minimum to prevent div_param overflow
+    resolution = 1;
+    // Hard minimum to ensure div_param stays below limit (extra margin above 1-bit theoretical min)
+// Conservative floor; core v2 uses scaled divider (<<8) so needs higher min.
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcChangeFrequency(config_.ledc_pulse_pin, (uint32_t)profile_.current_freq,
-                        config_.ledc_resolution);
+    const double LEDC_MIN_HZ = 5000.0;
 #else
-    ledcSetup(config_.ledc_channel, profile_.current_freq,
-              config_.ledc_resolution);
+    const double LEDC_MIN_HZ = 40000.0;
 #endif
-    current_speed_pps_ = (uint32_t)profile_.current_freq;
+    if (freq < LEDC_MIN_HZ) {
+      freq = LEDC_MIN_HZ;
+      profile_.current_freq = LEDC_MIN_HZ; // keep status in sync
+    }
+    
+    // Convert to integer frequency (LEDC requires uint32_t)
+    uint32_t freq_hz = (uint32_t)(freq + 0.5);  // Round to nearest
+    if (freq_hz < (uint32_t)LEDC_MIN_HZ) {
+      freq_hz = (uint32_t)LEDC_MIN_HZ;
+    }
+    
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
+#else
+    // For ESP32 v2.x, ledcSetup reconfigures the channel
+    // Track resolution changes and re-attach pin when resolution changes
+    static uint8_t last_resolution = 255;  // Initialize to invalid value
+    if (last_resolution != resolution) {
+      // Resolution changed - re-attach pin to ensure it's properly configured
+      ledcSetup(config_.ledc_channel, freq_hz, resolution);
+      ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
+      last_resolution = resolution;
+    } else {
+      // Same resolution - just update frequency (ledcSetup should handle this)
+      ledcSetup(config_.ledc_channel, freq_hz, resolution);
+    }
+#endif
+    current_speed_pps_ = (uint32_t)profile_.current_freq;  // Keep original for reporting
   }
 
   // Sync status structure
@@ -498,8 +582,48 @@ void ServoDriver::updateMotionProfile() {
   } else {
     status_.encoder_position = 0;
   }
-  status_.position_error =
-      (int32_t)profile_.target_position - (int32_t)current_position_;
+
+  // Calculate position error
+  // In closed-loop mode: use encoder position as actual position
+  // In open-loop mode: use commanded position
+  if (config_.enable_closed_loop_control && config_.enable_encoder_feedback) {
+    // Closed-loop: error = target - actual encoder position
+    status_.position_error =
+        (int32_t)profile_.target_position - status_.encoder_position;
+    
+    // Closed-loop correction: adjust pulse generation based on position error
+    // If we're behind (positive error), increase frequency slightly
+    // If we're ahead (negative error), decrease frequency slightly
+    int32_t error = status_.position_error;
+    
+    // Simple proportional correction (can be tuned)
+    // Only apply correction if error is significant (avoid jitter)
+    const int32_t ERROR_THRESHOLD = 10; // pulses
+    if (abs(error) > ERROR_THRESHOLD && profile_.phase != MotionProfile::IDLE) {
+      // Proportional gain: 0.1% per pulse error (tunable)
+      const double KP = 0.001;
+      double correction_factor = 1.0 + (KP * error);
+      // Limit correction to reasonable bounds (e.g., ±20%)
+      if (correction_factor > 1.2) correction_factor = 1.2;
+      if (correction_factor < 0.8) correction_factor = 0.8;
+      
+      // Apply correction to current frequency
+      profile_.current_freq *= correction_factor;
+      // Clamp to max frequency
+      if (profile_.current_freq > profile_.max_freq) {
+        profile_.current_freq = profile_.max_freq;
+      }
+      // Ensure minimum frequency (122 Hz is safe minimum for 1-bit LEDC resolution)
+      // Lower frequencies will be clamped in updateMotionProfile when LEDC is configured
+      if (profile_.current_freq < 1.0) {
+        profile_.current_freq = 1.0;  // Keep low for calculation, will be clamped later
+      }
+    }
+  } else {
+    // Open-loop: error = target - commanded position
+    status_.position_error =
+        (int32_t)profile_.target_position - (int32_t)current_position_;
+  }
   status_.last_update_ms = millis();
 
   // Read status input pins (active LOW)
@@ -579,14 +703,62 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   delayMicroseconds(10);
 
   // Start LEDC at initial low frequency
-  uint8_t max_duty = (1 << config_.ledc_resolution) - 1;
+  // CRITICAL: Use same resolution selection logic as updateMotionProfile
+  // Calculate minimum frequencies for each resolution
+  const double MIN_FREQ_1BIT = 80e6 / (262143.0 * 2.0);   // ≈ 152.6 Hz
+  const double MIN_FREQ_2BIT = 80e6 / (262143.0 * 4.0);   // ≈ 76.3 Hz
+  const double MIN_FREQ_3BIT = 80e6 / (262143.0 * 8.0);  // ≈ 38.1 Hz
+  const double MIN_FREQ_4BIT = 80e6 / (262143.0 * 16.0);  // ≈ 19.1 Hz
+  
+  // Ensure max_freq is at least the minimum safe frequency
+  if (max_freq < MIN_FREQ_1BIT) {
+    max_freq = MIN_FREQ_1BIT;
+    DEBUG_PRINT("ServoDriver: Clamped max_freq to minimum safe value: ");
+    DEBUG_PRINTLN(MIN_FREQ_1BIT);
+  }
+  
+  // Start with minimum safe frequency; force 1-bit to avoid div_param overflow
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  const double LEDC_MIN_HZ = 5000.0; // conservative floor for LEDC stability
+#else
+  const double LEDC_MIN_HZ = 40000.0; // higher floor for core v2 divider scaling
+#endif
+  double init_freq = profile_.current_freq;
+  uint8_t init_resolution = 1;
+  if (init_freq < LEDC_MIN_HZ) {
+    init_freq = LEDC_MIN_HZ;
+  }
+  // Update profile current_freq to match
+  profile_.current_freq = init_freq;
+  
+  uint8_t max_duty = (1 << init_resolution) - 1;
   uint8_t half_duty = max_duty / 2;
+  uint32_t init_freq_hz = (uint32_t)(init_freq + 0.5);
+
+#if SDF08NK8X_DEBUG
+  DEBUG_PRINT("ServoDriver: LEDC init freq=");
+  DEBUG_PRINT(init_freq_hz);
+  DEBUG_PRINT(" Hz, resolution=");
+  DEBUG_PRINTLN(init_resolution);
+#endif
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  ledcChangeFrequency(config_.ledc_pulse_pin, 1, config_.ledc_resolution);
+  // Stop LEDC output before changing frequency
+  ledcWrite(config_.ledc_pulse_pin, 0);
+  if (!ledcAttach(config_.ledc_pulse_pin, init_freq_hz, init_resolution)) {
+    DEBUG_PRINTLN("ServoDriver: ERROR - ledcAttach failed during startMotionProfile");
+    return;
+  }
   ledcWrite(config_.ledc_pulse_pin, half_duty);
 #else
-  ledcSetup(config_.ledc_channel, 1, config_.ledc_resolution);
+  // For ESP32 v2.x, stop LEDC output first, then reconfigure
+  // Stop any existing output
+  ledcWrite(config_.ledc_channel, 0);
+  // Small delay to ensure output stops
+  delayMicroseconds(100);
+  // Now reconfigure with new resolution and frequency
+  ledcSetup(config_.ledc_channel, init_freq_hz, init_resolution);
+  ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
   ledcWrite(config_.ledc_channel, half_duty);
 #endif
 
@@ -652,7 +824,19 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   }
 
   target_position_ = target_position;
-  int64_t delta = (int64_t)target_position - (int64_t)current_position_;
+  
+  // In closed-loop mode, use encoder position as current position for move calculation
+  // In open-loop mode, use commanded position
+  uint32_t current_pos = current_position_;
+  if (config_.enable_closed_loop_control && config_.enable_encoder_feedback) {
+    // Use encoder accumulator for accurate position (already updated in updateMotionProfile)
+    // For move calculation, use encoder position as the starting point
+    current_pos = (uint32_t)encoder_accumulator_;
+    // Sync commanded position to encoder position for consistency
+    current_position_ = current_pos;
+  }
+  
+  int64_t delta = (int64_t)target_position - (int64_t)current_pos;
   uint32_t pulse_count = (uint32_t)std::abs(delta);
   bool direction = (delta >= 0);
 

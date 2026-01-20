@@ -1,0 +1,18 @@
+fix(SDF08NK8X): resolve critical bugs and improve thread safety
+
+- Add missing <cmath> include for std::abs()
+- Fix integer overflow in moveRelative() with bounds validation
+- Add mutex protection to moveRelative(), clearAlarm(), eStop(), setPosition()
+- Fix position clamping bug when stopping motion early
+- Add error checking for timer/mutex creation in constructor
+- Change AlarmCallback to use const char* instead of String for ISR safety
+- Fix status structure: change uint8_t flags to bool
+- Add parameter validation (speed, accel, decel > 0)
+- Replace PCNT magic numbers with named constants
+- Add division by zero protection in motion profile calculations
+- Add initialization validation for required pins and LEDC channel
+- Improve destructor cleanup for safe shutdown
+- Add ISR context documentation
+
+Fixes compilation errors, race conditions, position drift, and ISR safety issues.
+All changes compile successfully with no linter errors.
