@@ -129,10 +129,12 @@ struct DriverConfig {
    * @param enable_encoder_feedback: Enable encoder signal monitoring
    * @param enable_closed_loop_control: Enable closed-loop position control using encoder feedback
    *                                    (requires enable_encoder_feedback to be true)
+   * @param invert_output_logic: Treat LOW (GND) as logical HIGH for outputs
    * @param pcnt_unit: ESP32 PCNT unit (0-7) for encoder counting
    */
   bool enable_encoder_feedback;
   bool enable_closed_loop_control;
+  bool invert_output_logic;
   pcnt_unit_t pcnt_unit;
 
   /**
@@ -146,7 +148,7 @@ struct DriverConfig {
         encoder_ppr(12000), gear_numerator(1.0), gear_denominator(1.0),
         ledc_channel(0), ledc_pulse_pin(-1), ledc_resolution(2),
         enable_encoder_feedback(false), enable_closed_loop_control(false),
-        pcnt_unit(PCNT_UNIT_0) {}
+        invert_output_logic(true), pcnt_unit(PCNT_UNIT_0) {}
 };
 
 /**
@@ -453,7 +455,9 @@ private:
   int16_t last_pcnt_count_;
 
   // Private helper methods
-  void setDirectionPin(bool state), setEnablePin(bool state), stopLEDC();
+  bool writeOutputPin(size_t index, bool state);
+  bool setDirectionPin(bool state), setEnablePin(bool state);
+  void stopLEDC();
 
   void handleMoveComplete();
 
