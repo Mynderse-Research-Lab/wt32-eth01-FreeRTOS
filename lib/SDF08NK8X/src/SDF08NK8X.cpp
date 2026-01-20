@@ -191,7 +191,9 @@ bool ServoDriver::initialize() {
   for (size_t i = 0; i < DriverConfig::OUTPUT_PIN_COUNT; i++) {
     if (config_.output_pin_nos[i] >= 0) {
       pinMode(config_.output_pin_nos[i], OUTPUT);
-      digitalWrite(config_.output_pin_nos[i], HIGH);
+      // Default to logical LOW (inactive), respecting output inversion.
+      bool idle_level = config_.invert_output_logic ? HIGH : LOW;
+      digitalWrite(config_.output_pin_nos[i], idle_level);
     }
   }
   for (size_t i = 0; i < DriverConfig::INPUT_PIN_COUNT; i++) {
@@ -293,20 +295,15 @@ bool ServoDriver::enable() {
     return false;
   }
 
-  setEnablePin(true);
+  if (!setEnablePin(true)) {
+    DEBUG_PRINTLN("ServoDriver: Failed to enable enable pin");
 #if SDF08NK8X_USE_FREERTOS
-  xSemaphoreGive(mutex_);
-  vTaskDelay(pdMS_TO_TICKS(100)); // Wait for servo lockup (FreeRTOS-safe)
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-#else
-  delay(100); // Wait for servo lockup
+    xSemaphoreGive(mutex_);
 #endif
+    return false;
+  }
   enabled_ = true;
   status_.servo_enabled = true;
-#if SDF08NK8X_USE_FREERTOS
-  xSemaphoreGive(mutex_);
-#endif
-  DEBUG_PRINTLN("ServoDriver: Enabled");
   return true;
 }
 
@@ -321,9 +318,14 @@ bool ServoDriver::disable() {
     return false;
   }
 
-  setEnablePin(false);
+  if (!setEnablePin(false)) {
+    DEBUG_PRINTLN("ServoDriver: Failed to disable enable pin");
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  } 
   enabled_ = false;
-  motion_active_ = false;
   status_.servo_enabled = false;
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreGive(mutex_);
@@ -355,9 +357,9 @@ bool ServoDriver::clearAlarm() {
   // Pulse alarm reset pin to clear alarm
   // Note: delayMicroseconds is blocking but acceptable here as this function
   // should not be called from ISR context. If needed, use non-blocking delay.
-  digitalWrite(config_.output_pin_nos[1], LOW);
+  writeOutputPin(1, true);
   delayMicroseconds(100);
-  digitalWrite(config_.output_pin_nos[1], HIGH);
+  writeOutputPin(1, false);
 
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreGive(mutex_);
@@ -711,11 +713,11 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   const double MIN_FREQ_4BIT = 80e6 / (262143.0 * 16.0);  // ≈ 19.1 Hz
   
   // Ensure max_freq is at least the minimum safe frequency
-  if (max_freq < MIN_FREQ_1BIT) {
-    max_freq = MIN_FREQ_1BIT;
-    DEBUG_PRINT("ServoDriver: Clamped max_freq to minimum safe value: ");
-    DEBUG_PRINTLN(MIN_FREQ_1BIT);
-  }
+  // if (max_freq < MIN_FREQ_1BIT) {
+  //   max_freq = MIN_FREQ_1BIT;
+  //   DEBUG_PRINT("ServoDriver: Clamped max_freq to minimum safe value: ");
+  //   DEBUG_PRINTLN(MIN_FREQ_1BIT);
+  // }
   
   // Start with minimum safe frequency; force 1-bit to avoid div_param overflow
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
@@ -1081,16 +1083,20 @@ String ServoDriver::getDriverInfo() const {
 // PRIVATE HELPER METHODS
 // ============================================================================
 
-void ServoDriver::setDirectionPin(bool state) {
-  if (!initialized_ || config_.output_pin_nos[7] < 0) {
-    return;
+bool ServoDriver::writeOutputPin(size_t index, bool state) {
+  if (!initialized_ || index >= DriverConfig::OUTPUT_PIN_COUNT ||
+      config_.output_pin_nos[index] < 0) {
+    return false;
   }
-  digitalWrite(config_.output_pin_nos[7], state ? HIGH : LOW);
+  bool physical_state = config_.invert_output_logic ? !state : state;
+  digitalWrite(config_.output_pin_nos[index], physical_state ? HIGH : LOW);
+  return true;
 }
 
-void ServoDriver::setEnablePin(bool state) {
-  if (!initialized_ || config_.output_pin_nos[0] < 0) {
-    return;
-  }
-  digitalWrite(config_.output_pin_nos[0], state ? HIGH : LOW);
+bool ServoDriver::setDirectionPin(bool state) {
+  return writeOutputPin(7, state);
+}
+
+bool ServoDriver::setEnablePin(bool state) {
+  return writeOutputPin(0, state);
 }
