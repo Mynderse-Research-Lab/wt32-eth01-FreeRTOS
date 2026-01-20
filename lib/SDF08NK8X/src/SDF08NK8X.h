@@ -5,6 +5,8 @@
  *
  * FEATURES:
  * - Pulse/Direction Position Control (Deterministic)
+ * - Open-loop control (default) - position based on commanded pulses
+ * - Closed-loop control (optional) - position correction using encoder feedback
  * - Trapezoidal Velocity Profiling (Accel/Cruise/Decel)
  * - Hardware Encoder Feedback via PCNT (16-bit wrap-around)
  * - Status Monitoring (Position, Speed, Alarm, In-Position, Brake)
@@ -125,9 +127,12 @@ struct DriverConfig {
   /**
    * @brief Feature Flags
    * @param enable_encoder_feedback: Enable encoder signal monitoring
+   * @param enable_closed_loop_control: Enable closed-loop position control using encoder feedback
+   *                                    (requires enable_encoder_feedback to be true)
    * @param pcnt_unit: ESP32 PCNT unit (0-7) for encoder counting
    */
   bool enable_encoder_feedback;
+  bool enable_closed_loop_control;
   pcnt_unit_t pcnt_unit;
 
   /**
@@ -140,7 +145,8 @@ struct DriverConfig {
         control_mode(ControlMode::POSITION), max_pulse_freq(600000),
         encoder_ppr(12000), gear_numerator(1.0), gear_denominator(1.0),
         ledc_channel(0), ledc_pulse_pin(-1), ledc_resolution(2),
-        enable_encoder_feedback(false), pcnt_unit(PCNT_UNIT_0) {}
+        enable_encoder_feedback(false), enable_closed_loop_control(false),
+        pcnt_unit(PCNT_UNIT_0) {}
 };
 
 /**
