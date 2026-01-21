@@ -1,0 +1,27 @@
+[1/11] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/D_/Projects/wt32-eth01-base/src/main.cpp.obj
+In file included from D:/Projects/wt32-eth01-base/lib/SDF08NK8X/src/SDF08NK8X.h:23,
+                 from D:/Projects/wt32-eth01-base/src/main.cpp:4:
+C:/Users/ziaah/esp-idf/components/driver/deprecated/driver/pcnt.h:15:2: warning: #warning "legacy pcnt driver is deprecated, please migrate to use driver/pulse_cnt.h" [-Wcpp]
+   15 | #warning "legacy pcnt driver is deprecated, please migrate to use driver/pulse_cnt.h"
+      |  ^~~~~~~
+[2/11] Performing build step for 'bootloader'
+[1/1] cmd.exe /C "cd /D D:\Projects\wt32-eth01-base\idf\build\bootloader\esp-idf\esptool_py && C:\Users\ziaah\.espressif\python_env\idf5.1_py3.11_env\Scripts\python.exe C:/Users/ziaah/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 D:/Projects/wt32-eth01-base/idf/build/bootloader/bootloader.bin"
+Bootloader binary size 0x6860 bytes. 0x7a0 bytes (7%) free.
+[3/9] Building CXX object esp-idf/SDF08NK8X/CMakeFiles/__idf_SDF08NK8X.dir/D_/Projects/wt32-eth01-base/lib/SDF08NK8X/src/SDF08NK8X.cpp.obj
+In file included from D:/Projects/wt32-eth01-base/lib/SDF08NK8X/src/SDF08NK8X.h:23,
+                 from D:/Projects/wt32-eth01-base/lib/SDF08NK8X/src/SDF08NK8X.cpp:7:
+C:/Users/ziaah/esp-idf/components/driver/deprecated/driver/pcnt.h:15:2: warning: #warning "legacy pcnt driver is deprecated, please migrate to use driver/pulse_cnt.h" [-Wcpp]
+   15 | #warning "legacy pcnt driver is deprecated, please migrate to use driver/pulse_cnt.h"
+      |  ^~~~~~~
+[4/9] Linking C static library esp-idf\SDF08NK8X\libSDF08NK8X.a
+[5/9] Linking C static library esp-idf\main\libmain.a
+[6/9] Generating ld/sections.ld
+[7/9] Linking CXX executable wt32_eth01.elf
+[8/9] Generating binary image from built executable
+esptool.py v4.10.0
+Creating esp32 image...
+Merged 2 ELF sections
+Successfully created esp32 image.
+Generated D:/Projects/wt32-eth01-base/idf/build/wt32_eth01.bin
+[9/9] cmd.exe /C "cd /D D:\Projects\wt32-eth01-base\idf\build\esp-idf\esptool_py && C:\Users\ziaah\.espressif\python_env\idf5.1_py3.11_env\Scripts\python.exe C:/Users/ziaah/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Projects/wt32-eth01-base/idf/build/partition_table/partition-table.bin D:/Projects/wt32-eth01-base/idf/build/wt32_eth01.bin"
+wt32_eth01.bin binary size 0x4aad0 bytes. Smallest app partition is 0x100000 bytes. 0xb5530 bytes (71%) free.
