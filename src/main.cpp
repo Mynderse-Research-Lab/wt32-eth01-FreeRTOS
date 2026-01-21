@@ -8,98 +8,12 @@
 #include <freertos/timers.h>
 #include <cmath>  // For fabs()
 #include <inttypes.h>  // For PRId32, PRIu32
+#include "config.h"
 
 // ESP-IDF MQTT Client
 #include "mqtt_client.h"
 
 using Gantry::Gantry;
-
-// ---------- Logging Helper ----------
-#define LOG_INFO(tag, format, ...)                                             \
-  Serial.printf("[%6lu][Core%d][%s] " format "\n", (unsigned long)millis(),    \
-                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
-#define LOG_WARN(tag, format, ...)                                             \
-  Serial.printf("[%6lu][Core%d][%s] WARN: " format "\n", (unsigned long)millis(), \
-                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
-#define LOG_ERROR(tag, format, ...)                                            \
-  Serial.printf("[%6lu][Core%d][%s] ERROR: " format "\n", (unsigned long)millis(), \
-                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
-
-static const char *TAG_SYS = "System";
-static const char *TAG_ETH = "Ethernet";
-static const char *TAG_MQTT = "MQTT";
-static const char *TAG_GANTRY = "Gantry";
-
-// ---------- FreeRTOS Task Configuration ----------
-#define GANTRY_TASK_STACK_SIZE     4096
-#define GANTRY_TASK_PRIORITY       5
-#define GANTRY_TASK_CORE           1
-
-#define MQTT_TASK_STACK_SIZE       4096
-#define MQTT_TASK_PRIORITY         1
-#define MQTT_TASK_CORE             0
-
-#define BLINK_TASK_STACK_SIZE      1024
-#define BLINK_TASK_PRIORITY        1
-#define BLINK_TASK_CORE            0
-
-#define GANTRY_UPDATE_TASK_STACK_SIZE 2048
-#define GANTRY_UPDATE_TASK_PRIORITY  3
-#define GANTRY_UPDATE_TASK_CORE      1
-
-#define COMMAND_QUEUE_SIZE         10
-#define GANTRY_UPDATE_INTERVAL_MS   10
-
-// ---------- Pin Definitions (WT32-ETH01 Safe) ----------
-#define PIN_SERVO_PULSE 2   // Output
-#define PIN_SERVO_DIR 4     // Output
-#define PIN_SERVO_ENABLE 12 // Output
-#define PIN_ENC_A 35        // Input Only
-#define PIN_ENC_B 36        // Input Only
-#define PIN_GRIPPER 33      // Output for Gripper
-#define PIN_LIMIT_MIN 14    // Input Pullup (X Home)
-#define PIN_LIMIT_MAX 32    // Input Pullup (X End)
-
-// ---------- MQTT Config ----------
-#define MQTT_HOST "192.168.2.1"
-#define MQTT_PORT 1883
-#define MQTT_CLIENT_ID "esp32-ether-01"
-#define MQTT_PUB_TOPIC "lab/outbox"
-#define MQTT_SUB_TOPIC "lab/gantry/cmd"
-
-// ---------- Command Layout ----------
-struct GantryCommand {
-  int32_t x;                          // Item X position when detected (mm)
-  int32_t y;                          // Target Y position (mm)
-  int32_t theta;                      // Target theta angle (degrees)
-  uint32_t speed;                     // Gantry speed (mm/s)
-  float conveyor_speed_mm_per_s;      // Conveyor belt speed (mm/s)
-  uint32_t detection_timestamp_ms;    // When item was detected
-  uint32_t grip_delay_ms;             // Gripper actuation time (ms)
-  bool home;
-  bool calibrate;
-};
-
-// ---------- Pick-and-Place Configuration ----------
-#define PICK_ZONE_MIN_X_MM      50.0f    // Start of reachable pick window
-#define PICK_ZONE_MAX_X_MM      400.0f   // End of reachable pick window
-#define DEFAULT_GRIP_DELAY_MS   100      // Default gripper delay (was 500ms)
-#define MAX_GANTRY_SPEED_MM_S   500      // Maximum gantry speed
-#define DEFAULT_ACCEL_MM_S2     2000     // Default acceleration
-
-// ---------- FreeRTOS Handles ----------
-QueueHandle_t commandQueue = nullptr;
-TaskHandle_t gantryTaskHandle = nullptr;
-TaskHandle_t mqttTaskHandle = nullptr;
-TaskHandle_t blinkTaskHandle = nullptr;
-TaskHandle_t gantryUpdateTaskHandle = nullptr;
-TimerHandle_t mqttReconnectTimer = nullptr;
-
-// ---------- Network Config ----------
-IPAddress local_IP(192, 168, 2, 2);
-IPAddress gateway(192, 168, 2, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns(8, 8, 8, 8);
 
 // ESP-IDF MQTT client handle
 esp_mqtt_client_handle_t mqttClient = nullptr;
@@ -119,65 +33,59 @@ static void handleMqttMessage(const char *data, int data_len) {
   size_t copyLen = (data_len < (int)sizeof(buf) - 1) ? data_len : (sizeof(buf) - 1);
   memcpy(buf, data, copyLen);
   buf[copyLen] = '\0';
+  
+  // Warn if message was truncated
+  if (data_len >= (int)sizeof(buf)) {
+    LOG_WARN(TAG_MQTT, "Message truncated from %d to %d bytes", data_len, (int)sizeof(buf) - 1);
+  }
 
   LOG_INFO(TAG_MQTT, "Msg Received: %s", buf);
 
   // Initialize with defaults
+  uint32_t timestamp_ms = millis();  // Cache timestamp once
   GantryCommand cmd = {
     .x = 0,
     .y = 0,
     .theta = 0,
     .speed = 200,  // Default 200 mm/s
     .conveyor_speed_mm_per_s = 0.0f,
-    .detection_timestamp_ms = millis(),  // Default to now
+    .detection_timestamp_ms = timestamp_ms,
     .grip_delay_ms = DEFAULT_GRIP_DELAY_MS,
     .home = false,
     .calibrate = false
   };
 
-  // Parse command fields
+  // Optimized single-pass parsing
   // Format: "x:100,y:50,t:0,s:200,v:50,g:100,h:0,c:0"
-  char *xPtr = strstr(buf, "x:");
-  if (xPtr)
-    cmd.x = atoi(xPtr + 2);
+  char *token = strtok(buf, ",");
+  while (token != NULL) {
+    // Parse each key:value pair
+    if (token[0] && token[1] == ':') {
+      int32_t value = atoi(token + 2);
+      switch (token[0]) {
+        case 'x': cmd.x = value; break;
+        case 'y': cmd.y = value; break;
+        case 't': cmd.theta = value; break;
+        case 's': cmd.speed = value; break;
+        case 'v': cmd.conveyor_speed_mm_per_s = atof(token + 2); break;
+        case 'g': cmd.grip_delay_ms = value; break;
+        case 'h': cmd.home = (value == 1); break;
+        case 'c': cmd.calibrate = (value == 1); break;
+        default: break;  // Ignore unknown parameters
+      }
+    }
+    token = strtok(NULL, ",");
+  }
 
-  char *yPtr = strstr(buf, "y:");
-  if (yPtr)
-    cmd.y = atoi(yPtr + 2);
-
-  char *tPtr = strstr(buf, "t:");
-  if (tPtr)
-    cmd.theta = atoi(tPtr + 2);
-
-  char *sPtr = strstr(buf, "s:");
-  if (sPtr)
-    cmd.speed = atoi(sPtr + 2);
-  
-  // Conveyor velocity (v:)
-  char *vPtr = strstr(buf, "v:");
-  if (vPtr)
-    cmd.conveyor_speed_mm_per_s = atof(vPtr + 2);
-  
-  // Grip delay in ms (g:)
-  char *gPtr = strstr(buf, "g:");
-  if (gPtr)
-    cmd.grip_delay_ms = atoi(gPtr + 2);
-
-  char *hPtr = strstr(buf, "h:");
-  if (hPtr)
-    cmd.home = (atoi(hPtr + 2) == 1);
-
-  char *cPtr = strstr(buf, "c:");
-  if (cPtr)
-    cmd.calibrate = (atoi(cPtr + 2) == 1);
-
-  // Enqueue command
+  // Enqueue command with FIFO behavior
   // For real-time tracking, prioritize NEW commands over OLD queued ones
   if (commandQueue) {
-    // If queue is full, clear it to make room for latest position data
+    // If queue is full, drop oldest command to make room (FIFO)
     if (uxQueueSpacesAvailable(commandQueue) == 0) {
-      LOG_WARN(TAG_MQTT, "Queue full - clearing stale commands");
-      xQueueReset(commandQueue);
+      GantryCommand old_cmd;
+      if (xQueueReceive(commandQueue, &old_cmd, 0) == pdTRUE) {
+        LOG_WARN(TAG_MQTT, "Queue full - dropped oldest: x=%" PRId32, old_cmd.x);
+      }
     }
     
     if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
@@ -304,6 +212,12 @@ void EthEvent(arduino_event_id_t event) {
 float calculateInterceptPosition(float item_x_mm, float conveyor_speed,
                                   uint32_t latency_ms, float gantry_x,
                                   float gantry_speed) {
+    // Validate gantry speed to prevent division by zero
+    if (gantry_speed <= 0.0f) {
+        LOG_ERROR(TAG_GANTRY, "Invalid gantry speed: %.1f", gantry_speed);
+        return -1.0f;  // Error condition
+    }
+    
     // Compensate for network/processing latency
     float item_current_x = item_x_mm + conveyor_speed * (latency_ms / 1000.0f);
     
@@ -314,7 +228,7 @@ float calculateInterceptPosition(float item_x_mm, float conveyor_speed,
     
     // Iterative interception calculation (converges in 2-3 iterations)
     float intercept_x = item_current_x;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < INTERCEPT_ITERATIONS; i++) {
         float distance = fabs(intercept_x - gantry_x);
         float travel_time = distance / gantry_speed;  // seconds
         intercept_x = item_current_x + conveyor_speed * travel_time;
@@ -341,11 +255,11 @@ float calculateInterceptPosition(float item_x_mm, float conveyor_speed,
 void blinkTask(void *param) {
   (void)param;  // Unused parameter
   
-  pinMode(15, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
   const TickType_t delayTicks = pdMS_TO_TICKS(500);
   
   while (1) {
-    digitalWrite(15, !digitalRead(15));
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
     vTaskDelay(delayTicks);
   }
   
@@ -532,7 +446,7 @@ void gantryUpdateTask(void *param) {
 void mqttLoopTask(void *param) {
   (void)param;  // Unused parameter
   
-  const TickType_t publishInterval = pdMS_TO_TICKS(5000);
+  const TickType_t publishInterval = pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS);
   static uint32_t count = 0;
   
   while (1) {
