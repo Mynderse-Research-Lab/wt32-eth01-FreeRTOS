@@ -107,14 +107,32 @@ void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
         speed = 5000; // Default speed
     }
     
-    // For now, store target positions
-    // X-axis motion will be implemented using servo driver
-    // Y and Theta are simulated (stub implementation)
-    currentY_ = y;
-    currentTheta_ = theta;
+    // Store target positions for Y and Theta (simulated)
+    targetY_ = y;
+    targetTheta_ = theta;
+    currentY_ = y;  // Simulated - instant update
+    currentTheta_ = theta;  // Simulated - instant update
     
-    // TODO: Implement actual motion control with X-axis servo driver
-    // This is a minimal implementation to maintain API compatibility
+    // Calculate X-axis movement in pulses
+    int32_t currentX_pulses = axisX_.getPosition();
+    int32_t targetX_pulses = mmToPulses((float)x);
+    int32_t deltaX = targetX_pulses - currentX_pulses;
+    
+    // Check limit switches before movement
+    axisX_.updateLimitDebounce(true);
+    if (deltaX > 0 && axisX_.getLimitMaxDebounced()) {
+        return; // MAX limit active - cannot move forward
+    }
+    if (deltaX < 0 && axisX_.getLimitMinDebounced()) {
+        return; // MIN limit active - cannot move backward
+    }
+    
+    // Move X-axis using driver (if delta is non-zero)
+    if (deltaX != 0) {
+        uint32_t accel = speed / 2;
+        uint32_t decel = speed / 2;
+        axisX_.moveRelative(deltaX, speed, accel, decel);
+    }
 }
 
 GantryError Gantry::moveTo(const JointConfig& joint,
