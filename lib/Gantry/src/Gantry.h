@@ -86,6 +86,7 @@ struct GantryStatus {
     bool initialized;           // True if initialized
     bool enabled;               // True if motor enabled
     bool gripperActive;         // True if gripper closed
+    bool alarmActive;           // True if alarm condition exists
     
     // Configuration
     int32_t axisLength_mm;      // X-axis length in mm (after calibration)
@@ -220,6 +221,12 @@ public:
      * @return int Current Theta angle (degrees)
      */
     int getCurrentTheta() const;
+    
+    /**
+     * @brief Check if alarm condition is active
+     * @return bool true if alarm is active, false otherwise
+     */
+    bool isAlarmActive() const;
 
     // ============================================================================
     // ENHANCED KINEMATICS API (Phase 1.2)
