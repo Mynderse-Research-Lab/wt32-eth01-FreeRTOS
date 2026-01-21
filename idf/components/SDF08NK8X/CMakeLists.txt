@@ -13,3 +13,8 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
   SDF08NK8X_USE_FREERTOS=0
   SDF08NK8X_DEBUG=0
 )
+
+# Suppress deprecated PCNT warning treated as error by -Werror=cpp
+target_compile_options(${COMPONENT_LIB} PRIVATE
+  -Wno-error=cpp
+)
