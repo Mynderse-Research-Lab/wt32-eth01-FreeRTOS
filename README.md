@@ -36,3 +36,26 @@ To return the WT32-ETH01 to normal operation mode, simply:
 Touch pin 1 (EN) with ground again to reset the module.
 
 ![alt text](<Screenshot from 2025-06-28 18-05-10-1.png>)
+
+## ESP-IDF Usage
+This project includes an ESP-IDF build that reuses the existing Arduino-style `src/main.cpp`.
+
+### Prerequisites
+- ESP-IDF installed and `idf.py` available in your shell.
+- ESP-IDF component manager enabled (default).
+
+### Build and Flash
+From an ESP-IDF shell:
+
+```
+cd D:\Projects\wt32-eth01-base\idf
+idf.py set-target esp32
+idf.py build
+idf.py flash -p COM3
+idf.py monitor -p COM3
+```
+
+### Notes
+- The ESP-IDF project lives in `idf/`.
+- `idf/main/app_main.cpp` bridges into your existing `setup()` / `loop()` in `src/main.cpp`.
+- Arduino core v3 is pulled via `idf/main/idf_component.yml`.
