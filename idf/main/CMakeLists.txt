@@ -15,6 +15,7 @@ idf_component_register(
     espressif__arduino-esp32
     SDF08NK8X
     Gantry
+    mqtt
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE

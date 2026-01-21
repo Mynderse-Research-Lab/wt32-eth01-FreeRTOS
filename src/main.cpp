@@ -7,6 +7,7 @@
 #include <freertos/queue.h>
 #include <freertos/timers.h>
 #include <cmath>  // For fabs()
+#include <inttypes.h>  // For PRId32, PRIu32
 
 // ESP-IDF MQTT Client
 #include "mqtt_client.h"
@@ -15,14 +16,14 @@ using Gantry::Gantry;
 
 // ---------- Logging Helper ----------
 #define LOG_INFO(tag, format, ...)                                             \
-  Serial.printf("[%6lu][Core%d][%s] " format "\n", millis(), xPortGetCoreID(), \
-                tag, ##__VA_ARGS__)
+  Serial.printf("[%6lu][Core%d][%s] " format "\n", (unsigned long)millis(),    \
+                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
 #define LOG_WARN(tag, format, ...)                                             \
-  Serial.printf("[%6lu][Core%d][%s] WARN: " format "\n", millis(),             \
-                xPortGetCoreID(), tag, ##__VA_ARGS__)
+  Serial.printf("[%6lu][Core%d][%s] WARN: " format "\n", (unsigned long)millis(), \
+                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
 #define LOG_ERROR(tag, format, ...)                                            \
-  Serial.printf("[%6lu][Core%d][%s] ERROR: " format "\n", millis(),            \
-                xPortGetCoreID(), tag, ##__VA_ARGS__)
+  Serial.printf("[%6lu][Core%d][%s] ERROR: " format "\n", (unsigned long)millis(), \
+                (int)xPortGetCoreID(), tag, ##__VA_ARGS__)
 
 static const char *TAG_SYS = "System";
 static const char *TAG_ETH = "Ethernet";
@@ -182,7 +183,7 @@ static void handleMqttMessage(const char *data, int data_len) {
     if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
       LOG_ERROR(TAG_MQTT, "Queue send failed!");
     } else {
-      LOG_INFO(TAG_MQTT, "Queued: x=%d v=%.1f", cmd.x, cmd.conveyor_speed_mm_per_s);
+      LOG_INFO(TAG_MQTT, "Queued: x=%" PRId32 " v=%.1f", cmd.x, cmd.conveyor_speed_mm_per_s);
     }
   }
 }
@@ -259,7 +260,7 @@ static void startMqttClient() {
   }
 }
 
-void EthEvent(WiFiEvent_t event) {
+void EthEvent(arduino_event_id_t event) {
   switch (event) {
   case ARDUINO_EVENT_ETH_START:
     ETH.setHostname("esp32-eth");
@@ -452,12 +453,12 @@ void gantryTask(void *param) {
             continue;
           }
           
-          LOG_INFO(TAG_GANTRY, "Intercept: item@%.1f + %.1fmm/s -> target=%.1f (latency=%ums)",
+          LOG_INFO(TAG_GANTRY, "Intercept: item@%.1f + %.1fmm/s -> target=%.1f (latency=%" PRIu32 "ms)",
                    (float)cmd.x, cmd.conveyor_speed_mm_per_s, target_x_mm, latency_ms);
    } else {
           // Static target
           target_x_mm = (float)cmd.x;
-          LOG_INFO(TAG_GANTRY, "Static target: X=%.1f Y=%d T=%d Speed=%u",
+          LOG_INFO(TAG_GANTRY, "Static target: X=%.1f Y=%" PRId32 " T=%" PRId32 " Speed=%" PRIu32,
                    target_x_mm, cmd.y, cmd.theta, cmd.speed);
         }
         
@@ -477,7 +478,7 @@ void gantryTask(void *param) {
 
         // Grip sequence with configurable delay
         if (cmd.grip_delay_ms > 0) {
-          LOG_INFO(TAG_GANTRY, "Gripping (delay=%ums)...", cmd.grip_delay_ms);
+          LOG_INFO(TAG_GANTRY, "Gripping (delay=%" PRIu32 "ms)...", cmd.grip_delay_ms);
           gantry.grip(true);
           vTaskDelay(pdMS_TO_TICKS(cmd.grip_delay_ms));
           gantry.grip(false);
@@ -582,8 +583,8 @@ void setup() {
   }
 
   // 2. Start Ethernet
-  WiFi.onEvent(EthEvent);
-  ETH.begin(1, 16, 23, 18, ETH_PHY_LAN8720, ETH_CLOCK_GPIO17_OUT);
+  Network.onEvent(EthEvent);
+  ETH.begin(ETH_PHY_LAN8720, ETH_ADDR, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_PHY_POWER, ETH_CLK_MODE);
   ETH.config(local_IP, gateway, subnet, dns);
   LOG_INFO(TAG_SYS, "Ethernet initialized");
 
