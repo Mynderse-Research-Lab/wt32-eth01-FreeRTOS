@@ -239,13 +239,63 @@ int Gantry::calibrate() {
         return 0;
     }
     
-    if (xMaxPin_ < 0) {
-        return 0; // No max limit pin configured
+    if (xMinPin_ < 0 || xMaxPin_ < 0) {
+        return 0; // Both limit pins required for calibration
     }
     
-    // TODO: Implement calibration sequence
-    // This is a stub implementation
-    return 0;
+    // Ensure we're at MIN limit (home) first
+    axisX_.updateLimitDebounce(true);
+    if (!axisX_.getLimitMinDebounced()) {
+        // Not at home - home first
+        home();
+        
+        // Wait for homing to complete (with timeout)
+        unsigned long start_ms = millis();
+        while (axisX_.isHoming() && (millis() - start_ms) < 30000) {
+            axisX_.updateLimitDebounce();
+            delay(10);
+        }
+        
+        if (axisX_.isHoming()) {
+            return 0; // Homing timeout
+        }
+    }
+    
+    // Now measure travel distance from MIN to MAX
+    uint32_t speed = axisX_.getConfig().homing_speed_pps;
+    if (speed == 0) {
+        speed = 6000; // Default fallback
+    }
+    
+    // Start travel measurement (non-blocking)
+    // This will move from MIN to MAX and measure distance
+    if (!axisX_.measureTravelDistance(speed, speed, speed, 90000)) {
+        return 0; // Failed to start measurement
+    }
+    
+    // Wait for measurement to complete (with timeout)
+    unsigned long start_ms = millis();
+    while (!axisX_.hasTravelDistance() && (millis() - start_ms) < 90000) {
+        axisX_.updateLimitDebounce();
+        delay(10);
+        
+        // Check if measurement failed (alarm, etc.)
+        if (axisX_.isAlarmActive()) {
+            return 0; // Alarm during measurement
+        }
+    }
+    
+    if (!axisX_.hasTravelDistance()) {
+        return 0; // Measurement timeout
+    }
+    
+    // Get travel distance in pulses
+    uint32_t travel_pulses = axisX_.getTravelDistance();
+    
+    // Convert to mm and store
+    axisLength_ = pulsesToMm(travel_pulses);
+    
+    return axisLength_;
 }
 
 // ============================================================================
