@@ -221,7 +221,8 @@ bool Gantry::isBusy() const {
     if (!initialized_) {
         return false;
     }
-    return axisX_.isMotionActive();
+    // Check if X-axis is moving OR homing
+    return axisX_.isMotionActive() || axisX_.isHoming();
 }
 
 void Gantry::update() {
