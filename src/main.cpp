@@ -7,6 +7,7 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <freertos/timers.h>
+#include <cmath>  // For fabs()
 
 using Gantry::Gantry;
 
@@ -65,13 +66,23 @@ static const char *TAG_GANTRY = "Gantry";
 
 // ---------- Command Layout ----------
 struct GantryCommand {
-  int32_t x;
-  int32_t y;
-  int32_t theta;
-  uint32_t speed;
+  int32_t x;                          // Item X position when detected (mm)
+  int32_t y;                          // Target Y position (mm)
+  int32_t theta;                      // Target theta angle (degrees)
+  uint32_t speed;                     // Gantry speed (mm/s)
+  float conveyor_speed_mm_per_s;      // Conveyor belt speed (mm/s)
+  uint32_t detection_timestamp_ms;    // When item was detected
+  uint32_t grip_delay_ms;             // Gripper actuation time (ms)
   bool home;
   bool calibrate;
 };
+
+// ---------- Pick-and-Place Configuration ----------
+#define PICK_ZONE_MIN_X_MM      50.0f    // Start of reachable pick window
+#define PICK_ZONE_MAX_X_MM      400.0f   // End of reachable pick window
+#define DEFAULT_GRIP_DELAY_MS   100      // Default gripper delay (was 500ms)
+#define MAX_GANTRY_SPEED_MM_S   500      // Maximum gantry speed
+#define DEFAULT_ACCEL_MM_S2     2000     // Default acceleration
 
 // ---------- FreeRTOS Handles ----------
 QueueHandle_t commandQueue = nullptr;
@@ -122,8 +133,21 @@ void onMqttMessage(char *topic, char *payload,
 
   LOG_INFO(TAG_MQTT, "Msg Received: %s", buf);
 
-  GantryCommand cmd = {0, 0, 0, 5000, false, false}; // Defaults
+  // Initialize with defaults
+  GantryCommand cmd = {
+    .x = 0,
+    .y = 0,
+    .theta = 0,
+    .speed = 200,  // Default 200 mm/s
+    .conveyor_speed_mm_per_s = 0.0f,
+    .detection_timestamp_ms = millis(),  // Default to now
+    .grip_delay_ms = DEFAULT_GRIP_DELAY_MS,
+    .home = false,
+    .calibrate = false
+  };
 
+  // Parse command fields
+  // Format: "x:100,y:50,t:0,s:200,v:50,g:100,h:0,c:0"
   char *xPtr = strstr(buf, "x:");
   if (xPtr)
     cmd.x = atoi(xPtr + 2);
@@ -139,6 +163,16 @@ void onMqttMessage(char *topic, char *payload,
   char *sPtr = strstr(buf, "s:");
   if (sPtr)
     cmd.speed = atoi(sPtr + 2);
+  
+  // Conveyor velocity (v:)
+  char *vPtr = strstr(buf, "v:");
+  if (vPtr)
+    cmd.conveyor_speed_mm_per_s = atof(vPtr + 2);
+  
+  // Grip delay in ms (g:)
+  char *gPtr = strstr(buf, "g:");
+  if (gPtr)
+    cmd.grip_delay_ms = atoi(gPtr + 2);
 
   char *hPtr = strstr(buf, "h:");
   if (hPtr)
@@ -148,12 +182,19 @@ void onMqttMessage(char *topic, char *payload,
   if (cPtr)
     cmd.calibrate = (atoi(cPtr + 2) == 1);
 
-  // Enqueue
+  // Enqueue command
+  // For real-time tracking, prioritize NEW commands over OLD queued ones
   if (commandQueue) {
+    // If queue is full, clear it to make room for latest position data
+    if (uxQueueSpacesAvailable(commandQueue) == 0) {
+      LOG_WARN(TAG_MQTT, "Queue full - clearing stale commands");
+      xQueueReset(commandQueue);
+    }
+    
     if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
-      LOG_ERROR(TAG_MQTT, "Queue Full! Dropped command.");
+      LOG_ERROR(TAG_MQTT, "Queue send failed!");
     } else {
-      LOG_INFO(TAG_MQTT, "QueuedCmd");
+      LOG_INFO(TAG_MQTT, "Queued: x=%d v=%.1f", cmd.x, cmd.conveyor_speed_mm_per_s);
     }
   }
 }
@@ -179,6 +220,52 @@ void EthEvent(WiFiEvent_t event) {
   default:
     break;
   }
+}
+
+// ============================================================================
+// Conveyor Interception Helper
+// ============================================================================
+
+/**
+ * @brief Calculate intercept position for moving conveyor
+ * 
+ * The item moves on the conveyor while the gantry travels to it.
+ * We need to predict where the item WILL BE when the gantry arrives.
+ * 
+ * @param item_x_mm Item position when detected (mm)
+ * @param conveyor_speed Conveyor belt speed (mm/s, positive = increasing X)
+ * @param latency_ms Time since detection (ms)
+ * @param gantry_x Current gantry position (mm)
+ * @param gantry_speed Gantry travel speed (mm/s)
+ * @return Intercept X position (mm), or -1 if unreachable
+ */
+float calculateInterceptPosition(float item_x_mm, float conveyor_speed,
+                                  uint32_t latency_ms, float gantry_x,
+                                  float gantry_speed) {
+    // Compensate for network/processing latency
+    float item_current_x = item_x_mm + conveyor_speed * (latency_ms / 1000.0f);
+    
+    // If conveyor is stationary, target current position
+    if (fabs(conveyor_speed) < 0.1f) {
+        return item_current_x;
+    }
+    
+    // Iterative interception calculation (converges in 2-3 iterations)
+    float intercept_x = item_current_x;
+    for (int i = 0; i < 3; i++) {
+        float distance = fabs(intercept_x - gantry_x);
+        float travel_time = distance / gantry_speed;  // seconds
+        intercept_x = item_current_x + conveyor_speed * travel_time;
+    }
+    
+    // Check if intercept is within pick zone
+    if (intercept_x < PICK_ZONE_MIN_X_MM || intercept_x > PICK_ZONE_MAX_X_MM) {
+        LOG_WARN(TAG_GANTRY, "Intercept %.1f out of pick zone [%.1f, %.1f]",
+                 intercept_x, PICK_ZONE_MIN_X_MM, PICK_ZONE_MAX_X_MM);
+        return -1.0f;  // Unreachable
+    }
+    
+    return intercept_x;
 }
 
 // ============================================================================
@@ -237,15 +324,14 @@ void gantryTask(void *param) {
   if (!gantry.begin()) {
     LOG_ERROR(TAG_GANTRY, "Init Failed!");
     vTaskDelete(NULL);
-    return;
-  }
+     return;
+   }
   LOG_INFO(TAG_GANTRY, "Initialized");
 
   gantry.enable();
 
   GantryCommand cmd;
   const TickType_t busyCheckDelay = pdMS_TO_TICKS(GANTRY_UPDATE_INTERVAL_MS);
-  const TickType_t gripDelay = pdMS_TO_TICKS(500);
 
   // 3. Command Processing Loop
   while (1) {
@@ -267,34 +353,73 @@ void gantryTask(void *param) {
         int len = gantry.calibrate();
         if (len > 0) {
           LOG_INFO(TAG_GANTRY, "Calibrated Length: %d mm", len);
-        } else {
+   } else {
           LOG_ERROR(TAG_GANTRY, "Calibration Failed");
         }
         
       } else {
-        // Normal Move
-        LOG_INFO(TAG_GANTRY, "Moving: X=%d Y=%d T=%d Speed=%u", 
-                 cmd.x, cmd.y, cmd.theta, cmd.speed);
+        // ============================================================
+        // PICK-AND-PLACE FROM MOVING CONVEYOR
+        // ============================================================
         
         // Check for alarm before movement
         if (gantry.isAlarmActive()) {
           LOG_ERROR(TAG_GANTRY, "Alarm active - movement blocked");
-        } else {
-          gantry.moveTo(cmd.x, cmd.y, cmd.theta, cmd.speed);
-
-          // Wait for motion to complete
-          while (gantry.isBusy()) {
-            vTaskDelay(busyCheckDelay);
+          continue;
+        }
+        
+        // Calculate latency since item was detected
+        uint32_t latency_ms = millis() - cmd.detection_timestamp_ms;
+        
+        // Get current gantry position (in mm)
+        float gantry_x_mm = gantry.getXEncoder() / gantry.getPulsesPerMm();
+        
+        // Calculate intercept position for moving conveyor
+        float target_x_mm;
+        if (cmd.conveyor_speed_mm_per_s != 0.0f) {
+          // Moving conveyor - calculate interception point
+          target_x_mm = calculateInterceptPosition(
+            (float)cmd.x,
+            cmd.conveyor_speed_mm_per_s,
+            latency_ms,
+            gantry_x_mm,
+            (float)cmd.speed
+          );
+          
+          if (target_x_mm < 0) {
+            LOG_WARN(TAG_GANTRY, "Item unreachable - skipping");
+            continue;
           }
+          
+          LOG_INFO(TAG_GANTRY, "Intercept: item@%.1f + %.1fmm/s -> target=%.1f (latency=%ums)",
+                   (float)cmd.x, cmd.conveyor_speed_mm_per_s, target_x_mm, latency_ms);
+   } else {
+          // Static target
+          target_x_mm = (float)cmd.x;
+          LOG_INFO(TAG_GANTRY, "Static target: X=%.1f Y=%d T=%d Speed=%u",
+                   target_x_mm, cmd.y, cmd.theta, cmd.speed);
+        }
+        
+        // Clamp speed to maximum
+        uint32_t actual_speed = cmd.speed;
+        if (actual_speed > MAX_GANTRY_SPEED_MM_S) {
+          actual_speed = MAX_GANTRY_SPEED_MM_S;
+        }
+        
+        // Execute move to intercept position
+        gantry.moveTo((int32_t)target_x_mm, cmd.y, cmd.theta, actual_speed);
 
-          // Simple Pick Sequence (gripper open/close)
-          // Only if speed > 0 (indicates active movement command)
-          if (cmd.speed > 0) {
-            LOG_INFO(TAG_GANTRY, "Gripping...");
-            gantry.grip(true);
-            vTaskDelay(gripDelay);
-            gantry.grip(false);
-          }
+        // Wait for motion to complete
+        while (gantry.isBusy()) {
+          vTaskDelay(busyCheckDelay);
+        }
+
+        // Grip sequence with configurable delay
+        if (cmd.grip_delay_ms > 0) {
+          LOG_INFO(TAG_GANTRY, "Gripping (delay=%ums)...", cmd.grip_delay_ms);
+          gantry.grip(true);
+          vTaskDelay(pdMS_TO_TICKS(cmd.grip_delay_ms));
+          gantry.grip(false);
         }
       }
       LOG_INFO(TAG_GANTRY, "Cmd Done");
@@ -481,4 +606,5 @@ void loop() {
   // This function should not block or perform heavy work
   // Delete this task to free up resources
   vTaskDelete(NULL);
-}
+ }
+ 
