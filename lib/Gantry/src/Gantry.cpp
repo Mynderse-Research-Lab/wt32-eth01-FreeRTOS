@@ -36,15 +36,23 @@ bool Gantry::begin() {
         gripperActive_ = false;
     }
     
-    // Configure limit switch pins if set
-    if (xMinPin_ >= 0) {
+    // Configure limit switch pins in driver config BEFORE initialization
+    // This allows the driver to handle limit switch debouncing and safety
+    if (xMinPin_ >= 0 && xMaxPin_ >= 0) {
+        // Get mutable reference to driver config
+        BergerdaServo::DriverConfig& xConfig = 
+            const_cast<BergerdaServo::DriverConfig&>(axisX_.getConfig());
+        
+        // Set limit pins in driver config
+        xConfig.limit_min_pin = xMinPin_;
+        xConfig.limit_max_pin = xMaxPin_;
+        
+        // Configure limit switch pins (driver will also configure them during initialize)
         pinMode(xMinPin_, INPUT_PULLUP);
-    }
-    if (xMaxPin_ >= 0) {
         pinMode(xMaxPin_, INPUT_PULLUP);
     }
     
-    // Initialize X-axis servo driver
+    // Initialize X-axis servo driver (will configure limit switches if pins are set)
     if (!axisX_.initialize()) {
         return false;
     }
