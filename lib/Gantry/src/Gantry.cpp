@@ -234,6 +234,16 @@ void Gantry::update() {
     // This prevents false triggers from mechanical switch bounce
     axisX_.updateLimitDebounce();
     
+    // Check for alarm condition
+    if (axisX_.isAlarmActive()) {
+        // Handle alarm - stop motion and disable
+        if (isBusy()) {
+            axisX_.stopMotion(0);
+        }
+        enabled_ = false;
+        // Note: Could add alarm callback or status flag here
+    }
+    
     // Update X-axis position from encoder
     // Y and Theta are simulated, so no update needed for now
     // TODO: Implement trajectory following for Y/Theta axes
@@ -371,6 +381,17 @@ int Gantry::getCurrentY() const {
 
 int Gantry::getCurrentTheta() const {
     return currentTheta_;
+}
+
+// ============================================================================
+// ALARM MONITORING
+// ============================================================================
+
+bool Gantry::isAlarmActive() const {
+    if (!initialized_) {
+        return false;
+    }
+    return axisX_.isAlarmActive();
 }
 
 // ============================================================================
