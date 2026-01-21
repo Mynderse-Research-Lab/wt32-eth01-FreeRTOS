@@ -211,8 +211,27 @@ void Gantry::home() {
         return; // No limit pin configured
     }
     
-    // TODO: Implement homing sequence
-    // This is a stub implementation
+    // Update limit debouncing to get current state
+    axisX_.updateLimitDebounce(true);
+    
+    // Check if already at home (MIN limit active)
+    if (axisX_.getLimitMinDebounced()) {
+        // Already at home - set position to 0
+        axisX_.setPosition(0);
+        return;
+    }
+    
+    // Use driver's built-in homing sequence
+    // Moves negative until MIN limit switch is triggered
+    // Uses config.homing_speed_pps (default 6000 pps)
+    uint32_t homing_speed = axisX_.getConfig().homing_speed_pps;
+    if (homing_speed == 0) {
+        homing_speed = 6000; // Default fallback
+    }
+    
+    // Start homing (non-blocking)
+    // Position will be set to 0 automatically when MIN limit is reached
+    axisX_.startHoming(homing_speed);
 }
 
 int Gantry::calibrate() {
