@@ -138,17 +138,34 @@ struct DriverConfig {
   pcnt_unit_t pcnt_unit;
 
   /**
+   * @brief Limit Switch Configuration
+   * @param limit_min_pin: GPIO for minimum limit switch (active LOW with pullup)
+   * @param limit_max_pin: GPIO for maximum limit switch (active LOW with pullup)
+   */
+  int limit_min_pin;
+  int limit_max_pin;
+
+  /**
    * @brief Default constructor with defaults
    */
   DriverConfig()
-      : pulse_mode(PulseMode::PULSE_DIRECTION),
-        input_pin_nos{-1, -1, -1, -1, -1, -1},
+      : input_pin_nos{-1, -1, -1, -1, -1, -1},
         output_pin_nos{-1, -1, -1, -1, -1, -1, -1, -1},
-        control_mode(ControlMode::POSITION), max_pulse_freq(600000),
-        encoder_ppr(12000), gear_numerator(1.0), gear_denominator(1.0),
-        ledc_channel(0), ledc_pulse_pin(-1), ledc_resolution(2),
-        enable_encoder_feedback(false), enable_closed_loop_control(false),
-        invert_output_logic(true), pcnt_unit(PCNT_UNIT_0) {}
+        pulse_mode(PulseMode::PULSE_DIRECTION),
+        control_mode(ControlMode::POSITION),
+        max_pulse_freq(600000),
+        encoder_ppr(12000),
+        gear_numerator(1.0),
+        gear_denominator(1.0),
+        ledc_channel(0),
+        ledc_pulse_pin(-1),
+        ledc_resolution(2),
+        enable_encoder_feedback(false),
+        enable_closed_loop_control(false),
+        invert_output_logic(true),
+        pcnt_unit(PCNT_UNIT_0),
+        limit_min_pin(-1),
+        limit_max_pin(-1) {}
 };
 
 /**

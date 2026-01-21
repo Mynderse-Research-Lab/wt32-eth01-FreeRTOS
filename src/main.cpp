@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include "SDF08NK8X.h"
 
 using namespace BergerdaServo;
@@ -11,7 +12,7 @@ using namespace BergerdaServo;
 
 // Pin Definitions
 #define PIN_PULSE    2   // Output: Pulse signal
-#define PIN_DIR       17  // Output: Direction signal
+#define PIN_DIR      12   // Output: Direction signal (avoid ETH clock GPIO17)
 #define PIN_ENABLE   15  // Output: Servo enable (SON)
 #define PIN_LIMIT_MIN 14 // Input Pullup: Home limit switch (active LOW)
 #define PIN_LIMIT_MAX 32 // Input Pullup: End limit switch (active LOW)
@@ -19,6 +20,10 @@ using namespace BergerdaServo;
 // Servo Driver
 DriverConfig config;
 ServoDriver* driver = nullptr;
+bool output_invert = true;
+bool pulse_active = false;
+uint32_t pulse_end_ms = 0;
+uint32_t pulse_freq_hz = 0;
 String inputLine;
 unsigned long last_rx_ms = 0;
 uint8_t limit_min_sample = 0;
@@ -30,35 +35,11 @@ bool limit_max_state = false;
 unsigned long last_limit_sample_ms = 0;
 static const uint8_t LIMIT_DEBOUNCE_CYCLES = 10;
 static const uint32_t STEPS_PER_REV = 6000;
-static bool invert_direction = false;
-
 // Forward declarations for helpers used before definitions.
 void updateLimitDebounce();
 bool getLimitMinDebounced();
 bool getLimitMaxDebounced();
 bool canMoveSteps(int32_t steps);
-
-struct SoftwareMoveState {
-  bool active = false;
-  bool direction = true;
-  uint32_t total_steps = 0;
-  uint32_t moved_steps = 0;
-  uint32_t accel_steps = 0;
-  uint32_t decel_steps = 0;
-  double accel_rate = 0.0;
-  double decel_rate = 0.0;
-  double max_speed = 0.0;
-  uint32_t high_us = 100;
-  uint32_t next_pulse_us = 0;
-  uint32_t pulse_high_start_us = 0;
-  bool pulse_high = false;
-  uint32_t progress_interval = 0;
-  uint32_t last_report = 0;
-  int pulse_pin = -1;
-  int dir_pin = -1;
-};
-
-SoftwareMoveState soft_move;
 
 uint32_t rpmToPps(double rpm) {
   if (rpm <= 0.0) {
@@ -71,170 +52,6 @@ uint32_t rpmToPps(double rpm) {
   return (uint32_t)(pps + 0.5);
 }
 
-void writeLogicalPin(int pin, bool logical_state) {
-  if (pin == config.output_pin_nos[7] && invert_direction) {
-    logical_state = !logical_state;
-  }
-  bool physical_state = config.invert_output_logic ? !logical_state : logical_state;
-  digitalWrite(pin, physical_state ? HIGH : LOW);
-}
-int32_t applyDirectionInvert(int32_t steps) {
-  return invert_direction ? -steps : steps;
-}
-
-uint32_t getLedcMinPps() {
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  return 5000;
-#else
-  return 40000;
-#endif
-}
-
-bool startSoftwareMove(int32_t steps, uint32_t max_pps,
-                       uint32_t accel_pps_per_s, uint32_t decel_pps_per_s,
-                       uint32_t progress_interval) {
-  if (soft_move.active || steps == 0 || max_pps == 0) {
-    return false;
-  }
-  if (!canMoveSteps(steps)) {
-    return false;
-  }
-
-  soft_move.active = true;
-  soft_move.direction = steps > 0;
-  soft_move.total_steps = (steps >= 0) ? (uint32_t)steps : (uint32_t)(-steps);
-  soft_move.moved_steps = 0;
-  soft_move.accel_rate = (accel_pps_per_s > 0) ? (double)accel_pps_per_s : 0.0;
-  soft_move.decel_rate = (decel_pps_per_s > 0) ? (double)decel_pps_per_s : 0.0;
-  soft_move.max_speed = (double)max_pps;
-  soft_move.progress_interval = progress_interval;
-  soft_move.last_report = 0;
-  soft_move.pulse_high = false;
-  soft_move.high_us = 100;
-  soft_move.pulse_pin = config.output_pin_nos[6];
-  soft_move.dir_pin = config.output_pin_nos[7];
-  if (soft_move.pulse_pin < 0 || soft_move.dir_pin < 0) {
-    soft_move.active = false;
-    return false;
-  }
-
-  soft_move.accel_steps = 0;
-  soft_move.decel_steps = 0;
-  if (soft_move.accel_rate > 0.0) {
-    soft_move.accel_steps = (uint32_t)((soft_move.max_speed * soft_move.max_speed) /
-                                       (2.0 * soft_move.accel_rate));
-  }
-  if (soft_move.decel_rate > 0.0) {
-    soft_move.decel_steps = (uint32_t)((soft_move.max_speed * soft_move.max_speed) /
-                                       (2.0 * soft_move.decel_rate));
-  }
-  if (soft_move.accel_steps + soft_move.decel_steps > soft_move.total_steps) {
-    soft_move.accel_steps = soft_move.total_steps / 2;
-    soft_move.decel_steps = soft_move.total_steps - soft_move.accel_steps;
-    if (soft_move.accel_rate > 0.0) {
-      soft_move.max_speed = sqrt(2.0 * soft_move.accel_rate *
-                                 (double)soft_move.accel_steps);
-    }
-  }
-
-  // Detach LEDC so we can bit-bang the pulse pin at low frequency.
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  ledcDetach(soft_move.pulse_pin);
-#else
-  ledcDetachPin(soft_move.pulse_pin);
-#endif
-  pinMode(soft_move.pulse_pin, OUTPUT);
-  writeLogicalPin(soft_move.dir_pin, soft_move.direction);
-  delayMicroseconds(10);
-  soft_move.next_pulse_us = micros();
-  return true;
-}
-void stopSoftwareMove() {
-  if (!soft_move.active) {
-    return;
-  }
-  soft_move.active = false;
-  soft_move.pulse_high = false;
-  writeLogicalPin(soft_move.dir_pin, false);
-  writeLogicalPin(soft_move.pulse_pin, false);
-  delayMicroseconds(1);
-
-  // Restore LEDC for normal driver operations.
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  ledcAttach(soft_move.pulse_pin, 1000, config.ledc_resolution);
-  ledcWrite(soft_move.pulse_pin, 0);
-#else
-  ledcSetup(config.ledc_channel, 1000, config.ledc_resolution);
-  ledcAttachPin(soft_move.pulse_pin, config.ledc_channel);
-  ledcWrite(config.ledc_channel, 0);
-#endif
-}
-void serviceSoftwareMove() {
-  if (!soft_move.active) {
-    return;
-  }
-
-  updateLimitDebounce();
-  if ((soft_move.direction && getLimitMaxDebounced()) ||
-      (!soft_move.direction && getLimitMinDebounced())) {
-    stopSoftwareMove();
-    return;
-  }
-
-  uint32_t now_us = micros();
-
-  if (soft_move.pulse_high) {
-    if ((uint32_t)(now_us - soft_move.pulse_high_start_us) >= soft_move.high_us) {
-      writeLogicalPin(soft_move.pulse_pin, false);
-      soft_move.pulse_high = false;
-      soft_move.moved_steps++;
-
-      if (soft_move.progress_interval > 0 &&
-          soft_move.moved_steps % soft_move.progress_interval == 0) {
-        LOG_PRINTF("Progress: %u / %u steps\n",
-                   soft_move.moved_steps, soft_move.total_steps);
-      }
-
-      if (soft_move.moved_steps >= soft_move.total_steps) {
-        LOG_PRINTF("Progress: %u / %u steps\n",
-                   soft_move.moved_steps, soft_move.total_steps);
-        stopSoftwareMove();
-        return;
-      }
-
-      double pps = soft_move.max_speed;
-      if (soft_move.accel_rate > 0.0 &&
-          soft_move.moved_steps < soft_move.accel_steps) {
-        pps = sqrt(2.0 * soft_move.accel_rate *
-                   (double)soft_move.moved_steps);
-        if (pps < 1.0) {
-          pps = 1.0;
-        }
-      } else if (soft_move.decel_rate > 0.0 &&
-                 soft_move.moved_steps >=
-                     (soft_move.total_steps - soft_move.decel_steps)) {
-        uint32_t remaining = soft_move.total_steps - soft_move.moved_steps;
-        pps = sqrt(2.0 * soft_move.decel_rate * (double)remaining);
-        if (pps < 1.0) {
-          pps = 1.0;
-        }
-      }
-
-      uint32_t period_us = (uint32_t)(1000000.0 / pps);
-      if (period_us < soft_move.high_us + 1) {
-        period_us = soft_move.high_us + 1;
-      }
-      soft_move.next_pulse_us = now_us + (period_us - soft_move.high_us);
-    }
-    return;
-  }
-
-  if ((int32_t)(now_us - soft_move.next_pulse_us) >= 0) {
-    writeLogicalPin(soft_move.pulse_pin, true);
-    soft_move.pulse_high = true;
-    soft_move.pulse_high_start_us = now_us;
-  }
-}
 
 void updateLimitDebounce() {
   const unsigned long now = millis();
@@ -250,7 +67,11 @@ void updateLimitDebounce() {
     if (limit_min_stable < LIMIT_DEBOUNCE_CYCLES) {
       limit_min_stable++;
       if (limit_min_stable == LIMIT_DEBOUNCE_CYCLES) {
+        bool old_state = limit_min_state;
         limit_min_state = min_now;
+        if (limit_min_state != old_state) {
+          LOG_PRINTF("⚠ LIMIT SWITCH: X_LS_MIN (IO14) %s\n", limit_min_state ? "ACTIVE" : "released");
+        }
       }
     }
   } else {
@@ -262,7 +83,11 @@ void updateLimitDebounce() {
     if (limit_max_stable < LIMIT_DEBOUNCE_CYCLES) {
       limit_max_stable++;
       if (limit_max_stable == LIMIT_DEBOUNCE_CYCLES) {
+        bool old_state = limit_max_state;
         limit_max_state = max_now;
+        if (limit_max_state != old_state) {
+          LOG_PRINTF("⚠ LIMIT SWITCH: X_LS_MAX (IO32) %s\n", limit_max_state ? "ACTIVE" : "released");
+        }
       }
     }
   } else {
@@ -285,8 +110,64 @@ void printHelp() {
   LOG_PRINTLN("  wait                 - wait for motion to complete");
   LOG_PRINTLN("  stop                 - stop motion");
   LOG_PRINTLN("  slow6000             - 1 turn (6000 steps) sequence (blocking)");
-  LOG_PRINTLN("  dirinvert <0|1>       - invert direction for move/slow");
+  LOG_PRINTLN("  invertout <0|1>       - set output inversion and reinit");
+  LOG_PRINTLN("  pulse <freq_hz> <ms>  - LEDC pulse test on PULSE pin");
+  LOG_PRINTLN("  pulsestop             - stop pulse test immediately");
   LOG_PRINTLN("");
+}
+
+void detachPulseLedc() {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(PIN_PULSE, 0);
+  ledcDetach(PIN_PULSE);
+#else
+  ledcWrite(config.ledc_channel, 0);
+  ledcDetachPin(PIN_PULSE);
+#endif
+  // Don't set pinMode - leave pin detached from LEDC for driver to reclaim
+}
+
+void stopPulseTest() {
+  if (!pulse_active) {
+    return;
+  }
+  pulse_active = false;
+  // Just detach LEDC and stop pulse - driver will reattach LEDC on next move
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(PIN_PULSE, 0);
+  ledcDetach(PIN_PULSE);
+#else
+  ledcWrite(config.ledc_channel, 0);
+  ledcDetachPin(PIN_PULSE);
+#endif
+  // Don't set pinMode to OUTPUT - leave pin detached from LEDC
+  // The driver will properly reattach LEDC when starting motion
+}
+
+void servicePulseTest() {
+  if (!pulse_active) {
+    return;
+  }
+  if ((int32_t)(millis() - pulse_end_ms) >= 0) {
+    stopPulseTest();
+    // Don't call driver->stopMotion() - it hangs when motion isn't active
+    LOG_PRINTLN("OK pulse test complete");
+  }
+}
+
+bool initDriver() {
+  if (driver) {
+    driver->disable();
+    delete driver;
+    driver = nullptr;
+  }
+
+  config.invert_output_logic = output_invert;
+  driver = new ServoDriver(config);
+  if (!driver->initialize()) {
+    return false;
+  }
+  return driver->enable();
 }
 
 void printLimits() {
@@ -308,8 +189,8 @@ void printStatus() {
   bool limitMax = getLimitMaxDebounced();
   LOG_PRINTF("  Servo Enabled: %s\n", status.servo_enabled ? "YES" : "NO");
   LOG_PRINTF("  Motion Active: %s\n", driver->isMotionActive() ? "YES" : "NO");
-  LOG_PRINTF("  Current Position: %u steps\n", driver->getPosition());
-  LOG_PRINTF("  Current Speed: %u pps\n", driver->getSpeed());
+  LOG_PRINTF("  Current Position: %" PRIu32 " steps\n", driver->getPosition());
+  LOG_PRINTF("  Current Speed: %" PRIu32 " pps\n", driver->getSpeed());
   LOG_PRINTF("  Limits: MIN=%s MAX=%s\n",
              limitMin ? "ACTIVE" : "open",
              limitMax ? "ACTIVE" : "open");
@@ -344,10 +225,12 @@ void waitForMotion() {
 void runslow6000() {
   const uint32_t total_steps = 6000;
   double speed_rpm = 6.0; // 600 Hz for 6000 steps = 10 seconds
-  uint32_t pps = rpmToPps(speed_rpm);
-  if (pps == 0) {
-    return;
+  uint32_t speed = rpmToPps(speed_rpm);
+  if (speed > config.max_pulse_freq) {
+    speed = config.max_pulse_freq;
   }
+  const uint32_t accel = rpmToPps(3.0);
+  const uint32_t decel = rpmToPps(3.0);
   const uint32_t progress_interval = 600;
 
   updateLimitDebounce();
@@ -357,14 +240,39 @@ void runslow6000() {
       return;
     }
   }
-  int32_t steps = applyDirectionInvert(static_cast<int32_t>(total_steps));
+  int32_t steps = static_cast<int32_t>(total_steps);
   if (!canMoveSteps(steps)) {
     LOG_PRINTLN("ERR limit active");
     return;
   }
 
-  startSoftwareMove(steps, pps,
-                    pps / 2, pps / 2, progress_interval);
+  const uint32_t start_pos = driver->getPosition();
+  if (!driver->moveRelative(steps, speed, accel, decel)) {
+    LOG_PRINTLN("ERR move rejected");
+    return;
+  }
+  uint32_t last_report = 0;
+  while (driver->isMotionActive()) {
+    updateLimitDebounce();
+    if (getLimitMaxDebounced()) {
+      driver->stopMotion(500);
+      break;
+    }
+    uint32_t current_pos = driver->getPosition();
+    uint32_t moved_steps = (current_pos >= start_pos)
+                               ? (current_pos - start_pos)
+                               : (start_pos - current_pos);
+    if (moved_steps != last_report && moved_steps % progress_interval == 0) {
+      last_report = moved_steps;
+      LOG_PRINTF("Progress: %" PRIu32 " / %" PRIu32 " steps\n", moved_steps, total_steps);
+    }
+    delay(2);
+  }
+  uint32_t final_pos = driver->getPosition();
+  uint32_t moved_steps = (final_pos >= start_pos)
+                             ? (final_pos - start_pos)
+                             : (start_pos - final_pos);
+  LOG_PRINTF("Progress: %" PRIu32 " / %" PRIu32 " steps\n", moved_steps, total_steps);
 }
 
 void processCommand(String cmd) {
@@ -398,49 +306,95 @@ void processCommand(String cmd) {
     waitForMotion();
   } else if (clean == "stop") {
     driver->stopMotion(500);
-    stopSoftwareMove();
     LOG_PRINTLN("OK Stop requested");
   } else if (clean == "slow6000" || clean == "slow100000" || clean == "slow1000000" || clean == "slow400000") {
     runslow6000();
-  } else if (clean.startsWith("dirinvert")) {
+  } else if (clean.startsWith("invertout")) {
     int value = 0;
-    if (sscanf(clean.c_str(), "dirinvert %d", &value) == 1) {
-      invert_direction = (value != 0);
+    if (sscanf(clean.c_str(), "invertout %d", &value) == 1) {
+      output_invert = (value != 0);
     } else {
-      invert_direction = !invert_direction;
+      output_invert = !output_invert;
     }
-    LOG_PRINTF("Direction invert: %s\n", invert_direction ? "ON" : "OFF");
+    if (initDriver()) {
+      LOG_PRINTF("Output invert: %s\n", output_invert ? "ON" : "OFF");
+    } else {
+      LOG_PRINTLN("ERR reinit failed");
+    }
+  } else if (clean == "pulsestop" || clean == "pulse stop") {
+    stopPulseTest();
+    driver->stopMotion(500);
+    LOG_PRINTLN("OK pulse test stopped");
+  } else if (clean.startsWith("pulse")) {
+    LOG_PRINTLN("[DBG] pulse: enter");
+    uint32_t freq = 0;
+    uint32_t ms = 0;
+    int parsed = sscanf(clean.c_str(), "pulse %lu %lu", &freq, &ms);
+    LOG_PRINTF("[DBG] pulse: sscanf returned %d, freq=%lu, ms=%lu\n", parsed, freq, ms);
+    if (parsed < 2) {
+      LOG_PRINTLN("⚠ Usage: pulse <freq_hz> <ms>");
+      return;
+    }
+    if (freq == 0 || ms == 0) {
+      LOG_PRINTLN("⚠ freq_hz and ms must be > 0");
+      return;
+    }
+    LOG_PRINTLN("[DBG] pulse: stopping active pulse if any");
+    if (pulse_active) {
+      LOG_PRINTLN("[DBG] pulse: calling stopPulseTest()");
+      stopPulseTest();
+      LOG_PRINTLN("[DBG] pulse: stopPulseTest() done");
+    } else {
+      LOG_PRINTLN("[DBG] pulse: no active pulse test");
+    }
+    // Don't call driver->stopMotion() here - it can hang if motion isn't active
+    // We're about to detach LEDC anyway, so driver state doesn't matter
+    LOG_PRINTLN("[DBG] pulse: detaching LEDC");
+    detachPulseLedc();
+    LOG_PRINTLN("[DBG] pulse: attaching LEDC");
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcAttach(PIN_PULSE, freq, 1);
+    ledcWrite(PIN_PULSE, 1);
+#else
+    ledcSetup(config.ledc_channel, freq, 1);
+    ledcAttachPin(PIN_PULSE, config.ledc_channel);
+    ledcWrite(config.ledc_channel, 1);
+#endif
+    LOG_PRINTLN("[DBG] pulse: setting vars");
+    pulse_active = true;
+    pulse_freq_hz = freq;
+    pulse_end_ms = millis() + ms;
+    LOG_PRINTLN("OK pulse test started");
   } else if (clean.startsWith("move")) {
+    LOG_PRINTLN("[DBG] move: enter");
     int32_t steps = 0;
     double speed_rpm = 1000.0;
     double accel_rpm = 500.0;
     double decel_rpm = 500.0;
     int parsed = sscanf(clean.c_str(), "move %ld %lf %lf %lf",
                         &steps, &speed_rpm, &accel_rpm, &decel_rpm);
+    LOG_PRINTF("[DBG] move: parsed=%d, steps=%ld, speed_rpm=%.1f\n", parsed, steps, speed_rpm);
     if (parsed < 1) {
       LOG_PRINTLN("⚠ Usage: move <steps> [speed_rpm accel_rpm decel_rpm]");
       return;
     }
-    steps = applyDirectionInvert(steps);
+    LOG_PRINTLN("[DBG] move: calling canMoveSteps");
     if (!canMoveSteps(steps)) {
+      LOG_PRINTLN("[DBG] move: canMoveSteps returned false");
       return;
     }
+    LOG_PRINTLN("[DBG] move: canMoveSteps OK, converting RPM");
     uint32_t speed = rpmToPps(speed_rpm);
     uint32_t accel = rpmToPps(accel_rpm);
     uint32_t decel = rpmToPps(decel_rpm);
     if (speed > config.max_pulse_freq) {
       speed = config.max_pulse_freq;
     }
-
-    if (speed < getLedcMinPps()) {
-      bool ok = startSoftwareMove(steps, speed, accel, decel, 0);
-      LOG_PRINTLN(ok ? "OK Move command accepted" : "ERR Move command rejected");
+    LOG_PRINTF("[DBG] move: calling moveRelative(steps=%ld, speed=%lu)\n", steps, speed);
+    if (driver->moveRelative(steps, speed, accel, decel)) {
+      LOG_PRINTLN("OK Move command accepted");
     } else {
-      if (driver->moveRelative(steps, speed, accel, decel)) {
-        LOG_PRINTLN("OK Move command accepted");
-      } else {
-        LOG_PRINTLN("ERR Move command rejected");
-      }
+      LOG_PRINTLN("ERR Move command rejected");
     }
   } else {
     LOG_PRINTLN("⚠ Unknown command. Type 'help' for options.");
@@ -463,10 +417,14 @@ void setup() {
   config.output_pin_nos[7] = PIN_DIR;    // DIR
   config.output_pin_nos[0] = PIN_ENABLE; // ENABLE
 
+  // Configure limit switch pins
+  config.limit_min_pin = PIN_LIMIT_MIN;
+  config.limit_max_pin = PIN_LIMIT_MAX;
+
   // Disable encoder feedback for basic test
   config.enable_encoder_feedback = false;
 
-  // Configure limit switch pins (INPUT with internal pullup)
+  // Configure limit switch pins (INPUT with internal pullup) - driver will also read them
   pinMode(PIN_LIMIT_MIN, INPUT_PULLUP);
   pinMode(PIN_LIMIT_MAX, INPUT_PULLUP);
   limit_min_sample = !digitalRead(PIN_LIMIT_MIN);
@@ -480,20 +438,13 @@ void setup() {
   config.pulse_mode = PulseMode::PULSE_DIRECTION;
   config.control_mode = ControlMode::POSITION;
 
-  // Create driver instance
-  driver = new ServoDriver(config);
   LOG_PRINTLN("Initializing driver...");
-  if (!driver->initialize()) {
+  if (!initDriver()) {
     LOG_PRINTLN("✗ FAIL: Driver initialization failed");
     LOG_PRINTLN("   Check pin connections and try again.");
     return;
   }
-  if (!driver->enable()) {
-    LOG_PRINTLN("✗ FAIL: Motor enable failed");
-    LOG_PRINTLN("   Check if motor is connected and driver is powered.");
-    return;
-  }
-  LOG_PRINTLN("✓ Driver ready.");
+  LOG_PRINTLN("✓ Driver ready (motor enabled).");
   LOG_PRINTLN("");
   LOG_PRINTLN("Type 'help' and press Enter to see commands.");
   printHelp();
@@ -501,30 +452,35 @@ void setup() {
 
 void loop() {
   updateLimitDebounce();
-  serviceSoftwareMove();
-  bool line_complete = false;
+  servicePulseTest();
   while (Serial.available() > 0) {
     char ch = static_cast<char>(Serial.read());
     last_rx_ms = millis();
-    if (ch == '\n' || ch == '\r') {
-      line_complete = true;
-    } else {
-      inputLine += ch;
-      if (inputLine.length() > 200) {
+    if (ch == '\n' || ch == '\r' || ch == ';') {
+      if (inputLine.length() > 0) {
+        String cmd = inputLine;
         inputLine = "";
-        LOG_PRINTLN("⚠ Input too long, cleared");
+        LOG_PRINTF("[RX] \"%s\"\n", cmd.c_str());
+        processCommand(cmd);
       }
+      continue;
+    }
+    inputLine += ch;
+    if (inputLine.length() > 200) {
+      inputLine = "";
+      LOG_PRINTLN("⚠ Input too long, cleared");
     }
   }
 
   if (inputLine.length() > 0) {
-    if (line_complete || (millis() - last_rx_ms) > 50) {
+    if ((millis() - last_rx_ms) > 50) {
       String line = inputLine;
       inputLine = "";
       line.trim();
       if (line.length() == 0) {
         return;
       }
+      LOG_PRINTF("[RX timeout] \"%s\"\n", line.c_str());
       int start = 0;
       while (start < static_cast<int>(line.length())) {
         int sep = line.indexOf(';', start);

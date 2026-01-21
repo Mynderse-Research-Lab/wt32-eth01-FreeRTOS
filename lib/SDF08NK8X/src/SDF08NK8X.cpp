@@ -6,6 +6,7 @@
 
 #include "SDF08NK8X.h"
 #include <cmath>
+#include <inttypes.h>
 
 using namespace BergerdaServo;
 
@@ -23,8 +24,17 @@ using namespace BergerdaServo;
 #endif
 
 #if SDF08NK8X_DEBUG
-#define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
-#define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+static bool debug_line_open = false;
+static inline void debugPrefix() {
+  if (!debug_line_open) {
+    Serial.printf("[%lu] ", millis());
+    debug_line_open = true;
+  }
+}
+#define DEBUG_PRINT(...) \
+  do { debugPrefix(); Serial.print(__VA_ARGS__); } while (0)
+#define DEBUG_PRINTLN(...) \
+  do { debugPrefix(); Serial.println(__VA_ARGS__); debug_line_open = false; } while (0)
 #else
 #define DEBUG_PRINT(...)
 #define DEBUG_PRINTLN(...)
@@ -35,11 +45,21 @@ using namespace BergerdaServo;
 // ============================================================================
 
 ServoDriver::ServoDriver(const DriverConfig &config)
-    : config_(config), initialized_(false), enabled_(false),
-      current_position_(0), motion_active_(false), current_speed_pps_(0),
-      current_direction_(true), last_status_update_ms_(0),
-      encoder_accumulator_(0), last_pcnt_count_(0), alarm_callback_(NULL),
-      position_reached_callback_(NULL), status_update_callback_(NULL) {
+    : config_(config),
+      status_(),
+      initialized_(false),
+      enabled_(false),
+      alarm_callback_(NULL),
+      position_reached_callback_(NULL),
+      status_update_callback_(NULL),
+      current_position_(0),
+      target_position_(0),
+      current_speed_pps_(0),
+      last_status_update_ms_(0),
+      motion_active_(false),
+      current_direction_(true),
+      encoder_accumulator_(0),
+      last_pcnt_count_(0) {
   // Initialize status structure
   status_.position_reached = false;
   status_.brake_released = false;
@@ -57,8 +77,9 @@ ServoDriver::ServoDriver(const DriverConfig &config)
   ramp_args.arg = this;
   ramp_args.name = "servo_ramp_timer";
   esp_err_t timer_err = esp_timer_create(&ramp_args, &ramp_timer_);
+  Serial.printf("[%lu] ServoDriver: esp_timer_create returned %d, ramp_timer_=%p\n", millis(), timer_err, ramp_timer_);
   if (timer_err != ESP_OK) {
-    DEBUG_PRINTLN("ServoDriver: Failed to create timer!");
+    Serial.printf("[%lu] ServoDriver: ERROR - Failed to create timer!\n", millis());
     ramp_timer_ = NULL;
   }
 
@@ -278,25 +299,35 @@ bool ServoDriver::initialize() {
 // ============================================================================
 
 bool ServoDriver::enable() {
+  Serial.printf("[%lu] ServoDriver: enable() called, initialized_=%d, enabled_=%d\n", millis(), initialized_, enabled_);
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
-  if (!initialized_ || enabled_) {
-    DEBUG_PRINTLN("ServoDriver: Not initialized or already enabled");
+  if (!initialized_) {
+    Serial.printf("[%lu] ServoDriver: enable() failed - not initialized\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
-  } else if (isAlarmActive()) {
-    DEBUG_PRINTLN("ServoDriver: Cannot enable - alarm active");
+  }
+  if (enabled_) {
+    Serial.printf("[%lu] ServoDriver: enable() failed - already enabled\n", millis());
+#if SDF08NK8X_USE_FREERTOS
+    xSemaphoreGive(mutex_);
+#endif
+    return false;
+  }
+  if (isAlarmActive()) {
+    Serial.printf("[%lu] ServoDriver: enable() failed - alarm active\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
 
+  Serial.printf("[%lu] ServoDriver: Calling setEnablePin(true)\n", millis());
   if (!setEnablePin(true)) {
-    DEBUG_PRINTLN("ServoDriver: Failed to enable enable pin");
+    Serial.printf("[%lu] ServoDriver: enable() failed - setEnablePin returned false\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -304,6 +335,7 @@ bool ServoDriver::enable() {
   }
   enabled_ = true;
   status_.servo_enabled = true;
+  Serial.printf("[%lu] ServoDriver: enable() SUCCESS\n", millis());
   return true;
 }
 
@@ -392,6 +424,11 @@ void ServoDriver::handleMoveComplete() {
 // ============================================================================
 
 void ServoDriver::rampTimerCallback(void *arg) {
+  static uint32_t callback_count = 0;
+  callback_count++;
+  if (callback_count % 100 == 0) {
+    Serial.printf("[CB] rampTimerCallback: call #%lu\n", callback_count);
+  }
   ServoDriver *driver = static_cast<ServoDriver *>(arg);
   driver->updateMotionProfile();
 }
@@ -403,6 +440,12 @@ void ServoDriver::rampTimerCallback(void *arg) {
  *       Callbacks are invoked here, so they must also be ISR-safe.
  */
 void ServoDriver::updateMotionProfile() {
+  static uint32_t call_count = 0;
+  call_count++;
+  if (call_count % 100 == 0) {
+    Serial.printf("[%lu] updateMotionProfile: call #%lu, phase=%d\n", millis(), call_count, (int)profile_.phase);
+  }
+  
   if (profile_.phase == MotionProfile::IDLE) {
     return;
   }
@@ -519,13 +562,17 @@ void ServoDriver::updateMotionProfile() {
     const double MIN_FREQ_2BIT = 80e6 / (262143.0 * 4.0);   // ≈ 76.3 Hz
     const double MIN_FREQ_3BIT = 80e6 / (262143.0 * 8.0);  // ≈ 38.1 Hz
     const double MIN_FREQ_4BIT = 80e6 / (262143.0 * 16.0);  // ≈ 19.1 Hz
+    (void)MIN_FREQ_1BIT;
+    (void)MIN_FREQ_2BIT;
+    (void)MIN_FREQ_3BIT;
+    (void)MIN_FREQ_4BIT;
     
     // Simplify: always use 1-bit resolution at a safe minimum to prevent div_param overflow
     resolution = 1;
     // Hard minimum to ensure div_param stays below limit (extra margin above 1-bit theoretical min)
 // Conservative floor; core v2 uses scaled divider (<<8) so needs higher min.
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    const double LEDC_MIN_HZ = 5000.0;
+    const double LEDC_MIN_HZ = 1000.0; // lowered to allow slow movements
 #else
     const double LEDC_MIN_HZ = 40000.0;
 #endif
@@ -541,7 +588,23 @@ void ServoDriver::updateMotionProfile() {
     }
     
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
+    static uint32_t freq_change_count = 0;
+    freq_change_count++;
+    if (freq_change_count % 100 == 0) {
+      Serial.printf("[%lu] ledcChangeFrequency: call #%lu, freq=%lu, res=%d\n", millis(), freq_change_count, freq_hz, resolution);
+    }
+    double result = ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
+    if (freq_change_count % 100 == 0) {
+      Serial.printf("[%lu] ledcChangeFrequency returned %f\n", millis(), result);
+    }
+    // Re-apply duty cycle after frequency change (it may get reset)
+    // For 1-bit resolution, we need duty=1 (50% of range 0-1), not 0
+    uint8_t max_duty = (1 << resolution) - 1;
+    uint8_t duty = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
+    if (freq_change_count % 100 == 0) {
+      Serial.printf("[%lu] Writing duty=%d (max_duty=%d)\n", millis(), duty, max_duty);
+    }
+    ledcWrite(config_.ledc_pulse_pin, duty);
 #else
     // For ESP32 v2.x, ledcSetup reconfigures the channel
     // Track resolution changes and re-attach pin when resolution changes
@@ -555,6 +618,10 @@ void ServoDriver::updateMotionProfile() {
       // Same resolution - just update frequency (ledcSetup should handle this)
       ledcSetup(config_.ledc_channel, freq_hz, resolution);
     }
+    // Re-apply duty cycle after frequency change
+    uint8_t max_duty_v2 = (1 << resolution) - 1;
+    uint8_t duty_v2 = (max_duty_v2 > 0) ? ((max_duty_v2 + 1) / 2) : 1;
+    ledcWrite(config_.ledc_channel, duty_v2);
 #endif
     current_speed_pps_ = (uint32_t)profile_.current_freq;  // Keep original for reporting
   }
@@ -653,9 +720,10 @@ void ServoDriver::updateMotionProfile() {
 void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
                                      double accel_rate, double decel_rate,
                                      bool direction) {
+  Serial.printf("[%lu] ServoDriver: [DBG] startMotionProfile ENTER\n", millis());
   // Validate rates to avoid division by zero
   if (accel_rate <= 0.0 || decel_rate <= 0.0) {
-    DEBUG_PRINTLN("ServoDriver: Invalid accel/decel rates in startMotionProfile");
+    Serial.printf("[%lu] ServoDriver: Invalid accel/decel rates\n", millis());
     return;
   }
 
@@ -711,6 +779,10 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   const double MIN_FREQ_2BIT = 80e6 / (262143.0 * 4.0);   // ≈ 76.3 Hz
   const double MIN_FREQ_3BIT = 80e6 / (262143.0 * 8.0);  // ≈ 38.1 Hz
   const double MIN_FREQ_4BIT = 80e6 / (262143.0 * 16.0);  // ≈ 19.1 Hz
+  (void)MIN_FREQ_1BIT;
+  (void)MIN_FREQ_2BIT;
+  (void)MIN_FREQ_3BIT;
+  (void)MIN_FREQ_4BIT;
   
   // Ensure max_freq is at least the minimum safe frequency
   // if (max_freq < MIN_FREQ_1BIT) {
@@ -721,7 +793,7 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   
   // Start with minimum safe frequency; force 1-bit to avoid div_param overflow
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  const double LEDC_MIN_HZ = 5000.0; // conservative floor for LEDC stability
+  const double LEDC_MIN_HZ = 1000.0; // lowered to allow slow movements
 #else
   const double LEDC_MIN_HZ = 40000.0; // higher floor for core v2 divider scaling
 #endif
@@ -734,7 +806,8 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   profile_.current_freq = init_freq;
   
   uint8_t max_duty = (1 << init_resolution) - 1;
-  uint8_t half_duty = max_duty / 2;
+  // For 1-bit resolution, duty must be 1 (not 0) to generate pulses
+  uint8_t duty = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
   uint32_t init_freq_hz = (uint32_t)(init_freq + 0.5);
 
 #if SDF08NK8X_DEBUG
@@ -745,27 +818,40 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
 #endif
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  // Stop LEDC output before changing frequency
+  // For v3+: stop output, detach, reattach with new frequency
+  Serial.printf("[%lu] ServoDriver: [DBG] Stopping LEDC output\n", millis());
   ledcWrite(config_.ledc_pulse_pin, 0);
+  Serial.printf("[%lu] ServoDriver: [DBG] Detaching LEDC\n", millis());
+  ledcDetach(config_.ledc_pulse_pin);
+  Serial.printf("[%lu] ServoDriver: [DBG] About to call ledcAttach\n", millis());
   if (!ledcAttach(config_.ledc_pulse_pin, init_freq_hz, init_resolution)) {
-    DEBUG_PRINTLN("ServoDriver: ERROR - ledcAttach failed during startMotionProfile");
+    Serial.printf("[%lu] ServoDriver: ERROR - ledcAttach failed\n", millis());
     return;
   }
-  ledcWrite(config_.ledc_pulse_pin, half_duty);
+  Serial.printf("[%lu] ServoDriver: [DBG] ledcAttach OK, calling ledcWrite with duty=%d\n", millis(), duty);
+  ledcWrite(config_.ledc_pulse_pin, duty);
+  Serial.printf("[%lu] ServoDriver: [DBG] ledcWrite done\n", millis());
 #else
   // For ESP32 v2.x, stop LEDC output first, then reconfigure
-  // Stop any existing output
+  Serial.printf("[%lu] ServoDriver: [DBG] Calling ledcWrite(0)\n", millis());
   ledcWrite(config_.ledc_channel, 0);
-  // Small delay to ensure output stops
   delayMicroseconds(100);
-  // Now reconfigure with new resolution and frequency
+  Serial.printf("[%lu] ServoDriver: [DBG] Calling ledcSetup\n", millis());
   ledcSetup(config_.ledc_channel, init_freq_hz, init_resolution);
+  Serial.printf("[%lu] ServoDriver: [DBG] Calling ledcAttachPin\n", millis());
   ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
-  ledcWrite(config_.ledc_channel, half_duty);
+  Serial.printf("[%lu] ServoDriver: [DBG] Calling ledcWrite with duty=%d\n", millis(), duty);
+  ledcWrite(config_.ledc_channel, duty);
+  Serial.printf("[%lu] ServoDriver: [DBG] ledcWrite done\n", millis());
 #endif
 
+  Serial.printf("[%lu] ServoDriver: [DBG] Starting ramp timer, ramp_timer_=%p, interval=%lu us\n", millis(), ramp_timer_, (unsigned long)RAMP_INTERVAL_US);
   // Start periodic ramp timer
-  esp_timer_start_periodic(ramp_timer_, RAMP_INTERVAL_US);
+  esp_err_t start_err = esp_timer_start_periodic(ramp_timer_, RAMP_INTERVAL_US);
+  Serial.printf("[%lu] ServoDriver: [DBG] esp_timer_start_periodic returned %d\n", millis(), start_err);
+  if (start_err != ESP_OK) {
+    Serial.printf("[%lu] ServoDriver: ERROR - Failed to start timer!\n", millis());
+  }
 
   DEBUG_PRINT("ServoDriver: Profile started. Total=");
   DEBUG_PRINT(total_pulses);
@@ -783,11 +869,12 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
 
 bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
                                  uint32_t acceleration, uint32_t deceleration) {
+  Serial.printf("[%lu] ServoDriver: [DBG] moveToPosition ENTER\n", millis());
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
   if (!initialized_ || !enabled_) {
-    DEBUG_PRINTLN("ServoDriver: Motor not enabled");
+    Serial.printf("[%lu] ServoDriver: Motor not enabled\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -795,7 +882,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   }
 
   if (motion_active_) {
-    DEBUG_PRINTLN("ServoDriver: Busy (Movement in progress)");
+    Serial.printf("[%lu] ServoDriver: Busy (Movement in progress)\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -840,10 +927,35 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   
   int64_t delta = (int64_t)target_position - (int64_t)current_pos;
   uint32_t pulse_count = (uint32_t)std::abs(delta);
-  bool direction = (delta >= 0);
+  bool direction = (delta < 0);  // Inverted for hardware: positive → false/LOW, negative → true/HIGH
+  Serial.printf("[%lu] ServoDriver: delta=%lld, direction=%d\n", millis(), delta, direction);
+
+  // Check limit switches before allowing movement
+  if (config_.limit_min_pin >= 0 && config_.limit_max_pin >= 0) {
+    bool limit_min_active = !digitalRead(config_.limit_min_pin);  // Active LOW
+    bool limit_max_active = !digitalRead(config_.limit_max_pin);  // Active LOW
+    
+    // Block forward movement (positive delta) if MAX limit is active
+    if (delta > 0 && limit_max_active) {
+      Serial.printf("[%lu] ServoDriver: MAX limit active - cannot move forward\n", millis());
+#if SDF08NK8X_USE_FREERTOS
+      xSemaphoreGive(mutex_);
+#endif
+      return false;
+    }
+    
+    // Block backward movement (negative delta) if MIN limit is active
+    if (delta < 0 && limit_min_active) {
+      Serial.printf("[%lu] ServoDriver: MIN limit active - cannot move backward\n", millis());
+#if SDF08NK8X_USE_FREERTOS
+      xSemaphoreGive(mutex_);
+#endif
+      return false;
+    }
+  }
 
   if (pulse_count == 0) {
-    DEBUG_PRINTLN("ServoDriver: Already at target position");
+    Serial.printf("[%lu] ServoDriver: Already at target position\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -852,15 +964,12 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
 
   status_.position_error = delta;
 
-  DEBUG_PRINT("ServoDriver: Moving to ");
-  DEBUG_PRINT(target_position);
-  DEBUG_PRINT(" (delta: ");
-  DEBUG_PRINT(delta);
-  DEBUG_PRINTLN(")");
+  Serial.printf("[%lu] ServoDriver: [DBG] About to call startMotionProfile\n", millis());
 
   // Use motion profile with acceleration/deceleration
   startMotionProfile(pulse_count, (double)speed, (double)acceleration,
                      (double)deceleration, direction);
+  Serial.printf("[%lu] ServoDriver: [DBG] startMotionProfile returned\n", millis());
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreGive(mutex_);
 #endif
@@ -869,28 +978,32 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
 
 bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
                                uint32_t acceleration, uint32_t deceleration) {
+  Serial.printf("[%lu] ServoDriver: [DBG] moveRelative ENTER, delta=%lld\n", millis(), delta_counts);
 #if SDF08NK8X_USE_FREERTOS
+  Serial.printf("[%lu] ServoDriver: [DBG] Taking mutex\n", millis());
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  Serial.printf("[%lu] ServoDriver: [DBG] Mutex taken\n", millis());
 #endif
   if (!initialized_ || !enabled_) {
-    DEBUG_PRINTLN("ServoDriver: Motor not enabled");
+    Serial.printf("[%lu] ServoDriver: Motor not enabled\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
 
+  Serial.printf("[%lu] ServoDriver: [DBG] Calculating target\n", millis());
   // Calculate target position and validate it doesn't overflow
   int64_t target_signed = (int64_t)current_position_ + delta_counts;
   if (target_signed < 0) {
-    DEBUG_PRINTLN("ServoDriver: moveRelative would result in negative position");
+    Serial.printf("[%lu] ServoDriver: moveRelative would result in negative position\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
   if (target_signed > UINT32_MAX) {
-    DEBUG_PRINTLN("ServoDriver: moveRelative would overflow position");
+    Serial.printf("[%lu] ServoDriver: moveRelative would overflow position\n", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -898,9 +1011,13 @@ bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
   }
 
   uint32_t target = (uint32_t)target_signed;
+  Serial.printf("[%lu] ServoDriver: [DBG] Target calculated: %lu\n", millis(), target);
 #if SDF08NK8X_USE_FREERTOS
+  Serial.printf("[%lu] ServoDriver: [DBG] Giving mutex\n", millis());
   xSemaphoreGive(mutex_);
+  Serial.printf("[%lu] ServoDriver: [DBG] Mutex given\n", millis());
 #endif
+  Serial.printf("[%lu] ServoDriver: [DBG] Calling moveToPosition\n", millis());
   return moveToPosition(target, speed, acceleration, deceleration);
 }
 
@@ -1054,7 +1171,7 @@ String ServoDriver::getConfigStatus() const {
   char buffer[256];
   snprintf(buffer, sizeof(buffer),
            "BergerdaServoDriver v%s\nInitialized: %s\nEnabled: %s\nPosition: "
-           "%u\nSpeed: %u pps",
+           "%" PRIu32 "\nSpeed: %" PRIu32 " pps",
            SERVO_DRIVER_VERSION, initialized_ ? "Yes" : "No",
            enabled_ ? "Yes" : "No", current_position_, current_speed_pps_);
   return String(buffer);
@@ -1071,7 +1188,7 @@ String ServoDriver::getDriverInfo() const {
   snprintf(buffer, sizeof(buffer),
            "Bergerda Servo Driver v%s\n"
            "Pulse Pin: %d | Dir Pin: %d | Enable Pin: %d | Alarm Pin: %d\n"
-           "Max Freq: %u Hz | Encoder PPR: %u",
+           "Max Freq: %" PRIu32 " Hz | Encoder PPR: %" PRIu32,
            SERVO_DRIVER_VERSION, config_.output_pin_nos[6],
            config_.output_pin_nos[7], config_.output_pin_nos[0],
            config_.input_pin_nos[2], config_.max_pulse_freq,
@@ -1088,13 +1205,21 @@ bool ServoDriver::writeOutputPin(size_t index, bool state) {
       config_.output_pin_nos[index] < 0) {
     return false;
   }
-  bool physical_state = config_.invert_output_logic ? !state : state;
+  // DIR pin (index 7) is NOT inverted - it's a logic signal, not a driver enable
+  bool physical_state = (index == 7) ? state : (config_.invert_output_logic ? !state : state);
+  if (index == 7) {  // DIR pin debug
+    Serial.printf("[%lu] writeOutputPin[7/DIR]: logical=%d, NO INVERT, physical=%d, pin=%d\n", 
+                  millis(), state, physical_state, config_.output_pin_nos[index]);
+  }
   digitalWrite(config_.output_pin_nos[index], physical_state ? HIGH : LOW);
   return true;
 }
 
 bool ServoDriver::setDirectionPin(bool state) {
-  return writeOutputPin(7, state);
+  Serial.printf("[%lu] setDirectionPin: logical state=%d\n", millis(), state);
+  bool result = writeOutputPin(7, state);
+  Serial.printf("[%lu] setDirectionPin: returned %d\n", millis(), result);
+  return result;
 }
 
 bool ServoDriver::setEnablePin(bool state) {
