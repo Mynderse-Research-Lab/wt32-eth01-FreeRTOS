@@ -189,6 +189,10 @@ void Gantry::update() {
         return;
     }
     
+    // CRITICAL: Update limit switch debouncing every loop
+    // This prevents false triggers from mechanical switch bounce
+    axisX_.updateLimitDebounce();
+    
     // Update X-axis position from encoder
     // Y and Theta are simulated, so no update needed for now
     // TODO: Implement trajectory following for Y/Theta axes
