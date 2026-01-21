@@ -1,5 +1,6 @@
 set(SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../src")
-set(LIB_DIR "${CMAKE_CURRENT_LIST_DIR}/../../lib/SDF08NK8X/src")
+set(SDF08NK8X_DIR "${CMAKE_CURRENT_LIST_DIR}/../../lib/SDF08NK8X/src")
+set(GANTRY_DIR "${CMAKE_CURRENT_LIST_DIR}/../../lib/Gantry/src")
 
 idf_component_register(
   SRCS
@@ -8,10 +9,12 @@ idf_component_register(
   INCLUDE_DIRS
     "."
     "${SRC_DIR}"
-    "${LIB_DIR}"
+    "${SDF08NK8X_DIR}"
+    "${GANTRY_DIR}"
   REQUIRES
     espressif__arduino-esp32
     SDF08NK8X
+    Gantry
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
