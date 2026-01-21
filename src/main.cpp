@@ -3,6 +3,10 @@
 #include <ETH.h>
 #include <Ticker.h>
 #include <driver/pcnt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include <freertos/timers.h>
 
 using Gantry::Gantry;
 
@@ -21,6 +25,26 @@ static const char *TAG_SYS = "System";
 static const char *TAG_ETH = "Ethernet";
 static const char *TAG_MQTT = "MQTT";
 static const char *TAG_GANTRY = "Gantry";
+
+// ---------- FreeRTOS Task Configuration ----------
+#define GANTRY_TASK_STACK_SIZE     4096
+#define GANTRY_TASK_PRIORITY       5
+#define GANTRY_TASK_CORE           1
+
+#define MQTT_TASK_STACK_SIZE       4096
+#define MQTT_TASK_PRIORITY         1
+#define MQTT_TASK_CORE             0
+
+#define BLINK_TASK_STACK_SIZE      1024
+#define BLINK_TASK_PRIORITY        1
+#define BLINK_TASK_CORE            0
+
+#define GANTRY_UPDATE_TASK_STACK_SIZE 2048
+#define GANTRY_UPDATE_TASK_PRIORITY  3
+#define GANTRY_UPDATE_TASK_CORE      1
+
+#define COMMAND_QUEUE_SIZE         10
+#define GANTRY_UPDATE_INTERVAL_MS   10
 
 // ---------- Pin Definitions (WT32-ETH01 Safe) ----------
 #define PIN_SERVO_PULSE 2   // Output
@@ -49,7 +73,13 @@ struct GantryCommand {
   bool calibrate;
 };
 
+// ---------- FreeRTOS Handles ----------
 QueueHandle_t commandQueue = nullptr;
+TaskHandle_t gantryTaskHandle = nullptr;
+TaskHandle_t mqttTaskHandle = nullptr;
+TaskHandle_t blinkTaskHandle = nullptr;
+TaskHandle_t gantryUpdateTaskHandle = nullptr;
+TimerHandle_t mqttReconnectTimer = nullptr;
 
 // ---------- Network Config ----------
 IPAddress local_IP(192, 168, 2, 2);
@@ -58,8 +88,8 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(8, 8, 8, 8);
 
 AsyncMqttClient mqttClient;
-bool netUp = false;
-Ticker mqttReconnectTimer;
+volatile bool netUp = false;
+Ticker mqttReconnectTicker;  // Keep Ticker for compatibility with AsyncMqttClient
 
 // ---------- Objects ----------
 BergerdaServo::DriverConfig xConfig;
@@ -74,8 +104,10 @@ void onMqttConnect(bool sessionPresent) {
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   LOG_WARN(TAG_MQTT, "Disconnected (Reason: %d)", (int)reason);
-  if (netUp)
-    mqttReconnectTimer.once(2, []() { mqttClient.connect(); });
+  if (netUp) {
+    // Use Ticker for compatibility with AsyncMqttClient
+    mqttReconnectTicker.once(2, []() { mqttClient.connect(); });
+  }
 }
 
 void onMqttMessage(char *topic, char *payload,
@@ -142,24 +174,46 @@ void EthEvent(WiFiEvent_t event) {
   case ARDUINO_EVENT_ETH_DISCONNECTED:
     LOG_WARN(TAG_ETH, "Link Down");
     netUp = false;
-    mqttReconnectTimer.detach();
+    mqttReconnectTicker.detach();
     break;
   default:
     break;
   }
 }
 
-// ---------- FreeRTOS Tasks ----------
+// ============================================================================
+// FreeRTOS Tasks
+// ============================================================================
 
+/**
+ * @brief Blink LED task - Heartbeat indicator
+ * @param param Task parameter (unused)
+ */
 void blinkTask(void *param) {
+  (void)param;  // Unused parameter
+  
   pinMode(15, OUTPUT);
+  const TickType_t delayTicks = pdMS_TO_TICKS(500);
+  
   while (1) {
     digitalWrite(15, !digitalRead(15));
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(delayTicks);
   }
+  
+  // Should never reach here
+  vTaskDelete(NULL);
 }
 
+/**
+ * @brief Gantry command processing task
+ * @param param Task parameter (unused)
+ * 
+ * Processes commands from MQTT queue and executes gantry operations.
+ * Runs on Core 1 with high priority for real-time motion control.
+ */
 void gantryTask(void *param) {
+  (void)param;  // Unused parameter
+  
   LOG_INFO(TAG_GANTRY, "Task Started");
 
   // 1. Configure X Axis Pins
@@ -170,98 +224,182 @@ void gantryTask(void *param) {
   xConfig.input_pin_nos[4] = PIN_ENC_B;
   xConfig.enable_encoder_feedback = true;
   xConfig.pcnt_unit = PCNT_UNIT_0;
+  
+  // Configure limit switch pins in driver config
+  xConfig.limit_min_pin = PIN_LIMIT_MIN;
+  xConfig.limit_max_pin = PIN_LIMIT_MAX;
 
   // 2. Initialize Gantry
   static Gantry::Gantry gantry(xConfig, PIN_GRIPPER);
-  gantry.setLimitPins(PIN_LIMIT_MIN, PIN_LIMIT_MAX); // Limit Pins
+  gantry.setLimitPins(PIN_LIMIT_MIN, PIN_LIMIT_MAX);
   gantrySystem = &gantry;
 
   if (!gantry.begin()) {
     LOG_ERROR(TAG_GANTRY, "Init Failed!");
     vTaskDelete(NULL);
+    return;
   }
   LOG_INFO(TAG_GANTRY, "Initialized");
 
   gantry.enable();
 
   GantryCommand cmd;
+  const TickType_t busyCheckDelay = pdMS_TO_TICKS(GANTRY_UPDATE_INTERVAL_MS);
+  const TickType_t gripDelay = pdMS_TO_TICKS(500);
 
-  // 3. Command Loop
+  // 3. Command Processing Loop
   while (1) {
-    // Block until command available
+    // Block until command available (infinite timeout)
     if (xQueueReceive(commandQueue, &cmd, portMAX_DELAY) == pdTRUE) {
 
       if (cmd.home) {
         LOG_INFO(TAG_GANTRY, "Executing Homing...");
         gantry.home();
+        
+        // Wait for homing to complete
+        while (gantry.isBusy()) {
+          vTaskDelay(busyCheckDelay);
+        }
+        LOG_INFO(TAG_GANTRY, "Homing Complete");
+        
       } else if (cmd.calibrate) {
         LOG_INFO(TAG_GANTRY, "Executing Calibration...");
         int len = gantry.calibrate();
-        LOG_INFO(TAG_GANTRY, "Calibrated Length: %d", len);
+        if (len > 0) {
+          LOG_INFO(TAG_GANTRY, "Calibrated Length: %d mm", len);
+        } else {
+          LOG_ERROR(TAG_GANTRY, "Calibration Failed");
+        }
+        
       } else {
         // Normal Move
-        LOG_INFO(TAG_GANTRY, "Moving: X=%d Y=%d T=%d", cmd.x, cmd.y, cmd.theta);
-        gantry.moveTo(cmd.x, cmd.y, cmd.theta, cmd.speed);
+        LOG_INFO(TAG_GANTRY, "Moving: X=%d Y=%d T=%d Speed=%u", 
+                 cmd.x, cmd.y, cmd.theta, cmd.speed);
+        
+        // Check for alarm before movement
+        if (gantry.isAlarmActive()) {
+          LOG_ERROR(TAG_GANTRY, "Alarm active - movement blocked");
+        } else {
+          gantry.moveTo(cmd.x, cmd.y, cmd.theta, cmd.speed);
 
-        while (gantry.isBusy()) {
-          gantry.update();
-          vTaskDelay(pdMS_TO_TICKS(10));
-        }
+          // Wait for motion to complete
+          while (gantry.isBusy()) {
+            vTaskDelay(busyCheckDelay);
+          }
 
-        // Simple Pick Sequence check (could normally require separate command)
-        // For now, assume positioning implies pick/place logic is handled
-        // elsewhere or via next command But strict requirement was "belt speed
-        // ... fed over MQTT" -> likely one-shot. Let's keep the simple grip
-        // sequence if it's a move command.
-        if (cmd.speed > 0) { // Naive check
-          LOG_INFO(TAG_GANTRY, "Gripping...");
-          gantry.grip(true);
-          vTaskDelay(pdMS_TO_TICKS(500));
-          gantry.grip(false);
+          // Simple Pick Sequence (gripper open/close)
+          // Only if speed > 0 (indicates active movement command)
+          if (cmd.speed > 0) {
+            LOG_INFO(TAG_GANTRY, "Gripping...");
+            gantry.grip(true);
+            vTaskDelay(gripDelay);
+            gantry.grip(false);
+          }
         }
       }
       LOG_INFO(TAG_GANTRY, "Cmd Done");
     }
   }
+  
+  // Should never reach here
+  vTaskDelete(NULL);
 }
 
+/**
+ * @brief Gantry update task - Calls gantry.update() periodically
+ * @param param Task parameter (unused)
+ * 
+ * Runs continuously to update gantry state (limit debouncing, etc.)
+ * Runs on Core 1 with medium priority.
+ */
+void gantryUpdateTask(void *param) {
+  (void)param;  // Unused parameter
+  
+  const TickType_t updateInterval = pdMS_TO_TICKS(GANTRY_UPDATE_INTERVAL_MS);
+  
+  // Wait for gantry system to be initialized
+  while (gantrySystem == nullptr) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  
+  LOG_INFO(TAG_GANTRY, "Update Task Started");
+  
+  while (1) {
+    if (gantrySystem != nullptr) {
+      gantrySystem->update();
+    }
+    vTaskDelay(updateInterval);
+  }
+  
+  // Should never reach here
+  vTaskDelete(NULL);
+}
+
+/**
+ * @brief MQTT loop task - Publishes status periodically
+ * @param param Task parameter (unused)
+ * 
+ * Publishes heartbeat and gantry status to MQTT broker.
+ * Runs on Core 0 with low priority.
+ */
 void mqttLoopTask(void *param) {
+  (void)param;  // Unused parameter
+  
+  const TickType_t publishInterval = pdMS_TO_TICKS(5000);
+  static uint32_t count = 0;
+  
   while (1) {
     if (netUp && mqttClient.connected()) {
-      static uint32_t count = 0;
-      // Heartbeat
+      // Heartbeat message
       char msg[64];
       snprintf(msg, sizeof(msg), "Count: %u", count++);
       mqttClient.publish(MQTT_PUB_TOPIC, 0, false, msg);
 
-      if (gantrySystem) {
+      // Gantry status message
+      if (gantrySystem != nullptr) {
         char sMsg[128];
-        snprintf(sMsg, sizeof(sMsg), "X:%d Y:%d Th:%d",
-                 gantrySystem->getXEncoder(), gantrySystem->getCurrentY(),
-                 gantrySystem->getCurrentTheta());
+        snprintf(sMsg, sizeof(sMsg), "X:%d Y:%d Th:%d Busy:%d Alarm:%d",
+                 gantrySystem->getXEncoder(), 
+                 gantrySystem->getCurrentY(),
+                 gantrySystem->getCurrentTheta(),
+                 gantrySystem->isBusy() ? 1 : 0,
+                 gantrySystem->isAlarmActive() ? 1 : 0);
         mqttClient.publish("lab/gantry", 0, false, sMsg);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    vTaskDelay(publishInterval);
   }
+  
+  // Should never reach here
+  vTaskDelete(NULL);
 }
 
-// ---------- Setup / Loop ----------
+// ============================================================================
+// Setup / Loop
+// ============================================================================
 
+/**
+ * @brief Arduino setup function - Initializes system and creates FreeRTOS tasks
+ */
 void setup() {
   Serial.begin(115200);
+  delay(1000);  // Allow serial to stabilize
   LOG_INFO(TAG_SYS, "Booting...");
 
-  // 1. Create Queue
-  commandQueue = xQueueCreate(10, sizeof(GantryCommand));
+  // 1. Create Command Queue
+  commandQueue = xQueueCreate(COMMAND_QUEUE_SIZE, sizeof(GantryCommand));
   if (commandQueue == NULL) {
     LOG_ERROR(TAG_SYS, "Queue Create Failed!");
+    // Continue anyway - queue creation failure is logged
+  } else {
+    LOG_INFO(TAG_SYS, "Command queue created (size: %d)", COMMAND_QUEUE_SIZE);
   }
 
   // 2. Start Ethernet
   WiFi.onEvent(EthEvent);
   ETH.begin(1, 16, 23, 18, ETH_PHY_LAN8720, ETH_CLOCK_GPIO17_OUT);
   ETH.config(local_IP, gateway, subnet, dns);
+  LOG_INFO(TAG_SYS, "Ethernet initialized");
 
   // 3. Setup MQTT
   mqttClient.onConnect(onMqttConnect);
@@ -269,13 +407,78 @@ void setup() {
   mqttClient.onMessage(onMqttMessage);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setClientId(MQTT_CLIENT_ID);
+  LOG_INFO(TAG_SYS, "MQTT client configured");
 
-  // 4. Create Tasks
-  xTaskCreatePinnedToCore(gantryTask, "Gantry", 4096, NULL, 5, NULL, 1);
-  xTaskCreatePinnedToCore(mqttLoopTask, "MqttLoop", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(blinkTask, "Blink", 1024, NULL, 1, NULL, 0);
+  // 4. Create FreeRTOS Tasks
+  // Gantry task - High priority, Core 1 (real-time motion control)
+  BaseType_t result = xTaskCreatePinnedToCore(
+    gantryTask,
+    "Gantry",
+    GANTRY_TASK_STACK_SIZE,
+    NULL,
+    GANTRY_TASK_PRIORITY,
+    &gantryTaskHandle,
+    GANTRY_TASK_CORE
+  );
+  if (result != pdPASS) {
+    LOG_ERROR(TAG_SYS, "Failed to create Gantry task!");
+  }
 
-  LOG_INFO(TAG_SYS, "Tasks created.");
+  // Gantry update task - Medium priority, Core 1 (periodic updates)
+  result = xTaskCreatePinnedToCore(
+    gantryUpdateTask,
+    "GantryUpdate",
+    GANTRY_UPDATE_TASK_STACK_SIZE,
+    NULL,
+    GANTRY_UPDATE_TASK_PRIORITY,
+    &gantryUpdateTaskHandle,
+    GANTRY_UPDATE_TASK_CORE
+  );
+  if (result != pdPASS) {
+    LOG_ERROR(TAG_SYS, "Failed to create Gantry Update task!");
+  }
+
+  // MQTT loop task - Low priority, Core 0 (network I/O)
+  result = xTaskCreatePinnedToCore(
+    mqttLoopTask,
+    "MqttLoop",
+    MQTT_TASK_STACK_SIZE,
+    NULL,
+    MQTT_TASK_PRIORITY,
+    &mqttTaskHandle,
+    MQTT_TASK_CORE
+  );
+  if (result != pdPASS) {
+    LOG_ERROR(TAG_SYS, "Failed to create MQTT task!");
+  }
+
+  // Blink task - Low priority, Core 0 (heartbeat LED)
+  result = xTaskCreatePinnedToCore(
+    blinkTask,
+    "Blink",
+    BLINK_TASK_STACK_SIZE,
+    NULL,
+    BLINK_TASK_PRIORITY,
+    &blinkTaskHandle,
+    BLINK_TASK_CORE
+  );
+  if (result != pdPASS) {
+    LOG_ERROR(TAG_SYS, "Failed to create Blink task!");
+  }
+
+  LOG_INFO(TAG_SYS, "All tasks created successfully");
+  LOG_INFO(TAG_SYS, "System ready");
 }
 
-void loop() { vTaskDelete(NULL); }
+/**
+ * @brief Arduino loop function
+ * 
+ * In FreeRTOS-based applications, loop() is typically empty or minimal.
+ * All work is done in FreeRTOS tasks.
+ */
+void loop() {
+  // FreeRTOS tasks handle all functionality
+  // This function should not block or perform heavy work
+  // Delete this task to free up resources
+  vTaskDelete(NULL);
+}
