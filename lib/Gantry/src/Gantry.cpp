@@ -17,7 +17,8 @@ Gantry::Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)
     : axisX_(xConfig), gripperPin_(gripperPin), xMinPin_(-1), xMaxPin_(-1),
       initialized_(false), enabled_(false), gripperActive_(false),
       currentY_(0), currentTheta_(0), targetY_(0), targetTheta_(0),
-      axisLength_(0), config_(), kinematicParams_() {
+      axisLength_(0), config_(), kinematicParams_(),
+      stepsPerRev_(6000.0f) {  // Default: 6000 steps/rev (common servo)
 }
 
 // ============================================================================
@@ -474,22 +475,36 @@ EndEffectorPose Gantry::getTargetEndEffectorPose() const {
 // HELPER METHODS
 // ============================================================================
 
-float Gantry::pulsesToMm(int32_t pulses) const {
-    // Convert encoder pulses to mm
-    // For a ball screw: mm = pulses * (pitch_mm / encoder_ppr)
-    // Using default kinematic parameter for ball screw pitch (40mm)
-    // Note: encoder_ppr should come from axisX_ config, but using default for now
-    // This will need to be updated when encoder configuration is available
-    const float defaultEncoderPPR = 2500.0f; // Default encoder PPR
+void Gantry::setStepsPerRevolution(float steps_per_rev) {
+    if (steps_per_rev > 0) {
+        stepsPerRev_ = steps_per_rev;
+    }
+}
+
+float Gantry::getPulsesPerMm() const {
+    // Calculate pulses per mm based on motor steps and ball screw pitch
+    // Formula: pulses_per_mm = steps_per_rev / pitch_mm
+    // Example: 6000 steps/rev / 40mm = 150 pulses/mm
     const float pitch = kinematicParams_.x_axis_ball_screw_pitch_mm;
-    return (float)pulses * (pitch / defaultEncoderPPR);
+    if (pitch <= 0) return 150.0f;  // Default fallback
+    return stepsPerRev_ / pitch;
+}
+
+float Gantry::pulsesToMm(int32_t pulses) const {
+    // Convert motor pulses to mm
+    // Formula: mm = pulses / pulses_per_mm
+    // For ball screw: mm = pulses * (pitch_mm / steps_per_rev)
+    // Example: 150 pulses * (40mm / 6000) = 1mm
+    float pulsesPerMm = getPulsesPerMm();
+    if (pulsesPerMm <= 0) return 0.0f;
+    return (float)pulses / pulsesPerMm;
 }
 
 int32_t Gantry::mmToPulses(float mm) const {
-    // Convert mm to encoder pulses
-    const float defaultEncoderPPR = 2500.0f; // Default encoder PPR
-    const float pitch = kinematicParams_.x_axis_ball_screw_pitch_mm;
-    return (int32_t)(mm * (defaultEncoderPPR / pitch));
+    // Convert mm to motor pulses
+    // Formula: pulses = mm * pulses_per_mm
+    // Example: 1mm * 150 = 150 pulses
+    return (int32_t)(mm * getPulsesPerMm());
 }
 
 } // namespace Gantry
