@@ -132,9 +132,33 @@ GantryError Gantry::moveTo(const JointConfig& joint,
         return GantryError::ALREADY_MOVING;
     }
     
+    // Check for alarm condition
+    if (axisX_.isAlarmActive()) {
+        return GantryError::TIMEOUT; // Or could add GantryError::ALARM
+    }
+    
     // Validate joint limits
     if (!Kinematics::validate(joint, config_.limits)) {
         return GantryError::INVALID_POSITION;
+    }
+    
+    // Update limit debouncing before movement check
+    axisX_.updateLimitDebounce(true);
+    
+    // Get current X position and calculate delta
+    int32_t currentX_pulses = axisX_.getPosition();
+    int32_t targetX_pulses = mmToPulses(joint.x);
+    int32_t deltaX = targetX_pulses - currentX_pulses;
+    
+    // Check limit switches before allowing movement
+    // Driver will also check, but explicit check provides better error reporting
+    if (deltaX > 0 && axisX_.getLimitMaxDebounced()) {
+        // Trying to move forward but MAX limit is active
+        return GantryError::LIMIT_SWITCH_FAILED;
+    }
+    if (deltaX < 0 && axisX_.getLimitMinDebounced()) {
+        // Trying to move backward but MIN limit is active
+        return GantryError::LIMIT_SWITCH_FAILED;
     }
     
     // Store target positions
@@ -144,8 +168,24 @@ GantryError Gantry::moveTo(const JointConfig& joint,
     // Convert speed: mm/s to pulses/s for X-axis
     uint32_t speed_pps = (uint32_t)(speed_mm_per_s * 100.0f); // Approximate conversion
     
-    // Call existing moveTo method
-    moveTo((int32_t)joint.x, (int32_t)joint.y, (int32_t)joint.theta, speed_pps);
+    // Convert acceleration/deceleration if provided
+    uint32_t accel_pps = 0;
+    uint32_t decel_pps = 0;
+    if (acceleration_mm_per_s2 > 0) {
+        accel_pps = (uint32_t)(acceleration_mm_per_s2 * 100.0f);
+    }
+    if (deceleration_mm_per_s2 > 0) {
+        decel_pps = (uint32_t)(deceleration_mm_per_s2 * 100.0f);
+    }
+    
+    // Use default if not specified
+    if (accel_pps == 0) accel_pps = speed_pps / 2;
+    if (decel_pps == 0) decel_pps = speed_pps / 2;
+    
+    // Move X-axis using driver (will also check limits internally)
+    if (!axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)) {
+        return GantryError::INVALID_PARAMETER;
+    }
     
     return GantryError::OK;
 }
