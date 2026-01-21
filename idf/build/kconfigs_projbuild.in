@@ -1,7 +1,0 @@
-source "C:/Users/ziaah/esp-idf/components/bootloader/Kconfig.projbuild"
-source "C:/Users/ziaah/esp-idf/components/esp_app_format/Kconfig.projbuild"
-source "C:/Users/ziaah/esp-idf/components/esp_rom/Kconfig.projbuild"
-source "C:/Users/ziaah/esp-idf/components/esptool_py/Kconfig.projbuild"
-source "C:/Users/ziaah/esp-idf/components/partition_table/Kconfig.projbuild"
-source "D:/Projects/wt32-eth01-base/idf/managed_components/espressif__arduino-esp32/Kconfig.projbuild"
-source "D:/Projects/wt32-eth01-base/idf/managed_components/espressif__esp_rainmaker/Kconfig.projbuild"
