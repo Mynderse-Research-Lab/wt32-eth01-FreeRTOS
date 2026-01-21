@@ -1,0 +1,2 @@
+- updated .gitignore to ignore WT32-velometer.code-workspace and .vscode folder. Also reflected the change across the repository's history by running `git rm --cached <file/folder>` for the folder and workspace file.
+- 
