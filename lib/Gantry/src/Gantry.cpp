@@ -185,16 +185,18 @@ GantryError Gantry::moveTo(const JointConfig& joint,
     targetTheta_ = (int32_t)joint.theta;
     
     // Convert speed: mm/s to pulses/s for X-axis
-    uint32_t speed_pps = (uint32_t)(speed_mm_per_s * 100.0f); // Approximate conversion
+    // Formula: speed_pps = speed_mm_per_s * pulses_per_mm
+    float pulsesPerMm = getPulsesPerMm();
+    uint32_t speed_pps = (uint32_t)(speed_mm_per_s * pulsesPerMm);
     
-    // Convert acceleration/deceleration if provided
+    // Convert acceleration/deceleration if provided (same conversion)
     uint32_t accel_pps = 0;
     uint32_t decel_pps = 0;
     if (acceleration_mm_per_s2 > 0) {
-        accel_pps = (uint32_t)(acceleration_mm_per_s2 * 100.0f);
+        accel_pps = (uint32_t)(acceleration_mm_per_s2 * pulsesPerMm);
     }
     if (deceleration_mm_per_s2 > 0) {
-        decel_pps = (uint32_t)(deceleration_mm_per_s2 * 100.0f);
+        decel_pps = (uint32_t)(deceleration_mm_per_s2 * pulsesPerMm);
     }
     
     // Use default if not specified
