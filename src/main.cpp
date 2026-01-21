@@ -1,5 +1,4 @@
 #include "Gantry.h"
-#include <AsyncMqttClient.h>
 #include <ETH.h>
 #include <Ticker.h>
 #include <driver/pcnt.h>
@@ -8,6 +7,9 @@
 #include <freertos/queue.h>
 #include <freertos/timers.h>
 #include <cmath>  // For fabs()
+
+// ESP-IDF MQTT Client
+#include "mqtt_client.h"
 
 using Gantry::Gantry;
 
@@ -98,37 +100,23 @@ IPAddress gateway(192, 168, 2, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(8, 8, 8, 8);
 
-AsyncMqttClient mqttClient;
+// ESP-IDF MQTT client handle
+esp_mqtt_client_handle_t mqttClient = nullptr;
 volatile bool netUp = false;
-Ticker mqttReconnectTicker;  // Keep Ticker for compatibility with AsyncMqttClient
+volatile bool mqttConnected = false;
+Ticker mqttReconnectTicker;
 
 // ---------- Objects ----------
 BergerdaServo::DriverConfig xConfig;
 Gantry::Gantry *gantrySystem = nullptr;
 
-// ---------- MQTT Functions ----------
-void onMqttConnect(bool sessionPresent) {
-  LOG_INFO(TAG_MQTT, "Connected. Session: %d", sessionPresent);
-  mqttClient.subscribe(MQTT_SUB_TOPIC, 1);
-  mqttClient.publish(MQTT_PUB_TOPIC, 1, true, "online");
-}
-
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  LOG_WARN(TAG_MQTT, "Disconnected (Reason: %d)", (int)reason);
-  if (netUp) {
-    // Use Ticker for compatibility with AsyncMqttClient
-    mqttReconnectTicker.once(2, []() { mqttClient.connect(); });
-  }
-}
-
-void onMqttMessage(char *topic, char *payload,
-                   AsyncMqttClientMessageProperties properties, size_t len,
-                   size_t index, size_t total) {
+// ---------- MQTT Message Handler ----------
+static void handleMqttMessage(const char *data, int data_len) {
   // Basic Parsing: Expecting JSON-like string
   // "x:1000,y:200,t:90,s:5000,h:1,c:1"
   char buf[128];
-  size_t copyLen = (len < sizeof(buf) - 1) ? len : (sizeof(buf) - 1);
-  memcpy(buf, payload, copyLen);
+  size_t copyLen = (data_len < (int)sizeof(buf) - 1) ? data_len : (sizeof(buf) - 1);
+  memcpy(buf, data, copyLen);
   buf[copyLen] = '\0';
 
   LOG_INFO(TAG_MQTT, "Msg Received: %s", buf);
@@ -199,6 +187,78 @@ void onMqttMessage(char *topic, char *payload,
   }
 }
 
+// ---------- ESP-IDF MQTT Event Handler ----------
+static void mqttEventHandler(void *handler_args, esp_event_base_t base, 
+                              int32_t event_id, void *event_data) {
+  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+  
+  switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_CONNECTED:
+      LOG_INFO(TAG_MQTT, "Connected to broker");
+      mqttConnected = true;
+      // Subscribe to command topic
+      esp_mqtt_client_subscribe(mqttClient, MQTT_SUB_TOPIC, 1);
+      // Publish online status
+      esp_mqtt_client_publish(mqttClient, MQTT_PUB_TOPIC, "online", 0, 1, 1);
+      break;
+      
+    case MQTT_EVENT_DISCONNECTED:
+      LOG_WARN(TAG_MQTT, "Disconnected from broker");
+      mqttConnected = false;
+      // Reconnect will be handled automatically by esp_mqtt_client
+      break;
+      
+    case MQTT_EVENT_SUBSCRIBED:
+      LOG_INFO(TAG_MQTT, "Subscribed to %s", MQTT_SUB_TOPIC);
+      break;
+      
+    case MQTT_EVENT_DATA:
+      // Handle incoming message
+      if (event->data_len > 0) {
+        handleMqttMessage(event->data, event->data_len);
+      }
+      break;
+      
+    case MQTT_EVENT_ERROR:
+      LOG_ERROR(TAG_MQTT, "MQTT error occurred");
+      if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        LOG_ERROR(TAG_MQTT, "TCP transport error");
+      }
+      break;
+      
+    default:
+      break;
+  }
+}
+
+// ---------- MQTT Client Initialization ----------
+static void initMqttClient() {
+  char uri[64];
+  snprintf(uri, sizeof(uri), "mqtt://%s:%d", MQTT_HOST, MQTT_PORT);
+  
+  esp_mqtt_client_config_t mqtt_cfg = {};
+  mqtt_cfg.broker.address.uri = uri;
+  mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
+  mqtt_cfg.network.reconnect_timeout_ms = 2000;
+  mqtt_cfg.session.keepalive = 60;
+  
+  mqttClient = esp_mqtt_client_init(&mqtt_cfg);
+  if (mqttClient == nullptr) {
+    LOG_ERROR(TAG_MQTT, "Failed to create MQTT client");
+    return;
+  }
+  
+  esp_mqtt_client_register_event(mqttClient, MQTT_EVENT_ANY, mqttEventHandler, nullptr);
+  LOG_INFO(TAG_MQTT, "MQTT client initialized");
+}
+
+static void startMqttClient() {
+  if (mqttClient != nullptr) {
+    esp_mqtt_client_start(mqttClient);
+    LOG_INFO(TAG_MQTT, "MQTT client started");
+  }
+}
+
 void EthEvent(WiFiEvent_t event) {
   switch (event) {
   case ARDUINO_EVENT_ETH_START:
@@ -210,12 +270,13 @@ void EthEvent(WiFiEvent_t event) {
   case ARDUINO_EVENT_ETH_GOT_IP:
     LOG_INFO(TAG_ETH, "IP: %s", ETH.localIP().toString().c_str());
     netUp = true;
-    mqttClient.connect();
+    // Start MQTT client when network is ready
+    startMqttClient();
     break;
   case ARDUINO_EVENT_ETH_DISCONNECTED:
     LOG_WARN(TAG_ETH, "Link Down");
     netUp = false;
-    mqttReconnectTicker.detach();
+    mqttConnected = false;
     break;
   default:
     break;
@@ -474,11 +535,11 @@ void mqttLoopTask(void *param) {
   static uint32_t count = 0;
   
   while (1) {
-    if (netUp && mqttClient.connected()) {
+    if (netUp && mqttConnected && mqttClient != nullptr) {
       // Heartbeat message
       char msg[64];
-      snprintf(msg, sizeof(msg), "Count: %u", count++);
-      mqttClient.publish(MQTT_PUB_TOPIC, 0, false, msg);
+      snprintf(msg, sizeof(msg), "Count: %lu", (unsigned long)count++);
+      esp_mqtt_client_publish(mqttClient, MQTT_PUB_TOPIC, msg, 0, 0, 0);
 
       // Gantry status message
       if (gantrySystem != nullptr) {
@@ -489,7 +550,7 @@ void mqttLoopTask(void *param) {
                  gantrySystem->getCurrentTheta(),
                  gantrySystem->isBusy() ? 1 : 0,
                  gantrySystem->isAlarmActive() ? 1 : 0);
-        mqttClient.publish("lab/gantry", 0, false, sMsg);
+        esp_mqtt_client_publish(mqttClient, "lab/gantry", sMsg, 0, 0, 0);
       }
     }
     vTaskDelay(publishInterval);
@@ -526,12 +587,8 @@ void setup() {
   ETH.config(local_IP, gateway, subnet, dns);
   LOG_INFO(TAG_SYS, "Ethernet initialized");
 
-  // 3. Setup MQTT
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onMessage(onMqttMessage);
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  mqttClient.setClientId(MQTT_CLIENT_ID);
+  // 3. Setup MQTT (ESP-IDF native client)
+  initMqttClient();
   LOG_INFO(TAG_SYS, "MQTT client configured");
 
   // 4. Create FreeRTOS Tasks
