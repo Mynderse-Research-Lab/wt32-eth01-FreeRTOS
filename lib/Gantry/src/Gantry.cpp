@@ -394,6 +394,14 @@ bool Gantry::isAlarmActive() const {
     return axisX_.isAlarmActive();
 }
 
+void Gantry::setHomingSpeed(uint32_t speed_pps) {
+    if (initialized_) {
+        BergerdaServo::DriverConfig& config = 
+            const_cast<BergerdaServo::DriverConfig&>(axisX_.getConfig());
+        config.homing_speed_pps = speed_pps;
+    }
+}
+
 // ============================================================================
 // ENHANCED KINEMATICS API (Phase 1.2)
 // ============================================================================
