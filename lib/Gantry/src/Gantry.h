@@ -227,6 +227,12 @@ public:
      * @return bool true if alarm is active, false otherwise
      */
     bool isAlarmActive() const;
+    
+    /**
+     * @brief Set homing speed for X-axis
+     * @param speed_pps Homing speed in pulses per second
+     */
+    void setHomingSpeed(uint32_t speed_pps);
 
     // ============================================================================
     // ENHANCED KINEMATICS API (Phase 1.2)
