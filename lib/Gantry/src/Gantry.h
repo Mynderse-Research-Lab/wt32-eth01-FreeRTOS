@@ -296,10 +296,16 @@ private:
     // Configuration
     GantryConfig config_;
     KinematicParameters kinematicParams_;
+    float stepsPerRev_;  // Steps per motor revolution (default: 6000)
     
     // Helper methods for unit conversion
     float pulsesToMm(int32_t pulses) const;
     int32_t mmToPulses(float mm) const;
+    
+    // Kinematics configuration
+    void setStepsPerRevolution(float steps_per_rev);
+    float getStepsPerRevolution() const { return stepsPerRev_; }
+    float getPulsesPerMm() const;
 };
 
 // ============================================================================
