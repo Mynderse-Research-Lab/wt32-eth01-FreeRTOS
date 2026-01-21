@@ -1,44 +1,43 @@
 #include <Arduino.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include "SDF08NK8X.h"
+ #include "SDF08NK8X.h"
 
-using namespace BergerdaServo;
+ using namespace BergerdaServo;
 
 // Timestamped serial logging helpers.
 #define LOG_PRINT(value) do { Serial.printf("[%lu] ", millis()); Serial.print(value); } while (0)
 #define LOG_PRINTLN(value) do { Serial.printf("[%lu] ", millis()); Serial.println(value); } while (0)
 #define LOG_PRINTF(...) do { Serial.printf("[%lu] ", millis()); Serial.printf(__VA_ARGS__); } while (0)
-
-// Pin Definitions
-#define PIN_PULSE    2   // Output: Pulse signal
+ 
+ // Pin Definitions
+ #define PIN_PULSE    2   // Output: Pulse signal
 #define PIN_DIR      12   // Output: Direction signal (avoid ETH clock GPIO17)
 #define PIN_ENABLE   15  // Output: Servo enable (SON)
-#define PIN_LIMIT_MIN 14 // Input Pullup: Home limit switch (active LOW)
-#define PIN_LIMIT_MAX 32 // Input Pullup: End limit switch (active LOW)
-
-// Servo Driver
-DriverConfig config;
-ServoDriver* driver = nullptr;
+#define PIN_LIMIT_MIN 33 // Input Pullup: Home limit switch (active LOW)
+#define PIN_LIMIT_MAX 5 // Input Pullup: End limit switch (active LOW)
+#define PIN_ALARM    17 // Input Pullup: Alarm signal (active LOW)
+ 
+ // Servo Driver
+ DriverConfig config;
+ ServoDriver* driver = nullptr;
 bool output_invert = true;
 bool pulse_active = false;
 uint32_t pulse_end_ms = 0;
 uint32_t pulse_freq_hz = 0;
+bool homing_done = false;  // Track if initial homing has been completed
+bool homing_initiated = false;
+bool homing_reported = false;
+unsigned long homing_start_ms = 0;
 String inputLine;
 unsigned long last_rx_ms = 0;
-uint8_t limit_min_sample = 0;
-uint8_t limit_max_sample = 0;
-uint8_t limit_min_stable = 0;
-uint8_t limit_max_stable = 0;
-bool limit_min_state = false;
-bool limit_max_state = false;
-unsigned long last_limit_sample_ms = 0;
-static const uint8_t LIMIT_DEBOUNCE_CYCLES = 10;
+void IRAM_ATTR onLimitIrq() {
+  if (driver) {
+    driver->notifyLimitIrq();
+  }
+}
 static const uint32_t STEPS_PER_REV = 6000;
 // Forward declarations for helpers used before definitions.
-void updateLimitDebounce();
-bool getLimitMinDebounced();
-bool getLimitMaxDebounced();
 bool canMoveSteps(int32_t steps);
 
 uint32_t rpmToPps(double rpm) {
@@ -53,52 +52,6 @@ uint32_t rpmToPps(double rpm) {
 }
 
 
-void updateLimitDebounce() {
-  const unsigned long now = millis();
-  if (now - last_limit_sample_ms < 1) {
-    return;
-  }
-  last_limit_sample_ms = now;
-
-  bool min_now = !digitalRead(PIN_LIMIT_MIN);
-  bool max_now = !digitalRead(PIN_LIMIT_MAX);
-
-  if (min_now == limit_min_sample) {
-    if (limit_min_stable < LIMIT_DEBOUNCE_CYCLES) {
-      limit_min_stable++;
-      if (limit_min_stable == LIMIT_DEBOUNCE_CYCLES) {
-        bool old_state = limit_min_state;
-        limit_min_state = min_now;
-        if (limit_min_state != old_state) {
-          LOG_PRINTF("⚠ LIMIT SWITCH: X_LS_MIN (IO14) %s\n", limit_min_state ? "ACTIVE" : "released");
-        }
-      }
-    }
-  } else {
-    limit_min_sample = min_now;
-    limit_min_stable = 1;
-  }
-
-  if (max_now == limit_max_sample) {
-    if (limit_max_stable < LIMIT_DEBOUNCE_CYCLES) {
-      limit_max_stable++;
-      if (limit_max_stable == LIMIT_DEBOUNCE_CYCLES) {
-        bool old_state = limit_max_state;
-        limit_max_state = max_now;
-        if (limit_max_state != old_state) {
-          LOG_PRINTF("⚠ LIMIT SWITCH: X_LS_MAX (IO32) %s\n", limit_max_state ? "ACTIVE" : "released");
-        }
-      }
-    }
-  } else {
-    limit_max_sample = max_now;
-    limit_max_stable = 1;
-  }
-}
-
-bool getLimitMinDebounced() { return limit_min_state; }
-bool getLimitMaxDebounced() { return limit_max_state; }
-
 void printHelp() {
   LOG_PRINTLN("Commands:");
   LOG_PRINTLN("  help                 - show this help");
@@ -107,9 +60,9 @@ void printHelp() {
   LOG_PRINTLN("  enable               - enable motor");
   LOG_PRINTLN("  disable              - disable motor");
   LOG_PRINTLN("  move <steps> [v a d] - move steps (v/a/d in RPM, 6000 steps/rev)");
-  LOG_PRINTLN("  wait                 - wait for motion to complete");
   LOG_PRINTLN("  stop                 - stop motion");
   LOG_PRINTLN("  slow6000             - 1 turn (6000 steps) sequence (blocking)");
+  LOG_PRINTLN("  travel               - measure distance between MIN/MAX");
   LOG_PRINTLN("  invertout <0|1>       - set output inversion and reinit");
   LOG_PRINTLN("  pulse <freq_hz> <ms>  - LEDC pulse test on PULSE pin");
   LOG_PRINTLN("  pulsestop             - stop pulse test immediately");
@@ -163,6 +116,7 @@ bool initDriver() {
   }
 
   config.invert_output_logic = output_invert;
+  config.invert_dir_pin = true;
   driver = new ServoDriver(config);
   if (!driver->initialize()) {
     return false;
@@ -171,11 +125,15 @@ bool initDriver() {
 }
 
 void printLimits() {
-  updateLimitDebounce();
-  bool limitMin = getLimitMinDebounced();
-  bool limitMax = getLimitMaxDebounced();
-  LOG_PRINTF("  X_LS_MIN (IO14 / Home): %s\n", limitMin ? "ACTIVE (LOW)" : "open (HIGH)");
-  LOG_PRINTF("  X_LS_MAX (IO32 / End):  %s\n", limitMax ? "ACTIVE (LOW)" : "open (HIGH)");
+  if (driver) {
+    driver->updateLimitDebounce(true);
+  }
+  bool limitMin = driver ? driver->getLimitMinDebounced() : false;
+  bool limitMax = driver ? driver->getLimitMaxDebounced() : false;
+  LOG_PRINTF("  X_LS_MIN (IO%d / Home): %s\n", PIN_LIMIT_MIN,
+             limitMin ? "ACTIVE (LOW)" : "open (HIGH)");
+  LOG_PRINTF("  X_LS_MAX (IO%d / End):  %s\n", PIN_LIMIT_MAX,
+             limitMax ? "ACTIVE (LOW)" : "open (HIGH)");
 }
 
 void printStatus() {
@@ -184,9 +142,9 @@ void printStatus() {
     return;
   }
   DriveStatus status = driver->getStatus();
-  updateLimitDebounce();
-  bool limitMin = getLimitMinDebounced();
-  bool limitMax = getLimitMaxDebounced();
+  driver->updateLimitDebounce(true);
+  bool limitMin = driver->getLimitMinDebounced();
+  bool limitMax = driver->getLimitMaxDebounced();
   LOG_PRINTF("  Servo Enabled: %s\n", status.servo_enabled ? "YES" : "NO");
   LOG_PRINTF("  Motion Active: %s\n", driver->isMotionActive() ? "YES" : "NO");
   LOG_PRINTF("  Current Position: %" PRIu32 " steps\n", driver->getPosition());
@@ -201,9 +159,11 @@ bool canMoveSteps(int32_t steps) {
     LOG_PRINTLN("⚠ Move ignored (0 steps)");
     return false;
   }
-  updateLimitDebounce();
-  bool limitMin = getLimitMinDebounced();
-  bool limitMax = getLimitMaxDebounced();
+  if (driver) {
+    driver->updateLimitDebounce(true);
+  }
+  bool limitMin = driver ? driver->getLimitMinDebounced() : false;
+  bool limitMax = driver ? driver->getLimitMaxDebounced() : false;
   if (steps > 0 && limitMax) {
     LOG_PRINTLN("⚠ X_LS_MAX (IO32) is ACTIVE - cannot move forward");
     return false;
@@ -215,12 +175,6 @@ bool canMoveSteps(int32_t steps) {
   return true;
 }
 
-void waitForMotion() {
-  if (!driver) {
-    return;
-  }
-  LOG_PRINTF("Motion Active: %s\n", driver->isMotionActive() ? "YES" : "NO");
-}
 
 void runslow6000() {
   const uint32_t total_steps = 6000;
@@ -233,7 +187,9 @@ void runslow6000() {
   const uint32_t decel = rpmToPps(3.0);
   const uint32_t progress_interval = 600;
 
-  updateLimitDebounce();
+  if (driver) {
+    driver->updateLimitDebounce(true);
+  }
   if (!driver->isEnabled()) {
     if (!driver->enable()) {
       LOG_PRINTLN("ERR enable failed");
@@ -253,8 +209,8 @@ void runslow6000() {
   }
   uint32_t last_report = 0;
   while (driver->isMotionActive()) {
-    updateLimitDebounce();
-    if (getLimitMaxDebounced()) {
+    driver->updateLimitDebounce();
+    if (driver->getLimitMaxDebounced()) {
       driver->stopMotion(500);
       break;
     }
@@ -290,6 +246,39 @@ void processCommand(String cmd) {
     return;
   }
 
+  // Auto-homing on first command if HOME_ON_BOOT is enabled
+  if (config.home_on_boot && !homing_done && !homing_initiated) {
+    LOG_PRINTLN("");
+    LOG_PRINTLN("========================================");
+    LOG_PRINTLN(" AUTO-HOMING SEQUENCE");
+    LOG_PRINTLN("========================================");
+    LOG_PRINTF("Moving to MIN limit switch (IO%d)...\n", PIN_LIMIT_MIN);
+    LOG_PRINTLN("Press Ctrl+C to abort if needed.");
+    LOG_PRINTLN("");
+    
+    // If MIN limit already active, skip homing
+    if (driver->getLimitMinDebounced()) {
+      LOG_PRINTLN("✓ MIN limit already active - homing skipped");
+      homing_done = true;
+      homing_reported = true;
+    } else if (driver->startHoming(config.homing_speed_pps)) {
+      homing_initiated = true;
+      homing_start_ms = millis();
+      LOG_PRINTLN("Homing started... (non-blocking)");
+    } else {
+      LOG_PRINTLN("✗ Homing failed to start");
+      homing_done = true;
+      homing_reported = true;
+    }
+    LOG_PRINTLN("");
+    return;  // don't process the triggering command
+  }
+
+  if (driver && driver->isHoming() && clean != "stop" && clean != "status") {
+    LOG_PRINTLN("⚠ Homing in progress - command ignored");
+    return;
+  }
+
   if (clean == "help" || clean == "?") {
     printHelp();
   } else if (clean == "status") {
@@ -302,13 +291,40 @@ void processCommand(String cmd) {
   } else if (clean == "disable") {
     bool ok = driver->disable();
     LOG_PRINTF("%s Motor disabled\n", ok ? "OK" : "ERR");
-  } else if (clean == "wait") {
-    waitForMotion();
   } else if (clean == "stop") {
     driver->stopMotion(500);
     LOG_PRINTLN("OK Stop requested");
+  } else if (clean == "home") {
+    if (driver->getLimitMinDebounced()) {
+      LOG_PRINTLN("✓ MIN limit already active - homing skipped");
+      homing_done = true;
+      homing_reported = true;
+    } else if (driver->startHoming(config.homing_speed_pps)) {
+      homing_initiated = true;
+      homing_start_ms = millis();
+      LOG_PRINTLN("Homing started... (non-blocking)");
+    } else {
+      LOG_PRINTLN("✗ Homing failed to start");
+      homing_done = true;
+      homing_reported = true;
+    }
+    while (driver->isHoming()) {
+      driver->updateLimitDebounce();
+      delay(10);
+    }
+    if (!driver->isHoming()) {
+        LOG_PRINTLN("OK Homing complete - position set to 0");
+      }
   } else if (clean == "slow6000" || clean == "slow100000" || clean == "slow1000000" || clean == "slow400000") {
     runslow6000();
+  } else if (clean == "travel") {
+    LOG_PRINTLN("Measuring travel between MIN and MAX...");
+    bool ok = driver->measureTravelDistance(12000, 12000, 12000, 90000);
+    if (ok && driver->hasTravelDistance()) {
+      LOG_PRINTF("OK Travel distance: %" PRIu32 " steps\n", driver->getTravelDistance());
+    } else {
+      LOG_PRINTLN("ERR Travel measurement failed");
+    }
   } else if (clean.startsWith("invertout")) {
     int value = 0;
     if (sscanf(clean.c_str(), "invertout %d", &value) == 1) {
@@ -338,6 +354,13 @@ void processCommand(String cmd) {
     if (freq == 0 || ms == 0) {
       LOG_PRINTLN("⚠ freq_hz and ms must be > 0");
       return;
+    }
+    if (driver) {
+      driver->updateLimitDebounce(true);
+      if (driver->getLimitMinDebounced() || driver->getLimitMaxDebounced()) {
+        LOG_PRINTLN("⚠ Limit switch active - pulse blocked");
+        return;
+      }
     }
     LOG_PRINTLN("[DBG] pulse: stopping active pulse if any");
     if (pulse_active) {
@@ -402,57 +425,81 @@ void processCommand(String cmd) {
 
   Serial.flush();
 }
-
-void setup() {
-  Serial.begin(115200);
+ 
+ void setup() {
+   Serial.begin(115200);
   Serial.setTimeout(50);
-  delay(2000);  // Wait for serial monitor
-
+   delay(2000);  // Wait for serial monitor
+   
   LOG_PRINTLN("\n========================================");
   LOG_PRINTLN("Serial Driver Test (Interactive)");
   LOG_PRINTLN("========================================\n");
-
-  // Configure pins
-  config.output_pin_nos[6] = PIN_PULSE;   // PULSE
-  config.output_pin_nos[7] = PIN_DIR;    // DIR
-  config.output_pin_nos[0] = PIN_ENABLE; // ENABLE
+   
+   // Configure pins
+   config.output_pin_nos[6] = PIN_PULSE;   // PULSE
+   config.output_pin_nos[7] = PIN_DIR;    // DIR
+   config.output_pin_nos[0] = PIN_ENABLE; // ENABLE
 
   // Configure limit switch pins
   config.limit_min_pin = PIN_LIMIT_MIN;
   config.limit_max_pin = PIN_LIMIT_MAX;
+  config.homing_speed_pps = 6000;
 
-  // Disable encoder feedback for basic test
-  config.enable_encoder_feedback = false;
-
-  // Configure limit switch pins (INPUT with internal pullup) - driver will also read them
-  pinMode(PIN_LIMIT_MIN, INPUT_PULLUP);
-  pinMode(PIN_LIMIT_MAX, INPUT_PULLUP);
-  limit_min_sample = !digitalRead(PIN_LIMIT_MIN);
-  limit_max_sample = !digitalRead(PIN_LIMIT_MAX);
-  limit_min_state = limit_min_sample;
-  limit_max_state = limit_max_sample;
-  limit_min_stable = 1;
-  limit_max_stable = 1;
-
-  // Set control mode
-  config.pulse_mode = PulseMode::PULSE_DIRECTION;
-  config.control_mode = ControlMode::POSITION;
-
+  // Enable homing on boot
+  config.home_on_boot = (HOME_ON_BOOT != 0);
+   
+   // Disable encoder feedback for basic test
+   config.enable_encoder_feedback = false;
+   
+   
+   // Set control mode
+   config.pulse_mode = PulseMode::PULSE_DIRECTION;
+   config.control_mode = ControlMode::POSITION;
+   
   LOG_PRINTLN("Initializing driver...");
   if (!initDriver()) {
     LOG_PRINTLN("✗ FAIL: Driver initialization failed");
     LOG_PRINTLN("   Check pin connections and try again.");
-    return;
-  }
+     return;
+   }
   LOG_PRINTLN("✓ Driver ready (motor enabled).");
+
+  // Attach limit switch interrupts after driver configures pins
+  attachInterrupt(digitalPinToInterrupt(PIN_LIMIT_MIN), onLimitIrq, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_LIMIT_MAX), onLimitIrq, CHANGE);
+  
+  // Auto-homing on boot if enabled
+  if (config.home_on_boot) {
+    LOG_PRINTLN("");
+    LOG_PRINTLN("⚠ HOME_ON_BOOT enabled - waiting for any serial input to start homing...");
+    LOG_PRINTF("   (Homing will move negative until MIN limit switch IO%d is triggered)\n",
+               PIN_LIMIT_MIN);
+  }
+  
   LOG_PRINTLN("");
   LOG_PRINTLN("Type 'help' and press Enter to see commands.");
   printHelp();
 }
 
 void loop() {
-  updateLimitDebounce();
+  if (driver) {
+    driver->updateLimitDebounce();
+  }
   servicePulseTest();
+  if (homing_initiated && !homing_done) {
+    if (!driver->isHoming()) {
+      homing_done = true;
+      if (!homing_reported) {
+        LOG_PRINTLN("✓ Homing complete - position set to 0");
+        homing_reported = true;
+      }
+    } else if (millis() - homing_start_ms > 30000) {
+      LOG_PRINTLN("✗ Homing timeout - stopping motion");
+      driver->stopMotion(0);
+      homing_done = true;
+      homing_reported = true;
+    }
+  }
   while (Serial.available() > 0) {
     char ch = static_cast<char>(Serial.read());
     last_rx_ms = millis();
@@ -495,4 +542,5 @@ void loop() {
       }
     }
   }
-}
+ }
+ 
