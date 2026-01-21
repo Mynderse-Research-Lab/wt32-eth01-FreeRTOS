@@ -5,3 +5,11 @@
 .vscode/ipch
 
 *.code-workspace
+
+# IDE/tooling
+.cache/
+.clangd
+compile_commands.json
+
+# ESP-IDF build artifacts
+idf/build/
