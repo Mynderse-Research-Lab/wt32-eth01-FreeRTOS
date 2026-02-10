@@ -5,7 +5,9 @@
  * 
  * This class provides a complete gantry control system with:
  * - X-axis: Real hardware servo driver (SDF08NK8X)
- * - Y/Theta axes: Simulated with trapezoidal velocity profiles
+ * - Y-axis: Step/dir stepper axis (cooperative update loop)
+ * - Theta axis: PWM servo (inline rotary)
+ * - End-effector: Digital output control
  * - Workspace coordinate system
  * - Homing and calibration
  * - Integrated with GantryConfig, GantryKinematics, GantryTrajectory modules
@@ -17,6 +19,10 @@
 #include "GantryConfig.h"
 #include "GantryKinematics.h"
 #include "GantryTrajectory.h"
+#include "GantryAxisStepper.h"
+#include "GantryRotaryServo.h"
+#include "GantryEndEffector.h"
+#include "GantryUtils.h"
 #include "SDF08NK8X.h"
 #include <Arduino.h>
 
@@ -102,8 +108,8 @@ struct GantryStatus {
  * 
  * Mechanical Layout:
  * - X-axis: Horizontal axis (SDF08NK8X servo driver, ball-screw)
- * - Y-axis: Vertical axis (simulated)
- * - Theta: Rotary axis (simulated)
+ * - Y-axis: Vertical axis (stepper, step/dir)
+ * - Theta: Rotary axis (PWM servo)
  */
 class Gantry {
 public:
@@ -136,6 +142,55 @@ public:
      * @param xMaxPin Maximum limit pin (end)
      */
     void setLimitPins(int xMinPin, int xMaxPin);
+
+    /**
+     * @brief Configure Y-axis stepper pins
+     */
+    void setYAxisPins(int stepPin, int dirPin, int enablePin = -1,
+                      bool invertDir = false, bool enableActiveLow = true);
+
+    /**
+     * @brief Set Y-axis steps-per-mm conversion
+     */
+    void setYAxisStepsPerMm(float stepsPerMm);
+
+    /**
+     * @brief Set Y-axis travel limits
+     */
+    void setYAxisLimits(float minMm, float maxMm);
+
+    /**
+     * @brief Set Y-axis motion limits
+     */
+    void setYAxisMotionLimits(float maxSpeedMmPerS,
+                              float accelMmPerS2,
+                              float decelMmPerS2);
+
+    /**
+     * @brief Configure theta servo PWM pin and channel
+     */
+    void setThetaServo(int pwmPin, int pwmChannel = 0);
+
+    /**
+     * @brief Set theta angular limits (degrees)
+     */
+    void setThetaLimits(float minDeg, float maxDeg);
+
+    /**
+     * @brief Set theta servo pulse width range (microseconds)
+     */
+    void setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs);
+
+    /**
+     * @brief Configure end-effector pin (overrides constructor pin)
+     */
+    void setEndEffectorPin(int pin, bool activeHigh = true);
+    
+    /**
+     * @brief Set safe Y height for X-axis travel (default: 150mm)
+     * @param safeHeight_mm Safe height in mm
+     */
+    void setSafeYHeight(float safeHeight_mm);
     
     /**
      * @brief Home the X-axis
@@ -278,6 +333,9 @@ public:
 
 private:
     BergerdaServo::ServoDriver axisX_;
+    GantryAxisStepper axisY_;
+    GantryRotaryServo axisTheta_;
+    GantryEndEffector endEffector_;
     int gripperPin_;
     int xMinPin_;
     int xMaxPin_;
@@ -298,9 +356,43 @@ private:
     KinematicParameters kinematicParams_;
     float stepsPerRev_;  // Steps per motor revolution (default: 6000)
     
+    // Sequential motion state machine
+    enum class MotionState {
+        IDLE,              // No motion in progress
+        Y_DESCENDING,      // Y-axis moving down to target
+        GRIPPER_ACTUATING, // Gripper opening/closing
+        Y_RETRACTING,      // Y-axis retracting to safe height
+        X_MOVING,          // X-axis moving to target
+        THETA_MOVING       // Theta axis moving (can happen anytime)
+    };
+    
+    MotionState motionState_;
+    float targetX_mm_;
+    float targetY_mm_;
+    float targetTheta_deg_;
+    float safeYHeight_mm_;  // Safe Y height for X-axis travel
+    uint32_t speed_mm_per_s_;
+    uint32_t speed_deg_per_s_;
+    uint32_t acceleration_mm_per_s2_;
+    uint32_t deceleration_mm_per_s2_;
+    bool gripperTargetState_;  // Target gripper state (grab/release)
+    uint32_t gripperActuateStart_ms_;  // Timestamp when gripper started actuating
+    
     // Helper methods for unit conversion (private)
     float pulsesToMm(int32_t pulses) const;
     int32_t mmToPulses(float mm) const;
+    
+    // Sequential motion helpers
+    void startSequentialMotion();
+    void processSequentialMotion();
+    void startXAxisMotion();
+    
+    // Common helper functions
+    float getCurrentYPosition() const;
+    uint32_t getHomingSpeed() const;
+    void moveYAxisTo(float targetY, float speed, float accel, float decel);
+    void updateAxisPositions();
+    void stopAllMotion();
 
 public:
     // Kinematics configuration accessors (public for external calculations)
