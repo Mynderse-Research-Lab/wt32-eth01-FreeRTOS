@@ -1,582 +1,479 @@
+/**
+ * @file main.cpp
+ * @brief Example application for Gantry library
+ * @version 1.0.0
+ * 
+ * This example demonstrates basic usage of the Gantry library with:
+ * - X-axis control via SDF08NK8X servo driver
+ * - Y-axis control via step/dir stepper
+ * - Theta-axis control via PWM servo
+ * - End-effector (gripper) control
+ * - Serial command interface for interactive testing
+ * 
+ * Based on configuration patterns from SDF08NK8X-Driver-library branch
+ */
+
 #include "Gantry.h"
-#include <ETH.h>
-#include <Ticker.h>
-#include <driver/pcnt.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <freertos/queue.h>
-#include <freertos/timers.h>
-#include <cmath>  // For fabs()
-#include <inttypes.h>  // For PRId32, PRIu32
-#include "config.h"
-
-// ESP-IDF MQTT Client
-#include "mqtt_client.h"
-
-using Gantry::Gantry;
-
-// ESP-IDF MQTT client handle
-esp_mqtt_client_handle_t mqttClient = nullptr;
-volatile bool netUp = false;
-volatile bool mqttConnected = false;
-Ticker mqttReconnectTicker;
-
-// ---------- Objects ----------
-BergerdaServo::DriverConfig xConfig;
-Gantry::Gantry *gantrySystem = nullptr;
-
-// ---------- MQTT Message Handler ----------
-static void handleMqttMessage(const char *data, int data_len) {
-  // Basic Parsing: Expecting JSON-like string
-  // "x:1000,y:200,t:90,s:5000,h:1,c:1"
-  char buf[128];
-  size_t copyLen = (data_len < (int)sizeof(buf) - 1) ? data_len : (sizeof(buf) - 1);
-  memcpy(buf, data, copyLen);
-  buf[copyLen] = '\0';
-  
-  // Warn if message was truncated
-  if (data_len >= (int)sizeof(buf)) {
-    LOG_WARN(TAG_MQTT, "Message truncated from %d to %d bytes", data_len, (int)sizeof(buf) - 1);
-  }
-
-  LOG_INFO(TAG_MQTT, "Msg Received: %s", buf);
-
-  // Initialize with defaults
-  uint32_t timestamp_ms = millis();  // Cache timestamp once
-  GantryCommand cmd = {
-    .x = 0,
-    .y = 0,
-    .theta = 0,
-    .speed = 200,  // Default 200 mm/s
-    .conveyor_speed_mm_per_s = 0.0f,
-    .detection_timestamp_ms = timestamp_ms,
-    .grip_delay_ms = DEFAULT_GRIP_DELAY_MS,
-    .home = false,
-    .calibrate = false
-  };
-
-  // Optimized single-pass parsing
-  // Format: "x:100,y:50,t:0,s:200,v:50,g:100,h:0,c:0"
-  char *token = strtok(buf, ",");
-  while (token != NULL) {
-    // Parse each key:value pair
-    if (token[0] && token[1] == ':') {
-      int32_t value = atoi(token + 2);
-      switch (token[0]) {
-        case 'x': cmd.x = value; break;
-        case 'y': cmd.y = value; break;
-        case 't': cmd.theta = value; break;
-        case 's': cmd.speed = value; break;
-        case 'v': cmd.conveyor_speed_mm_per_s = atof(token + 2); break;
-        case 'g': cmd.grip_delay_ms = value; break;
-        case 'h': cmd.home = (value == 1); break;
-        case 'c': cmd.calibrate = (value == 1); break;
-        default: break;  // Ignore unknown parameters
-      }
-    }
-    token = strtok(NULL, ",");
-  }
-
-  // Enqueue command with FIFO behavior
-  // For real-time tracking, prioritize NEW commands over OLD queued ones
-  if (commandQueue) {
-    // If queue is full, drop oldest command to make room (FIFO)
-    if (uxQueueSpacesAvailable(commandQueue) == 0) {
-      GantryCommand old_cmd;
-      if (xQueueReceive(commandQueue, &old_cmd, 0) == pdTRUE) {
-        LOG_WARN(TAG_MQTT, "Queue full - dropped oldest: x=%" PRId32, old_cmd.x);
-      }
-    }
-    
-    if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
-      LOG_ERROR(TAG_MQTT, "Queue send failed!");
-    } else {
-      LOG_INFO(TAG_MQTT, "Queued: x=%" PRId32 " v=%.1f", cmd.x, cmd.conveyor_speed_mm_per_s);
-    }
-  }
-}
-
-// ---------- ESP-IDF MQTT Event Handler ----------
-static void mqttEventHandler(void *handler_args, esp_event_base_t base, 
-                              int32_t event_id, void *event_data) {
-  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
-  
-  switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-      LOG_INFO(TAG_MQTT, "Connected to broker");
-      mqttConnected = true;
-      // Subscribe to command topic
-      esp_mqtt_client_subscribe(mqttClient, MQTT_SUB_TOPIC, 1);
-      // Publish online status
-      esp_mqtt_client_publish(mqttClient, MQTT_PUB_TOPIC, "online", 0, 1, 1);
-      break;
-      
-    case MQTT_EVENT_DISCONNECTED:
-      LOG_WARN(TAG_MQTT, "Disconnected from broker");
-      mqttConnected = false;
-      // Reconnect will be handled automatically by esp_mqtt_client
-      break;
-      
-    case MQTT_EVENT_SUBSCRIBED:
-      LOG_INFO(TAG_MQTT, "Subscribed to %s", MQTT_SUB_TOPIC);
-      break;
-      
-    case MQTT_EVENT_DATA:
-      // Handle incoming message
-      if (event->data_len > 0) {
-        handleMqttMessage(event->data, event->data_len);
-      }
-      break;
-      
-    case MQTT_EVENT_ERROR:
-      LOG_ERROR(TAG_MQTT, "MQTT error occurred");
-      if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-        LOG_ERROR(TAG_MQTT, "TCP transport error");
-      }
-      break;
-      
-    default:
-      break;
-  }
-}
-
-// ---------- MQTT Client Initialization ----------
-static void initMqttClient() {
-  char uri[64];
-  snprintf(uri, sizeof(uri), "mqtt://%s:%d", MQTT_HOST, MQTT_PORT);
-  
-  esp_mqtt_client_config_t mqtt_cfg = {};
-  mqtt_cfg.broker.address.uri = uri;
-  mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
-  mqtt_cfg.network.reconnect_timeout_ms = 2000;
-  mqtt_cfg.session.keepalive = 60;
-  
-  mqttClient = esp_mqtt_client_init(&mqtt_cfg);
-  if (mqttClient == nullptr) {
-    LOG_ERROR(TAG_MQTT, "Failed to create MQTT client");
-    return;
-  }
-  
-  esp_mqtt_client_register_event(mqttClient, MQTT_EVENT_ANY, mqttEventHandler, nullptr);
-  LOG_INFO(TAG_MQTT, "MQTT client initialized");
-}
-
-static void startMqttClient() {
-  if (mqttClient != nullptr) {
-    esp_mqtt_client_start(mqttClient);
-    LOG_INFO(TAG_MQTT, "MQTT client started");
-  }
-}
-
-void EthEvent(arduino_event_id_t event) {
-  switch (event) {
-  case ARDUINO_EVENT_ETH_START:
-    ETH.setHostname("esp32-eth");
-    break;
-  case ARDUINO_EVENT_ETH_CONNECTED:
-    LOG_INFO(TAG_ETH, "Link Up");
-    break;
-  case ARDUINO_EVENT_ETH_GOT_IP:
-    LOG_INFO(TAG_ETH, "IP: %s", ETH.localIP().toString().c_str());
-    netUp = true;
-    // Start MQTT client when network is ready
-    startMqttClient();
-    break;
-  case ARDUINO_EVENT_ETH_DISCONNECTED:
-    LOG_WARN(TAG_ETH, "Link Down");
-    netUp = false;
-    mqttConnected = false;
-    break;
-  default:
-    break;
-  }
-}
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/pcnt.h"
+#include "esp_log.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "gpio_expander.h"
+#include "MCP23S17.h"
+#include <inttypes.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <stddef.h>
 
 // ============================================================================
-// Conveyor Interception Helper
+// Pin Definitions - MCP23S17 GPIO Expander Mapping
 // ============================================================================
+// All digital GPIO operations use MCP23S17 (pins 0-15)
+// PWM and encoder pins remain on direct ESP32 GPIO (16+)
 
-/**
- * @brief Calculate intercept position for moving conveyor
- * 
- * The item moves on the conveyor while the gantry travels to it.
- * We need to predict where the item WILL BE when the gantry arrives.
- * 
- * @param item_x_mm Item position when detected (mm)
- * @param conveyor_speed Conveyor belt speed (mm/s, positive = increasing X)
- * @param latency_ms Time since detection (ms)
- * @param gantry_x Current gantry position (mm)
- * @param gantry_speed Gantry travel speed (mm/s)
- * @return Intercept X position (mm), or -1 if unreachable
- */
-float calculateInterceptPosition(float item_x_mm, float conveyor_speed,
-                                  uint32_t latency_ms, float gantry_x,
-                                  float gantry_speed) {
-    // Validate gantry speed to prevent division by zero
-    if (gantry_speed <= 0.0f) {
-        LOG_ERROR(TAG_GANTRY, "Invalid gantry speed: %.1f", gantry_speed);
-        return -1.0f;  // Error condition
-    }
-    
-    // Compensate for network/processing latency
-    float item_current_x = item_x_mm + conveyor_speed * (latency_ms / 1000.0f);
-    
-    // If conveyor is stationary, target current position
-    if (fabs(conveyor_speed) < 0.1f) {
-        return item_current_x;
-    }
-    
-    // Iterative interception calculation (converges in 2-3 iterations)
-    float intercept_x = item_current_x;
-    for (int i = 0; i < INTERCEPT_ITERATIONS; i++) {
-        float distance = fabs(intercept_x - gantry_x);
-        float travel_time = distance / gantry_speed;  // seconds
-        intercept_x = item_current_x + conveyor_speed * travel_time;
-    }
-    
-    // Check if intercept is within pick zone
-    if (intercept_x < PICK_ZONE_MIN_X_MM || intercept_x > PICK_ZONE_MAX_X_MM) {
-        LOG_WARN(TAG_GANTRY, "Intercept %.1f out of pick zone [%.1f, %.1f]",
-                 intercept_x, PICK_ZONE_MIN_X_MM, PICK_ZONE_MAX_X_MM);
-        return -1.0f;  // Unreachable
-    }
-    
-    return intercept_x;
-}
+// MCP23S17 SPI pins (direct ESP32 GPIO)
+#define PIN_SPI_MISO  19  // SPI MISO
+#define PIN_SPI_MOSI  23  // SPI MOSI
+#define PIN_SPI_SCLK  18  // SPI SCLK
+#define PIN_SPI_CS    5   // SPI Chip Select
 
-// ============================================================================
-// FreeRTOS Tasks
-// ============================================================================
+// MCP23S17 Pin Assignments (Port A: 0-7, Port B: 8-15)
+// X-axis pins (on MCP23S17)
+#define PIN_PULSE      0   // MCP23S17 Port A Pin 0: Pulse signal (output)
+#define PIN_DIR        1   // MCP23S17 Port A Pin 1: Direction signal (output)
+#define PIN_ENABLE     2   // MCP23S17 Port A Pin 2: Servo enable SON (output)
+#define PIN_LIMIT_MIN  3   // MCP23S17 Port A Pin 3: Home limit switch (input, pullup)
+#define PIN_LIMIT_MAX  4   // MCP23S17 Port A Pin 4: End limit switch (input, pullup)
 
-/**
- * @brief Blink LED task - Heartbeat indicator
- * @param param Task parameter (unused)
- */
-void blinkTask(void *param) {
-  (void)param;  // Unused parameter
-  
-  pinMode(LED_PIN, OUTPUT);
-  const TickType_t delayTicks = pdMS_TO_TICKS(500);
-  
-  while (1) {
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    vTaskDelay(delayTicks);
-  }
-  
-  // Should never reach here
-  vTaskDelete(NULL);
-}
+// Y-axis pins (on MCP23S17)
+#define PIN_Y_STEP     5   // MCP23S17 Port A Pin 5: Y-axis step pin (output)
+#define PIN_Y_DIR      6   // MCP23S17 Port A Pin 6: Y-axis direction pin (output)
+#define PIN_Y_ENABLE   7   // MCP23S17 Port A Pin 7: Y-axis enable pin (output)
 
-/**
- * @brief Gantry command processing task
- * @param param Task parameter (unused)
- * 
- * Processes commands from MQTT queue and executes gantry operations.
- * Runs on Core 1 with high priority for real-time motion control.
- */
-void gantryTask(void *param) {
-  (void)param;  // Unused parameter
-  
-  LOG_INFO(TAG_GANTRY, "Task Started");
+// End-effector and LED pins (on MCP23S17 Port B)
+#define PIN_GRIPPER    8   // MCP23S17 Port B Pin 0: Gripper control pin (output)
+#define PIN_LED        9   // MCP23S17 Port B Pin 1: Status LED (output)
+// Port B pins 2-7 available for future use
 
-  // 1. Configure X Axis Pins
-  xConfig.output_pin_nos[6] = PIN_SERVO_PULSE;
-  xConfig.output_pin_nos[7] = PIN_SERVO_DIR;
-  xConfig.output_pin_nos[0] = PIN_SERVO_ENABLE;
-  xConfig.input_pin_nos[3] = PIN_ENC_A;
-  xConfig.input_pin_nos[4] = PIN_ENC_B;
-  xConfig.enable_encoder_feedback = true;
-  xConfig.pcnt_unit = PCNT_UNIT_0;
-  
-  // Configure limit switch pins in driver config
-  xConfig.limit_min_pin = PIN_LIMIT_MIN;
-  xConfig.limit_max_pin = PIN_LIMIT_MAX;
+// Direct ESP32 GPIO pins (PWM and encoder - must stay on ESP32)
+#define PIN_ENC_A     35  // Direct GPIO: Encoder A+ (input only, PCNT)
+#define PIN_ENC_B     36  // Direct GPIO: Encoder B+ (input only, PCNT)
+#define PIN_THETA_PWM 13  // Direct GPIO: Theta PWM servo pin (LEDC output)
 
-  // 2. Initialize Gantry
-  static Gantry::Gantry gantry(xConfig, PIN_GRIPPER);
-  gantry.setLimitPins(PIN_LIMIT_MIN, PIN_LIMIT_MAX);
-  gantrySystem = &gantry;
+// Helper macros to convert MCP23S17 pins to GPIO expander format
+// MCP23S17 pins are 0-15, direct GPIO pins are 16+
+#define MCP_PIN(pin) (pin)           // MCP23S17 pin (0-15)
+#define ESP_PIN(pin) ((pin) + 16)    // Direct ESP32 GPIO pin (16+)
 
-  if (!gantry.begin()) {
-    LOG_ERROR(TAG_GANTRY, "Init Failed!");
-    vTaskDelete(NULL);
-     return;
-   }
-  LOG_INFO(TAG_GANTRY, "Initialized");
+static const char *TAG = "GantryExample";
 
-  gantry.enable();
+// Gantry system instance
+static Gantry::Gantry* g_gantry = nullptr;
 
-  GantryCommand cmd;
-  const TickType_t busyCheckDelay = pdMS_TO_TICKS(GANTRY_UPDATE_INTERVAL_MS);
+// Serial logging helpers (similar to SDF08NK8X example)
+#define LOG_PRINT(value) do { \
+    ESP_LOGI(TAG, "%s", value); \
+} while (0)
 
-  // 3. Command Processing Loop
-  while (1) {
-    // Block until command available (infinite timeout)
-    if (xQueueReceive(commandQueue, &cmd, portMAX_DELAY) == pdTRUE) {
+#define LOG_PRINTLN(value) do { \
+    ESP_LOGI(TAG, "%s", value); \
+} while (0)
 
-      if (cmd.home) {
-        LOG_INFO(TAG_GANTRY, "Executing Homing...");
-        gantry.home();
-        
-        // Wait for homing to complete
-        while (gantry.isBusy()) {
-          vTaskDelay(busyCheckDelay);
-        }
-        LOG_INFO(TAG_GANTRY, "Homing Complete");
-        
-      } else if (cmd.calibrate) {
-        LOG_INFO(TAG_GANTRY, "Executing Calibration...");
-        int len = gantry.calibrate();
-        if (len > 0) {
-          LOG_INFO(TAG_GANTRY, "Calibrated Length: %d mm", len);
-   } else {
-          LOG_ERROR(TAG_GANTRY, "Calibration Failed");
-        }
-        
-      } else {
-        // ============================================================
-        // PICK-AND-PLACE FROM MOVING CONVEYOR
-        // ============================================================
-        
-        // Check for alarm before movement
-        if (gantry.isAlarmActive()) {
-          LOG_ERROR(TAG_GANTRY, "Alarm active - movement blocked");
-          continue;
-        }
-        
-        // Calculate latency since item was detected
-        uint32_t latency_ms = millis() - cmd.detection_timestamp_ms;
-        
-        // Get current gantry position (in mm)
-        float gantry_x_mm = gantry.getXEncoder() / gantry.getPulsesPerMm();
-        
-        // Calculate intercept position for moving conveyor
-        float target_x_mm;
-        if (cmd.conveyor_speed_mm_per_s != 0.0f) {
-          // Moving conveyor - calculate interception point
-          target_x_mm = calculateInterceptPosition(
-            (float)cmd.x,
-            cmd.conveyor_speed_mm_per_s,
-            latency_ms,
-            gantry_x_mm,
-            (float)cmd.speed
-          );
-          
-          if (target_x_mm < 0) {
-            LOG_WARN(TAG_GANTRY, "Item unreachable - skipping");
-            continue;
-          }
-          
-          LOG_INFO(TAG_GANTRY, "Intercept: item@%.1f + %.1fmm/s -> target=%.1f (latency=%" PRIu32 "ms)",
-                   (float)cmd.x, cmd.conveyor_speed_mm_per_s, target_x_mm, latency_ms);
-   } else {
-          // Static target
-          target_x_mm = (float)cmd.x;
-          LOG_INFO(TAG_GANTRY, "Static target: X=%.1f Y=%" PRId32 " T=%" PRId32 " Speed=%" PRIu32,
-                   target_x_mm, cmd.y, cmd.theta, cmd.speed);
-        }
-        
-        // Clamp speed to maximum
-        uint32_t actual_speed = cmd.speed;
-        if (actual_speed > MAX_GANTRY_SPEED_MM_S) {
-          actual_speed = MAX_GANTRY_SPEED_MM_S;
-        }
-        
-        // Execute move to intercept position
-        gantry.moveTo((int32_t)target_x_mm, cmd.y, cmd.theta, actual_speed);
+#define LOG_PRINTF(...) do { \
+    ESP_LOGI(TAG, __VA_ARGS__); \
+} while (0)
 
-        // Wait for motion to complete
-        while (gantry.isBusy()) {
-          vTaskDelay(busyCheckDelay);
-        }
-
-        // Grip sequence with configurable delay
-        if (cmd.grip_delay_ms > 0) {
-          LOG_INFO(TAG_GANTRY, "Gripping (delay=%" PRIu32 "ms)...", cmd.grip_delay_ms);
-          gantry.grip(true);
-          vTaskDelay(pdMS_TO_TICKS(cmd.grip_delay_ms));
-          gantry.grip(false);
-        }
-      }
-      LOG_INFO(TAG_GANTRY, "Cmd Done");
-    }
-  }
-  
-  // Should never reach here
-  vTaskDelete(NULL);
-}
+// Forward declarations
+void printHelp();
+void printStatus();
+void printLimits();
+void processCommand(const char* cmd);
 
 /**
  * @brief Gantry update task - Calls gantry.update() periodically
- * @param param Task parameter (unused)
- * 
- * Runs continuously to update gantry state (limit debouncing, etc.)
- * Runs on Core 1 with medium priority.
  */
 void gantryUpdateTask(void *param) {
-  (void)param;  // Unused parameter
-  
-  const TickType_t updateInterval = pdMS_TO_TICKS(GANTRY_UPDATE_INTERVAL_MS);
-  
-  // Wait for gantry system to be initialized
-  while (gantrySystem == nullptr) {
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-  
-  LOG_INFO(TAG_GANTRY, "Update Task Started");
-  
-  while (1) {
-    if (gantrySystem != nullptr) {
-      gantrySystem->update();
+    (void)param;
+    
+    const TickType_t updateInterval = pdMS_TO_TICKS(10);  // 100 Hz
+    
+    // Wait for gantry system to be initialized
+    while (g_gantry == nullptr) {
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelay(updateInterval);
-  }
-  
-  // Should never reach here
-  vTaskDelete(NULL);
+    
+    ESP_LOGI(TAG, "Gantry update task started");
+    
+    while (1) {
+        if (g_gantry != nullptr) {
+            g_gantry->update();
+        }
+        vTaskDelay(updateInterval);
+    }
+    
+    vTaskDelete(nullptr);
 }
 
 /**
- * @brief MQTT loop task - Publishes status periodically
- * @param param Task parameter (unused)
- * 
- * Publishes heartbeat and gantry status to MQTT broker.
- * Runs on Core 0 with low priority.
+ * @brief Serial command processing task
  */
-void mqttLoopTask(void *param) {
-  (void)param;  // Unused parameter
-  
-  const TickType_t publishInterval = pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS);
-  static uint32_t count = 0;
-  
-  while (1) {
-    if (netUp && mqttConnected && mqttClient != nullptr) {
-      // Heartbeat message
-      char msg[64];
-      snprintf(msg, sizeof(msg), "Count: %lu", (unsigned long)count++);
-      esp_mqtt_client_publish(mqttClient, MQTT_PUB_TOPIC, msg, 0, 0, 0);
-
-      // Gantry status message
-      if (gantrySystem != nullptr) {
-        char sMsg[128];
-        snprintf(sMsg, sizeof(sMsg), "X:%d Y:%d Th:%d Busy:%d Alarm:%d",
-                 gantrySystem->getXEncoder(), 
-                 gantrySystem->getCurrentY(),
-                 gantrySystem->getCurrentTheta(),
-                 gantrySystem->isBusy() ? 1 : 0,
-                 gantrySystem->isAlarmActive() ? 1 : 0);
-        esp_mqtt_client_publish(mqttClient, "lab/gantry", sMsg, 0, 0, 0);
-      }
+void serialTask(void *param) {
+    (void)param;
+    
+    char inputLine[256];
+    size_t inputIndex = 0;
+    
+    ESP_LOGI(TAG, "Serial task started");
+    ESP_LOGI(TAG, "Type 'help' for commands");
+    
+    while (1) {
+        // Read serial input character by character
+        int c = getchar();
+        if (c >= 0) {
+            if (c == '\n' || c == '\r' || c == ';') {
+                if (inputIndex > 0) {
+                    inputLine[inputIndex] = '\0';
+                    ESP_LOGI(TAG, "[RX] %s", inputLine);
+                    processCommand(inputLine);
+                    inputIndex = 0;
+                }
+            } else if (c >= 32 && c <= 126 && inputIndex < sizeof(inputLine) - 1) {
+                inputLine[inputIndex++] = c;
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    vTaskDelay(publishInterval);
-  }
-  
-  // Should never reach here
-  vTaskDelete(NULL);
+    
+    vTaskDelete(nullptr);
 }
 
-// ============================================================================
-// Setup / Loop
-// ============================================================================
+/**
+ * @brief Print help message
+ */
+void printHelp() {
+    LOG_PRINTLN("========================================");
+    LOG_PRINTLN("Gantry Library Example - Commands:");
+    LOG_PRINTLN("========================================");
+    LOG_PRINTLN("  help                 - show this help");
+    LOG_PRINTLN("  status               - print gantry status");
+    LOG_PRINTLN("  limits               - read limit switches");
+    LOG_PRINTLN("  enable               - enable motors");
+    LOG_PRINTLN("  disable              - disable motors");
+    LOG_PRINTLN("  home                 - home X-axis");
+    LOG_PRINTLN("  calibrate            - calibrate X-axis length");
+    LOG_PRINTLN("  move <x> <y> <t>     - move to position (mm, mm, deg)");
+    LOG_PRINTLN("  grip <0|1>           - control gripper (0=open, 1=close)");
+    LOG_PRINTLN("  stop                 - stop all motion");
+    LOG_PRINTLN("");
+}
 
 /**
- * @brief Arduino setup function - Initializes system and creates FreeRTOS tasks
+ * @brief Print gantry status
  */
-void setup() {
-  Serial.begin(115200);
-  delay(1000);  // Allow serial to stabilize
-  LOG_INFO(TAG_SYS, "Booting...");
+void printStatus() {
+    if (g_gantry == nullptr) {
+        LOG_PRINTLN("ERROR: Gantry not initialized");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "=== Gantry Status ===");
+    ESP_LOGI(TAG, "X Position: %d pulses", g_gantry->getXEncoder());
+    ESP_LOGI(TAG, "Y Position: %d mm", g_gantry->getCurrentY());
+    ESP_LOGI(TAG, "Theta: %d deg", g_gantry->getCurrentTheta());
+    ESP_LOGI(TAG, "Busy: %s", g_gantry->isBusy() ? "Yes" : "No");
+    ESP_LOGI(TAG, "Alarm: %s", g_gantry->isAlarmActive() ? "Yes" : "No");
+    
+    // Get current joint configuration
+    Gantry::JointConfig current = g_gantry->getCurrentJointConfig();
+    ESP_LOGI(TAG, "Joint Config: x=%.1f y=%.1f theta=%.1f",
+             current.x, current.y, current.theta);
+    
+    // Get current end-effector pose
+    Gantry::EndEffectorPose pose = g_gantry->getCurrentEndEffectorPose();
+    ESP_LOGI(TAG, "End-Effector: x=%.1f y=%.1f z=%.1f theta=%.1f",
+             pose.x, pose.y, pose.z, pose.theta);
+}
 
-  // 1. Create Command Queue
-  commandQueue = xQueueCreate(COMMAND_QUEUE_SIZE, sizeof(GantryCommand));
-  if (commandQueue == NULL) {
-    LOG_ERROR(TAG_SYS, "Queue Create Failed!");
-    // Continue anyway - queue creation failure is logged
-  } else {
-    LOG_INFO(TAG_SYS, "Command queue created (size: %d)", COMMAND_QUEUE_SIZE);
-  }
+/**
+ * @brief Print limit switch status
+ */
+void printLimits() {
+    if (g_gantry == nullptr) {
+        LOG_PRINTLN("ERROR: Gantry not initialized");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "=== Limit Switches ===");
+    uint8_t limit_min = gpio_expander_read(PIN_LIMIT_MIN);
+    uint8_t limit_max = gpio_expander_read(PIN_LIMIT_MAX);
+    ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", PIN_LIMIT_MIN,
+             limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+    ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", PIN_LIMIT_MAX,
+             limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+}
 
-  // 2. Start Ethernet
-  Network.onEvent(EthEvent);
-  ETH.begin(ETH_PHY_LAN8720, ETH_ADDR, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_PHY_POWER, ETH_CLK_MODE);
-  ETH.config(local_IP, gateway, subnet, dns);
-  LOG_INFO(TAG_SYS, "Ethernet initialized");
+/**
+ * @brief Process serial command
+ */
+void processCommand(const char* cmd) {
+    if (cmd == nullptr || strlen(cmd) == 0) {
+        return;
+    }
+    
+    // Convert to lowercase for comparison
+    char cmdLower[256];
+    strncpy(cmdLower, cmd, sizeof(cmdLower) - 1);
+    cmdLower[sizeof(cmdLower) - 1] = '\0';
+    for (int i = 0; cmdLower[i]; i++) {
+        cmdLower[i] = tolower(cmdLower[i]);
+    }
+    
+    if (g_gantry == nullptr && strcmp(cmdLower, "help") != 0) {
+        LOG_PRINTLN("ERROR: Gantry not initialized");
+     return;
+   }
+    
+    if (strcmp(cmdLower, "help") == 0 || strcmp(cmdLower, "?") == 0) {
+        printHelp();
+    } else if (strcmp(cmdLower, "status") == 0) {
+        printStatus();
+    } else if (strcmp(cmdLower, "limits") == 0) {
+        printLimits();
+    } else if (strcmp(cmdLower, "enable") == 0) {
+        g_gantry->enable();
+        LOG_PRINTLN("OK Motors enabled");
+    } else if (strcmp(cmdLower, "disable") == 0) {
+        g_gantry->disable();
+        LOG_PRINTLN("OK Motors disabled");
+    } else if (strcmp(cmdLower, "home") == 0) {
+        ESP_LOGI(TAG, "Starting homing sequence...");
+        g_gantry->home();
+        while (g_gantry->isBusy()) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        ESP_LOGI(TAG, "OK Homing complete");
+    } else if (strcmp(cmdLower, "calibrate") == 0) {
+        ESP_LOGI(TAG, "Starting calibration...");
+        int len = g_gantry->calibrate();
+        if (len > 0) {
+            ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
+   } else {
+            LOG_PRINTLN("ERROR: Calibration failed");
+        }
+    } else if (strncmp(cmdLower, "move", 4) == 0) {
+        float x = 0.0f, y = 0.0f, theta = 0.0f;
+        int parsed = sscanf(cmd, "move %f %f %f", &x, &y, &theta);
+        if (parsed < 3) {
+            LOG_PRINTLN("ERROR: Usage: move <x_mm> <y_mm> <theta_deg>");
+            return;
+        }
+        
+        Gantry::JointConfig target;
+        target.x = x;
+        target.y = y;
+        target.theta = theta;
+        
+        ESP_LOGI(TAG, "Moving to: x=%.1f y=%.1f theta=%.1f", x, y, theta);
+        Gantry::GantryError result = g_gantry->moveTo(target, 50, 30);
+        if (result == Gantry::GantryError::OK) {
+            LOG_PRINTLN("OK Move command accepted");
+            while (g_gantry->isBusy()) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            LOG_PRINTLN("OK Move complete");
+   } else {
+            ESP_LOGE(TAG, "ERROR: Move failed: %d", (int)result);
+        }
+    } else if (strncmp(cmdLower, "grip", 4) == 0) {
+        int value = 0;
+        int parsed = sscanf(cmd, "grip %d", &value);
+        if (parsed < 1) {
+            LOG_PRINTLN("ERROR: Usage: grip <0|1>");
+            return;
+        }
+        g_gantry->grip(value != 0);
+        ESP_LOGI(TAG, "OK Gripper %s", value ? "closed" : "opened");
+    } else if (strcmp(cmdLower, "stop") == 0) {
+        g_gantry->disable();
+        g_gantry->enable();  // Re-enable to reset state
+        LOG_PRINTLN("OK Stop requested");
+    } else {
+        ESP_LOGE(TAG, "ERROR: Unknown command: %s", cmd);
+        ESP_LOGI(TAG, "Type 'help' for available commands");
+    }
+}
 
-  // 3. Setup MQTT (ESP-IDF native client)
-  initMqttClient();
-  LOG_INFO(TAG_SYS, "MQTT client configured");
-
-  // 4. Create FreeRTOS Tasks
-  // Gantry task - High priority, Core 1 (real-time motion control)
+/**
+ * @brief ESP-IDF app_main entry point
+ */
+extern "C" void app_main(void) {
+    ESP_LOGI(TAG, "\n========================================");
+    ESP_LOGI(TAG, "Gantry Library Example");
+    ESP_LOGI(TAG, "========================================\n");
+    
+    // ========================================================================
+    // Initialize MCP23S17 GPIO Expander
+    // ========================================================================
+    ESP_LOGI(TAG, "Initializing MCP23S17 GPIO expander...");
+    mcp23s17_config_t mcp_config = {};
+    mcp_config.spi_host = SPI2_HOST;
+    mcp_config.cs_pin = (gpio_num_t)PIN_SPI_CS;
+    mcp_config.miso_pin = (gpio_num_t)PIN_SPI_MISO;
+    mcp_config.mosi_pin = (gpio_num_t)PIN_SPI_MOSI;
+    mcp_config.sclk_pin = (gpio_num_t)PIN_SPI_SCLK;
+    mcp_config.device_address = 0x00;  // A0=A1=A2=GND (address 0x20)
+    mcp_config.clock_speed_hz = 10000000;  // 10 MHz
+    
+    if (!gpio_expander_init(&mcp_config)) {
+        ESP_LOGE(TAG, "Failed to initialize MCP23S17!");
+        ESP_LOGE(TAG, "System will continue but GPIO operations may fail.");
+    } else {
+        ESP_LOGI(TAG, "MCP23S17 initialized successfully");
+        
+        // Configure MCP23S17 pins
+        // Output pins
+        gpio_expander_set_direction(PIN_PULSE, true);
+        gpio_expander_set_direction(PIN_DIR, true);
+        gpio_expander_set_direction(PIN_ENABLE, true);
+        gpio_expander_set_direction(PIN_Y_STEP, true);
+        gpio_expander_set_direction(PIN_Y_DIR, true);
+        gpio_expander_set_direction(PIN_Y_ENABLE, true);
+        gpio_expander_set_direction(PIN_GRIPPER, true);
+        gpio_expander_set_direction(PIN_LED, true);
+        
+        // Input pins with pull-ups
+        gpio_expander_set_direction(PIN_LIMIT_MIN, false);
+        gpio_expander_set_pullup(PIN_LIMIT_MIN, true);
+        gpio_expander_set_direction(PIN_LIMIT_MAX, false);
+        gpio_expander_set_pullup(PIN_LIMIT_MAX, true);
+        
+        // Initialize outputs to safe states
+        gpio_expander_write(PIN_PULSE, 0);
+        gpio_expander_write(PIN_DIR, 0);
+        gpio_expander_write(PIN_ENABLE, 0);  // Disabled
+        gpio_expander_write(PIN_Y_STEP, 0);
+        gpio_expander_write(PIN_Y_DIR, 0);
+        gpio_expander_write(PIN_Y_ENABLE, 0);  // Disabled
+        gpio_expander_write(PIN_GRIPPER, 0);  // Open
+        gpio_expander_write(PIN_LED, 0);
+        
+        ESP_LOGI(TAG, "MCP23S17 pins configured");
+    }
+    
+    // ========================================================================
+    // Configure X-axis servo driver
+    // ========================================================================
+    BergerdaServo::DriverConfig xConfig;
+    
+    // Pin configuration
+    // NOTE: SDF08NK8X library expects direct GPIO pin numbers.
+    // For MCP23S17 support, library modifications are required.
+    // Currently using MCP23S17 pin numbers (0-15) - library needs GPIO abstraction layer.
+    xConfig.output_pin_nos[6] = PIN_PULSE;   // PULSE (MCP23S17 PA0)
+    xConfig.output_pin_nos[7] = PIN_DIR;     // DIR (MCP23S17 PA1)
+    xConfig.output_pin_nos[0] = PIN_ENABLE;  // ENABLE (MCP23S17 PA2)
+    
+    // Encoder pins (must stay on direct ESP32 GPIO for PCNT)
+    xConfig.input_pin_nos[3] = PIN_ENC_A;    // Encoder A+ (ESP32 GPIO 35)
+    xConfig.input_pin_nos[4] = PIN_ENC_B;    // Encoder B+ (ESP32 GPIO 36)
+    xConfig.enable_encoder_feedback = true;
+    xConfig.pcnt_unit = PCNT_UNIT_0;
+    
+    // Limit switch pins (MCP23S17 PA3, PA4)
+    // NOTE: Library needs modification to use gpio_expander_read() instead of gpio_get_level()
+    xConfig.limit_min_pin = PIN_LIMIT_MIN;   // MCP23S17 PA3
+    xConfig.limit_max_pin = PIN_LIMIT_MAX;   // MCP23S17 PA4
+    xConfig.homing_speed_pps = 6000;
+    
+    // Motor parameters
+    xConfig.encoder_ppr = 6000;
+    xConfig.max_pulse_freq = 10000;
+    xConfig.max_speed_pps = 10000;
+    xConfig.max_accel_pps2 = 5000;
+    
+    // Control mode
+    xConfig.pulse_mode = BergerdaServo::PulseMode::PULSE_DIRECTION;
+    xConfig.control_mode = BergerdaServo::ControlMode::POSITION;
+    
+    // Create gantry instance
+    // NOTE: Gripper pin is on MCP23S17 PB0 (pin 8)
+    // Library needs modification to use gpio_expander_write() instead of digitalWrite()
+    static Gantry::Gantry gantry(xConfig, PIN_GRIPPER);  // MCP23S17 PB0
+    g_gantry = &gantry;
+    
+    // Configure limit switches
+    gantry.setLimitPins(PIN_LIMIT_MIN, PIN_LIMIT_MAX);
+    
+    // Configure Y-axis stepper
+    // NOTE: GantryAxisStepper library expects direct GPIO pin numbers.
+    // For MCP23S17 support, library modifications are required.
+    // Currently using MCP23S17 pin numbers (5-7) - library needs GPIO abstraction layer.
+    gantry.setYAxisPins(PIN_Y_STEP, PIN_Y_DIR, PIN_Y_ENABLE);  // MCP23S17 PA5, PA6, PA7
+    gantry.setYAxisStepsPerMm(200.0f);  // 200 steps/mm (adjust to your setup)
+    gantry.setYAxisLimits(0.0f, 200.0f);  // 0-200mm travel
+    gantry.setYAxisMotionLimits(100.0f, 500.0f, 500.0f);  // Max speed, accel, decel
+    
+    // Configure theta servo
+    gantry.setThetaServo(PIN_THETA_PWM, 0);  // LEDC channel 0
+    gantry.setThetaLimits(-90.0f, 90.0f);
+    gantry.setThetaPulseRange(1000, 2000);  // Standard servo range
+    
+    // Set safe height
+    gantry.setSafeYHeight(150.0f);  // Safe height for X-axis travel
+    
+    // Initialize gantry
+    ESP_LOGI(TAG, "Initializing gantry...");
+    if (!gantry.begin()) {
+        ESP_LOGE(TAG, "ERROR: Gantry initialization failed!");
+        ESP_LOGE(TAG, "Check pin connections and try again.");
+        return;
+    }
+    ESP_LOGI(TAG, "OK Gantry initialized");
+    
+    // Enable motors
+    gantry.enable();
+    ESP_LOGI(TAG, "OK Motors enabled");
+    
+    // Create FreeRTOS tasks
+    // Gantry update task - Core 1, high priority
   BaseType_t result = xTaskCreatePinnedToCore(
-    gantryTask,
-    "Gantry",
-    GANTRY_TASK_STACK_SIZE,
-    NULL,
-    GANTRY_TASK_PRIORITY,
-    &gantryTaskHandle,
-    GANTRY_TASK_CORE
-  );
-  if (result != pdPASS) {
-    LOG_ERROR(TAG_SYS, "Failed to create Gantry task!");
-  }
-
-  // Gantry update task - Medium priority, Core 1 (periodic updates)
-  result = xTaskCreatePinnedToCore(
     gantryUpdateTask,
     "GantryUpdate",
-    GANTRY_UPDATE_TASK_STACK_SIZE,
+        4096,
+        NULL,
+        5,
     NULL,
-    GANTRY_UPDATE_TASK_PRIORITY,
-    &gantryUpdateTaskHandle,
-    GANTRY_UPDATE_TASK_CORE
+        1  // Core 1
   );
   if (result != pdPASS) {
-    LOG_ERROR(TAG_SYS, "Failed to create Gantry Update task!");
+        ESP_LOGE(TAG, "Failed to create Gantry Update task!");
   }
 
-  // MQTT loop task - Low priority, Core 0 (network I/O)
+    // Serial command task - Core 0, low priority
   result = xTaskCreatePinnedToCore(
-    mqttLoopTask,
-    "MqttLoop",
-    MQTT_TASK_STACK_SIZE,
+        serialTask,
+        "SerialCmd",
+        4096,
     NULL,
-    MQTT_TASK_PRIORITY,
-    &mqttTaskHandle,
-    MQTT_TASK_CORE
+        1,
+    NULL,
+        0  // Core 0
   );
   if (result != pdPASS) {
-    LOG_ERROR(TAG_SYS, "Failed to create MQTT task!");
-  }
-
-  // Blink task - Low priority, Core 0 (heartbeat LED)
-  result = xTaskCreatePinnedToCore(
-    blinkTask,
-    "Blink",
-    BLINK_TASK_STACK_SIZE,
-    NULL,
-    BLINK_TASK_PRIORITY,
-    &blinkTaskHandle,
-    BLINK_TASK_CORE
-  );
-  if (result != pdPASS) {
-    LOG_ERROR(TAG_SYS, "Failed to create Blink task!");
-  }
-
-  LOG_INFO(TAG_SYS, "All tasks created successfully");
-  LOG_INFO(TAG_SYS, "System ready");
-}
-
-/**
- * @brief Arduino loop function
- * 
- * In FreeRTOS-based applications, loop() is typically empty or minimal.
- * All work is done in FreeRTOS tasks.
- */
-void loop() {
-  // FreeRTOS tasks handle all functionality
-  // This function should not block or perform heavy work
-  // Delete this task to free up resources
+        ESP_LOGE(TAG, "Failed to create Serial task!");
+    }
+    
+    ESP_LOGI(TAG, "All tasks created successfully");
+    ESP_LOGI(TAG, "System ready");
+    ESP_LOGI(TAG, "");
+    printHelp();
+    
+    // Main task can exit - FreeRTOS tasks handle everything
   vTaskDelete(NULL);
  }
  
