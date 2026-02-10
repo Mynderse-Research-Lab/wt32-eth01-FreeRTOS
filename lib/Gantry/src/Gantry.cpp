@@ -7,6 +7,8 @@
 #include "Gantry.h"
 #include <cmath>
 
+using namespace Gantry::Constants;
+
 namespace Gantry {
 
 // ============================================================================
@@ -18,7 +20,13 @@ Gantry::Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)
       initialized_(false), enabled_(false), gripperActive_(false),
       currentY_(0), currentTheta_(0), targetY_(0), targetTheta_(0),
       axisLength_(0), config_(), kinematicParams_(),
-      stepsPerRev_(6000.0f) {  // Default: 6000 steps/rev (common servo)
+      stepsPerRev_(DEFAULT_STEPS_PER_REV),
+      motionState_(MotionState::IDLE),
+      targetX_mm_(0.0f), targetY_mm_(0.0f), targetTheta_deg_(0.0f),
+      safeYHeight_mm_(DEFAULT_SAFE_Y_HEIGHT_MM),
+      speed_mm_per_s_(DEFAULT_SPEED_MM_PER_S), speed_deg_per_s_(DEFAULT_SPEED_DEG_PER_S),
+      acceleration_mm_per_s2_(0), deceleration_mm_per_s2_(0),
+      gripperTargetState_(false), gripperActuateStart_ms_(0) {
 }
 
 // ============================================================================
@@ -30,10 +38,10 @@ bool Gantry::begin() {
         return true;
     }
     
-    // Initialize gripper pin
+    // Initialize end-effector (gripper) pin
     if (gripperPin_ >= 0) {
-        pinMode(gripperPin_, OUTPUT);
-        digitalWrite(gripperPin_, LOW);
+        endEffector_.configurePin(gripperPin_, true);
+        endEffector_.begin();
         gripperActive_ = false;
     }
     
@@ -58,6 +66,16 @@ bool Gantry::begin() {
         return false;
     }
     
+    // Initialize Y-axis stepper if configured
+    if (axisY_.isConfigured()) {
+        axisY_.begin();
+    }
+
+    // Initialize theta servo if configured
+    if (axisTheta_.isConfigured()) {
+        axisTheta_.begin();
+    }
+
     initialized_ = true;
     return true;
 }
@@ -67,21 +85,23 @@ bool Gantry::begin() {
 // ============================================================================
 
 void Gantry::enable() {
-    if (!initialized_) {
-        return;
-    }
+    GANTRY_CHECK_INITIALIZED();
     axisX_.enable();
+    if (axisY_.isConfigured()) {
+        axisY_.enable();
+    }
     enabled_ = true;
 }
 
 void Gantry::disable() {
-    if (!initialized_) {
-        return;
-    }
+    GANTRY_CHECK_INITIALIZED();
     if (isBusy()) {
-        axisX_.stopMotion(0);
+        stopAllMotion();
     }
     axisX_.disable();
+    if (axisY_.isConfigured()) {
+        axisY_.disable();
+    }
     enabled_ = false;
 }
 
@@ -92,6 +112,51 @@ void Gantry::disable() {
 void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
     xMinPin_ = xMinPin;
     xMaxPin_ = xMaxPin;
+}
+
+void Gantry::setYAxisPins(int stepPin, int dirPin, int enablePin,
+                          bool invertDir, bool enableActiveLow) {
+    axisY_.configurePins(stepPin, dirPin, enablePin, invertDir, enableActiveLow);
+}
+
+void Gantry::setYAxisStepsPerMm(float stepsPerMm) {
+    axisY_.setStepsPerMm(stepsPerMm);
+}
+
+void Gantry::setYAxisLimits(float minMm, float maxMm) {
+    axisY_.setLimits(minMm, maxMm);
+}
+
+void Gantry::setYAxisMotionLimits(float maxSpeedMmPerS,
+                                  float accelMmPerS2,
+                                  float decelMmPerS2) {
+    axisY_.setMotionLimits(maxSpeedMmPerS, accelMmPerS2, decelMmPerS2);
+}
+
+void Gantry::setThetaServo(int pwmPin, int pwmChannel) {
+    axisTheta_.configurePin(pwmPin, pwmChannel);
+}
+
+void Gantry::setThetaLimits(float minDeg, float maxDeg) {
+    axisTheta_.setAngleRange(minDeg, maxDeg);
+}
+
+void Gantry::setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs) {
+    axisTheta_.setPulseRange(minPulseUs, maxPulseUs);
+}
+
+void Gantry::setEndEffectorPin(int pin, bool activeHigh) {
+    gripperPin_ = pin;
+    endEffector_.configurePin(pin, activeHigh);
+    if (initialized_) {
+        endEffector_.begin();
+    }
+}
+
+void Gantry::setSafeYHeight(float safeHeight_mm) {
+    if (safeHeight_mm > 0.0f) {
+        safeYHeight_mm_ = safeHeight_mm;
+    }
 }
 
 // ============================================================================
@@ -108,32 +173,31 @@ void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
         speed = 5000; // Default speed
     }
     
-    // Store target positions for Y and Theta (simulated)
+    // Store target positions for Y and Theta
     targetY_ = y;
     targetTheta_ = theta;
-    currentY_ = y;  // Simulated - instant update
-    currentTheta_ = theta;  // Simulated - instant update
-    
-    // Calculate X-axis movement in pulses
-    int32_t currentX_pulses = axisX_.getPosition();
-    int32_t targetX_pulses = mmToPulses((float)x);
-    int32_t deltaX = targetX_pulses - currentX_pulses;
-    
-    // Check limit switches before movement
-    axisX_.updateLimitDebounce(true);
-    if (deltaX > 0 && axisX_.getLimitMaxDebounced()) {
-        return; // MAX limit active - cannot move forward
+    if (axisY_.isConfigured()) {
+        axisY_.moveToMm((float)y);
+    } else {
+        currentY_ = y;  // Simulated - instant update
     }
-    if (deltaX < 0 && axisX_.getLimitMinDebounced()) {
-        return; // MIN limit active - cannot move backward
+    if (axisTheta_.isConfigured()) {
+        axisTheta_.moveToDeg((float)theta);
+        currentTheta_ = (int32_t)axisTheta_.getCurrentDeg();
+    } else {
+        currentTheta_ = theta;  // Simulated - instant update
     }
     
-    // Move X-axis using driver (if delta is non-zero)
-    if (deltaX != 0) {
-        uint32_t accel = speed / 2;
-        uint32_t decel = speed / 2;
-        axisX_.moveRelative(deltaX, speed, accel, decel);
-    }
+    // Store targets for sequential motion
+    targetX_mm_ = (float)x;
+    targetY_mm_ = (float)y;
+    targetTheta_deg_ = (float)theta;
+    speed_mm_per_s_ = (uint32_t)(speed / getPulsesPerMm());  // Convert pps to mm/s
+    acceleration_mm_per_s2_ = 0;
+    deceleration_mm_per_s2_ = 0;
+    
+    // Start sequential motion sequence
+    startSequentialMotion();
 }
 
 GantryError Gantry::moveTo(const JointConfig& joint,
@@ -141,73 +205,28 @@ GantryError Gantry::moveTo(const JointConfig& joint,
                            uint32_t speed_deg_per_s,
                            uint32_t acceleration_mm_per_s2,
                            uint32_t deceleration_mm_per_s2) {
-    if (!initialized_) {
-        return GantryError::NOT_INITIALIZED;
-    }
-    if (!enabled_) {
-        return GantryError::MOTOR_NOT_ENABLED;
-    }
-    if (isBusy()) {
-        return GantryError::ALREADY_MOVING;
-    }
+    GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
+    GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
+    GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
     
-    // Check for alarm condition
     if (axisX_.isAlarmActive()) {
-        return GantryError::TIMEOUT; // Or could add GantryError::ALARM
+        return GantryError::TIMEOUT;
     }
     
-    // Validate joint limits
     if (!Kinematics::validate(joint, config_.limits)) {
         return GantryError::INVALID_POSITION;
     }
     
-    // Update limit debouncing before movement check
-    axisX_.updateLimitDebounce(true);
+    // Store targets for sequential motion
+    targetX_mm_ = joint.x;
+    targetY_mm_ = joint.y;
+    targetTheta_deg_ = joint.theta;
+    speed_mm_per_s_ = speed_mm_per_s;
+    speed_deg_per_s_ = speed_deg_per_s;
+    acceleration_mm_per_s2_ = acceleration_mm_per_s2;
+    deceleration_mm_per_s2_ = deceleration_mm_per_s2;
     
-    // Get current X position and calculate delta
-    int32_t currentX_pulses = axisX_.getPosition();
-    int32_t targetX_pulses = mmToPulses(joint.x);
-    int32_t deltaX = targetX_pulses - currentX_pulses;
-    
-    // Check limit switches before allowing movement
-    // Driver will also check, but explicit check provides better error reporting
-    if (deltaX > 0 && axisX_.getLimitMaxDebounced()) {
-        // Trying to move forward but MAX limit is active
-        return GantryError::LIMIT_SWITCH_FAILED;
-    }
-    if (deltaX < 0 && axisX_.getLimitMinDebounced()) {
-        // Trying to move backward but MIN limit is active
-        return GantryError::LIMIT_SWITCH_FAILED;
-    }
-    
-    // Store target positions
-    targetY_ = (int32_t)joint.y;
-    targetTheta_ = (int32_t)joint.theta;
-    
-    // Convert speed: mm/s to pulses/s for X-axis
-    // Formula: speed_pps = speed_mm_per_s * pulses_per_mm
-    float pulsesPerMm = getPulsesPerMm();
-    uint32_t speed_pps = (uint32_t)(speed_mm_per_s * pulsesPerMm);
-    
-    // Convert acceleration/deceleration if provided (same conversion)
-    uint32_t accel_pps = 0;
-    uint32_t decel_pps = 0;
-    if (acceleration_mm_per_s2 > 0) {
-        accel_pps = (uint32_t)(acceleration_mm_per_s2 * pulsesPerMm);
-    }
-    if (deceleration_mm_per_s2 > 0) {
-        decel_pps = (uint32_t)(deceleration_mm_per_s2 * pulsesPerMm);
-    }
-    
-    // Use default if not specified
-    if (accel_pps == 0) accel_pps = speed_pps / 2;
-    if (decel_pps == 0) decel_pps = speed_pps / 2;
-    
-    // Move X-axis using driver (will also check limits internally)
-    if (!axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)) {
-        return GantryError::INVALID_PARAMETER;
-    }
-    
+    startSequentialMotion();
     return GantryError::OK;
 }
 
@@ -216,25 +235,15 @@ GantryError Gantry::moveTo(const EndEffectorPose& pose,
                            uint32_t speed_deg_per_s,
                            uint32_t acceleration_mm_per_s2,
                            uint32_t deceleration_mm_per_s2) {
-    if (!initialized_) {
-        return GantryError::NOT_INITIALIZED;
-    }
-    if (!enabled_) {
-        return GantryError::MOTOR_NOT_ENABLED;
-    }
-    if (isBusy()) {
-        return GantryError::ALREADY_MOVING;
-    }
+    GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
+    GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
+    GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
     
-    // Use inverse kinematics to get joint configuration
     JointConfig joint = inverseKinematics(pose);
-    
-    // Validate joint limits
     if (!Kinematics::validate(joint, config_.limits)) {
         return GantryError::INVALID_POSITION;
     }
     
-    // Call moveTo with joint configuration
     return moveTo(joint, speed_mm_per_s, speed_deg_per_s, acceleration_mm_per_s2, deceleration_mm_per_s2);
 }
 
@@ -242,32 +251,27 @@ bool Gantry::isBusy() const {
     if (!initialized_) {
         return false;
     }
-    // Check if X-axis is moving OR homing
-    return axisX_.isMotionActive() || axisX_.isHoming();
+    return motionState_ != MotionState::IDLE ||
+           axisX_.isMotionActive() || axisX_.isHoming() ||
+           (axisY_.isConfigured() && axisY_.isBusy());
 }
 
 void Gantry::update() {
-    if (!initialized_) {
+    GANTRY_CHECK_INITIALIZED();
+    
+    if (axisX_.isAlarmActive()) {
+        if (isBusy()) {
+            stopAllMotion();
+        }
+        enabled_ = false;
         return;
     }
     
-    // CRITICAL: Update limit switch debouncing every loop
-    // This prevents false triggers from mechanical switch bounce
-    axisX_.updateLimitDebounce();
-    
-    // Check for alarm condition
-    if (axisX_.isAlarmActive()) {
-        // Handle alarm - stop motion and disable
-        if (isBusy()) {
-            axisX_.stopMotion(0);
-        }
-        enabled_ = false;
-        // Note: Could add alarm callback or status flag here
+    if (motionState_ != MotionState::IDLE) {
+        processSequentialMotion();
     }
     
-    // Update X-axis position from encoder
-    // Y and Theta are simulated, so no update needed for now
-    // TODO: Implement trajectory following for Y/Theta axes
+    updateAxisPositions();
 }
 
 // ============================================================================
@@ -275,98 +279,56 @@ void Gantry::update() {
 // ============================================================================
 
 void Gantry::home() {
-    if (!initialized_ || !enabled_) {
-        return;
-    }
+    GANTRY_CHECK_INITIALIZED();
+    GANTRY_CHECK_ENABLED();
     
     if (xMinPin_ < 0) {
-        return; // No limit pin configured
-    }
-    
-    // Update limit debouncing to get current state
-    axisX_.updateLimitDebounce(true);
-    
-    // Check if already at home (MIN limit active)
-    if (axisX_.getLimitMinDebounced()) {
-        // Already at home - set position to 0
-        axisX_.setPosition(0);
         return;
     }
     
-    // Use driver's built-in homing sequence
-    // Moves negative until MIN limit switch is triggered
-    // Uses config.homing_speed_pps (default 6000 pps)
-    uint32_t homing_speed = axisX_.getConfig().homing_speed_pps;
-    if (homing_speed == 0) {
-        homing_speed = 6000; // Default fallback
-    }
-    
-    // Start homing (non-blocking)
-    // Position will be set to 0 automatically when MIN limit is reached
-    axisX_.startHoming(homing_speed);
+    axisX_.startHoming(getHomingSpeed());
 }
 
 int Gantry::calibrate() {
-    if (!initialized_ || !enabled_) {
+    GANTRY_CHECK_INITIALIZED_RET(0);
+    GANTRY_CHECK_ENABLED_RET(0);
+    
+    if (xMinPin_ < 0 || xMaxPin_ < 0) {
         return 0;
     }
     
-    if (xMinPin_ < 0 || xMaxPin_ < 0) {
-        return 0; // Both limit pins required for calibration
-    }
+    home();
     
-    // Ensure we're at MIN limit (home) first
-    axisX_.updateLimitDebounce(true);
-    if (!axisX_.getLimitMinDebounced()) {
-        // Not at home - home first
-        home();
-        
-        // Wait for homing to complete (with timeout)
-        unsigned long start_ms = millis();
-        while (axisX_.isHoming() && (millis() - start_ms) < 30000) {
-            axisX_.updateLimitDebounce();
-            delay(10);
-        }
-        
-        if (axisX_.isHoming()) {
-            return 0; // Homing timeout
-        }
-    }
-    
-    // Now measure travel distance from MIN to MAX
-    uint32_t speed = axisX_.getConfig().homing_speed_pps;
-    if (speed == 0) {
-        speed = 6000; // Default fallback
-    }
-    
-    // Start travel measurement (non-blocking)
-    // This will move from MIN to MAX and measure distance
-    if (!axisX_.measureTravelDistance(speed, speed, speed, 90000)) {
-        return 0; // Failed to start measurement
-    }
-    
-    // Wait for measurement to complete (with timeout)
+    // Wait for homing to complete
     unsigned long start_ms = millis();
-    while (!axisX_.hasTravelDistance() && (millis() - start_ms) < 90000) {
-        axisX_.updateLimitDebounce();
+    while (axisX_.isHoming() && (millis() - start_ms) < CALIBRATION_TIMEOUT_MS) {
         delay(10);
-        
-        // Check if measurement failed (alarm, etc.)
+    }
+    
+    if (axisX_.isHoming()) {
+        return 0;
+    }
+    
+    // Measure travel distance from MIN to MAX
+    uint32_t speed = getHomingSpeed();
+    if (!axisX_.measureTravelDistance(speed, speed, speed, TRAVEL_MEASUREMENT_TIMEOUT_MS)) {
+        return 0;
+    }
+    
+    // Wait for measurement to complete
+    start_ms = millis();
+    while (!axisX_.hasTravelDistance() && (millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+        delay(10);
         if (axisX_.isAlarmActive()) {
-            return 0; // Alarm during measurement
+            return 0;
         }
     }
     
     if (!axisX_.hasTravelDistance()) {
-        return 0; // Measurement timeout
+        return 0;
     }
     
-    // Get travel distance in pulses
-    uint32_t travel_pulses = axisX_.getTravelDistance();
-    
-    // Convert to mm and store
-    axisLength_ = pulsesToMm(travel_pulses);
-    
+    axisLength_ = pulsesToMm(axisX_.getTravelDistance());
     return axisLength_;
 }
 
@@ -375,12 +337,9 @@ int Gantry::calibrate() {
 // ============================================================================
 
 void Gantry::grip(bool active) {
-    if (!initialized_) {
-        return;
-    }
-    
-    if (gripperPin_ >= 0) {
-        digitalWrite(gripperPin_, active ? HIGH : LOW);
+    GANTRY_CHECK_INITIALIZED();
+    if (endEffector_.isConfigured()) {
+        endEffector_.setActive(active);
         gripperActive_ = active;
     }
 }
@@ -390,17 +349,17 @@ void Gantry::grip(bool active) {
 // ============================================================================
 
 int Gantry::getXEncoder() const {
-    if (!initialized_) {
-        return 0;
-    }
-    return axisX_.getEncoderPosition();
+    return initialized_ ? axisX_.getEncoderPosition() : 0;
 }
 
 int Gantry::getCurrentY() const {
-    return currentY_;
+    return (int)getCurrentYPosition();
 }
 
 int Gantry::getCurrentTheta() const {
+    if (axisTheta_.isConfigured()) {
+        return (int)axisTheta_.getCurrentDeg();
+    }
     return currentTheta_;
 }
 
@@ -409,10 +368,7 @@ int Gantry::getCurrentTheta() const {
 // ============================================================================
 
 bool Gantry::isAlarmActive() const {
-    if (!initialized_) {
-        return false;
-    }
-    return axisX_.isAlarmActive();
+    return initialized_ && axisX_.isAlarmActive();
 }
 
 void Gantry::setHomingSpeed(uint32_t speed_pps) {
@@ -437,29 +393,17 @@ JointConfig Gantry::inverseKinematics(const EndEffectorPose& pose) const {
 
 JointConfig Gantry::getCurrentJointConfig() const {
     JointConfig joint;
-    
-    // Get X position from encoder and convert to mm
-    int32_t xPulses = getXEncoder();
-    joint.x = pulsesToMm(xPulses);
-    
-    // Y and Theta are stored directly in mm/degrees
-    joint.y = (float)currentY_;
-    joint.theta = (float)currentTheta_;
-    
+    joint.x = pulsesToMm(getXEncoder());
+    joint.y = getCurrentYPosition();
+    joint.theta = axisTheta_.isConfigured() ? axisTheta_.getCurrentDeg() : (float)currentTheta_;
     return joint;
 }
 
 JointConfig Gantry::getTargetJointConfig() const {
     JointConfig joint;
-    
-    // Target X position (for now, use current - will be updated when moveTo is implemented)
-    int32_t xPulses = getXEncoder();
-    joint.x = pulsesToMm(xPulses);
-    
-    // Y and Theta targets
-    joint.y = (float)targetY_;
+    joint.x = pulsesToMm(getXEncoder());  // Current X (target tracking not implemented)
+    joint.y = axisY_.isConfigured() ? axisY_.getTargetMm() : (float)targetY_;
     joint.theta = (float)targetTheta_;
-    
     return joint;
 }
 
@@ -484,11 +428,8 @@ void Gantry::setStepsPerRevolution(float steps_per_rev) {
 }
 
 float Gantry::getPulsesPerMm() const {
-    // Calculate pulses per mm based on motor steps and ball screw pitch
-    // Formula: pulses_per_mm = steps_per_rev / pitch_mm
-    // Example: 6000 steps/rev / 40mm = 150 pulses/mm
     const float pitch = kinematicParams_.x_axis_ball_screw_pitch_mm;
-    if (pitch <= 0) return 150.0f;  // Default fallback
+    if (pitch <= 0) return DEFAULT_PULSES_PER_MM;
     return stepsPerRev_ / pitch;
 }
 
@@ -503,10 +444,198 @@ float Gantry::pulsesToMm(int32_t pulses) const {
 }
 
 int32_t Gantry::mmToPulses(float mm) const {
-    // Convert mm to motor pulses
-    // Formula: pulses = mm * pulses_per_mm
-    // Example: 1mm * 150 = 150 pulses
     return (int32_t)(mm * getPulsesPerMm());
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+float Gantry::getCurrentYPosition() const {
+    return axisY_.isConfigured() ? axisY_.getCurrentMm() : (float)currentY_;
+}
+
+uint32_t Gantry::getHomingSpeed() const {
+    uint32_t speed = axisX_.getConfig().homing_speed_pps;
+    return (speed > 0) ? speed : DEFAULT_HOMING_SPEED_PPS;
+}
+
+void Gantry::moveYAxisTo(float targetY, float speed, float accel, float decel) {
+    if (axisY_.isConfigured()) {
+        axisY_.moveToMm(targetY, speed, accel, decel);
+    } else {
+        currentY_ = (int32_t)targetY;
+    }
+}
+
+void Gantry::updateAxisPositions() {
+    if (axisY_.isConfigured()) {
+        axisY_.update();
+        currentY_ = (int32_t)axisY_.getCurrentMm();
+    }
+    if (axisTheta_.isConfigured()) {
+        currentTheta_ = (int32_t)axisTheta_.getCurrentDeg();
+    }
+}
+
+void Gantry::stopAllMotion() {
+    axisX_.stopMotion(0);
+    if (axisY_.isConfigured()) {
+        axisY_.stop();
+    }
+    motionState_ = MotionState::IDLE;
+}
+
+// ============================================================================
+// SEQUENTIAL MOTION IMPLEMENTATION
+// ============================================================================
+
+void Gantry::startSequentialMotion() {
+    if (!enabled_ || motionState_ != MotionState::IDLE) {
+        return;
+    }
+    
+    float currentY = getCurrentYPosition();
+    
+    // Determine gripper action: descending = picking (close), ascending = placing (open)
+    gripperTargetState_ = (targetY_mm_ < currentY);
+    
+    // Determine motion sequence based on current and target Y positions
+    if (currentY < safeYHeight_mm_) {
+        // Retract Y to safe height first
+        motionState_ = MotionState::Y_RETRACTING;
+        moveYAxisTo(safeYHeight_mm_, (float)speed_mm_per_s_,
+                   (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_);
+        if (!axisY_.isConfigured()) {
+            motionState_ = MotionState::X_MOVING;
+            startXAxisMotion();
+        }
+    } else if (targetY_mm_ < currentY) {
+        // Y needs to descend to target
+        motionState_ = MotionState::Y_DESCENDING;
+        moveYAxisTo(targetY_mm_, (float)speed_mm_per_s_,
+                   (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_);
+        if (!axisY_.isConfigured()) {
+            motionState_ = MotionState::GRIPPER_ACTUATING;
+            grip(gripperTargetState_);
+            gripperActuateStart_ms_ = millis();
+        }
+    } else {
+        // Y is at safe height, start X movement
+        motionState_ = MotionState::X_MOVING;
+        startXAxisMotion();
+    }
+    
+    // Theta moves independently
+    if (axisTheta_.isConfigured()) {
+        axisTheta_.moveToDeg(targetTheta_deg_);
+        currentTheta_ = (int32_t)axisTheta_.getCurrentDeg();
+    } else {
+        currentTheta_ = (int32_t)targetTheta_deg_;
+    }
+}
+
+void Gantry::processSequentialMotion() {
+    if (!enabled_) {
+        motionState_ = MotionState::IDLE;
+        return;
+    }
+    
+    switch (motionState_) {
+        case MotionState::Y_DESCENDING:
+            // Wait for Y-axis to reach target
+            if (!axisY_.isConfigured() || !axisY_.isBusy()) {
+                // Y-axis reached target, actuate gripper
+                motionState_ = MotionState::GRIPPER_ACTUATING;
+                grip(gripperTargetState_);
+                gripperActuateStart_ms_ = millis();
+            }
+            break;
+            
+        case MotionState::GRIPPER_ACTUATING:
+            if (millis() - gripperActuateStart_ms_ >= Constants::GRIPPER_ACTUATE_TIME_MS) {
+                motionState_ = MotionState::Y_RETRACTING;
+                moveYAxisTo(safeYHeight_mm_, (float)speed_mm_per_s_,
+                           (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_);
+                if (!axisY_.isConfigured()) {
+                    motionState_ = MotionState::X_MOVING;
+                    startXAxisMotion();
+                }
+            }
+            break;
+            
+        case MotionState::Y_RETRACTING:
+            if (!axisY_.isConfigured() || !axisY_.isBusy()) {
+                float currentY = getCurrentYPosition();
+                if (targetY_mm_ < currentY) {
+                    motionState_ = MotionState::Y_DESCENDING;
+                    moveYAxisTo(targetY_mm_, (float)speed_mm_per_s_,
+                               (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_);
+                    if (!axisY_.isConfigured()) {
+                        motionState_ = MotionState::GRIPPER_ACTUATING;
+                        grip(gripperTargetState_);
+                        gripperActuateStart_ms_ = millis();
+                    }
+                } else {
+                    motionState_ = MotionState::X_MOVING;
+                    startXAxisMotion();
+                }
+            }
+            break;
+            
+        case MotionState::X_MOVING:
+            // Wait for X-axis to reach target
+            if (!axisX_.isMotionActive()) {
+                // All motion complete
+                motionState_ = MotionState::IDLE;
+            }
+            break;
+            
+        case MotionState::THETA_MOVING:
+            // Theta moves independently, check if complete
+            if (!axisTheta_.isConfigured()) {
+                motionState_ = MotionState::IDLE;
+            }
+            break;
+            
+        case MotionState::IDLE:
+        default:
+            break;
+    }
+}
+
+void Gantry::startXAxisMotion() {
+    // Calculate X-axis movement in pulses
+    int32_t currentX_pulses = axisX_.getPosition();
+    int32_t targetX_pulses = mmToPulses(targetX_mm_);
+    int32_t deltaX = targetX_pulses - currentX_pulses;
+    
+    if (deltaX == 0) {
+        // Already at target X
+        motionState_ = MotionState::IDLE;
+        return;
+    }
+    
+    // Convert speed: mm/s to pulses/s for X-axis
+    float pulsesPerMm = getPulsesPerMm();
+    uint32_t speed_pps = (uint32_t)(speed_mm_per_s_ * pulsesPerMm);
+    
+    // Convert acceleration/deceleration if provided
+    uint32_t accel_pps = 0;
+    uint32_t decel_pps = 0;
+    if (acceleration_mm_per_s2_ > 0) {
+        accel_pps = (uint32_t)(acceleration_mm_per_s2_ * pulsesPerMm);
+    }
+    if (deceleration_mm_per_s2_ > 0) {
+        decel_pps = (uint32_t)(deceleration_mm_per_s2_ * pulsesPerMm);
+    }
+    
+    // Use default if not specified
+    if (accel_pps == 0) accel_pps = speed_pps / 2;
+    if (decel_pps == 0) decel_pps = speed_pps / 2;
+    
+    // Move X-axis using driver (driver handles limit switch checks internally)
+    axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps);
 }
 
 } // namespace Gantry
