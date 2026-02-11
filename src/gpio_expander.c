@@ -4,6 +4,7 @@
  */
 
 #include "gpio_expander.h"
+#include "MCP23S17.h"
 #include "esp_log.h"
 
 static const char *TAG = "GPIOExpander";
@@ -42,8 +43,8 @@ esp_err_t gpio_expander_set_direction(uint8_t pin, bool is_output) {
         }
         return mcp23s17_set_pin_direction(g_mcp_handle, pin, is_output);
     } else {
-        // Direct GPIO pin
-        gpio_num_t gpio_num = (gpio_num_t)(pin - GPIO_DIRECT_PIN_BASE);
+        // Direct GPIO pin (raw GPIO number, no offset encoding)
+        gpio_num_t gpio_num = (gpio_num_t)pin;
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << gpio_num);
         io_conf.mode = is_output ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT;
@@ -63,7 +64,7 @@ esp_err_t gpio_expander_set_pullup(uint8_t pin, bool enable) {
         return mcp23s17_set_pin_pullup(g_mcp_handle, pin, enable);
     } else {
         // Direct GPIO pin - configure pull-up
-        gpio_num_t gpio_num = (gpio_num_t)(pin - GPIO_DIRECT_PIN_BASE);
+        gpio_num_t gpio_num = (gpio_num_t)pin;
         gpio_set_pull_mode(gpio_num, enable ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
         return ESP_OK;
     }
@@ -78,8 +79,8 @@ esp_err_t gpio_expander_write(uint8_t pin, uint8_t level) {
         }
         return mcp23s17_write_pin(g_mcp_handle, pin, level);
     } else {
-        // Direct GPIO pin
-        gpio_num_t gpio_num = (gpio_num_t)(pin - GPIO_DIRECT_PIN_BASE);
+        // Direct GPIO pin (raw GPIO number, no offset encoding)
+        gpio_num_t gpio_num = (gpio_num_t)pin;
         gpio_set_level(gpio_num, level);
         return ESP_OK;
     }
@@ -94,8 +95,8 @@ uint8_t gpio_expander_read(uint8_t pin) {
         }
         return mcp23s17_read_pin(g_mcp_handle, pin);
     } else {
-        // Direct GPIO pin
-        gpio_num_t gpio_num = (gpio_num_t)(pin - GPIO_DIRECT_PIN_BASE);
+        // Direct GPIO pin (raw GPIO number, no offset encoding)
+        gpio_num_t gpio_num = (gpio_num_t)pin;
         return gpio_get_level(gpio_num);
     }
 }
