@@ -1,7 +1,7 @@
 # Gantry Library Configuration Guide
 
 **Version:** 1.0.0  
-**Last Updated:** 2025-01-XX
+**Last Updated:** Feb 10th 2026
 
 Complete configuration guide for the Gantry library.
 
@@ -560,5 +560,6 @@ gantry.moveTo(placePos, 50, 30);
 
 ---
 
-**Last Updated:** 2025-01-XX  
+**Last Updated:** Feb 10th 2026  
 **Version:** 1.0.0
+
