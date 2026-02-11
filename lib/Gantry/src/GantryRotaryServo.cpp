@@ -55,9 +55,10 @@ bool GantryRotaryServo::begin() {
     }
 
 #if defined(ARDUINO_ARCH_ESP32)
-    ledcSetup(pwmChannel_, kServoFreqHz, kPwmResolutionBits);
-    ledcAttachPin(pwmPin_, pwmChannel_);
-    active_ = true;
+    active_ = ledcAttach(static_cast<uint8_t>(pwmPin_), kServoFreqHz, kPwmResolutionBits);
+    if (!active_) {
+        return false;
+    }
     moveToDeg(currentDeg_);
     return true;
 #else
