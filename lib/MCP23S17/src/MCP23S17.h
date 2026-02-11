@@ -41,7 +41,7 @@ typedef struct mcp23s17_handle* mcp23s17_handle_t;
 /**
  * @brief MCP23S17 configuration structure
  */
-typedef struct {
+typedef struct mcp23s17_config_t {
     spi_host_device_t spi_host;      // SPI host (SPI2_HOST or SPI3_HOST)
     gpio_num_t cs_pin;               // Chip select pin
     gpio_num_t miso_pin;             // MISO pin
