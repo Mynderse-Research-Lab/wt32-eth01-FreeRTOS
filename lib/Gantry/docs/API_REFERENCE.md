@@ -1,7 +1,7 @@
 # Gantry Library API Reference
 
 **Version:** 1.0.0  
-**Last Updated:** 2025-01-XX
+**Last Updated:** Feb 10th 2026
 
 Complete API documentation for the Gantry library.
 
@@ -774,5 +774,6 @@ switch (result) {
 
 ---
 
-**Last Updated:** 2025-01-XX  
+**Last Updated:** Feb 10th 2026  
 **Version:** 1.0.0
+
