@@ -1,7 +1,7 @@
 # Gantry Library Examples
 
 **Version:** 1.0.0  
-**Last Updated:** 2025-01-XX
+**Last Updated:** Feb 10th 2026
 
 Complete code examples for using the Gantry library.
 
@@ -699,5 +699,6 @@ void printStatus() {
 
 ---
 
-**Last Updated:** 2025-01-XX  
+**Last Updated:** Feb 10th 2026  
 **Version:** 1.0.0
+
