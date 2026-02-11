@@ -10,8 +10,7 @@
 #ifndef GPIO_EXPANDER_H
 #define GPIO_EXPANDER_H
 
-#include "MCP23S17.h"
-#include "driver/gpio.h"
+#include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -19,12 +18,16 @@
 extern "C" {
 #endif
 
+// Forward declarations to avoid pulling MCP23S17 SPI internals into this public header.
+typedef struct mcp23s17_config_t mcp23s17_config_t;
+typedef struct mcp23s17_handle* mcp23s17_handle_t;
+
 // Pin mapping: Logical pin numbers mapped to MCP23S17 or direct GPIO
 // MCP23S17 pins: 0-15 (Port A: 0-7, Port B: 8-15)
-// Direct GPIO: 16-255 (ESP32 GPIO numbers)
+// Direct GPIO: 16-255 (raw ESP32 GPIO numbers, no offset encoding)
 
 #define GPIO_EXPANDER_PIN_BASE 0x00  // MCP23S17 pins start at 0
-#define GPIO_DIRECT_PIN_BASE   0x10  // Direct GPIO pins start at 16
+#define GPIO_DIRECT_PIN_BASE   0x10  // Values >= 16 are treated as direct GPIO
 
 // Pin type flags
 #define PIN_TYPE_MCP23S17  0x00
