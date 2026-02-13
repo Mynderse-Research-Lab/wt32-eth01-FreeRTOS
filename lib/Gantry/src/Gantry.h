@@ -22,6 +22,7 @@
 #include "GantryAxisStepper.h"
 #include "GantryRotaryServo.h"
 #include "GantryEndEffector.h"
+#include "GantryLimitSwitch.h"
 #include "GantryUtils.h"
 #include "SDF08NK8X.h"
 #include <Arduino.h>
@@ -182,6 +183,13 @@ public:
     void setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs);
 
     /**
+     * @brief Set joint-space validation limits used by move commands
+     */
+    void setJointLimits(float xMin, float xMax,
+                        float yMin, float yMax,
+                        float thetaMin, float thetaMax);
+
+    /**
      * @brief Configure end-effector pin (overrides constructor pin)
      */
     void setEndEffectorPin(int pin, bool activeHigh = true);
@@ -202,6 +210,16 @@ public:
      * @return int Axis length in mm, or 0 on failure
      */
     int calibrate();
+
+    /**
+     * @brief Request immediate abort of ongoing homing/calibration/motion
+     */
+    void requestAbort();
+
+    /**
+     * @brief Check whether an abort has been requested
+     */
+    bool isAbortRequested() const;
     
     /**
      * @brief Move to target position
@@ -247,6 +265,12 @@ public:
      * @return bool true if busy
      */
     bool isBusy() const;
+
+    /**
+     * @brief Check if gantry motor control is enabled
+     * @return bool true if enabled
+     */
+    bool isEnabled() const;
     
     /**
      * @brief Update function - call frequently in loop
@@ -264,6 +288,30 @@ public:
      * @return int Encoder position (pulses)
      */
     int getXEncoder() const;
+
+    /**
+     * @brief Get raw X-axis encoder feedback (always encoder counter)
+     * @return int Encoder position (pulses)
+     */
+    int getXEncoderRaw() const;
+
+    /**
+     * @brief Get X-axis commanded/driver position
+     * @return int Position (pulses)
+     */
+    int32_t getXCommandedPulses() const;
+
+    /**
+     * @brief Get X-axis commanded/driver position in mm
+     * @return float Position (mm)
+     */
+    float getXCommandedMm() const;
+
+    /**
+     * @brief Get X-axis raw encoder position in mm
+     * @return float Position (mm)
+     */
+    float getXEncoderMm() const;
     
     /**
      * @brief Get current Y position
@@ -345,12 +393,18 @@ private:
     int gripperPin_;
     int xMinPin_;
     int xMaxPin_;
+    GantryLimitSwitch xMinSwitch_;
+    GantryLimitSwitch xMaxSwitch_;
     
     bool initialized_;
     bool enabled_;
+    bool abortRequested_;
+    bool homingInProgress_;
+    bool calibrationInProgress_;
     bool gripperActive_;
     
     // Position tracking
+    float currentX_mm_;
     int32_t currentY_;
     int32_t currentTheta_;
     int32_t targetY_;
@@ -383,6 +437,7 @@ private:
     uint32_t deceleration_mm_per_s2_;
     bool gripperTargetState_;  // Target gripper state (grab/release)
     uint32_t gripperActuateStart_ms_;  // Timestamp when gripper started actuating
+    uint32_t lastXPositionCounts_;
     
     // Helper methods for unit conversion (private)
     float pulsesToMm(int32_t pulses) const;
@@ -396,7 +451,7 @@ private:
     // Common helper functions
     float getCurrentYPosition() const;
     uint32_t getHomingSpeed() const;
-    void moveYAxisTo(float targetY, float speed, float accel, float decel);
+    bool moveYAxisTo(float targetY, float speed, float accel, float decel);
     void updateAxisPositions();
     void stopAllMotion();
 

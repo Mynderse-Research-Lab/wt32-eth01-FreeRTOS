@@ -32,7 +32,7 @@ public:
     bool isConfigured() const { return configured_; }
     bool isActive() const { return active_; }
 
-    void moveToDeg(float angleDeg);
+    bool moveToDeg(float angleDeg);
     float getCurrentDeg() const { return currentDeg_; }
 
 private:

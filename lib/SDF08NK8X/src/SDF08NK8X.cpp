@@ -65,7 +65,10 @@ ServoDriver::ServoDriver(const DriverConfig &config)
       limit_min_state_(false),
       limit_max_state_(false),
       last_limit_sample_ms_(0),
-      limit_irq_pending_(false) {
+      limit_irq_pending_(false),
+      alarm_sample_state_(false),
+      alarm_state_debounced_(false),
+      alarm_stable_count_(0) {
   // Initialize status structure
   status_.position_reached = false;
   status_.brake_released = false;
@@ -83,9 +86,9 @@ ServoDriver::ServoDriver(const DriverConfig &config)
   ramp_args.arg = this;
   ramp_args.name = "servo_ramp_timer";
   esp_err_t timer_err = esp_timer_create(&ramp_args, &ramp_timer_);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: esp_timer_create returned %d, ramp_timer_=%p\n", millis(), timer_err, ramp_timer_);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: esp_timer_create returned %d, ramp_timer_=%p", millis(), timer_err, ramp_timer_);
   if (timer_err != ESP_OK) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - Failed to create timer!\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - Failed to create timer!", millis());
     ramp_timer_ = NULL;
   }
 
@@ -322,35 +325,35 @@ bool ServoDriver::initialize() {
 // ============================================================================
 
 bool ServoDriver::enable() {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: enable() called, initialized_=%d, enabled_=%d\n", millis(), initialized_, enabled_);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: enable() called, initialized_=%d, enabled_=%d", millis(), initialized_, enabled_);
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
   if (!initialized_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - not initialized\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - not initialized", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
   if (enabled_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - already enabled\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - already enabled", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
   if (isAlarmActive()) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - alarm active\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - alarm active", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
 
-  ESP_LOGI(TAG, "[%lu] ServoDriver: Calling setEnablePin(true)\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: Calling setEnablePin(true)", millis());
   if (!setEnablePin(true)) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - setEnablePin returned false\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: enable() failed - setEnablePin returned false", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -358,7 +361,7 @@ bool ServoDriver::enable() {
   }
   enabled_ = true;
   status_.servo_enabled = true;
-  ESP_LOGI(TAG, "[%lu] ServoDriver: enable() SUCCESS\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: enable() SUCCESS", millis());
   return true;
 }
 
@@ -438,7 +441,7 @@ void ServoDriver::stopLEDC() {
 // - update motion state and callbacks
 void ServoDriver::stopMotionFromIsr(const char *reason, bool set_home) {
   if (reason) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: %s\n", millis(), reason);
+    ESP_LOGI(TAG, "[%lu] ServoDriver: %s", millis(), reason);
   }
   if (set_home) {
     homing_active_ = false;
@@ -457,8 +460,8 @@ void ServoDriver::handleMoveComplete() {
   motion_active_ = false;
   DEBUG_PRINT("ServoDriver: Move Complete. Position: ");
   DEBUG_PRINTLN(current_position_);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: Motion stopped at position=%lu\n",
-                millis(), current_position_);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: Motion stopped at position=%lu",
+               millis(), (unsigned long)current_position_);
 
   // Notify callback if registered
   if (position_reached_callback_) {
@@ -474,7 +477,7 @@ void ServoDriver::rampTimerCallback(void *arg) {
   static uint32_t callback_count = 0;
   callback_count++;
   if (callback_count % 100 == 0) {
-    ESP_LOGI(TAG, "[CB] rampTimerCallback: call #%lu\n", callback_count);
+    ESP_LOGI(TAG, "[CB] rampTimerCallback: call #%lu", (unsigned long)callback_count);
   }
   ServoDriver *driver = static_cast<ServoDriver *>(arg);
   driver->updateMotionProfile();
@@ -512,8 +515,27 @@ void ServoDriver::updateMotionProfile() {
     }
   }
 
-  // Stop motion immediately if alarm is active
-  bool alarm_now = isAlarmActive();
+  // Debounce ALM input to reject short EMI spikes.
+  static constexpr uint8_t kAlarmDebounceCycles = 4; // 4 x 5ms = ~20ms
+  bool alarm_raw = isAlarmActive();
+  if (alarm_raw == alarm_state_debounced_) {
+    alarm_stable_count_ = 0;
+    alarm_sample_state_ = alarm_raw;
+  } else {
+    if (alarm_raw != alarm_sample_state_) {
+      alarm_sample_state_ = alarm_raw;
+      alarm_stable_count_ = 1;
+    } else if (alarm_stable_count_ < 255) {
+      alarm_stable_count_++;
+    }
+
+    if (alarm_stable_count_ >= kAlarmDebounceCycles) {
+      alarm_state_debounced_ = alarm_raw;
+      alarm_stable_count_ = 0;
+    }
+  }
+
+  bool alarm_now = alarm_state_debounced_;
   if (alarm_now) {
     status_.alarm_active = true;
     stopMotionFromIsr("ALARM active - stopping motion", false);
@@ -783,10 +805,10 @@ void ServoDriver::updateMotionProfile() {
 void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
                                      double accel_rate, double decel_rate,
                                      bool direction) {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] startMotionProfile ENTER\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] startMotionProfile ENTER", millis());
   // Validate rates to avoid division by zero
   if (accel_rate <= 0.0 || decel_rate <= 0.0) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Invalid accel/decel rates\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Invalid accel/decel rates", millis());
     return;
   }
 
@@ -856,10 +878,10 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   
   // Start with minimum safe frequency; force 1-bit to avoid div_param overflow
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)", millis());
   const double LEDC_MIN_HZ = 500.0; // lowered to allow slow movements
 #else
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 0)\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 0)", millis());
   const double LEDC_MIN_HZ = 40000.0; // higher floor for core v2 divider scaling
 #endif
   double init_freq = profile_.current_freq;
@@ -884,38 +906,38 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   // For v3+: stop output, detach, reattach with new frequency
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Stopping LEDC output\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Stopping LEDC output", millis());
   ledcWrite(config_.ledc_pulse_pin, 0);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Detaching LEDC\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Detaching LEDC", millis());
   ledcDetach(config_.ledc_pulse_pin);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] About to call ledcAttach\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] About to call ledcAttach", millis());
   if (!ledcAttach(config_.ledc_pulse_pin, init_freq_hz, init_resolution)) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - ledcAttach failed\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - ledcAttach failed", millis());
     return;
   }
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcAttach OK, calling ledcWrite with duty=%d\n", millis(), duty);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcAttach OK, calling ledcWrite with duty=%d", millis(), duty);
   ledcWrite(config_.ledc_pulse_pin, duty);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done", millis());
 #else
   // For ESP32 v2.x, stop LEDC output first, then reconfigure
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite(0)\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite(0)", millis());
   ledcWrite(config_.ledc_channel, 0);
   delayMicroseconds(100);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcSetup\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcSetup", millis());
   ledcSetup(config_.ledc_channel, init_freq_hz, init_resolution);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcAttachPin\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcAttachPin", millis());
   ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite with duty=%d\n", millis(), duty);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite with duty=%d", millis(), duty);
   ledcWrite(config_.ledc_channel, duty);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done", millis());
 #endif
 
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Starting ramp timer, ramp_timer_=%p, interval=%lu us\n", millis(), ramp_timer_, (unsigned long)RAMP_INTERVAL_US);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Starting ramp timer, ramp_timer_=%p, interval=%lu us", millis(), ramp_timer_, (unsigned long)RAMP_INTERVAL_US);
   // Start periodic ramp timer
   esp_err_t start_err = esp_timer_start_periodic(ramp_timer_, RAMP_INTERVAL_US);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] esp_timer_start_periodic returned %d\n", millis(), start_err);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] esp_timer_start_periodic returned %d", millis(), start_err);
   if (start_err != ESP_OK) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - Failed to start timer!\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - Failed to start timer!", millis());
   }
 
   DEBUG_PRINT("ServoDriver: Profile started. Total=");
@@ -934,19 +956,19 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
 
 bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
                                  uint32_t acceleration, uint32_t deceleration) {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] moveToPosition ENTER\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] moveToPosition ENTER", millis());
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
   if (isAlarmActive()) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Alarm active - move rejected\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Alarm active - move rejected", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
   if (!initialized_ || !enabled_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Motor not enabled\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Motor not enabled", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -954,7 +976,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   }
 
   if (motion_active_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Busy (Movement in progress)\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Busy (Movement in progress)", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -1000,7 +1022,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   int64_t delta = (int64_t)target_position - (int64_t)current_pos;
   uint32_t pulse_count = (uint32_t)std::abs(delta);
   bool direction = (delta >= 0);  // Logical direction: positive → true, negative → false
-  ESP_LOGI(TAG, "[%lu] ServoDriver: delta=%lld, direction=%d\n", millis(), delta, direction);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: delta=%lld, direction=%d", millis(), delta, direction);
 
   // Check limit switches before allowing movement
   if (config_.limit_min_pin >= 0 && config_.limit_max_pin >= 0) {
@@ -1008,7 +1030,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
     
     // Block positive movement if MAX limit is active
     if (direction && limit_max_state_) {
-      ESP_LOGI(TAG, "[%lu] ServoDriver: MAX limit active - cannot move forward\n", millis());
+      ESP_LOGI(TAG, "[%lu] ServoDriver: MAX limit active - cannot move forward", millis());
 #if SDF08NK8X_USE_FREERTOS
       xSemaphoreGive(mutex_);
 #endif
@@ -1017,7 +1039,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
     
     // Block negative movement if MIN limit is active
     if (!direction && limit_min_state_) {
-      ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit active - cannot move backward\n", millis());
+      ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit active - cannot move backward", millis());
 #if SDF08NK8X_USE_FREERTOS
       xSemaphoreGive(mutex_);
 #endif
@@ -1026,7 +1048,7 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   }
 
   if (pulse_count == 0) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Already at target position\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Already at target position", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -1035,12 +1057,12 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
 
   status_.position_error = delta;
 
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] About to call startMotionProfile\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] About to call startMotionProfile", millis());
 
   // Use motion profile with acceleration/deceleration
   startMotionProfile(pulse_count, (double)speed, (double)acceleration,
                      (double)deceleration, direction);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] startMotionProfile returned\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] startMotionProfile returned", millis());
 #if SDF08NK8X_USE_FREERTOS
   xSemaphoreGive(mutex_);
 #endif
@@ -1049,32 +1071,32 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
 
 bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
                                uint32_t acceleration, uint32_t deceleration) {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] moveRelative ENTER, delta=%lld\n", millis(), delta_counts);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] moveRelative ENTER, delta=%lld", millis(), delta_counts);
 #if SDF08NK8X_USE_FREERTOS
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Taking mutex\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Taking mutex", millis());
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Mutex taken\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Mutex taken", millis());
 #endif
   if (!initialized_ || !enabled_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Motor not enabled\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Motor not enabled", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
 
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calculating target\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calculating target", millis());
   // Calculate target position and validate it doesn't overflow
   int64_t target_signed = (int64_t)current_position_ + delta_counts;
   if (target_signed < 0) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: moveRelative would result in negative position\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: moveRelative would result in negative position", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
     return false;
   }
   if (target_signed > UINT32_MAX) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: moveRelative would overflow position\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: moveRelative would overflow position", millis());
 #if SDF08NK8X_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
@@ -1082,13 +1104,13 @@ bool ServoDriver::moveRelative(int64_t delta_counts, uint32_t speed,
   }
 
   uint32_t target = (uint32_t)target_signed;
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Target calculated: %lu\n", millis(), target);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Target calculated: %lu", millis(), (unsigned long)target);
 #if SDF08NK8X_USE_FREERTOS
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Giving mutex\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Giving mutex", millis());
   xSemaphoreGive(mutex_);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Mutex given\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Mutex given", millis());
 #endif
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling moveToPosition\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling moveToPosition", millis());
   return moveToPosition(target, speed, acceleration, deceleration);
 }
 
@@ -1135,30 +1157,30 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
   xSemaphoreGive(mutex_);
 #endif
 
-  ESP_LOGI(TAG, "[%lu] ServoDriver: Motion stopped at position=%lu\n",
-                millis(), current_position_);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: Motion stopped at position=%lu",
+                millis(), (unsigned long)current_position_);
   DEBUG_PRINTLN("ServoDriver: Motion stopped immediately");
   return true;
 }
 
 bool ServoDriver::startHoming(uint32_t speed) {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: startHoming called\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: startHoming called", millis());
   
   // Check if limit switches are configured
   if (config_.limit_min_pin < 0 || config_.limit_max_pin < 0) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - limit switches not configured\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - limit switches not configured", millis());
     return false;
   }
 
   if (isAlarmActive()) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - alarm active\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - alarm active", millis());
     return false;
   }
   
   // Check if already at MIN limit
   updateLimitDebounce(true);
   if (limit_min_state_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit already active - homing skipped\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit already active - homing skipped", millis());
     homing_active_ = false;
     motion_active_ = false;
     current_position_ = 0;  // Set home position to 0
@@ -1172,14 +1194,14 @@ bool ServoDriver::startHoming(uint32_t speed) {
 
   // Check if at MAX limit
   if (limit_max_state_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: At MAX limit - homing...\n", millis());
+    ESP_LOGI(TAG, "[%lu] ServoDriver: At MAX limit - homing...", millis());
     current_position_ = 22222222;  // Set home position to 0
   }
   
   // Start moving negative (toward MIN limit) at constant speed.
   // We use a large pulse count and rely on limit protection to stop.
   homing_active_ = true;
-  ESP_LOGI(TAG, "[%lu] ServoDriver: Starting homing sequence - moving to MIN limit\n", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: Starting homing sequence - moving to MIN limit", millis());
   
   if (speed == 0) {
     speed = config_.homing_speed_pps;
@@ -1306,7 +1328,7 @@ void ServoDriver::updateLimitDebounce(bool force) {
           bool old_state = limit_min_state_;
           limit_min_state_ = min_now;
           if (config_.limit_log_changes && limit_min_state_ != old_state) {
-            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MIN (IO%d) %s\n",
+            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MIN (IO%d) %s",
                           millis(), config_.limit_min_pin,
                           limit_min_state_ ? "ACTIVE" : "released");
           }
@@ -1327,7 +1349,7 @@ void ServoDriver::updateLimitDebounce(bool force) {
           bool old_state = limit_max_state_;
           limit_max_state_ = max_now;
           if (config_.limit_log_changes && limit_max_state_ != old_state) {
-            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MAX (IO%d) %s\n",
+            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MAX (IO%d) %s",
                           millis(), config_.limit_max_pin,
                           limit_max_state_ ? "ACTIVE" : "released");
           }
@@ -1462,8 +1484,8 @@ String ServoDriver::getVersion() { return String(SERVO_DRIVER_VERSION); }
 String ServoDriver::getDriverInfo() const {
   char buffer[256];
   snprintf(buffer, sizeof(buffer),
-           "Bergerda Servo Driver v%s\n"
-           "Pulse Pin: %d | Dir Pin: %d | Enable Pin: %d | Alarm Pin: %d\n"
+           "Bergerda Servo Driver v%s"
+           "Pulse Pin: %d | Dir Pin: %d | Enable Pin: %d | Alarm Pin: %d"
            "Max Freq: %" PRIu32 " Hz | Encoder PPR: %" PRIu32,
            SERVO_DRIVER_VERSION, config_.output_pin_nos[6],
            config_.output_pin_nos[7], config_.output_pin_nos[0],
@@ -1486,7 +1508,7 @@ bool ServoDriver::writeOutputPin(size_t index, bool state) {
       (index == 7) ? (config_.invert_dir_pin ? !state : state)
                    : (config_.invert_output_logic ? !state : state);
   if (index == 7) {  // DIR pin debug
-    ESP_LOGI(TAG, "[%lu] writeOutputPin[7/DIR]: logical=%d, invert_dir=%d, physical=%d, pin=%d\n",
+    ESP_LOGI(TAG, "[%lu] writeOutputPin[7/DIR]: logical=%d, invert_dir=%d, physical=%d, pin=%d",
                   millis(), state, config_.invert_dir_pin, physical_state,
                   config_.output_pin_nos[index]);
   }
@@ -1495,9 +1517,9 @@ bool ServoDriver::writeOutputPin(size_t index, bool state) {
 }
 
 bool ServoDriver::setDirectionPin(bool state) {
-  ESP_LOGI(TAG, "[%lu] setDirectionPin: logical state=%d\n", millis(), state);
+  ESP_LOGI(TAG, "[%lu] setDirectionPin: logical state=%d", millis(), state);
   bool result = writeOutputPin(7, state);
-  ESP_LOGI(TAG, "[%lu] setDirectionPin: returned %d\n", millis(), result);
+  ESP_LOGI(TAG, "[%lu] setDirectionPin: returned %d", millis(), result);
   return result;
 }
 

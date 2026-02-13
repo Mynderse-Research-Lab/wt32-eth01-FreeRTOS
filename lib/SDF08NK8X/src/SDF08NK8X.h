@@ -561,6 +561,11 @@ private:
   uint32_t last_limit_sample_ms_;
   volatile bool limit_irq_pending_;
 
+  // Alarm debounce state (used in motion update loop to reject short EMI spikes)
+  bool alarm_sample_state_;
+  bool alarm_state_debounced_;
+  uint8_t alarm_stable_count_;
+
 
 
   // Private helper methods
