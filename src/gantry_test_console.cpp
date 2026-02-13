@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gpio_expander.h"
+#include "gantry_app_constants.h"
 #include "esp_log.h"
 
 #include <ctype.h>
@@ -46,10 +47,50 @@ void printLimits(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "=== Limit Switches ===");
   uint8_t limit_min = gpio_expander_read(cfg->limit_min_pin);
   uint8_t limit_max = gpio_expander_read(cfg->limit_max_pin);
-  ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", cfg->limit_min_pin,
-           limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-  ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", cfg->limit_max_pin,
-           limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  if (cfg->use_mcp23s17) {
+    ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", cfg->limit_min_pin,
+             limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+    ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", cfg->limit_max_pin,
+             limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  } else {
+    ESP_LOGI(TAG, "X_LS_MIN (GPIO %d / Home): %s", cfg->limit_min_pin,
+             limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+    ESP_LOGI(TAG, "X_LS_MAX (GPIO %d / End):  %s", cfg->limit_max_pin,
+             limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  }
+}
+
+void printActivePins(const GantryTestConsoleConfig *cfg) {
+  if (cfg == nullptr) {
+    ESP_LOGI(TAG, "ERROR: Pin configuration not available");
+    return;
+  }
+
+  ESP_LOGI(TAG, "=== Active Pin Configuration ===");
+  ESP_LOGI(TAG, "Mode: %s", cfg->use_mcp23s17 ? "MCP23S17 IO Expander" : "Direct WT32 GPIO (temporary)");
+
+  ESP_LOGI(TAG, "X Pulse      : %d", cfg->x_pulse_pin);
+  ESP_LOGI(TAG, "X Dir        : %d", cfg->x_dir_pin);
+  ESP_LOGI(TAG, "X Enable     : %d", cfg->x_enable_pin);
+  ESP_LOGI(TAG, "X Alarm In   : %d", cfg->x_alarm_pin);
+  if (cfg->x_alarm_reset_pin >= 0) {
+    ESP_LOGI(TAG, "X Alarm Reset: %d", cfg->x_alarm_reset_pin);
+  } else {
+    ESP_LOGI(TAG, "X Alarm Reset: disabled");
+  }
+  ESP_LOGI(TAG, "X Encoder A  : %d", cfg->x_encoder_a_pin);
+  ESP_LOGI(TAG, "X Encoder B  : %d", cfg->x_encoder_b_pin);
+  ESP_LOGI(TAG, "Theta PWM    : %d", cfg->theta_pwm_pin);
+
+  if (cfg->use_mcp23s17) {
+    ESP_LOGI(TAG, "X Min Limit  : MCP P%d", cfg->limit_min_pin);
+    ESP_LOGI(TAG, "X Max Limit  : MCP P%d", cfg->limit_max_pin);
+  } else {
+    ESP_LOGI(TAG, "X Min Limit  : GPIO %d", cfg->limit_min_pin);
+    ESP_LOGI(TAG, "X Max Limit  : GPIO %d", cfg->limit_max_pin);
+  }
+
+  ESP_LOGI(TAG, "========================================");
 }
 
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
@@ -75,6 +116,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     printStatus(cfg->gantry);
   } else if (strcmp(cmdLower, "limits") == 0) {
     printLimits(cfg);
+  } else if (strcmp(cmdLower, "pins") == 0) {
+    printActivePins(cfg);
   } else if (strcmp(cmdLower, "enable") == 0) {
     cfg->gantry->enable();
     ESP_LOGI(TAG, "OK Motors enabled");
@@ -152,6 +195,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
   ESP_LOGI(TAG, "  limits               - read limit switches");
+  ESP_LOGI(TAG, "  pins                 - print active pin configuration");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
   ESP_LOGI(TAG, "  home                 - home X-axis");
