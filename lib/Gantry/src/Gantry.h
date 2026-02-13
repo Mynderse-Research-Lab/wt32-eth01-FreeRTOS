@@ -282,6 +282,12 @@ public:
      * @return bool true if alarm is active, false otherwise
      */
     bool isAlarmActive() const;
+
+    /**
+     * @brief Send alarm reset pulse (ARST) to X-axis driver
+     * @return bool true if reset pulse was sent
+     */
+    bool clearAlarm();
     
     /**
      * @brief Set homing speed for X-axis

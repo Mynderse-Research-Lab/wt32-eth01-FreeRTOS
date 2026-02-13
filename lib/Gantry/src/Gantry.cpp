@@ -371,6 +371,13 @@ bool Gantry::isAlarmActive() const {
     return initialized_ && axisX_.isAlarmActive();
 }
 
+bool Gantry::clearAlarm() {
+    if (!initialized_) {
+        return false;
+    }
+    return axisX_.clearAlarm();
+}
+
 void Gantry::setHomingSpeed(uint32_t speed_pps) {
     if (initialized_) {
         BergerdaServo::DriverConfig& config = 

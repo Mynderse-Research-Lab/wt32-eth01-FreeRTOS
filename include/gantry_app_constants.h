@@ -41,8 +41,8 @@
 #define PIN_X_DIR_DIRECT 12
 #define PIN_X_ENABLE_DIRECT 15
 #define PIN_X_ALARM_DIRECT 17
-// No dedicated alarm-reset pin in SDF08NK8X test mapping.
-#define PIN_X_ALARM_RESET_DIRECT -1
+// ARST output enabled for testing.
+#define PIN_X_ALARM_RESET_DIRECT 32
 #define PIN_X_LIMIT_MIN_DIRECT 33
 #define PIN_X_LIMIT_MAX_DIRECT 5
 
