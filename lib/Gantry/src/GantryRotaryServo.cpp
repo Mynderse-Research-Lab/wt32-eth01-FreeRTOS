@@ -71,9 +71,12 @@ bool GantryRotaryServo::begin() {
 #endif
 }
 
-void GantryRotaryServo::moveToDeg(float angleDeg) {
+bool GantryRotaryServo::moveToDeg(float angleDeg) {
     if (!configured_) {
-        return;
+        return false;
+    }
+    if (!active_) {
+        return false;
     }
 
     if (angleDeg < minDeg_) {
@@ -89,6 +92,7 @@ void GantryRotaryServo::moveToDeg(float angleDeg) {
     uint16_t pulseUs =
         static_cast<uint16_t>(minPulseUs_ + (spanPulse * fraction));
     writePulseUs(pulseUs);
+    return true;
 }
 
 void GantryRotaryServo::writePulseUs(uint16_t pulseUs) {

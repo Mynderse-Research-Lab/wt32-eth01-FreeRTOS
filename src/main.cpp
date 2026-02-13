@@ -166,9 +166,9 @@ extern "C" void app_main(void) {
     xConfig.enable_encoder_feedback = true;
     xConfig.pcnt_unit = PCNT_UNIT_0;
     
-    // Limit switches are required for any active X-axis mode.
-    xConfig.limit_min_pin = activeLimitMinPin;
-    xConfig.limit_max_pin = activeLimitMaxPin;
+    // Limit logic is handled in Gantry library (reusable limit objects for all axes).
+    xConfig.limit_min_pin = -1;
+    xConfig.limit_max_pin = -1;
     xConfig.homing_speed_pps = GANTRY_HOMING_SPEED_PPS;
     
     // Motor parameters
@@ -178,6 +178,7 @@ extern "C" void app_main(void) {
     // Control mode
     xConfig.pulse_mode = BergerdaServo::PulseMode::PULSE_DIRECTION;
     xConfig.control_mode = BergerdaServo::ControlMode::POSITION;
+    xConfig.invert_dir_pin = true;
     
     // Create gantry instance (gripper on MCP23S17 PB0)
     static Gantry::Gantry gantry(xConfig, APP_USE_MCP23S17 ? PIN_GRIPPER : -1);
@@ -197,6 +198,7 @@ extern "C" void app_main(void) {
     gantry.setThetaServo(PIN_THETA_PWM, 0);  // LEDC channel 0
     gantry.setThetaLimits(GANTRY_THETA_MIN_DEG, GANTRY_THETA_MAX_DEG);
     gantry.setThetaPulseRange(GANTRY_THETA_MIN_PULSE_US, GANTRY_THETA_MAX_PULSE_US);
+
     
     // Set safe height
     gantry.setSafeYHeight(GANTRY_SAFE_Y_MM);
