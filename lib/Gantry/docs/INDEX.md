@@ -14,6 +14,7 @@ Complete documentation index for the Gantry library.
 - **[Architecture Guide](ARCHITECTURE.md)** - System architecture and design
 - **[Configuration Guide](CONFIGURATION_GUIDE.md)** - Setup and tuning
 - **[Development Status](DEVELOPMENT_STATUS.md)** - Current implementation status
+- **[Development Journal](DEVELOPMENT_JOURNAL.md)** - Chronological implementation record
 - **[Examples](EXAMPLES.md)** - Code examples and tutorials
 
 ---
@@ -135,6 +136,7 @@ pose.theta = 90.0f;
 | ARCHITECTURE.md | ✅ Complete | Feb 10th 2026 |
 | CONFIGURATION_GUIDE.md | ✅ Complete | Feb 10th 2026 |
 | DEVELOPMENT_STATUS.md | ✅ Complete | Feb 10th 2026 |
+| DEVELOPMENT_JOURNAL.md | ✅ Complete | Feb 10th 2026 |
 | EXAMPLES.md | ✅ Complete | Feb 10th 2026 |
 
 ---
