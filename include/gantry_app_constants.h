@@ -1,6 +1,11 @@
 #ifndef GANTRY_APP_CONSTANTS_H
 #define GANTRY_APP_CONSTANTS_H
 
+// Temporary hardware mode switch for app-level testing.
+// 0 = No MCP23S17 connected (direct WT32 GPIO only for critical X-axis signals)
+// 1 = MCP23S17 connected and used for extended IO
+#define APP_USE_MCP23S17 0
+
 // MCP23S17 SPI pins (direct ESP32 GPIO)
 #define PIN_SPI_MISO 19
 #define PIN_SPI_MOSI 23
@@ -29,6 +34,17 @@
 #define PIN_ENC_A 35
 #define PIN_ENC_B 36
 #define PIN_THETA_PWM 13
+
+// Direct WT32 test pins for X-axis (used when APP_USE_MCP23S17 == 0)
+// These intentionally mirror SDF08NK8X-Driver-library test mappings.
+#define PIN_X_PULSE_DIRECT 2
+#define PIN_X_DIR_DIRECT 12
+#define PIN_X_ENABLE_DIRECT 15
+#define PIN_X_ALARM_DIRECT 17
+// No dedicated alarm-reset pin in SDF08NK8X test mapping.
+#define PIN_X_ALARM_RESET_DIRECT -1
+#define PIN_X_LIMIT_MIN_DIRECT 33
+#define PIN_X_LIMIT_MAX_DIRECT 5
 
 // MCP23S17 defaults
 #define MCP23S17_DEVICE_ADDRESS 0x00
