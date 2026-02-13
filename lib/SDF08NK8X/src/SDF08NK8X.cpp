@@ -395,7 +395,7 @@ bool ServoDriver::isAlarmActive() const {
   if (!initialized_ || config_.input_pin_nos[2] <= 0) {
     return false;
   }
-  return !digitalRead(config_.input_pin_nos[2]); // Active LOW
+  return digitalRead(config_.input_pin_nos[2]); // Active LOW
 }
 
 bool ServoDriver::clearAlarm() {
