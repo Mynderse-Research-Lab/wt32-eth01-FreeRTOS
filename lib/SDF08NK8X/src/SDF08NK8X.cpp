@@ -487,12 +487,6 @@ void ServoDriver::rampTimerCallback(void *arg) {
  *       Callbacks are invoked here, so they must also be ISR-safe.
  */
 void ServoDriver::updateMotionProfile() {
-  static uint32_t call_count = 0;
-  call_count++;
-  if (call_count % 100 == 0) {
-    ESP_LOGI(TAG, "[%lu] updateMotionProfile: call #%lu, phase=%d\n", millis(), call_count, (int)profile_.phase);
-  }
-  
   if (profile_.phase == MotionProfile::IDLE) {
     return;
   }
@@ -669,22 +663,11 @@ void ServoDriver::updateMotionProfile() {
     }
     
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    static uint32_t freq_change_count = 0;
-    freq_change_count++;
-    if (freq_change_count % 100 == 0) {
-      ESP_LOGI(TAG, "[%lu] ledcChangeFrequency: call #%lu, freq=%lu, res=%d\n", millis(), freq_change_count, freq_hz, resolution);
-    }
-    double result = ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
-    if (freq_change_count % 100 == 0) {
-      ESP_LOGI(TAG, "[%lu] ledcChangeFrequency returned %f\n", millis(), result);
-    }
+    (void)ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
     // Re-apply duty cycle after frequency change (it may get reset)
     // For 1-bit resolution, we need duty=1 (50% of range 0-1), not 0
     uint8_t max_duty = (1 << resolution) - 1;
     uint8_t duty = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
-    if (freq_change_count % 100 == 0) {
-      ESP_LOGI(TAG, "[%lu] Writing duty=%d (max_duty=%d)\n", millis(), duty, max_duty);
-    }
     ledcWrite(config_.ledc_pulse_pin, duty);
 #else
     // For ESP32 v2.x, ledcSetup reconfigures the channel
