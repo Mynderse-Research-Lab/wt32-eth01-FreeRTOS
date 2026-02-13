@@ -1,10 +1,8 @@
 #include "gantry_test_console.h"
 
 #include "basic_tests.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gpio_expander.h"
-#include "gantry_app_constants.h"
 #include "esp_log.h"
 
 #include <ctype.h>
@@ -178,6 +176,12 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     cfg->gantry->disable();
     cfg->gantry->enable();
     ESP_LOGI(TAG, "OK Stop requested");
+  } else if (strcmp(cmdLower, "alarmreset") == 0 || strcmp(cmdLower, "arst") == 0) {
+    if (cfg->gantry->clearAlarm()) {
+      ESP_LOGI(TAG, "OK Alarm reset pulse sent");
+    } else {
+      ESP_LOGE(TAG, "ERROR: Alarm reset failed (ARST pin may be disabled)");
+    }
   } else if (strcmp(cmdLower, "selftest") == 0) {
     BasicTestSummary result = runBasicTests();
     ESP_LOGI(TAG, "Selftest complete: passed=%d failed=%d", result.passed, result.failed);
@@ -203,6 +207,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  move <x> <y> <t>     - move to position (mm, mm, deg)");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
   ESP_LOGI(TAG, "  stop                 - stop all motion");
+  ESP_LOGI(TAG, "  alarmreset | arst    - pulse alarm reset output (ARST)");
   ESP_LOGI(TAG, "  selftest             - run basic math/config tests");
   ESP_LOGI(TAG, "");
 }
