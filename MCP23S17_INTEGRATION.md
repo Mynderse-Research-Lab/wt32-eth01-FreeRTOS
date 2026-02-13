@@ -1,140 +1,72 @@
-# MCP23S17 GPIO Expander Integration
+# MCP23S17 Integration and Direct GPIO Test Mode
 
 ## Overview
 
-All digital GPIO operations have been moved to MCP23S17 SPI GPIO expander. PWM and encoder pins remain on direct ESP32 GPIO.
+The application supports two X-axis IO modes:
 
-## Pin Assignment
+- `APP_USE_MCP23S17=1`: Extended IO through MCP23S17.
+- `APP_USE_MCP23S17=0`: Temporary direct WT32 GPIO test mode (no MCP hardware connected).
 
-### MCP23S17 GPIO Expander (SPI)
+In both modes:
 
-**SPI Pins (Direct ESP32 GPIO):**
+- Limit switches are required for any active X-axis.
+- Encoder pins stay on direct ESP32 GPIO.
+- Theta servo PWM stays on direct ESP32 GPIO.
+
+## Active Modes
+
+### MCP Mode (`APP_USE_MCP23S17=1`)
+
+SPI wiring:
+
 - CS: GPIO 5
 - MISO: GPIO 19
 - MOSI: GPIO 23
 - SCLK: GPIO 18
 
-**MCP23S17 Port A (Pins 0-7):**
-- Pin 0: X-axis PULSE (output)
-- Pin 1: X-axis DIR (output)
-- Pin 2: X-axis ENABLE (output)
-- Pin 3: X-axis LIMIT_MIN (input, pullup)
-- Pin 4: X-axis LIMIT_MAX (input, pullup)
-- Pin 5: Y-axis STEP (output)
-- Pin 6: Y-axis DIR (output)
-- Pin 7: Y-axis ENABLE (output)
+X-axis signals:
 
-**MCP23S17 Port B (Pins 8-15):**
-- Pin 8: GRIPPER (output)
-- Pin 9: LED (output)
-- Pins 10-15: Available for future use
+- Pulse: `PIN_PULSE` (direct GPIO 32, LEDC)
+- DIR / ENABLE / status and control lines: MCP pins
+- Limits: MCP `PIN_LIMIT_MIN` / `PIN_LIMIT_MAX`
 
-### Direct ESP32 GPIO (PWM/Encoder)
+### Temporary Direct Mode (`APP_USE_MCP23S17=0`)
 
-- GPIO 13: Theta-axis PWM (LEDC output)
-- GPIO 35: Encoder A+ (PCNT input, input-only pin)
-- GPIO 36: Encoder B+ (PCNT input, input-only pin)
+Direct WT32 mapping is aligned to `SDF08NK8X-Driver-library` test app:
 
-## Library Modifications Required
+- X Pulse: GPIO 2
+- X DIR: GPIO 12
+- X ENABLE: GPIO 15
+- X ALM input: GPIO 17
+- X Limit MIN: GPIO 33
+- X Limit MAX: GPIO 5
+- X ALM reset: disabled (`-1`) in this mode
 
-The following libraries need modifications to support MCP23S17:
+Additional direct pins still used:
 
-### 1. SDF08NK8X Library
+- Encoder A: GPIO 35
+- Encoder B: GPIO 36
+- Theta PWM: GPIO 13
 
-**File:** `lib/SDF08NK8X/src/SDF08NK8X.cpp`
+## GPIO Abstraction Behavior
 
-**Changes needed:**
-- Replace `gpio_set_level()` calls with `gpio_expander_write()`
-- Replace `gpio_get_level()` calls with `gpio_expander_read()`
-- Replace `gpio_config()` calls with `gpio_expander_set_direction()`
-- Update limit switch reading to use `gpio_expander_read()`
+`gpio_expander` now behaves as:
 
-**Example:**
-```cpp
-// Old:
-gpio_set_level((gpio_num_t)pin, level);
+- MCP initialized: pins `0..15` are MCP pins, others are direct GPIO.
+- MCP not initialized (`gpio_expander_init(NULL)`): all pins are treated as direct GPIO.
 
-// New:
-gpio_expander_write(pin, level);
-```
+This is required so direct-mode mappings like GPIO `2`, `5`, `12`, and `15` work correctly.
 
-### 2. GantryAxisStepper Library
+## Runtime Verification
 
-**File:** `lib/Gantry/src/GantryAxisStepper.cpp`
+Use serial console commands:
 
-**Changes needed:**
-- Replace `digitalWrite()` / `gpio_set_level()` with `gpio_expander_write()`
-- Replace `digitalRead()` / `gpio_get_level()` with `gpio_expander_read()`
-- Replace `pinMode()` / `gpio_config()` with `gpio_expander_set_direction()`
+- `pins`: prints active runtime pin mapping used by `main.cpp`.
+- `limits`: reads and prints active limit switch states.
 
-**Example:**
-```cpp
-// Old:
-digitalWrite(stepPin_, HIGH);
-digitalWrite(stepPin_, LOW);
+The `pins` command prints from runtime-configured values (not hardcoded display constants).
 
-// New:
-gpio_expander_write(stepPin_, 1);
-gpio_expander_write(stepPin_, 0);
-```
+## Pinout Spreadsheets
 
-### 3. GantryEndEffector Library
-
-**File:** `lib/Gantry/src/GantryEndEffector.cpp`
-
-**Changes needed:**
-- Replace `digitalWrite()` with `gpio_expander_write()`
-- Replace `pinMode()` with `gpio_expander_set_direction()`
-
-### 4. Gantry Library (Limit Switches)
-
-**File:** `lib/Gantry/src/Gantry.cpp`
-
-**Changes needed:**
-- Update limit switch reading to use `gpio_expander_read()`
-- Note: Limit switches are handled by SDF08NK8X library, so changes there will propagate
-
-## GPIO Abstraction Layer
-
-The GPIO abstraction layer (`include/gpio_expander.h` / `src/gpio_expander.c`) provides:
-
-- `gpio_expander_init()` - Initialize MCP23S17
-- `gpio_expander_set_direction()` - Configure pin direction
-- `gpio_expander_set_pullup()` - Configure pull-up resistor
-- `gpio_expander_write()` - Write pin level
-- `gpio_expander_read()` - Read pin level
-
-**Pin Numbering:**
-- MCP23S17 pins: 0-15 (Port A: 0-7, Port B: 8-15)
-- Direct GPIO pins: 16+ (ESP32 GPIO numbers)
-
-## Current Status
-
-✅ **Completed:**
-- MCP23S17 library implementation
-- GPIO abstraction layer
-- Main application initialization
-- Pin definitions updated
-
-⚠️ **Pending:**
-- SDF08NK8X library modifications
-- GantryAxisStepper library modifications
-- GantryEndEffector library modifications
-- Testing and verification
-
-## Testing
-
-After library modifications:
-
-1. Verify MCP23S17 initialization
-2. Test digital outputs (PULSE, DIR, ENABLE, STEP pins)
-3. Test digital inputs (limit switches)
-4. Verify PWM still works (Theta servo)
-5. Verify encoder reading still works (PCNT)
-
-## Notes
-
-- Encoder pins (GPIO 35, 36) must remain on direct ESP32 GPIO for PCNT functionality
-- PWM pins must remain on direct ESP32 GPIO for LEDC functionality
-- All other digital GPIO can be moved to MCP23S17
-- MCP23S17 provides 16 GPIO pins, sufficient for current needs
+- Main mapping: `pinout.csv`
+- Temporary direct-mode mapping: `pinout_temporary_direct_gpio.csv`
