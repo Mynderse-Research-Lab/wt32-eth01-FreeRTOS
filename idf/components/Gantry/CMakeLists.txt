@@ -9,6 +9,7 @@ idf_component_register(
     "${GANTRY_SRC_DIR}/GantryConfig.cpp"
     "${GANTRY_SRC_DIR}/GantryEndEffector.cpp"
     "${GANTRY_SRC_DIR}/GantryKinematics.cpp"
+    "${GANTRY_SRC_DIR}/GantryLimitSwitch.cpp"
     "${GANTRY_SRC_DIR}/GantryRotaryServo.cpp"
     "${GANTRY_SRC_DIR}/GantryTrajectory.cpp"
   INCLUDE_DIRS
