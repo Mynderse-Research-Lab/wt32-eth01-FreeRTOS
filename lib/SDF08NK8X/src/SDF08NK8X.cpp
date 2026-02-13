@@ -57,15 +57,7 @@ ServoDriver::ServoDriver(const DriverConfig &config)
       current_direction_(true),
       homing_active_(false),
       travel_distance_valid_(false),
-      travel_distance_steps_(0),
-      limit_min_sample_(0),
-      limit_max_sample_(0),
-      limit_min_stable_(0),
-      limit_max_stable_(0),
-      limit_min_state_(false),
-      limit_max_state_(false),
-      last_limit_sample_ms_(0),
-      limit_irq_pending_(false) {
+      travel_distance_steps_(0) {
   // Initialize status structure
   status_.position_reached = false;
   status_.brake_released = false;
@@ -229,20 +221,6 @@ bool ServoDriver::initialize() {
     if (config_.input_pin_nos[i] >= 0) {
       pinMode(config_.input_pin_nos[i], INPUT);
     }
-  }
-
-  // Configure limit switch pins (active LOW with pullup)
-  if (config_.limit_min_pin >= 0) {
-    pinMode(config_.limit_min_pin, INPUT_PULLUP);
-    limit_min_sample_ = !digitalRead(config_.limit_min_pin);
-    limit_min_state_ = limit_min_sample_;
-    limit_min_stable_ = 1;
-  }
-  if (config_.limit_max_pin >= 0) {
-    pinMode(config_.limit_max_pin, INPUT_PULLUP);
-    limit_max_sample_ = !digitalRead(config_.limit_max_pin);
-    limit_max_state_ = limit_max_sample_;
-    limit_max_stable_ = 1;
   }
 
   // Initialize LEDC channel for pulse output
@@ -489,27 +467,6 @@ void ServoDriver::rampTimerCallback(void *arg) {
 void ServoDriver::updateMotionProfile() {
   if (profile_.phase == MotionProfile::IDLE) {
     return;
-  }
-
-  // Always refresh limit state before making any safety decisions.
-  // This keeps limit handling deterministic even with switch bounce.
-  updateLimitDebounce();
-
-  // Stop motion if a limit switch is triggered in the travel direction
-  if (config_.limit_min_pin >= 0 && config_.limit_max_pin >= 0) {
-    // profile_.direction == true => positive direction
-    if (profile_.direction && limit_max_state_) {
-      stopMotionFromIsr("MAX limit active - stopping motion", false);
-      return;
-    }
-    if (!profile_.direction && limit_min_state_) {
-      if (homing_active_) {
-        stopMotionFromIsr("MIN limit active - homing complete", true);
-      } else {
-        stopMotionFromIsr("MIN limit active - stopping motion", false);
-      }
-      return;
-    }
   }
 
   // Stop motion immediately if alarm is active
@@ -1002,29 +959,6 @@ bool ServoDriver::moveToPosition(uint32_t target_position, uint32_t speed,
   bool direction = (delta >= 0);  // Logical direction: positive → true, negative → false
   ESP_LOGI(TAG, "[%lu] ServoDriver: delta=%lld, direction=%d\n", millis(), delta, direction);
 
-  // Check limit switches before allowing movement
-  if (config_.limit_min_pin >= 0 && config_.limit_max_pin >= 0) {
-    updateLimitDebounce(true);
-    
-    // Block positive movement if MAX limit is active
-    if (direction && limit_max_state_) {
-      ESP_LOGI(TAG, "[%lu] ServoDriver: MAX limit active - cannot move forward\n", millis());
-#if SDF08NK8X_USE_FREERTOS
-      xSemaphoreGive(mutex_);
-#endif
-      return false;
-    }
-    
-    // Block negative movement if MIN limit is active
-    if (!direction && limit_min_state_) {
-      ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit active - cannot move backward\n", millis());
-#if SDF08NK8X_USE_FREERTOS
-      xSemaphoreGive(mutex_);
-#endif
-      return false;
-    }
-  }
-
   if (pulse_count == 0) {
     ESP_LOGI(TAG, "[%lu] ServoDriver: Already at target position\n", millis());
 #if SDF08NK8X_USE_FREERTOS
@@ -1142,207 +1076,27 @@ bool ServoDriver::stopMotion(uint32_t deceleration) {
 }
 
 bool ServoDriver::startHoming(uint32_t speed) {
-  ESP_LOGI(TAG, "[%lu] ServoDriver: startHoming called\n", millis());
-  
-  // Check if limit switches are configured
-  if (config_.limit_min_pin < 0 || config_.limit_max_pin < 0) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - limit switches not configured\n", millis());
-    return false;
-  }
-
-  if (isAlarmActive()) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: Homing failed - alarm active\n", millis());
-    return false;
-  }
-  
-  // Check if already at MIN limit
-  updateLimitDebounce(true);
-  if (limit_min_state_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: MIN limit already active - homing skipped\n", millis());
-    homing_active_ = false;
-    motion_active_ = false;
-    current_position_ = 0;  // Set home position to 0
-    profile_.phase = MotionProfile::IDLE;
-    if (ramp_timer_) {
-      esp_timer_stop(ramp_timer_);
-    }
-    stopLEDC();
-    return true;
-  }
-
-  // Check if at MAX limit
-  if (limit_max_state_) {
-    ESP_LOGI(TAG, "[%lu] ServoDriver: At MAX limit - homing...\n", millis());
-    current_position_ = 22222222;  // Set home position to 0
-  }
-  
-  // Start moving negative (toward MIN limit) at constant speed.
-  // We use a large pulse count and rely on limit protection to stop.
-  homing_active_ = true;
-  ESP_LOGI(TAG, "[%lu] ServoDriver: Starting homing sequence - moving to MIN limit\n", millis());
-  
-  if (speed == 0) {
-    speed = config_.homing_speed_pps;
-  }
-
-  // Start motion profile in negative direction at constant speed
-  // Use a very large pulse count (will stop when limit is hit)
-  startMotionProfile(1000000000, (double)speed, (double)speed, (double)speed, false);  // direction=false for negative
-  
-  return true;
+  (void)speed;
+  ESP_LOGW(TAG, "[%lu] ServoDriver: startHoming is disabled in driver; use Gantry layer limit logic", millis());
+  return false;
 }
 
 bool ServoDriver::measureTravelDistance(uint32_t speed, uint32_t acceleration,
                                         uint32_t deceleration,
                                         uint32_t timeout_ms) {
-  // Measure travel by:
-  // 1) Homing to MIN (if not already there)
-  // 2) Zeroing position
-  // 3) Moving toward MAX until limit triggers
-  // The final position is the measured travel distance.
-  // TODO: Provide a non-blocking/async version with progress callbacks.
-  if (!initialized_ || !enabled_) {
-    return false;
-  }
-  if (config_.limit_min_pin < 0 || config_.limit_max_pin < 0) {
-    return false;
-  }
-  if (motion_active_) {
-    return false;
-  }
-  if (isAlarmActive()) {
-    return false;
-  }
-
+  (void)speed;
+  (void)acceleration;
+  (void)deceleration;
+  (void)timeout_ms;
   travel_distance_valid_ = false;
   travel_distance_steps_ = 0;
-
-  uint32_t start_ms = millis();
-  updateLimitDebounce(true);
-
-  // Ensure we're at MIN first
-  if (!limit_min_state_) {
-    if (!startHoming(speed)) {
-      return false;
-    }
-    while (isHoming()) {
-      updateLimitDebounce();
-      if ((millis() - start_ms) > timeout_ms) {
-        stopMotion(0);
-        homing_active_ = false;
-        return false;
-      }
-      delay(2);
-    }
-  }
-
-  // Reset position at MIN
-  current_position_ = 0;
-  status_.current_position = 0;
-  updateLimitDebounce(true);
-
-  if (limit_max_state_) {
-    travel_distance_steps_ = 0;
-    travel_distance_valid_ = true;
-    return true;
-  }
-
-  // Move toward MAX with large step count; limit logic will stop at MAX
-  if (!moveRelative(1000000000LL, speed, acceleration, deceleration)) {
-    return false;
-  }
-
-  while (isMotionActive()) {
-    updateLimitDebounce();
-    if ((millis() - start_ms) > timeout_ms) {
-      stopMotion(0);
-      return false;
-    }
-    delay(2);
-  }
-
-  updateLimitDebounce(true);
-  if (!limit_max_state_) {
-    return false;
-  }
-
-  travel_distance_steps_ = current_position_;
-  travel_distance_valid_ = true;
-  return true;
+  ESP_LOGW(TAG, "[%lu] ServoDriver: measureTravelDistance is disabled in driver; use Gantry layer limit logic", millis());
+  return false;
 }
 
-bool ServoDriver::hasTravelDistance() const { return travel_distance_valid_; }
+bool ServoDriver::hasTravelDistance() const { return false; }
 
-uint32_t ServoDriver::getTravelDistance() const { return travel_distance_steps_; }
-
-void IRAM_ATTR ServoDriver::notifyLimitIrq() { limit_irq_pending_ = true; }
-
-void ServoDriver::updateLimitDebounce(bool force) {
-  // Non-blocking debounce with optional ISR-assisted refresh.
-  // - Samples are spaced by limit_sample_interval_ms.
-  // - A state change is accepted only after limit_debounce_cycles
-  //   consecutive matching samples.
-  if (config_.limit_min_pin < 0 && config_.limit_max_pin < 0) {
-    return;
-  }
-  if (limit_irq_pending_) {
-    limit_irq_pending_ = false;
-    force = true;
-  }
-  uint32_t now_ms = millis();
-  if (!force && (now_ms - last_limit_sample_ms_ < config_.limit_sample_interval_ms)) {
-    return;
-  }
-  last_limit_sample_ms_ = now_ms;
-
-  uint8_t cycles = config_.limit_debounce_cycles ? config_.limit_debounce_cycles : 1;
-
-  if (config_.limit_min_pin >= 0) {
-    bool min_now = !digitalRead(config_.limit_min_pin);
-    if (min_now == limit_min_sample_) {
-      if (limit_min_stable_ < cycles) {
-        limit_min_stable_++;
-        if (limit_min_stable_ == cycles) {
-          bool old_state = limit_min_state_;
-          limit_min_state_ = min_now;
-          if (config_.limit_log_changes && limit_min_state_ != old_state) {
-            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MIN (IO%d) %s\n",
-                          millis(), config_.limit_min_pin,
-                          limit_min_state_ ? "ACTIVE" : "released");
-          }
-        }
-      }
-    } else {
-      limit_min_sample_ = min_now;
-      limit_min_stable_ = 1;
-    }
-  }
-
-  if (config_.limit_max_pin >= 0) {
-    bool max_now = !digitalRead(config_.limit_max_pin);
-    if (max_now == limit_max_sample_) {
-      if (limit_max_stable_ < cycles) {
-        limit_max_stable_++;
-        if (limit_max_stable_ == cycles) {
-          bool old_state = limit_max_state_;
-          limit_max_state_ = max_now;
-          if (config_.limit_log_changes && limit_max_state_ != old_state) {
-            ESP_LOGI(TAG, "[%lu] ⚠ LIMIT SWITCH: MAX (IO%d) %s\n",
-                          millis(), config_.limit_max_pin,
-                          limit_max_state_ ? "ACTIVE" : "released");
-          }
-        }
-      }
-    } else {
-      limit_max_sample_ = max_now;
-      limit_max_stable_ = 1;
-    }
-  }
-}
-
-bool ServoDriver::getLimitMinDebounced() const { return limit_min_state_; }
-
-bool ServoDriver::getLimitMaxDebounced() const { return limit_max_state_; }
+uint32_t ServoDriver::getTravelDistance() const { return 0; }
 
 bool ServoDriver::eStop() {
 #if SDF08NK8X_USE_FREERTOS
