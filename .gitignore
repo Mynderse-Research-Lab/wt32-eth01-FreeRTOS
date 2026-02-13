@@ -13,3 +13,4 @@ compile_commands.json
 
 # ESP-IDF build artifacts
 idf/build/
+idf/managed_components/
