@@ -1,0 +1,20 @@
+Mode,Signal,Symbol,WT32_GPIO,Direction,Used_In_Test,Notes
+APP_USE_MCP23S17=0,X pulse output,PIN_X_PULSE_DIRECT,2,Output,Yes,Matches SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,X direction output,PIN_X_DIR_DIRECT,12,Output,Yes,Matches SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,X enable output,PIN_X_ENABLE_DIRECT,15,Output,Yes,Matches SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,X alarm input,PIN_X_ALARM_DIRECT,17,Input,Yes,Matches SDF08NK8X-Driver-library test app (active low)
+APP_USE_MCP23S17=0,X alarm reset output,PIN_X_ALARM_RESET_DIRECT,-1,N/A,No,Not used in SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,Encoder A input,PIN_ENC_A,35,Input,Yes,PCNT input
+APP_USE_MCP23S17=0,Encoder B input,PIN_ENC_B,36,Input,Yes,PCNT input
+APP_USE_MCP23S17=0,Theta PWM output,PIN_THETA_PWM,13,Output,Yes,Servo PWM output
+APP_USE_MCP23S17=0,X CW/CCW prohibition,PIN_X_CWCCW_PROHIB,,N/A,No,Disabled in temporary mode
+APP_USE_MCP23S17=0,X pulse inhibit,PIN_X_PULSE_INHIB,,N/A,No,Disabled in temporary mode
+APP_USE_MCP23S17=0,X pos reached input,PIN_X_POS_REACHED,,N/A,No,Disabled in temporary mode
+APP_USE_MCP23S17=0,X brake status input,PIN_X_BRAKE_STATUS,,N/A,No,Disabled in temporary mode
+APP_USE_MCP23S17=0,X min limit input,PIN_X_LIMIT_MIN_DIRECT,33,Input,Yes,Matches SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,X max limit input,PIN_X_LIMIT_MAX_DIRECT,5,Input,Yes,Matches SDF08NK8X-Driver-library test app
+APP_USE_MCP23S17=0,Y step output,PIN_Y_STEP,,N/A,No,Y-axis setup skipped in temporary mode
+APP_USE_MCP23S17=0,Y dir output,PIN_Y_DIR,,N/A,No,Y-axis setup skipped in temporary mode
+APP_USE_MCP23S17=0,Y enable output,PIN_Y_ENABLE,,N/A,No,Y-axis setup skipped in temporary mode
+APP_USE_MCP23S17=0,Gripper output,PIN_GRIPPER,,N/A,No,Gripper skipped in temporary mode
+APP_USE_MCP23S17=0,Status LED output,PIN_LED,,N/A,No,Via MCP only
