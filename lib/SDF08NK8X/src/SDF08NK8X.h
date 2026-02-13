@@ -391,24 +391,6 @@ public:
   uint32_t getTravelDistance() const;
 
   /**
-   * @brief Notify driver of a limit switch GPIO interrupt
-   * @note Call from an ISR to force debounce update on next loop/timer tick.
-   */
-  void notifyLimitIrq();
-
-  /**
-   * @brief Update limit switch debounce state
-   * @param force When true, update immediately regardless of sample interval
-   */
-  void updateLimitDebounce(bool force = false);
-
-  /**
-   * @brief Read debounced limit switch states
-   */
-  bool getLimitMinDebounced() const;
-  bool getLimitMaxDebounced() const;
-
-  /**
    * @brief Emergency stop - immediately disable motor
    * @return true if successful
    */
@@ -551,17 +533,6 @@ private:
   // Travel measurement state (MIN->MAX distance)
   bool travel_distance_valid_;
   uint32_t travel_distance_steps_;
-
-  // Limit switch debounce state
-  // These track the last sampled value and the number of consecutive
-  // matching samples required before accepting a change.
-  uint8_t limit_min_sample_, limit_max_sample_;
-  uint8_t limit_min_stable_, limit_max_stable_;
-  bool limit_min_state_, limit_max_state_;
-  uint32_t last_limit_sample_ms_;
-  volatile bool limit_irq_pending_;
-
-
 
   // Private helper methods
   bool writeOutputPin(size_t index, bool state);
