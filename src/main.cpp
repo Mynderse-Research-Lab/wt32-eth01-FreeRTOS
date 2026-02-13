@@ -151,7 +151,7 @@ extern "C" void app_main(void) {
     xConfig.output_pin_nos[6] = activePulsePin;
     xConfig.output_pin_nos[7] = APP_USE_MCP23S17 ? PIN_DIR : PIN_X_DIR_DIRECT;
     xConfig.output_pin_nos[0] = APP_USE_MCP23S17 ? PIN_ENABLE : PIN_X_ENABLE_DIRECT;
-    xConfig.output_pin_nos[1] = APP_USE_MCP23S17 ? PIN_X_ALARM_RESET : -1;
+    xConfig.output_pin_nos[1] = APP_USE_MCP23S17 ? PIN_X_ALARM_RESET : PIN_X_ALARM_RESET_DIRECT;
     xConfig.output_pin_nos[2] = APP_USE_MCP23S17 ? PIN_X_CWCCW_PROHIB : -1;
     xConfig.output_pin_nos[4] = APP_USE_MCP23S17 ? PIN_X_PULSE_INHIB : -1;
 
