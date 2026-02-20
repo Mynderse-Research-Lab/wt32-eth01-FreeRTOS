@@ -416,8 +416,12 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int accel = -1;
     int decel = -1;
     int parsed = sscanf(cmd, "accel %d %d", &accel, &decel);
-    if (parsed < 1 || accel < 0) {
-      ESP_LOGI(TAG, "ERROR: Usage: accel <mm_per_s2> [decel_mm_per_s2]");
+    if (parsed < 1 || accel <= 0) {
+      ESP_LOGI(TAG, "ERROR: Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
+      return;
+    }
+    if (parsed >= 2 && decel <= 0) {
+      ESP_LOGI(TAG, "ERROR: Decel must be > 0");
       return;
     }
     const uint32_t requestedAccel = (uint32_t)accel;
