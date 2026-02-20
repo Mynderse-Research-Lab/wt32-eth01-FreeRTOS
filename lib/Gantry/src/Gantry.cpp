@@ -478,10 +478,10 @@ int32_t Gantry::getXCommandedPulses() const {
     if (!initialized_) {
         return 0;
     }
-    // Homing seeds a large synthetic counter value to guarantee direction.
-    // This value is not a physical machine coordinate and should not be
-    // surfaced as live commanded position telemetry.
-    if (axisX_.isHoming()) {
+    // Homing/calibration can seed very large synthetic counters to enforce
+    // direction and travel. Those internal references are not physical
+    // machine coordinates and must not be exposed as live commanded position.
+    if (axisX_.isHoming() || homingInProgress_ || calibrationInProgress_) {
         return 0;
     }
     return (int32_t)axisX_.getPosition();
