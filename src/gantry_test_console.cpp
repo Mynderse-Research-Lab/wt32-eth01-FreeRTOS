@@ -45,14 +45,17 @@ static ControlDebounceState g_controlDebounce = {
 static bool g_homeCompletedThisSession = false;
 static bool g_calibratedThisSession = false;
 static bool g_calibrationInProgress = false;
+enum class LinearUnitMode { MM = 0, INCH = 1 };
 static uint32_t g_moveSpeedMmPerS = 50;
 static uint32_t g_moveSpeedDegPerS = 30;
 static uint32_t g_moveAccelMmPerS2 = 0;
 static uint32_t g_moveDecelMmPerS2 = 0;
 static bool g_motionProfileRangeLimitEnabled = true;
+static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
 
+static constexpr float kMmPerInch = 25.4f;
 static constexpr uint32_t kMinSpeedMmPerS = 1;
 static constexpr uint32_t kMaxSpeedMmPerS = 500;
 static constexpr uint32_t kMinAccelMmPerS2 = 100;
@@ -69,6 +72,24 @@ uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue
     return maxValue;
   }
   return value;
+}
+
+const char *getLinearUnitLabel() {
+  return (g_linearUnitMode == LinearUnitMode::INCH) ? "in" : "mm";
+}
+
+float convertMmToSelected(float valueMm) {
+  if (g_linearUnitMode == LinearUnitMode::INCH) {
+    return valueMm / kMmPerInch;
+  }
+  return valueMm;
+}
+
+float convertSelectedToMm(float valueSelected) {
+  if (g_linearUnitMode == LinearUnitMode::INCH) {
+    return valueSelected * kMmPerInch;
+  }
+  return valueSelected;
 }
 
 void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
@@ -93,8 +114,12 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
     const Gantry::JointConfig joint = cfg->gantry->getCurrentJointConfig();
     const float xCmdMm = cfg->gantry->getXCommandedMm();
     const float xEncMm = cfg->gantry->getXEncoderMm();
-    ESP_LOGI(TAG, "LIVE POS: x_cmd=%.2f mm, x_enc=%.2f mm, y=%.2f mm, theta=%.2f deg",
-             xCmdMm, xEncMm, joint.y, joint.theta);
+    const float xCmdDisp = convertMmToSelected(xCmdMm);
+    const float xEncDisp = convertMmToSelected(xEncMm);
+    const float yDisp = convertMmToSelected(joint.y);
+    ESP_LOGI(TAG, "LIVE POS: x_cmd=%.2f %s, x_enc=%.2f %s, y=%.2f %s, theta=%.2f deg",
+             xCmdDisp, getLinearUnitLabel(), xEncDisp, getLinearUnitLabel(),
+             yDisp, getLinearUnitLabel(), joint.theta);
     g_lastLiveMotionLogMs = nowMs;
     g_liveMotionWasBusy = true;
   }
@@ -233,22 +258,31 @@ void printStatus(Gantry::Gantry *gantry) {
 
   ESP_LOGI(TAG, "=== Gantry Status ===");
   Gantry::JointConfig current = gantry->getCurrentJointConfig();
-  ESP_LOGI(TAG, "X Position: %.1f mm", current.x);
+  const float xDisp = convertMmToSelected(current.x);
+  const float yDisp = convertMmToSelected((float)gantry->getCurrentY());
+  ESP_LOGI(TAG, "X Position: %.3f %s", xDisp, getLinearUnitLabel());
   ESP_LOGI(TAG, "X Encoder : %d pulses", gantry->getXEncoder());
-  ESP_LOGI(TAG, "Y Position: %d mm", gantry->getCurrentY());
+  ESP_LOGI(TAG, "Y Position: %.3f %s", yDisp, getLinearUnitLabel());
   ESP_LOGI(TAG, "Theta: %d deg", gantry->getCurrentTheta());
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
-  ESP_LOGI(TAG, "Motion Profile: speed=%lu mm/s, theta=%lu deg/s, accel=%lu mm/s2, decel=%lu mm/s2",
-           (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveSpeedDegPerS,
-           (unsigned long)g_moveAccelMmPerS2, (unsigned long)g_moveDecelMmPerS2);
-  ESP_LOGI(TAG, "Range Limits: %s (speed:%lu-%lu mm/s, accel/decel:%lu-%lu mm/s2)",
+  ESP_LOGI(TAG, "Motion Profile: speed=%.3f %s/s, theta=%lu deg/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
+           convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
+           (unsigned long)g_moveSpeedDegPerS,
+           convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
+           convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
+  ESP_LOGI(TAG, "Range Limits: %s (speed:%.3f-%.3f %s/s, accel/decel:%.3f-%.3f %s/s2)",
            g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED",
-           (unsigned long)kMinSpeedMmPerS, (unsigned long)kMaxSpeedMmPerS,
-           (unsigned long)kMinAccelMmPerS2, (unsigned long)kMaxAccelMmPerS2);
+           convertMmToSelected((float)kMinSpeedMmPerS), convertMmToSelected((float)kMaxSpeedMmPerS),
+           getLinearUnitLabel(),
+           convertMmToSelected((float)kMinAccelMmPerS2), convertMmToSelected((float)kMaxAccelMmPerS2),
+           getLinearUnitLabel());
+  ESP_LOGI(TAG, "Units: linear=%s (internal mm)", getLinearUnitLabel());
 
-  ESP_LOGI(TAG, "Joint Config: x=%.1f y=%.1f theta=%.1f", current.x, current.y, current.theta);
+  ESP_LOGI(TAG, "Joint Config: x=%.3f %s, y=%.3f %s, theta=%.1f deg",
+           convertMmToSelected(current.x), getLinearUnitLabel(),
+           convertMmToSelected(current.y), getLinearUnitLabel(), current.theta);
 
   Gantry::EndEffectorPose pose = gantry->getCurrentEndEffectorPose();
   ESP_LOGI(TAG, "End-Effector: x=%.1f y=%.1f z=%.1f theta=%.1f", pose.x, pose.y, pose.z,
@@ -398,7 +432,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       ESP_LOGI(TAG, "ERROR: Usage: speed <mm_per_s> [deg_per_s]");
       return;
     }
-    const uint32_t requestedSpeedMm = (uint32_t)speedMm;
+    const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)speedMm);
     const uint32_t clampedSpeedMm =
         applyRangeLimitU32(requestedSpeedMm, kMinSpeedMmPerS, kMaxSpeedMmPerS,
                            g_motionProfileRangeLimitEnabled);
@@ -407,11 +441,13 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       g_moveSpeedDegPerS = (uint32_t)speedDeg;
     }
     if (g_motionProfileRangeLimitEnabled && clampedSpeedMm != requestedSpeedMm) {
-      ESP_LOGW(TAG, "Speed clamped: requested=%lu mm/s -> applied=%lu mm/s",
-               (unsigned long)requestedSpeedMm, (unsigned long)clampedSpeedMm);
+      ESP_LOGW(TAG, "Speed clamped: requested=%.3f %s/s -> applied=%.3f %s/s",
+               convertMmToSelected((float)requestedSpeedMm), getLinearUnitLabel(),
+               convertMmToSelected((float)clampedSpeedMm), getLinearUnitLabel());
     }
-    ESP_LOGI(TAG, "OK Speed updated: %lu mm/s, theta=%lu deg/s",
-             (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveSpeedDegPerS);
+    ESP_LOGI(TAG, "OK Speed updated: %.3f %s/s, theta=%lu deg/s",
+             convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
+             (unsigned long)g_moveSpeedDegPerS);
   } else if (strncmp(cmdLower, "accel", 5) == 0) {
     int accel = -1;
     int decel = -1;
@@ -424,8 +460,10 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       ESP_LOGI(TAG, "ERROR: Decel must be > 0");
       return;
     }
-    const uint32_t requestedAccel = (uint32_t)accel;
-    const uint32_t requestedDecel = (parsed >= 2 && decel >= 0) ? (uint32_t)decel : (uint32_t)accel;
+    const uint32_t requestedAccel = (uint32_t)convertSelectedToMm((float)accel);
+    const uint32_t requestedDecel =
+        (parsed >= 2 && decel > 0) ? (uint32_t)convertSelectedToMm((float)decel)
+                                   : (uint32_t)convertSelectedToMm((float)accel);
     const uint32_t clampedAccel =
         applyRangeLimitU32(requestedAccel, kMinAccelMmPerS2, kMaxAccelMmPerS2,
                            g_motionProfileRangeLimitEnabled);
@@ -441,12 +479,34 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     if (g_motionProfileRangeLimitEnabled &&
         (clampedAccel != requestedAccel || clampedDecel != requestedDecel)) {
-      ESP_LOGW(TAG, "Accel/decel clamped: requested=(%lu,%lu) -> applied=(%lu,%lu) mm/s2",
-               (unsigned long)requestedAccel, (unsigned long)requestedDecel,
-               (unsigned long)clampedAccel, (unsigned long)clampedDecel);
+      ESP_LOGW(TAG, "Accel/decel clamped: requested=(%.3f,%.3f) %s/s2 -> applied=(%.3f,%.3f) %s/s2",
+               convertMmToSelected((float)requestedAccel), convertMmToSelected((float)requestedDecel),
+               getLinearUnitLabel(),
+               convertMmToSelected((float)clampedAccel), convertMmToSelected((float)clampedDecel),
+               getLinearUnitLabel());
     }
-    ESP_LOGI(TAG, "OK Accel updated: accel=%lu mm/s2, decel=%lu mm/s2",
-             (unsigned long)g_moveAccelMmPerS2, (unsigned long)g_moveDecelMmPerS2);
+    ESP_LOGI(TAG, "OK Accel updated: accel=%.3f %s/s2, decel=%.3f %s/s2",
+             convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
+             convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
+  } else if (strncmp(cmdLower, "units", 5) == 0) {
+    char unitStr[16] = {0};
+    int parsed = sscanf(cmd, "units %15s", unitStr);
+    if (parsed < 1) {
+      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      return;
+    }
+    for (int i = 0; unitStr[i]; i++) {
+      unitStr[i] = static_cast<char>(tolower(unitStr[i]));
+    }
+    if (strcmp(unitStr, "mm") == 0) {
+      g_linearUnitMode = LinearUnitMode::MM;
+    } else if (strcmp(unitStr, "in") == 0 || strcmp(unitStr, "inch") == 0 || strcmp(unitStr, "inches") == 0) {
+      g_linearUnitMode = LinearUnitMode::INCH;
+    } else {
+      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      return;
+    }
+    ESP_LOGI(TAG, "OK Linear units set to %s (internal storage remains mm)", getLinearUnitLabel());
   } else if (strncmp(cmdLower, "rangelimit", 10) == 0) {
     int enabled = -1;
     int parsed = sscanf(cmd, "rangelimit %d", &enabled);
@@ -469,16 +529,18 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     float theta = 0.0f;
     int parsed = sscanf(cmd, "move %f %f %f", &x, &y, &theta);
     if (parsed < 3) {
-      ESP_LOGI(TAG, "ERROR: Usage: move <x_mm> <y_mm> <theta_deg>");
+      ESP_LOGI(TAG, "ERROR: Usage: move <x_%s> <y_%s> <theta_deg>",
+               getLinearUnitLabel(), getLinearUnitLabel());
       return;
     }
 
     Gantry::JointConfig target;
-    target.x = x;
-    target.y = y;
+    target.x = convertSelectedToMm(x);
+    target.y = convertSelectedToMm(y);
     target.theta = theta;
 
-    ESP_LOGI(TAG, "Moving to: x=%.1f y=%.1f theta=%.1f", x, y, theta);
+    ESP_LOGI(TAG, "Moving to: x=%.3f %s, y=%.3f %s, theta=%.1f deg",
+             x, getLinearUnitLabel(), y, getLinearUnitLabel(), theta);
     Gantry::GantryError result = cfg->gantry->moveTo(
         target, g_moveSpeedMmPerS, g_moveSpeedDegPerS, g_moveAccelMmPerS2, g_moveDecelMmPerS2);
     if (result == Gantry::GantryError::OK) {
@@ -530,8 +592,9 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  disable              - disable motors");
   ESP_LOGI(TAG, "  home                 - home X-axis");
   ESP_LOGI(TAG, "  calibrate            - calibrate X-axis and set X max from result");
-  ESP_LOGI(TAG, "  speed <mm/s> [deg/s] - set move speed");
-  ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (mm/s2)");
+  ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
+  ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
+  ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");
   ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable speed+accel/decel range clamps");
   ESP_LOGI(TAG, "  move <x> <y> <t>     - move to position (requires home+calibrate this startup)");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
