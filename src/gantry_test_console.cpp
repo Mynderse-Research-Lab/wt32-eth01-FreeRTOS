@@ -49,8 +49,27 @@ static uint32_t g_moveSpeedMmPerS = 50;
 static uint32_t g_moveSpeedDegPerS = 30;
 static uint32_t g_moveAccelMmPerS2 = 0;
 static uint32_t g_moveDecelMmPerS2 = 0;
+static bool g_motionProfileRangeLimitEnabled = true;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
+
+static constexpr uint32_t kMinSpeedMmPerS = 1;
+static constexpr uint32_t kMaxSpeedMmPerS = 500;
+static constexpr uint32_t kMinAccelMmPerS2 = 100;
+static constexpr uint32_t kMaxAccelMmPerS2 = 900;
+
+uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
+  if (!enabled) {
+    return value;
+  }
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
+}
 
 void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr || cfg->gantry == nullptr) {
@@ -224,6 +243,10 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Motion Profile: speed=%lu mm/s, theta=%lu deg/s, accel=%lu mm/s2, decel=%lu mm/s2",
            (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveSpeedDegPerS,
            (unsigned long)g_moveAccelMmPerS2, (unsigned long)g_moveDecelMmPerS2);
+  ESP_LOGI(TAG, "Range Limits: %s (speed:%lu-%lu mm/s, accel/decel:%lu-%lu mm/s2)",
+           g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED",
+           (unsigned long)kMinSpeedMmPerS, (unsigned long)kMaxSpeedMmPerS,
+           (unsigned long)kMinAccelMmPerS2, (unsigned long)kMaxAccelMmPerS2);
 
   ESP_LOGI(TAG, "Joint Config: x=%.1f y=%.1f theta=%.1f", current.x, current.y, current.theta);
 
@@ -375,9 +398,17 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       ESP_LOGI(TAG, "ERROR: Usage: speed <mm_per_s> [deg_per_s]");
       return;
     }
-    g_moveSpeedMmPerS = (uint32_t)speedMm;
+    const uint32_t requestedSpeedMm = (uint32_t)speedMm;
+    const uint32_t clampedSpeedMm =
+        applyRangeLimitU32(requestedSpeedMm, kMinSpeedMmPerS, kMaxSpeedMmPerS,
+                           g_motionProfileRangeLimitEnabled);
+    g_moveSpeedMmPerS = clampedSpeedMm;
     if (parsed >= 2 && speedDeg > 0) {
       g_moveSpeedDegPerS = (uint32_t)speedDeg;
+    }
+    if (g_motionProfileRangeLimitEnabled && clampedSpeedMm != requestedSpeedMm) {
+      ESP_LOGW(TAG, "Speed clamped: requested=%lu mm/s -> applied=%lu mm/s",
+               (unsigned long)requestedSpeedMm, (unsigned long)clampedSpeedMm);
     }
     ESP_LOGI(TAG, "OK Speed updated: %lu mm/s, theta=%lu deg/s",
              (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveSpeedDegPerS);
@@ -389,14 +420,41 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       ESP_LOGI(TAG, "ERROR: Usage: accel <mm_per_s2> [decel_mm_per_s2]");
       return;
     }
-    g_moveAccelMmPerS2 = (uint32_t)accel;
+    const uint32_t requestedAccel = (uint32_t)accel;
+    const uint32_t requestedDecel = (parsed >= 2 && decel >= 0) ? (uint32_t)decel : (uint32_t)accel;
+    const uint32_t clampedAccel =
+        applyRangeLimitU32(requestedAccel, kMinAccelMmPerS2, kMaxAccelMmPerS2,
+                           g_motionProfileRangeLimitEnabled);
+    const uint32_t clampedDecel =
+        applyRangeLimitU32(requestedDecel, kMinAccelMmPerS2, kMaxAccelMmPerS2,
+                           g_motionProfileRangeLimitEnabled);
+
+    g_moveAccelMmPerS2 = clampedAccel;
     if (parsed >= 2 && decel >= 0) {
-      g_moveDecelMmPerS2 = (uint32_t)decel;
+      g_moveDecelMmPerS2 = clampedDecel;
     } else {
-      g_moveDecelMmPerS2 = (uint32_t)accel;
+      g_moveDecelMmPerS2 = clampedAccel;
+    }
+    if (g_motionProfileRangeLimitEnabled &&
+        (clampedAccel != requestedAccel || clampedDecel != requestedDecel)) {
+      ESP_LOGW(TAG, "Accel/decel clamped: requested=(%lu,%lu) -> applied=(%lu,%lu) mm/s2",
+               (unsigned long)requestedAccel, (unsigned long)requestedDecel,
+               (unsigned long)clampedAccel, (unsigned long)clampedDecel);
     }
     ESP_LOGI(TAG, "OK Accel updated: accel=%lu mm/s2, decel=%lu mm/s2",
              (unsigned long)g_moveAccelMmPerS2, (unsigned long)g_moveDecelMmPerS2);
+  } else if (strncmp(cmdLower, "rangelimit", 10) == 0) {
+    int enabled = -1;
+    int parsed = sscanf(cmd, "rangelimit %d", &enabled);
+    if (parsed < 1 || (enabled != 0 && enabled != 1)) {
+      ESP_LOGI(TAG, "ERROR: Usage: rangelimit <0|1>");
+      return;
+    }
+    g_motionProfileRangeLimitEnabled = (enabled == 1);
+    ESP_LOGI(TAG, "OK Range limits %s", g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED");
+    ESP_LOGI(TAG, "Configured ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
+             (unsigned long)kMinSpeedMmPerS, (unsigned long)kMaxSpeedMmPerS,
+             (unsigned long)kMinAccelMmPerS2, (unsigned long)kMaxAccelMmPerS2);
   } else if (strncmp(cmdLower, "move", 4) == 0) {
     if (!g_homeCompletedThisSession || !g_calibratedThisSession) {
       ESP_LOGE(TAG, "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup.");
@@ -470,6 +528,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  calibrate            - calibrate X-axis and set X max from result");
   ESP_LOGI(TAG, "  speed <mm/s> [deg/s] - set move speed");
   ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (mm/s2)");
+  ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable speed+accel/decel range clamps");
   ESP_LOGI(TAG, "  move <x> <y> <t>     - move to position (requires home+calibrate this startup)");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
   ESP_LOGI(TAG, "  stop                 - stop all motion");
