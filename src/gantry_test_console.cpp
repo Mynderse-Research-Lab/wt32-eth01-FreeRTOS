@@ -99,18 +99,16 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
 
   const bool busy = cfg->gantry->isBusy();
   const uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-  constexpr uint32_t kLiveLogIntervalMs = 1000;
-
-  if (!busy) {
-    g_liveMotionWasBusy = false;
-    g_lastLiveMotionLogMs = 0;
-    return;
-  }
+  constexpr uint32_t kLiveLogIntervalBusyMs = 100;
+  constexpr uint32_t kLiveLogIntervalIdleMs = 5000;
+  const uint32_t intervalMs = busy ? kLiveLogIntervalBusyMs : kLiveLogIntervalIdleMs;
+  const bool stateChanged = (busy != g_liveMotionWasBusy);
 
   // While motion is active, emit a periodic dual-source X report:
   // - x_cmd: commanded/driver position
   // - x_enc: encoder feedback position
-  if (!g_liveMotionWasBusy || (nowMs - g_lastLiveMotionLogMs) >= kLiveLogIntervalMs) {
+  if (stateChanged || g_lastLiveMotionLogMs == 0 ||
+      (nowMs - g_lastLiveMotionLogMs) >= intervalMs) {
     const Gantry::JointConfig joint = cfg->gantry->getCurrentJointConfig();
     const float xCmdMm = cfg->gantry->getXCommandedMm();
     const float xEncMm = cfg->gantry->getXEncoderMm();
@@ -121,8 +119,8 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
              xCmdDisp, getLinearUnitLabel(), xEncDisp, getLinearUnitLabel(),
              yDisp, getLinearUnitLabel(), joint.theta);
     g_lastLiveMotionLogMs = nowMs;
-    g_liveMotionWasBusy = true;
   }
+  g_liveMotionWasBusy = busy;
 }
 
 void calibrationTask(void *param) {
