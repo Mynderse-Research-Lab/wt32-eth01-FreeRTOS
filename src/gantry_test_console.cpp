@@ -59,7 +59,7 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
 
   const bool busy = cfg->gantry->isBusy();
   const uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-  constexpr uint32_t kLiveLogIntervalMs = 100;
+  constexpr uint32_t kLiveLogIntervalMs = 1000;
 
   if (!busy) {
     g_liveMotionWasBusy = false;
