@@ -165,8 +165,8 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
   cur.enabled = cfg->gantry->isEnabled();
   cur.busy = cfg->gantry->isBusy();
   cur.alarm = cfg->gantry->isAlarmActive();
-  cur.min_limit_active = (gpio_expander_read(cfg->limit_min_pin) == 0);
-  cur.max_limit_active = (gpio_expander_read(cfg->limit_max_pin) == 0);
+  cur.min_limit_active = (gpio_expander_read(cfg->limit_x_min_pin) == 0);
+  cur.max_limit_active = (gpio_expander_read(cfg->limit_x_max_pin) == 0);
   cur.raw_alarm_level = (cfg->x_alarm_pin >= 0) ? gpio_expander_read(cfg->x_alarm_pin) : -1;
 
   if (!g_controlDebounce.initialized) {
@@ -294,12 +294,18 @@ void printLimits(const GantryTestConsoleConfig *cfg) {
   }
 
   ESP_LOGI(TAG, "=== Limit Switches ===");
-  uint8_t limit_min = gpio_expander_read(cfg->limit_min_pin);
-  uint8_t limit_max = gpio_expander_read(cfg->limit_max_pin);
-  ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", cfg->limit_min_pin,
-           limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-  ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", cfg->limit_max_pin,
-           limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  uint8_t x_min = gpio_expander_read(cfg->limit_x_min_pin);
+  uint8_t x_max = gpio_expander_read(cfg->limit_x_max_pin);
+  uint8_t y_min = gpio_expander_read(cfg->limit_y_min_pin);
+  uint8_t y_max = gpio_expander_read(cfg->limit_y_max_pin);
+  ESP_LOGI(TAG, "X_LS_MIN (MCP P%d / Home): %s", cfg->limit_x_min_pin,
+           x_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  ESP_LOGI(TAG, "X_LS_MAX (MCP P%d / End):  %s", cfg->limit_x_max_pin,
+           x_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  ESP_LOGI(TAG, "Y_LS_MIN (MCP P%d / Home): %s", cfg->limit_y_min_pin,
+           y_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  ESP_LOGI(TAG, "Y_LS_MAX (MCP P%d / End):  %s", cfg->limit_y_max_pin,
+           y_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
 }
 
 void printActivePins(const GantryTestConsoleConfig *cfg) {
@@ -311,21 +317,20 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "=== Active Pin Configuration ===");
   ESP_LOGI(TAG, "Mode: MCP23S17 IO Expander");
 
-  ESP_LOGI(TAG, "X Pulse      : %d", cfg->x_pulse_pin);
-  ESP_LOGI(TAG, "X Dir        : %d", cfg->x_dir_pin);
-  ESP_LOGI(TAG, "X Enable     : %d", cfg->x_enable_pin);
-  ESP_LOGI(TAG, "X Alarm In   : %d", cfg->x_alarm_pin);
-  if (cfg->x_alarm_reset_pin >= 0) {
-    ESP_LOGI(TAG, "X Alarm Reset: %d", cfg->x_alarm_reset_pin);
-  } else {
-    ESP_LOGI(TAG, "X Alarm Reset: disabled");
-  }
-  ESP_LOGI(TAG, "X Encoder A  : %d", cfg->x_encoder_a_pin);
-  ESP_LOGI(TAG, "X Encoder B  : %d", cfg->x_encoder_b_pin);
-  ESP_LOGI(TAG, "Theta PWM    : %d", cfg->theta_pwm_pin);
-
-  ESP_LOGI(TAG, "X Min Limit  : MCP P%d", cfg->limit_min_pin);
-  ESP_LOGI(TAG, "X Max Limit  : MCP P%d", cfg->limit_max_pin);
+  ESP_LOGI(TAG, "X Pulse       : GPIO %d (direct)", cfg->x_pulse_pin);
+  ESP_LOGI(TAG, "X Dir         : MCP P%d", cfg->x_dir_pin);
+  ESP_LOGI(TAG, "X Enable      : MCP P%d", cfg->x_enable_pin);
+  ESP_LOGI(TAG, "X Alarm In    : MCP P%d", cfg->x_alarm_pin);
+  ESP_LOGI(TAG, "X Alarm Reset : MCP P%d", cfg->x_alarm_reset_pin);
+  ESP_LOGI(TAG, "Y Alarm In    : MCP P%d", cfg->y_alarm_pin);
+  ESP_LOGI(TAG, "Y Alarm Reset : MCP P%d", cfg->y_alarm_reset_pin);
+  ESP_LOGI(TAG, "X Encoder A   : GPIO %d (direct)", cfg->x_encoder_a_pin);
+  ESP_LOGI(TAG, "X Encoder B   : GPIO %d (direct)", cfg->x_encoder_b_pin);
+  ESP_LOGI(TAG, "Theta PWM     : GPIO %d (direct)", cfg->theta_pwm_pin);
+  ESP_LOGI(TAG, "X Min Limit   : MCP P%d", cfg->limit_x_min_pin);
+  ESP_LOGI(TAG, "X Max Limit   : MCP P%d", cfg->limit_x_max_pin);
+  ESP_LOGI(TAG, "Y Min Limit   : MCP P%d", cfg->limit_y_min_pin);
+  ESP_LOGI(TAG, "Y Max Limit   : MCP P%d", cfg->limit_y_max_pin);
 
   ESP_LOGI(TAG, "========================================");
 }
@@ -373,13 +378,13 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     ESP_LOGI(TAG, "Starting homing sequence...");
 
     // Snapshot pre-home MIN state to detect "already home" no-motion case.
-    bool minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+    bool minWasActive = (gpio_expander_read(cfg->limit_x_min_pin) == 0);
     cfg->gantry->home();
     vTaskDelay(pdMS_TO_TICKS(20));
 
     // If homing did not even start, do not report success.
     if (!cfg->gantry->isBusy()) {
-      bool minIsActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+      bool minIsActive = (gpio_expander_read(cfg->limit_x_min_pin) == 0);
       if (minWasActive || minIsActive) {
         g_homeCompletedThisSession = true;
         ESP_LOGI(TAG, "OK Homing skipped: already at MIN/home switch");

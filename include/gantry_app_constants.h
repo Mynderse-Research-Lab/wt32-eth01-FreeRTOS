@@ -9,21 +9,24 @@
 #define PIN_SPI_CS 5      // GPIO 5  — exposed on header
 
 // MCP23S17 pin assignments (0-15)
-#define PIN_DIR 1
-#define PIN_ENABLE 2
-#define PIN_LIMIT_MIN 3
-#define PIN_LIMIT_MAX 4
-#define PIN_Y_STEP 5
-#define PIN_Y_DIR 6
-#define PIN_Y_ENABLE 7
-#define PIN_GRIPPER 8
-#define PIN_LED 9
-#define PIN_X_POS_REACHED 10
-#define PIN_X_BRAKE_STATUS 11
-#define PIN_X_ALARM_STATUS 12
-#define PIN_X_ALARM_RESET 13
-#define PIN_X_CWCCW_PROHIB 14
-#define PIN_X_PULSE_INHIB 15
+// Port A (pins 0–7)
+#define PIN_DIR 1              // PA1 — X-axis direction (Servo SIGN/DIR)
+#define PIN_ENABLE 2           // PA2 — X-axis servo enable (SON)
+#define PIN_LIMIT_X_MIN 3     // PA3 — X-axis home limit switch (active low, pull-up)
+#define PIN_LIMIT_X_MAX 4     // PA4 — X-axis end limit switch (active low, pull-up)
+#define PIN_Y_STEP 5           // PA5 — Y-axis stepper pulse
+#define PIN_Y_DIR 6            // PA6 — Y-axis stepper direction
+#define PIN_Y_ENABLE 7         // PA7 — Y-axis stepper enable
+
+// Port B (pins 8–15)
+#define PIN_GRIPPER 8          // PB0 — End-effector gripper control
+#define PIN_LIMIT_Y_MIN 9     // PB1 — Y-axis home limit switch (active low, pull-up)
+#define PIN_LIMIT_Y_MAX 10    // PB2 — Y-axis end limit switch (active low, pull-up)
+#define PIN_X_ALARM_STATUS 11 // PB3 — X-axis alarm status (Drive OUT3, active low)
+#define PIN_Y_ALARM_STATUS 12 // PB4 — Y-axis alarm status (Drive OUT3, active low)
+#define PIN_X_ALARM_RESET 13  // PB5 — X-axis alarm reset (Drive IN1/ARST)
+#define PIN_Y_ALARM_RESET 14  // PB6 — Y-axis alarm reset (Drive IN1/ARST)
+#define PIN_X_PULSE_INHIB 15  // PB7 — X-axis pulse inhibit (Drive IN5/INH)
 
 // Direct ESP32 GPIO pins (exposed on WT32-ETH01 headers)
 #define PIN_PULSE 32      // GPIO 32 — LEDC pulse output (labelled CFG)
