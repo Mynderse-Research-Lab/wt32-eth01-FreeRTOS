@@ -47,7 +47,16 @@ Exit monitor with `Ctrl+]`.
 
 - **`idf.py: command not found`**
   - You are not in ESP-IDF shell. Re-run step 2.
+- **`CMakeLists.txt not found in project directory`**
+  - Make sure these files exist:
+    - `idf/CMakeLists.txt`
+    - `idf/main/CMakeLists.txt`
+    - `idf/main/idf_component.yml`
+    - `idf/sdkconfig.defaults`
 - **Wrong COM port**
   - Find your device in Device Manager and update the `-p COMx` value.
 - **Python package / click errors**
   - Re-run ESP-IDF installer or `install.bat` inside `C:\Users\ziaah\esp-idf`.
+- **`Failed to resolve component 'SDF08NK8X'` (or `Gantry`, `MCP23S17`)**
+  - In this branch, build is configured to compile library sources directly from `lib/*/src`.
+  - `idf/main/CMakeLists.txt` should not require custom components named `SDF08NK8X`, `Gantry`, or `MCP23S17`.
