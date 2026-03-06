@@ -1,47 +1,53 @@
 # Build Instructions (ESP-IDF)
 
-This repository no longer tracks the `idf` folder in git.
-To build with ESP-IDF, restore the last tracked `idf` project locally, then build.
+This is the fastest way to build and flash this project with ESP-IDF on Windows.
 
 ## 1) Prerequisites
 
-- ESP-IDF installed (recommended: v5.1 as used by this project)
-- WT32 board connected (optional for build, required for flash/monitor)
+- ESP-IDF installed (tested with `v5.1.x`)
+- Python/toolchain installed through ESP-IDF installer
+- Board connected over USB (for flash/monitor)
 
-## 2) Open an ESP-IDF shell
+## 2) Open ESP-IDF environment
 
-Use an ESP-IDF-enabled shell (or run the export script manually):
-
-### Windows PowerShell
+Open **ESP-IDF PowerShell** from the Start menu, or run:
 
 ```powershell
 . "$env:USERPROFILE\esp-idf\export.ps1"
 ```
 
-## 3) Restore local `idf` project files (not committed)
-
-From repository root:
+## 3) Go to the project
 
 ```powershell
-cd D:\Projects\wt32-eth01-base
-$LAST_IDF_COMMIT = git rev-list -n 1 HEAD -- idf/CMakeLists.txt
-git restore --source $LAST_IDF_COMMIT --worktree -- idf
+cd D:\Projects\wt32-eth01-base\idf
 ```
-
-This restores the `idf` project files into your working tree for local build use.
 
 ## 4) Build
 
 ```powershell
-cd D:\Projects\wt32-eth01-base\idf
 idf.py fullclean
 idf.py build
 ```
 
-## 5) Flash and monitor (optional)
+If build succeeds, firmware is created at:
+
+`D:\Projects\wt32-eth01-base\idf\build\wt32_eth01_base.bin`
+
+## 5) Flash and monitor
+
+Replace `COM3` if your port is different:
 
 ```powershell
 idf.py -p COM3 flash monitor
 ```
 
-Use your actual COM port if different.
+Exit monitor with `Ctrl+]`.
+
+## 6) Quick troubleshooting
+
+- **`idf.py: command not found`**
+  - You are not in ESP-IDF shell. Re-run step 2.
+- **Wrong COM port**
+  - Find your device in Device Manager and update the `-p COMx` value.
+- **Python package / click errors**
+  - Re-run ESP-IDF installer or `install.bat` inside `C:\Users\ziaah\esp-idf`.
