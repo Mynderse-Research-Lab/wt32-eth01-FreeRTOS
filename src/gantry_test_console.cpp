@@ -296,17 +296,10 @@ void printLimits(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "=== Limit Switches ===");
   uint8_t limit_min = gpio_expander_read(cfg->limit_min_pin);
   uint8_t limit_max = gpio_expander_read(cfg->limit_max_pin);
-  if (cfg->use_mcp23s17) {
-    ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", cfg->limit_min_pin,
-             limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-    ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", cfg->limit_max_pin,
-             limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-  } else {
-    ESP_LOGI(TAG, "X_LS_MIN (GPIO %d / Home): %s", cfg->limit_min_pin,
-             limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-    ESP_LOGI(TAG, "X_LS_MAX (GPIO %d / End):  %s", cfg->limit_max_pin,
-             limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
-  }
+  ESP_LOGI(TAG, "X_LS_MIN (MCP23S17 PA%d / Home): %s", cfg->limit_min_pin,
+           limit_min == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
+  ESP_LOGI(TAG, "X_LS_MAX (MCP23S17 PA%d / End):  %s", cfg->limit_max_pin,
+           limit_max == 0 ? "ACTIVE (LOW)" : "open (HIGH)");
 }
 
 void printActivePins(const GantryTestConsoleConfig *cfg) {
@@ -316,7 +309,7 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   }
 
   ESP_LOGI(TAG, "=== Active Pin Configuration ===");
-  ESP_LOGI(TAG, "Mode: %s", cfg->use_mcp23s17 ? "MCP23S17 IO Expander" : "Direct WT32 GPIO (temporary)");
+  ESP_LOGI(TAG, "Mode: MCP23S17 IO Expander");
 
   ESP_LOGI(TAG, "X Pulse      : %d", cfg->x_pulse_pin);
   ESP_LOGI(TAG, "X Dir        : %d", cfg->x_dir_pin);
@@ -331,13 +324,8 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "X Encoder B  : %d", cfg->x_encoder_b_pin);
   ESP_LOGI(TAG, "Theta PWM    : %d", cfg->theta_pwm_pin);
 
-  if (cfg->use_mcp23s17) {
-    ESP_LOGI(TAG, "X Min Limit  : MCP P%d", cfg->limit_min_pin);
-    ESP_LOGI(TAG, "X Max Limit  : MCP P%d", cfg->limit_max_pin);
-  } else {
-    ESP_LOGI(TAG, "X Min Limit  : GPIO %d", cfg->limit_min_pin);
-    ESP_LOGI(TAG, "X Max Limit  : GPIO %d", cfg->limit_max_pin);
-  }
+  ESP_LOGI(TAG, "X Min Limit  : MCP P%d", cfg->limit_min_pin);
+  ESP_LOGI(TAG, "X Max Limit  : MCP P%d", cfg->limit_max_pin);
 
   ESP_LOGI(TAG, "========================================");
 }

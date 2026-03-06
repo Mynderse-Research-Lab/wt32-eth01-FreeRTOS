@@ -12,15 +12,13 @@ static const char *TAG = "GPIOExpander";
 static mcp23s17_handle_t g_mcp_handle = NULL;
 
 static bool is_mcp_pin(uint8_t pin) {
-    // MCP pins are meaningful only when an MCP device is initialized.
-    // In direct mode (no MCP attached), all pins are treated as direct GPIO.
-    return (g_mcp_handle != NULL) && (pin < GPIO_DIRECT_PIN_BASE);
+    return (pin < GPIO_DIRECT_PIN_BASE);
 }
 
 bool gpio_expander_init(const mcp23s17_config_t* mcp_config) {
     if (mcp_config == NULL) {
-        ESP_LOGW(TAG, "MCP23S17 config is NULL - using direct GPIO only");
-        return true;
+        ESP_LOGE(TAG, "MCP23S17 config is NULL");
+        return false;
     }
 
     g_mcp_handle = mcp23s17_init(mcp_config);

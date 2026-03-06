@@ -4,7 +4,7 @@
  * @version 1.0.0
  * 
  * Provides GPIO abstraction that works with both direct ESP32 GPIO
- * and MCP23S17 GPIO expander. Maps logical pin numbers to physical pins.
+ * and MCP23S17 GPIO expander.
  */
 
 #ifndef GPIO_EXPANDER_H
@@ -22,9 +22,9 @@ extern "C" {
 typedef struct mcp23s17_config_t mcp23s17_config_t;
 typedef struct mcp23s17_handle* mcp23s17_handle_t;
 
-// Pin mapping: Logical pin numbers mapped to MCP23S17 or direct GPIO.
-// When MCP23S17 is initialized, pins 0-15 are MCP pins and other pins are direct GPIO.
-// When MCP23S17 is not initialized, all pins are treated as direct GPIO.
+// Pin mapping:
+// - Pins 0..15 are MCP23S17 pins (require MCP23S17 initialization)
+// - Pins >= 16 are treated as direct ESP32 GPIO numbers
 
 #define GPIO_EXPANDER_PIN_BASE 0x00  // MCP23S17 pins start at 0
 #define GPIO_DIRECT_PIN_BASE   0x10  // Values >= 16 are treated as direct GPIO
@@ -36,7 +36,7 @@ typedef struct mcp23s17_handle* mcp23s17_handle_t;
 /**
  * @brief Initialize GPIO expander system
  * 
- * @param mcp_config MCP23S17 configuration (NULL to disable MCP23S17)
+ * @param mcp_config MCP23S17 configuration (must be non-NULL)
  * @return true on success
  */
 bool gpio_expander_init(const mcp23s17_config_t* mcp_config);

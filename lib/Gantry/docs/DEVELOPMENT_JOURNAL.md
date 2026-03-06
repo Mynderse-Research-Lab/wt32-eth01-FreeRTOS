@@ -12,9 +12,7 @@ This journal captures the full development path of the current Gantry + SDF08NK8
 - Migrated the application to a FreeRTOS-style structure.
 - Split serial/test console logic out of `main.cpp` into `src/gantry_test_console.cpp`.
 - Moved pin and app constants into `include/gantry_app_constants.h`.
-- Added dual hardware mode support:
-  - MCP23S17 IO expander mode.
-  - Direct WT32 GPIO mode for test bring-up without MCP23S17.
+- Standardized on MCP23S17 IO expander mode for expansion-card digital IO.
 - Added reusable limit-switch object in Gantry library:
   - `lib/Gantry/src/GantryLimitSwitch.h`
   - `lib/Gantry/src/GantryLimitSwitch.cpp`
@@ -50,15 +48,10 @@ This journal captures the full development path of the current Gantry + SDF08NK8
 
 ---
 
-## 4) Pinout and Test Wiring Evolution
+## 4) Pinout and Wiring
 
-- Temporary direct test mapping aligned to SDF08 driver test branch:
-  - Pulse/Dir/Enable/ALM/ARST wired directly to WT32 pins.
-- ARST test pin enabled and moved to GPIO32.
-- Limit switches required in active axis modes and monitored in runtime diagnostics.
-- Added spreadsheet-friendly pinout artifacts:
-  - `pinout.csv`
-  - `pinout_temporary_direct_gpio.csv`
+- Expansion-card + MCP23S17 mapping is documented in `pinout.csv`.
+- Limit switches are required for active axis motion and monitored in runtime diagnostics.
 
 ---
 
