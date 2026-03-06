@@ -31,6 +31,10 @@ struct UpdateTaskConfig {
     Gantry::Gantry *gantry;
 };
 
+struct IoSelfTestConfig {
+    Gantry::Gantry *gantry;
+};
+
 /**
  * @brief Gantry update task - Calls gantry.update() at 100 Hz
  */
@@ -49,6 +53,54 @@ void gantryUpdateTask(void *param) {
         cfg->gantry->update();
         vTaskDelay(updateInterval);
     }
+}
+
+/**
+ * @brief Simple FreeRTOS self-test task for MCP23S17 + Gantry wiring
+ *
+ * Exercises:
+ * - MCP23S17 LED output (blink)
+ * - Optional short homing + status read via Gantry
+ */
+void mcpIoSelfTestTask(void *param) {
+    auto *cfg = static_cast<IoSelfTestConfig *>(param);
+
+    ESP_LOGI(TAG, "MCP23S17 IO self-test starting");
+
+    // 1) Blink status LED on MCP23S17 a few times to verify SPI + expander IO
+    for (int i = 0; i < 5; ++i) {
+        gpio_expander_write(PIN_LED, 1);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        gpio_expander_write(PIN_LED, 0);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    ESP_LOGI(TAG, "MCP23S17 LED blink test complete");
+
+    // 2) Optional: run a short homing sequence through Gantry if available
+    if (cfg != nullptr && cfg->gantry != nullptr) {
+        ESP_LOGI(TAG, "Starting Gantry homing self-test");
+        cfg->gantry->home();
+
+        const uint32_t kHomingTimeoutMs = 30000;
+        uint32_t startMs = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        while (cfg->gantry->isBusy()) {
+            uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000ULL);
+            if (nowMs - startMs > kHomingTimeoutMs) {
+                ESP_LOGW(TAG, "Gantry homing self-test timed out");
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+
+        Gantry::JointConfig joint = cfg->gantry->getCurrentJointConfig();
+        ESP_LOGI(TAG, "Gantry homing self-test complete: X=%.3f mm, Y=%.3f mm, Theta=%.1f deg",
+                 joint.x, joint.y, joint.theta);
+    } else {
+        ESP_LOGW(TAG, "Gantry pointer is null; skipping motion self-test");
+    }
+
+    ESP_LOGI(TAG, "MCP23S17 IO self-test task finished");
+    vTaskDelete(nullptr);
 }
 
 /**
@@ -198,6 +250,7 @@ extern "C" void app_main(void) {
     
     // Create FreeRTOS tasks
     static UpdateTaskConfig updateCfg = {&gantry};
+    static IoSelfTestConfig ioSelfTestCfg = {&gantry};
     static GantryTestConsoleConfig consoleCfg = {};
     consoleCfg.gantry = &gantry;
     consoleCfg.limit_min_pin = activeLimitMinPin;
@@ -224,6 +277,20 @@ extern "C" void app_main(void) {
     );
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Gantry Update task!");
+    }
+
+    // Optional: MCP23S17 + Gantry IO self-test task (runs once then exits)
+    result = xTaskCreatePinnedToCore(
+        mcpIoSelfTestTask,
+        "McpIoSelfTest",
+        3072,
+        &ioSelfTestCfg,
+        GANTRY_UPDATE_TASK_PRIORITY,
+        NULL,
+        GANTRY_UPDATE_TASK_CORE
+    );
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create MCP IO self-test task!");
     }
 
     // Serial command task - Core 0, low priority
