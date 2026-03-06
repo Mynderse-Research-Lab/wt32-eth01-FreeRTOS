@@ -1,7 +1,7 @@
 Symbol,Domain,Pin,MCP_Port_Bit,Direction,Function,Notes
-PIN_SPI_MISO,ESP32 GPIO,19,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
-PIN_SPI_MOSI,ESP32 GPIO,23,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI
-PIN_SPI_SCLK,ESP32 GPIO,18,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
+PIN_SPI_MISO,ESP32 GPIO,4,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
+PIN_SPI_MOSI,ESP32 GPIO,15,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI (must be HIGH at boot)
+PIN_SPI_SCLK,ESP32 GPIO,14,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
 PIN_SPI_CS,ESP32 GPIO,5,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
 PIN_DIR,MCP23S17,1,Port A bit 1,Output,X-axis direction signal,Servo SIGN/DIR
 PIN_ENABLE,MCP23S17,2,Port A bit 2,Output,X-axis servo enable,Servo SON
@@ -19,6 +19,6 @@ PIN_X_ALARM_RESET,MCP23S17,13,Port B bit 5,Output,X-axis alarm reset command,Dri
 PIN_X_CWCCW_PROHIB,MCP23S17,14,Port B bit 6,Output,X-axis CW/CCW prohibition command,Drive IN3
 PIN_X_PULSE_INHIB,MCP23S17,15,Port B bit 7,Output,X-axis pulse inhibit command,Drive IN5/INH
 PIN_PULSE,ESP32 GPIO,32,,Output,X-axis pulse output,LEDC hardware pulse generation
-PIN_ENC_A,ESP32 GPIO,35,,Input,X-axis encoder A,PCNT input
-PIN_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,PCNT input
-PIN_THETA_PWM,ESP32 GPIO,13,,Output,Theta servo PWM output,LEDC PWM output
+PIN_ENC_A,ESP32 GPIO,35,,Input,X-axis encoder A,PCNT input (input-only)
+PIN_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,PCNT input (input-only)
+PIN_THETA_PWM,ESP32 GPIO,2,,Output,Theta servo PWM output,LEDC PWM output

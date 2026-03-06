@@ -8,12 +8,16 @@ Libraries (`Gantry`, `SDF08NK8X`, `MCP23S17`) are **pin-number agnostic** — th
 
 ## SPI wiring (ESP32 → MCP23S17)
 
-| Signal | ESP32 GPIO | MCP23S17 Pin |
-|--------|-----------|--------------|
-| MISO   | 19        | SO           |
-| MOSI   | 23        | SI           |
-| SCLK   | 18        | SCK          |
-| CS     | 5         | CS           |
+> **WT32-ETH01 note:** GPIO 18, 19, 23 are internally wired to the LAN8720A Ethernet PHY
+> and are **not available** for user IO. SPI is routed to free, exposed GPIOs instead.
+> See `WT32_ETH01_PINOUT.md` for the full board pin map.
+
+| Signal | ESP32 GPIO | MCP23S17 Pin | Boot note |
+|--------|-----------|--------------|-----------|
+| MISO   | **4**     | SO           | No constraints |
+| MOSI   | **15**    | SI           | Must be HIGH at boot (default pull-up OK) |
+| SCLK   | **14**    | SCK          | No constraints |
+| CS     | **5**     | CS           | No constraints |
 
 **Device address:** `0x00` (A0=A1=A2=GND)
 **SPI clock:** 10 MHz
@@ -50,12 +54,12 @@ Libraries (`Gantry`, `SDF08NK8X`, `MCP23S17`) are **pin-number agnostic** — th
 
 These signals **cannot** go through the MCP23S17 because they require hardware peripherals (LEDC, PCNT):
 
-| Symbol         | ESP32 GPIO | Direction | Function                       |
-|----------------|-----------|-----------|--------------------------------|
-| `PIN_PULSE`    | 32        | Output    | X-axis pulse (LEDC hardware)   |
-| `PIN_ENC_A`    | 35        | Input     | X-axis encoder A (PCNT)        |
-| `PIN_ENC_B`    | 36        | Input     | X-axis encoder B (PCNT)        |
-| `PIN_THETA_PWM`| 13        | Output    | Theta servo PWM (LEDC)         |
+| Symbol         | ESP32 GPIO | Direction | Function                       | Boot note |
+|----------------|-----------|-----------|--------------------------------|-----------|
+| `PIN_PULSE`    | 32        | Output    | X-axis pulse (LEDC hardware)   | No constraints |
+| `PIN_ENC_A`    | 35        | Input     | X-axis encoder A (PCNT)        | Input-only; no pull resistors |
+| `PIN_ENC_B`    | 36        | Input     | X-axis encoder B (PCNT)        | Input-only; no pull resistors |
+| `PIN_THETA_PWM`| **2**     | Output    | Theta servo PWM (LEDC)         | Floats at boot = normal boot OK |
 
 ## GPIO Expander Abstraction (`gpio_expander`)
 
