@@ -5,18 +5,18 @@ PIN_SPI_SCLK,ESP32 GPIO,14,,Output,SPI clock for MCP23S17,Connected to MCP23S17 
 PIN_SPI_CS,ESP32 GPIO,5,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
 PIN_DIR,MCP23S17,1,Port A bit 1,Output,X-axis direction signal,Servo SIGN/DIR
 PIN_ENABLE,MCP23S17,2,Port A bit 2,Output,X-axis servo enable,Servo SON
-PIN_LIMIT_MIN,MCP23S17,3,Port A bit 3,Input (pull-up),X-axis home limit switch,Active low
-PIN_LIMIT_MAX,MCP23S17,4,Port A bit 4,Input (pull-up),X-axis end limit switch,Active low
+PIN_LIMIT_X_MIN,MCP23S17,3,Port A bit 3,Input (pull-up),X-axis home limit switch,Active low
+PIN_LIMIT_X_MAX,MCP23S17,4,Port A bit 4,Input (pull-up),X-axis end limit switch,Active low
 PIN_Y_STEP,MCP23S17,5,Port A bit 5,Output,Y-axis step signal,Stepper pulse
 PIN_Y_DIR,MCP23S17,6,Port A bit 6,Output,Y-axis direction signal,Stepper direction
 PIN_Y_ENABLE,MCP23S17,7,Port A bit 7,Output,Y-axis enable signal,Stepper enable
 PIN_GRIPPER,MCP23S17,8,Port B bit 0,Output,End-effector gripper control,Digital on/off
-PIN_LED,MCP23S17,9,Port B bit 1,Output,Status LED,Digital on/off
-PIN_X_POS_REACHED,MCP23S17,10,Port B bit 2,Input (pull-up),X-axis position reached status,Drive OUT1 active low
-PIN_X_BRAKE_STATUS,MCP23S17,11,Port B bit 3,Input (pull-up),X-axis brake status,Drive OUT2 active low
-PIN_X_ALARM_STATUS,MCP23S17,12,Port B bit 4,Input (pull-up),X-axis alarm status,Drive OUT3 active low
+PIN_LIMIT_Y_MIN,MCP23S17,9,Port B bit 1,Input (pull-up),Y-axis home limit switch,Active low
+PIN_LIMIT_Y_MAX,MCP23S17,10,Port B bit 2,Input (pull-up),Y-axis end limit switch,Active low
+PIN_X_ALARM_STATUS,MCP23S17,11,Port B bit 3,Input (pull-up),X-axis alarm status,Drive OUT3 active low
+PIN_Y_ALARM_STATUS,MCP23S17,12,Port B bit 4,Input (pull-up),Y-axis alarm status,Drive OUT3 active low
 PIN_X_ALARM_RESET,MCP23S17,13,Port B bit 5,Output,X-axis alarm reset command,Drive IN1/ARST
-PIN_X_CWCCW_PROHIB,MCP23S17,14,Port B bit 6,Output,X-axis CW/CCW prohibition command,Drive IN3
+PIN_Y_ALARM_RESET,MCP23S17,14,Port B bit 6,Output,Y-axis alarm reset command,Drive IN1/ARST
 PIN_X_PULSE_INHIB,MCP23S17,15,Port B bit 7,Output,X-axis pulse inhibit command,Drive IN5/INH
 PIN_PULSE,ESP32 GPIO,32,,Output,X-axis pulse output,LEDC hardware pulse generation
 PIN_ENC_A,ESP32 GPIO,35,,Input,X-axis encoder A,PCNT input (input-only)
