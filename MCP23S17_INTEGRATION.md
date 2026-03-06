@@ -26,28 +26,28 @@ Libraries (`Gantry`, `SDF08NK8X`, `MCP23S17`) are **pin-number agnostic** — th
 
 ### Port A (pins 0–7)
 
-| MCP Pin | Symbol         | Direction    | Function                         |
-|---------|----------------|-------------|----------------------------------|
-| 0       | *(reserved)*   | —           | —                                |
-| 1       | `PIN_DIR`      | Output      | X-axis direction (Servo SIGN/DIR)|
-| 2       | `PIN_ENABLE`   | Output      | X-axis servo enable (SON)        |
-| 3       | `PIN_LIMIT_MIN`| Input (pull-up) | X-axis home limit switch (active low) |
-| 4       | `PIN_LIMIT_MAX`| Input (pull-up) | X-axis end limit switch (active low)  |
-| 5       | `PIN_Y_STEP`   | Output      | Y-axis stepper pulse             |
-| 6       | `PIN_Y_DIR`    | Output      | Y-axis stepper direction         |
-| 7       | `PIN_Y_ENABLE` | Output      | Y-axis stepper enable            |
+| MCP Pin | Symbol              | Direction         | Function                         |
+|---------|---------------------|-------------------|----------------------------------|
+| 0       | *(reserved)*        | —                 | —                                |
+| 1       | `PIN_DIR`           | Output            | X-axis direction (Servo SIGN/DIR)|
+| 2       | `PIN_ENABLE`        | Output            | X-axis servo enable (SON)        |
+| 3       | `PIN_LIMIT_X_MIN`   | Input (pull-up)   | X-axis home limit switch (active low) |
+| 4       | `PIN_LIMIT_X_MAX`   | Input (pull-up)   | X-axis end limit switch (active low)  |
+| 5       | `PIN_Y_STEP`        | Output            | Y-axis stepper pulse             |
+| 6       | `PIN_Y_DIR`         | Output            | Y-axis stepper direction         |
+| 7       | `PIN_Y_ENABLE`      | Output            | Y-axis stepper enable            |
 
 ### Port B (pins 8–15)
 
 | MCP Pin | Symbol              | Direction       | Function                              |
 |---------|---------------------|-----------------|---------------------------------------|
 | 8       | `PIN_GRIPPER`       | Output          | End-effector gripper control           |
-| 9       | `PIN_LED`           | Output          | Status LED                             |
-| 10      | `PIN_X_POS_REACHED` | Input (pull-up) | X-axis position reached (Drive OUT1)   |
-| 11      | `PIN_X_BRAKE_STATUS`| Input (pull-up) | X-axis brake status (Drive OUT2)       |
-| 12      | `PIN_X_ALARM_STATUS`| Input (pull-up) | X-axis alarm status (Drive OUT3)       |
+| 9       | `PIN_LIMIT_Y_MIN`   | Input (pull-up) | Y-axis home limit switch (active low)                             |
+| 10      | `PIN_LIMIT_Y_MAX`   | Input (pull-up) | Y-axis end limit switch (active low)   |
+| 11      | `PIN_X_ALARM_STATUS`| Input (pull-up) | X-axis alarm status (Drive OUT3)       |
+| 12      | `PIN_Y_ALARM_STATUS`| Input (pull-up) | Y-axis alarm status (Drive OUT3)       |
 | 13      | `PIN_X_ALARM_RESET` | Output          | X-axis alarm reset (Drive IN1/ARST)    |
-| 14      | `PIN_X_CWCCW_PROHIB`| Output          | X-axis CW/CCW prohibition (Drive IN3)  |
+| 14      | `PIN_Y_ALARM_RESET` | Output          | Y-axis alarm reset (Drive IN1/ARST)  |
 | 15      | `PIN_X_PULSE_INHIB` | Output          | X-axis pulse inhibit (Drive IN5/INH)   |
 
 ## Direct ESP32 GPIO pins
