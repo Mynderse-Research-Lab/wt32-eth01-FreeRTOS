@@ -16,7 +16,6 @@
 #include "Gantry.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/pcnt.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -152,7 +151,7 @@ extern "C" void app_main(void) {
     xConfig.input_pin_nos[3] = PIN_X_ENC_A;    // Encoder A+ (ESP32 GPIO 35)
     xConfig.input_pin_nos[4] = PIN_X_ENC_B;    // Encoder B+ (ESP32 GPIO 36)
     xConfig.enable_encoder_feedback = true;
-    xConfig.pcnt_unit = static_cast<pcnt_unit_t>(X_ENCODER_PCNT_UNIT);
+    xConfig.pcnt_unit = X_ENCODER_PCNT_UNIT;
     
     // Limit logic is handled in Gantry library (reusable limit objects for all axes).
     xConfig.limit_min_pin = -1;
@@ -184,7 +183,7 @@ extern "C" void app_main(void) {
     yConfig.input_pin_nos[3] = PIN_Y_ENC_A;
     yConfig.input_pin_nos[4] = PIN_Y_ENC_B;
     yConfig.enable_encoder_feedback = true;
-    yConfig.pcnt_unit = static_cast<pcnt_unit_t>(Y_ENCODER_PCNT_UNIT);
+    yConfig.pcnt_unit = Y_ENCODER_PCNT_UNIT;
     yConfig.limit_min_pin = PIN_Y_LIMIT_MIN;
     yConfig.limit_max_pin = PIN_Y_LIMIT_MAX;
     yConfig.homing_speed_pps = GANTRY_HOMING_SPEED_PPS;
