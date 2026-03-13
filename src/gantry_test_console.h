@@ -15,8 +15,15 @@ struct GantryTestConsoleConfig {
   int x_enable_pin;
   int x_alarm_pin;
   int x_alarm_reset_pin;
+  int y_alarm_pin;
+  int y_alarm_reset_pin;
   int x_encoder_a_pin;
   int x_encoder_b_pin;
+  int y_pulse_pin;
+  int y_encoder_a_pin;
+  int y_encoder_b_pin;
+  int x_pulse_ledc_channel;
+  int y_pulse_ledc_channel;
   int theta_pwm_pin;
 };
 

@@ -5,7 +5,7 @@
  * 
  * This class provides a complete gantry control system with:
  * - X-axis: Real hardware servo driver (SDF08NK8X)
- * - Y-axis: Step/dir stepper axis (cooperative update loop)
+ * - Y-axis: Step/dir stepper axis or optional SDF08NK8X servo
  * - Theta axis: PWM servo (inline rotary)
  * - End-effector: Digital output control
  * - Workspace coordinate system
@@ -86,7 +86,7 @@ struct GantryStatus {
     // Motion state
     bool isBusy;                // True if any axis is moving
     bool xMoving;               // True if X axis is moving
-    bool yMoving;               // True if Y axis is moving (simulated)
+    bool yMoving;               // True if Y axis is moving
     bool thetaMoving;           // True if Theta axis is moving (simulated)
     
     // System state
@@ -109,7 +109,7 @@ struct GantryStatus {
  * 
  * Mechanical Layout:
  * - X-axis: Horizontal axis (SDF08NK8X servo driver, ball-screw)
- * - Y-axis: Vertical axis (stepper, step/dir)
+ * - Y-axis: Vertical axis (stepper step/dir or SDF08NK8X servo)
  * - Theta: Rotary axis (PWM servo)
  */
 class Gantry {
@@ -120,6 +120,9 @@ public:
      * @param gripperPin GPIO pin for the gripper
      */
     Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin);
+    Gantry(const BergerdaServo::DriverConfig &xConfig,
+           const BergerdaServo::DriverConfig &yConfig,
+           int gripperPin);
     
     /**
      * @brief Initialize the Gantry system
@@ -332,8 +335,8 @@ public:
     bool isAlarmActive() const;
 
     /**
-     * @brief Send alarm reset pulse (ARST) to X-axis driver
-     * @return bool true if reset pulse was sent
+     * @brief Send alarm reset pulse (ARST) to configured drive(s)
+     * @return bool true if at least one reset pulse was sent
      */
     bool clearAlarm();
     
@@ -387,6 +390,9 @@ public:
 
 private:
     BergerdaServo::ServoDriver axisX_;
+    BergerdaServo::ServoDriver axisYServo_;
+    bool yServoConfigured_;
+    bool yServoUseEncoder_;
     GantryAxisStepper axisY_;
     GantryRotaryServo axisTheta_;
     GantryEndEffector endEffector_;
@@ -452,6 +458,9 @@ private:
     float getCurrentYPosition() const;
     uint32_t getHomingSpeed() const;
     bool moveYAxisTo(float targetY, float speed, float accel, float decel);
+    bool isYAxisConfigured() const;
+    bool isYAxisBusy() const;
+    float getCurrentYFromServoMm() const;
     void updateAxisPositions();
     void stopAllMotion();
 
