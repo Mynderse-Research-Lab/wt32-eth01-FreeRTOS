@@ -22,7 +22,6 @@ idf_component_register(
     SDF08NK8X
     Gantry
     MCP23S17
-    mqtt
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
@@ -33,7 +32,6 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
   ETH_MDC_PIN=23
   ETH_MDIO_PIN=18
   ARDUINO_RUNNING_CORE=1
-  ELEGANTOTA_USE_ASYNC_WEBSERVER=1
   SDF08NK8X_USE_FREERTOS=0
   SDF08NK8X_DEBUG=1
 )
