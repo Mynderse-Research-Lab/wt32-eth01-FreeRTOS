@@ -35,11 +35,14 @@
 
 struct mcp23s17_handle {
     spi_device_handle_t spi_device;
+    spi_host_device_t spi_host;  // Stored for proper cleanup in deinit
     uint8_t device_address;
     uint8_t port_a_dir;      // Cached direction register
     uint8_t port_b_dir;
     uint8_t port_a_output;   // Cached output latch
     uint8_t port_b_output;
+    uint8_t port_a_pullup;   // Cached pull-up register
+    uint8_t port_b_pullup;
 };
 
 static const char *TAG = "MCP23S17";
@@ -98,6 +101,7 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     }
     memset(handle, 0, sizeof(struct mcp23s17_handle));
     handle->device_address = config->device_address & 0x07;  // Lower 3 bits only
+    handle->spi_host = config->spi_host;
 
     // Configure SPI bus
     spi_bus_config_t bus_cfg = {};
@@ -132,9 +136,8 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Configure CS pin
-    gpio_set_direction(config->cs_pin, GPIO_MODE_OUTPUT);
-    gpio_set_level(config->cs_pin, 1);  // CS high (inactive)
+    // Note: CS pin is managed automatically by the SPI driver (spics_io_num).
+    // No manual gpio_set_direction/gpio_set_level needed.
 
     // Initialize IOCON register (sequential mode, hardware addressing)
     ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x00);
@@ -154,6 +157,8 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
 
     handle->port_a_output = 0x00;
     handle->port_b_output = 0x00;
+    handle->port_a_pullup = 0x00;
+    handle->port_b_pullup = 0x00;
 
     ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X)", 0x20 | handle->device_address);
     return handle;
@@ -165,7 +170,7 @@ void mcp23s17_deinit(mcp23s17_handle_t handle) {
     if (handle->spi_device) {
         spi_bus_remove_device(handle->spi_device);
     }
-    spi_bus_free(SPI2_HOST);  // Assuming SPI2_HOST, adjust if needed
+    spi_bus_free(handle->spi_host);
     free(handle);
 }
 
@@ -194,18 +199,15 @@ esp_err_t mcp23s17_set_pin_pullup(mcp23s17_handle_t handle, mcp23s17_pin_t pin, 
 
     uint8_t bit = pin & 0x07;
     uint8_t reg = (pin < 8) ? MCP23S17_GPPUA : MCP23S17_GPPUB;
-    uint8_t current;
-    
-    esp_err_t ret = mcp23s17_read_register(handle, reg, &current);
-    if (ret != ESP_OK) return ret;
+    uint8_t* pullup_cache = (pin < 8) ? &handle->port_a_pullup : &handle->port_b_pullup;
 
     if (enable) {
-        current |= (1 << bit);
+        *pullup_cache |= (1 << bit);
     } else {
-        current &= ~(1 << bit);
+        *pullup_cache &= ~(1 << bit);
     }
 
-    return mcp23s17_write_register(handle, reg, current);
+    return mcp23s17_write_register(handle, reg, *pullup_cache);
 }
 
 esp_err_t mcp23s17_write_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin, uint8_t level) {
@@ -282,32 +284,36 @@ esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pi
     uint8_t inten_reg = (pin < 8) ? MCP23S17_GPINTENA : MCP23S17_GPINTENB;
     uint8_t intcon_reg = (pin < 8) ? MCP23S17_INTCONA : MCP23S17_INTCONB;
     uint8_t defval_reg = (pin < 8) ? MCP23S17_DEFVALA : MCP23S17_DEFVALB;
+    esp_err_t ret;
 
     // Enable/disable interrupt
     uint8_t inten_val;
-    mcp23s17_read_register(handle, inten_reg, &inten_val);
+    ret = mcp23s17_read_register(handle, inten_reg, &inten_val);
+    if (ret != ESP_OK) return ret;
     if (enable) {
         inten_val |= (1 << bit);
     } else {
         inten_val &= ~(1 << bit);
     }
-    mcp23s17_write_register(handle, inten_reg, inten_val);
+    ret = mcp23s17_write_register(handle, inten_reg, inten_val);
+    if (ret != ESP_OK) return ret;
 
-    // Configure interrupt trigger
+    // Configure interrupt trigger (compare to DEFVAL)
     uint8_t intcon_val;
-    mcp23s17_read_register(handle, intcon_reg, &intcon_val);
-    intcon_val |= (1 << bit);  // Compare to DEFVAL
-    mcp23s17_write_register(handle, intcon_reg, intcon_val);
+    ret = mcp23s17_read_register(handle, intcon_reg, &intcon_val);
+    if (ret != ESP_OK) return ret;
+    intcon_val |= (1 << bit);
+    ret = mcp23s17_write_register(handle, intcon_reg, intcon_val);
+    if (ret != ESP_OK) return ret;
 
     // Set default value for comparison
     uint8_t defval_val;
-    mcp23s17_read_register(handle, defval_reg, &defval_val);
+    ret = mcp23s17_read_register(handle, defval_reg, &defval_val);
+    if (ret != ESP_OK) return ret;
     if (trigger_on_rising) {
         defval_val &= ~(1 << bit);  // Trigger when pin goes HIGH (was LOW)
     } else {
         defval_val |= (1 << bit);   // Trigger when pin goes LOW (was HIGH)
     }
-    mcp23s17_write_register(handle, defval_reg, defval_val);
-
-    return ESP_OK;
+    return mcp23s17_write_register(handle, defval_reg, defval_val);
 }
