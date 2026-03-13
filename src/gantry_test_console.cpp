@@ -316,7 +316,7 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   }
 
   ESP_LOGI(TAG, "=== Active Pin Configuration ===");
-  ESP_LOGI(TAG, "Mode: %s", cfg->use_mcp23s17 ? "MCP23S17 IO Expander" : "Direct WT32 GPIO (temporary)");
+  ESP_LOGI(TAG, "Mode: MCP23S17 IO Expander");
 
   ESP_LOGI(TAG, "X Pulse      : %d", cfg->x_pulse_pin);
   ESP_LOGI(TAG, "X Dir        : %d", cfg->x_dir_pin);
@@ -327,8 +327,20 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   } else {
     ESP_LOGI(TAG, "X Alarm Reset: disabled");
   }
+  ESP_LOGI(TAG, "Y Alarm In   : %d", cfg->y_alarm_pin);
+  if (cfg->y_alarm_reset_pin >= 0) {
+    ESP_LOGI(TAG, "Y Alarm Reset: %d", cfg->y_alarm_reset_pin);
+  } else {
+    ESP_LOGI(TAG, "Y Alarm Reset: disabled");
+  }
   ESP_LOGI(TAG, "X Encoder A  : %d", cfg->x_encoder_a_pin);
   ESP_LOGI(TAG, "X Encoder B  : %d", cfg->x_encoder_b_pin);
+  ESP_LOGI(TAG, "Y Pulse      : %d", cfg->y_pulse_pin);
+  ESP_LOGI(TAG, "Y Encoder A  : %d", cfg->y_encoder_a_pin);
+  ESP_LOGI(TAG, "Y Encoder B  : %d", cfg->y_encoder_b_pin);
+  ESP_LOGI(TAG, "X Pulse LEDC : ch %d", cfg->x_pulse_ledc_channel);
+  ESP_LOGI(TAG, "Y Pulse LEDC : ch %d (active for Y servo pulse generation)",
+           cfg->y_pulse_ledc_channel);
   ESP_LOGI(TAG, "Theta PWM    : %d", cfg->theta_pwm_pin);
 
   if (cfg->use_mcp23s17) {
