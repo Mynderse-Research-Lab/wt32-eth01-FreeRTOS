@@ -27,6 +27,14 @@
 
 static const char *TAG = "GantryExample";
 
+#ifndef DIAG_SKIP_X_ARST_INIT_WRITE
+#define DIAG_SKIP_X_ARST_INIT_WRITE 0
+#endif
+
+#ifndef DIAG_SKIP_Y_ARST_INIT_WRITE
+#define DIAG_SKIP_Y_ARST_INIT_WRITE 0
+#endif
+
 static const char* resetReasonToString(esp_reset_reason_t reason) {
     switch (reason) {
         case ESP_RST_UNKNOWN: return "UNKNOWN";
@@ -164,6 +172,14 @@ extern "C" void app_main(void) {
         {PIN_Y_ALARM_RESET, 0},
     };
     for (const auto &s : initialStates) {
+        if (s.pin == PIN_X_ALARM_RESET && DIAG_SKIP_X_ARST_INIT_WRITE) {
+            logStep("MCP skip initial output write (X alarm reset)");
+            continue;
+        }
+        if (s.pin == PIN_Y_ALARM_RESET && DIAG_SKIP_Y_ARST_INIT_WRITE) {
+            logStep("MCP skip initial output write (Y alarm reset)");
+            continue;
+        }
         logStep("MCP write initial output level");
         if (!checkErr("gpio_expander_write(initial)",
                       gpio_expander_write(s.pin, s.level))) {

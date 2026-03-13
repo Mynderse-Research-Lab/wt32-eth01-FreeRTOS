@@ -36,12 +36,21 @@ Additions:
 4. Checked return codes:
    - `gpio_expander_set_direction`, `gpio_expander_set_pullup`, `gpio_expander_write`
    - On any error, logs operation + `esp_err_to_name()` and returns
+5. ARST isolation toggles (compile-time):
+   - `DIAG_SKIP_X_ARST_INIT_WRITE`
+   - `DIAG_SKIP_Y_ARST_INIT_WRITE`
+   - When enabled (`1`), startup skips the corresponding initial MCP write and logs a skip step.
 
 ## How to Run the Diagnostics
 
 1. Build and flash this branch.
 2. Open serial monitor and capture complete boot logs.
 3. Find the last `[BOOT-STEP N]` emitted before reset.
+
+Optional isolation build flags:
+- Add `-DDIAG_SKIP_X_ARST_INIT_WRITE=1` to isolate X alarm-reset output
+- Add `-DDIAG_SKIP_Y_ARST_INIT_WRITE=1` to isolate Y alarm-reset output
+- You can enable both for full ARST isolation.
 
 Interpretation:
 - If reset occurs before step logs, issue is very early boot or power.
