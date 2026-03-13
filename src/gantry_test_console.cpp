@@ -146,7 +146,7 @@ void calibrationTask(void *param) {
     ESP_LOGI(TAG, "Calibration aborted by stop request");
   } else {
     g_calibratedThisSession = hadCalibration;
-    ESP_LOGI(TAG, "ERROR: Calibration failed");
+    ESP_LOGE(TAG, "Calibration failed");
     if (hadCalibration) {
       ESP_LOGI(TAG, "Keeping previous calibrated X max (no successful recalibration)");
     }
@@ -250,7 +250,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
 
 void printStatus(Gantry::Gantry *gantry) {
   if (gantry == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -289,7 +289,7 @@ void printStatus(Gantry::Gantry *gantry) {
 
 void printLimits(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr || cfg->gantry == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -311,7 +311,7 @@ void printLimits(const GantryTestConsoleConfig *cfg) {
 
 void printActivePins(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Pin configuration not available");
+    ESP_LOGE(TAG, "Pin configuration not available");
     return;
   }
 
@@ -367,7 +367,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   }
 
   if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -439,7 +439,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int speedDeg = -1;
     int parsed = sscanf(cmd, "speed %d %d", &speedMm, &speedDeg);
     if (parsed < 1 || speedMm <= 0) {
-      ESP_LOGI(TAG, "ERROR: Usage: speed <mm_per_s> [deg_per_s]");
+      ESP_LOGE(TAG, "Usage: speed <mm_per_s> [deg_per_s]");
       return;
     }
     const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)speedMm);
@@ -463,11 +463,11 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int decel = -1;
     int parsed = sscanf(cmd, "accel %d %d", &accel, &decel);
     if (parsed < 1 || accel <= 0) {
-      ESP_LOGI(TAG, "ERROR: Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
+      ESP_LOGE(TAG, "Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
       return;
     }
     if (parsed >= 2 && decel <= 0) {
-      ESP_LOGI(TAG, "ERROR: Decel must be > 0");
+      ESP_LOGE(TAG, "Decel must be > 0");
       return;
     }
     const uint32_t requestedAccel = (uint32_t)convertSelectedToMm((float)accel);
@@ -502,7 +502,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     char unitStr[16] = {0};
     int parsed = sscanf(cmd, "units %15s", unitStr);
     if (parsed < 1) {
-      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
     for (int i = 0; unitStr[i]; i++) {
@@ -513,7 +513,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     } else if (strcmp(unitStr, "in") == 0 || strcmp(unitStr, "inch") == 0 || strcmp(unitStr, "inches") == 0) {
       g_linearUnitMode = LinearUnitMode::INCH;
     } else {
-      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
     ESP_LOGI(TAG, "OK Linear units set to %s (internal storage remains mm)", getLinearUnitLabel());
@@ -521,7 +521,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int enabled = -1;
     int parsed = sscanf(cmd, "rangelimit %d", &enabled);
     if (parsed < 1 || (enabled != 0 && enabled != 1)) {
-      ESP_LOGI(TAG, "ERROR: Usage: rangelimit <0|1>");
+      ESP_LOGE(TAG, "Usage: rangelimit <0|1>");
       return;
     }
     g_motionProfileRangeLimitEnabled = (enabled == 1);
@@ -539,7 +539,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     float theta = 0.0f;
     int parsed = sscanf(cmd, "move %f %f %f", &x, &y, &theta);
     if (parsed < 3) {
-      ESP_LOGI(TAG, "ERROR: Usage: move <x_%s> <y_%s> <theta_deg>",
+      ESP_LOGE(TAG, "Usage: move <x_%s> <y_%s> <theta_deg>",
                getLinearUnitLabel(), getLinearUnitLabel());
       return;
     }
@@ -562,7 +562,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int value = 0;
     int parsed = sscanf(cmd, "grip %d", &value);
     if (parsed < 1) {
-      ESP_LOGI(TAG, "ERROR: Usage: grip <0|1>");
+      ESP_LOGE(TAG, "Usage: grip <0|1>");
       return;
     }
     cfg->gantry->grip(value != 0);
