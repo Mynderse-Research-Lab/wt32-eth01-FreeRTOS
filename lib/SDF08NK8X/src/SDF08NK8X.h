@@ -24,7 +24,7 @@
 #endif
 
 #include <Arduino.h>
-#include <driver/pcnt.h>
+#include <driver/pulse_cnt.h>
 #include <esp_timer.h>
 
 // Optional FreeRTOS support - define SDF08NK8X_USE_FREERTOS=1 for thread safety
@@ -135,14 +135,15 @@ struct DriverConfig {
    *                                    (requires enable_encoder_feedback to be true)
    * @param invert_output_logic: Treat LOW (GND) as logical HIGH for outputs
    * @param invert_dir_pin: Invert DIR pin logic (true = swap direction)
-   * @param pcnt_unit: ESP32 PCNT unit (0-7) for encoder counting
+   * @param pcnt_unit: Logical PCNT unit id for app-level bookkeeping
+   *                   (driver/pulse_cnt allocates hardware units dynamically)
    * @param home_on_boot: Automatically home to MIN limit switch on first boot
    */
   bool enable_encoder_feedback;
   bool enable_closed_loop_control;
   bool invert_output_logic;
   bool invert_dir_pin;
-  pcnt_unit_t pcnt_unit;
+  int pcnt_unit;
   bool home_on_boot;
   uint32_t homing_speed_pps;
 
@@ -182,7 +183,7 @@ struct DriverConfig {
         enable_closed_loop_control(false),
         invert_output_logic(true),
         invert_dir_pin(false),
-        pcnt_unit(PCNT_UNIT_0),
+        pcnt_unit(0),
         home_on_boot(HOME_ON_BOOT),
         homing_speed_pps(6000),
         limit_debounce_cycles(10),
@@ -518,7 +519,10 @@ private:
   bool initialized_, enabled_;
   // Encoder Tracking
   int64_t encoder_accumulator_;
-  int16_t last_pcnt_count_;
+  int last_pcnt_count_;
+  pcnt_unit_handle_t pcnt_unit_handle_;
+  pcnt_channel_handle_t pcnt_chan_a_handle_;
+  pcnt_channel_handle_t pcnt_chan_b_handle_;
   
   // Callbacks
   AlarmCallback alarm_callback_;

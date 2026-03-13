@@ -46,6 +46,9 @@ ServoDriver::ServoDriver(const DriverConfig &config)
       enabled_(false),
       encoder_accumulator_(0),
       last_pcnt_count_(0),
+      pcnt_unit_handle_(nullptr),
+      pcnt_chan_a_handle_(nullptr),
+      pcnt_chan_b_handle_(nullptr),
       alarm_callback_(NULL),
       position_reached_callback_(NULL),
       status_update_callback_(NULL),
@@ -115,9 +118,19 @@ ServoDriver::~ServoDriver() {
   stopLEDC();
 
   // Stop encoder counting
-  if (config_.enable_encoder_feedback) {
-    pcnt_counter_pause(config_.pcnt_unit);
-    // Legacy driver doesn't have explicit deinit, but pause is good practice
+  if (pcnt_unit_handle_) {
+    pcnt_unit_stop(pcnt_unit_handle_);
+    pcnt_unit_disable(pcnt_unit_handle_);
+    if (pcnt_chan_a_handle_) {
+      pcnt_del_channel(pcnt_chan_a_handle_);
+      pcnt_chan_a_handle_ = nullptr;
+    }
+    if (pcnt_chan_b_handle_) {
+      pcnt_del_channel(pcnt_chan_b_handle_);
+      pcnt_chan_b_handle_ = nullptr;
+    }
+    pcnt_del_unit(pcnt_unit_handle_);
+    pcnt_unit_handle_ = nullptr;
   }
 
 #if SDF08NK8X_USE_FREERTOS
@@ -244,47 +257,59 @@ bool ServoDriver::initialize() {
     DEBUG_PRINTLN("ServoDriver: LEDC channel initialized");
   }
 
-  // Initialize PCNT for encoder quadrature decoding
+  // Initialize modern pulse counter (PCNT v2) for encoder quadrature decoding
   if (config_.enable_encoder_feedback && config_.input_pin_nos[3] > 0 &&
       config_.input_pin_nos[4] > 0) {
-    // TODO: Migrate to driver/pulse_cnt.h (legacy PCNT is deprecated).
-    // Configure channel 0 for A signal (count on A edges, use B for direction)
-    pcnt_config_t pcnt_config_a = {};
-    pcnt_config_a.pulse_gpio_num = config_.input_pin_nos[3]; // A+
-    pcnt_config_a.ctrl_gpio_num = config_.input_pin_nos[4];  // B+
-    pcnt_config_a.channel = PCNT_CHANNEL_0;
-    pcnt_config_a.unit = config_.pcnt_unit;
-    pcnt_config_a.pos_mode = PCNT_COUNT_INC; // Count up on A rising when B=LOW
-    pcnt_config_a.neg_mode =
-        PCNT_COUNT_DEC; // Count down on A falling when B=LOW
-    pcnt_config_a.lctrl_mode = PCNT_MODE_REVERSE; // Reverse on B=LOW
-    pcnt_config_a.hctrl_mode = PCNT_MODE_KEEP;    // Keep on B=HIGH
-    pcnt_config_a.counter_h_lim = 32767;
-    pcnt_config_a.counter_l_lim = -32768;
-    pcnt_unit_config(&pcnt_config_a);
+    pcnt_unit_config_t unit_config = {};
+    unit_config.low_limit = -32768;
+    unit_config.high_limit = 32767;
+    if (pcnt_new_unit(&unit_config, &pcnt_unit_handle_) != ESP_OK) {
+      DEBUG_PRINTLN("ServoDriver: Failed to allocate PCNT unit");
+      return false;
+    }
 
-    // Configure channel 1 for B signal (count on B edges, use A for direction)
-    pcnt_config_t pcnt_config_b = {};
-    pcnt_config_b.pulse_gpio_num = config_.input_pin_nos[4]; // B+
-    pcnt_config_b.ctrl_gpio_num = config_.input_pin_nos[3];  // A+
-    pcnt_config_b.channel = PCNT_CHANNEL_1;
-    pcnt_config_b.unit = config_.pcnt_unit;
-    pcnt_config_b.pos_mode = PCNT_COUNT_DEC;
-    pcnt_config_b.neg_mode = PCNT_COUNT_INC;
-    pcnt_config_b.lctrl_mode = PCNT_MODE_REVERSE;
-    pcnt_config_b.hctrl_mode = PCNT_MODE_KEEP;
-    pcnt_config_b.counter_h_lim = 32767;
-    pcnt_config_b.counter_l_lim = -32768;
-    pcnt_unit_config(&pcnt_config_b);
+    pcnt_chan_config_t chan_a_config = {};
+    chan_a_config.edge_gpio_num = config_.input_pin_nos[3];
+    chan_a_config.level_gpio_num = config_.input_pin_nos[4];
+    if (pcnt_new_channel(pcnt_unit_handle_, &chan_a_config, &pcnt_chan_a_handle_) != ESP_OK) {
+      DEBUG_PRINTLN("ServoDriver: Failed to allocate PCNT channel A");
+      return false;
+    }
 
-    // Enable glitch filter (10us pulse width filter)
-    pcnt_set_filter_value(config_.pcnt_unit, 100); // 100 * 80MHz = 1.25us
-    pcnt_filter_enable(config_.pcnt_unit);
+    pcnt_chan_config_t chan_b_config = {};
+    chan_b_config.edge_gpio_num = config_.input_pin_nos[4];
+    chan_b_config.level_gpio_num = config_.input_pin_nos[3];
+    if (pcnt_new_channel(pcnt_unit_handle_, &chan_b_config, &pcnt_chan_b_handle_) != ESP_OK) {
+      DEBUG_PRINTLN("ServoDriver: Failed to allocate PCNT channel B");
+      return false;
+    }
 
-    // Clear and start counter
-    pcnt_counter_pause(config_.pcnt_unit);
-    pcnt_counter_clear(config_.pcnt_unit);
-    pcnt_counter_resume(config_.pcnt_unit);
+    // Match legacy quadrature behavior:
+    // - A channel: inc on posedge, dec on negedge
+    // - B low inverts direction, B high keeps direction
+    pcnt_channel_set_edge_action(pcnt_chan_a_handle_,
+                                 PCNT_CHANNEL_EDGE_ACTION_INCREASE,
+                                 PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+    pcnt_channel_set_level_action(pcnt_chan_a_handle_,
+                                  PCNT_CHANNEL_LEVEL_ACTION_KEEP,
+                                  PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+
+    // B channel complements A channel edges for full quadrature decoding.
+    pcnt_channel_set_edge_action(pcnt_chan_b_handle_,
+                                 PCNT_CHANNEL_EDGE_ACTION_DECREASE,
+                                 PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+    pcnt_channel_set_level_action(pcnt_chan_b_handle_,
+                                  PCNT_CHANNEL_LEVEL_ACTION_KEEP,
+                                  PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+
+    pcnt_glitch_filter_config_t filter_config = {};
+    filter_config.max_glitch_ns = 1250;  // ~1.25us filter, equivalent to legacy value 100
+    pcnt_unit_set_glitch_filter(pcnt_unit_handle_, &filter_config);
+
+    pcnt_unit_enable(pcnt_unit_handle_);
+    pcnt_unit_clear_count(pcnt_unit_handle_);
+    pcnt_unit_start(pcnt_unit_handle_);
+    last_pcnt_count_ = 0;
 
     DEBUG_PRINTLN("ServoDriver: Encoder PCNT initialized");
   }
@@ -650,9 +675,9 @@ void ServoDriver::updateMotionProfile() {
   // Sync status structure
   status_.current_position = current_position_;
   status_.current_speed = current_speed_pps_;
-  if (config_.enable_encoder_feedback) {
-    int16_t count = 0;
-    pcnt_get_counter_value(config_.pcnt_unit, &count);
+  if (config_.enable_encoder_feedback && pcnt_unit_handle_) {
+    int count = 0;
+    pcnt_unit_get_count(pcnt_unit_handle_, &count);
 
     // Calculate delta and handle 16-bit wrap-around
     // PCNT counter limits: -32768 to 32767
@@ -1162,9 +1187,9 @@ void ServoDriver::resetEncoderPosition() {
   xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
   if (config_.enable_encoder_feedback) {
-    pcnt_counter_pause(config_.pcnt_unit);
-    pcnt_counter_clear(config_.pcnt_unit);
-    pcnt_counter_resume(config_.pcnt_unit);
+    if (pcnt_unit_handle_) {
+      pcnt_unit_clear_count(pcnt_unit_handle_);
+    }
     encoder_accumulator_ = 0;
     last_pcnt_count_ = 0;
   }
