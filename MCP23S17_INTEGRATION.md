@@ -18,7 +18,7 @@ This application runs in **MCP23S17 mode only** (`APP_USE_MCP23S17=1`).
 |---|---:|---|---|---|
 | CS | 5 | CS | Output | SPI chip select |
 | MISO | 4 | SO | Input | Data from MCP23S17 to ESP32 |
-| MOSI | 15 | SI | Output | Data from ESP32 to MCP23S17 |
+| MOSI | 12 | SI | Output | Data from ESP32 to MCP23S17 (strapping pin: must stay LOW during reset) |
 | SCLK | 14 | SCK | Output | SPI clock |
 
 ## MCP23S17 pin assignments
@@ -58,8 +58,8 @@ This application runs in **MCP23S17 mode only** (`APP_USE_MCP23S17=1`).
 | `PIN_X_ENC_A` | 35 | PCNT (unit 0) | Input | X encoder A |
 | `PIN_X_ENC_B` | 36 | PCNT (unit 0) | Input | X encoder B |
 | `PIN_Y_ENC_A` | 39 | PCNT (unit 1) | Input | Y encoder A |
-| `PIN_Y_ENC_B` | 34 | PCNT (unit 1) | Input | Y encoder B |
-| `PIN_THETA_PWM` | 13 | LEDC (ch 2) | Output | Theta PWM |
+| `PIN_Y_ENC_B` | 2 | PCNT (unit 1) | Input | Y encoder B (strapping pin: keep LOW/floating at reset) |
+| `PIN_THETA_PWM` | 15 | LEDC (ch 2) | Output | Theta PWM (strapping pin: keep HIGH at reset for normal boot logs) |
 
 > X and Y are now configured with identical SDF08NK8X servo-driver paths: each axis uses dedicated pulse (LEDC), encoder (PCNT), alarm input/reset, and MCP23S17 digital control/status lines.
 
