@@ -2,86 +2,83 @@
 
 ## Overview
 
-This application uses an **MCP23S17** 16-bit SPI GPIO expander as the sole expansion-card IO interface. The MCP23S17 **must be present and initialized at runtime**; there is no direct-GPIO fallback mode.
+This application runs in **MCP23S17 mode only** (`APP_USE_MCP23S17=1`).
 
-Libraries (`Gantry`, `SDF08NK8X`, `MCP23S17`) are **pin-number agnostic** — they receive all pin assignments through config structs at startup. Only `main.cpp` and `gantry_app_constants.h` define the physical pin mapping.
+- X/Y axis digital control and status IO is routed through MCP23S17.
+- End-effector (gripper) IO is routed through MCP23S17.
+- Only hardware-peripheral pins remain direct on WT32:
+  - X/Y encoder A/B on PCNT-capable direct GPIO.
+  - X/Y pulse output and Theta PWM output on direct LEDC/PWM GPIO.
 
-## SPI wiring (ESP32 → MCP23S17)
+> Note: MCP23S17 cannot provide ESP32 hardware PCNT/LEDC peripherals, so encoder and PWM-class signals must remain on direct ESP32 GPIO.
 
-> **WT32-ETH01 note:** GPIO 18, 19, 23 are internally wired to the LAN8720A Ethernet PHY
-> and are **not available** for user IO. SPI is routed to free, exposed GPIOs instead.
-> See `WT32_ETH01_PINOUT.md` for the full board pin map.
+## SPI wiring (WT32-ETH01 -> MCP23S17)
 
-| Signal | ESP32 GPIO | MCP23S17 Pin | Boot note |
-|--------|-----------|--------------|-----------|
-| MISO   | **4**     | SO           | No constraints |
-| MOSI   | **15**    | SI           | Must be HIGH at boot (default pull-up OK) |
-| SCLK   | **14**    | SCK          | No constraints |
-| CS     | **5**     | CS           | No constraints |
+| Signal | WT32-ETH01 GPIO | MCP23S17 Pin | Direction | Notes |
+|---|---:|---|---|---|
+| CS | 5 | CS | Output | SPI chip select |
+| MISO | 4 | SO | Input | Data from MCP23S17 to ESP32 |
+| MOSI | 15 | SI | Output | Data from ESP32 to MCP23S17 |
+| SCLK | 14 | SCK | Output | SPI clock |
 
-**Device address:** `0x00` (A0=A1=A2=GND)
-**SPI clock:** 10 MHz
+## MCP23S17 pin assignments
 
-## MCP23S17 pin assignments (0–15)
+### Port A (GPA0..GPA7 / logical 0..7)
 
-### Port A (pins 0–7)
+| Logical Pin | MCP Pin | Symbol | Direction | Function |
+|---:|---|---|---|---|
+| 0 | GPA0 | `PIN_X_DIR` | Output | X-axis direction |
+| 1 | GPA1 | `PIN_X_ENABLE` | Output | X-axis enable |
+| 2 | GPA2 | `PIN_X_LIMIT_MIN` | Input (pull-up) | X home limit (active-low) |
+| 3 | GPA3 | `PIN_X_LIMIT_MAX` | Input (pull-up) | X end limit (active-low) |
+| 4 | GPA4 | `PIN_X_ALARM_STATUS` | Input (pull-up) | X alarm input |
+| 5 | GPA5 | `PIN_X_ALARM_RESET` | Output | X alarm reset output |
+| 6 | GPA6 | *(available)* | - | Available for future assignment |
+| 7 | GPA7 | `PIN_GRIPPER` | Output | End-effector/gripper control |
 
-| MCP Pin | Symbol              | Direction         | Function                         |
-|---------|---------------------|-------------------|----------------------------------|
-| 0       | *(reserved)*        | —                 | —                                |
-| 1       | `PIN_DIR`           | Output            | X-axis direction (Servo SIGN/DIR)|
-| 2       | `PIN_ENABLE`        | Output            | X-axis servo enable (SON)        |
-| 3       | `PIN_LIMIT_X_MIN`   | Input (pull-up)   | X-axis home limit switch (active low) |
-| 4       | `PIN_LIMIT_X_MAX`   | Input (pull-up)   | X-axis end limit switch (active low)  |
-| 5       | `PIN_Y_STEP`        | Output            | Y-axis stepper pulse             |
-| 6       | `PIN_Y_DIR`         | Output            | Y-axis stepper direction         |
-| 7       | `PIN_Y_ENABLE`      | Output            | Y-axis stepper enable            |
+### Port B (GPB0..GPB7 / logical 8..15)
 
-### Port B (pins 8–15)
+| Logical Pin | MCP Pin | Symbol | Direction | Function |
+|---:|---|---|---|---|
+| 8 | GPB0 | `PIN_Y_DIR` | Output | Y-axis direction |
+| 9 | GPB1 | `PIN_Y_ENABLE` | Output | Y-axis enable |
+| 10 | GPB2 | `PIN_Y_LIMIT_MIN` | Input (pull-up) | Y home limit (active-low) |
+| 11 | GPB3 | `PIN_Y_LIMIT_MAX` | Input (pull-up) | Y end limit (active-low) |
+| 12 | GPB4 | `PIN_Y_ALARM_STATUS` | Input (pull-up) | Y alarm input |
+| 13 | GPB5 | `PIN_Y_ALARM_RESET` | Output | Y alarm reset output |
+| 14 | GPB6 | `PIN_THETA_LIMIT_MIN` | Input (pull-up) | Theta minimum limit switch (active-low) |
+| 15 | GPB7 | `PIN_THETA_LIMIT_MAX` | Input (pull-up) | Theta maximum limit switch (active-low) |
 
-| MCP Pin | Symbol              | Direction       | Function                              |
-|---------|---------------------|-----------------|---------------------------------------|
-| 8       | `PIN_GRIPPER`       | Output          | End-effector gripper control           |
-| 9       | `PIN_LIMIT_Y_MIN`   | Input (pull-up) | Y-axis home limit switch (active low)                             |
-| 10      | `PIN_LIMIT_Y_MAX`   | Input (pull-up) | Y-axis end limit switch (active low)   |
-| 11      | `PIN_X_ALARM_STATUS`| Input (pull-up) | X-axis alarm status (Drive OUT3)       |
-| 12      | `PIN_Y_ALARM_STATUS`| Input (pull-up) | Y-axis alarm status (Drive OUT3)       |
-| 13      | `PIN_X_ALARM_RESET` | Output          | X-axis alarm reset (Drive IN1/ARST)    |
-| 14      | `PIN_Y_ALARM_RESET` | Output          | Y-axis alarm reset (Drive IN1/ARST)  |
-| 15      | `PIN_X_PULSE_INHIB` | Output          | X-axis pulse inhibit (Drive IN5/INH)   |
+## Direct WT32 GPIO pins
 
-## Direct ESP32 GPIO pins
+| Symbol | WT32-ETH01 GPIO | Peripheral | Direction | Function |
+|---|---:|---|---|---|
+| `PIN_X_PULSE` | 32 | LEDC (ch 0) | Output | X pulse output |
+| `PIN_Y_PULSE` | 33 | LEDC (ch 1 reserved) | Output | Y pulse output |
+| `PIN_X_ENC_A` | 35 | PCNT (unit 0) | Input | X encoder A |
+| `PIN_X_ENC_B` | 36 | PCNT (unit 0) | Input | X encoder B |
+| `PIN_Y_ENC_A` | 39 | PCNT (unit 1) | Input | Y encoder A |
+| `PIN_Y_ENC_B` | 34 | PCNT (unit 1) | Input | Y encoder B |
+| `PIN_THETA_PWM` | 13 | LEDC (ch 2) | Output | Theta PWM |
 
-These signals **cannot** go through the MCP23S17 because they require hardware peripherals (LEDC, PCNT):
+> X and Y are now configured with identical SDF08NK8X servo-driver paths: each axis uses dedicated pulse (LEDC), encoder (PCNT), alarm input/reset, and MCP23S17 digital control/status lines.
 
-| Symbol         | ESP32 GPIO | Direction | Function                       | Boot note |
-|----------------|-----------|-----------|--------------------------------|-----------|
-| `PIN_PULSE`    | 32        | Output    | X-axis pulse (LEDC hardware)   | No constraints |
-| `PIN_ENC_A`    | 35        | Input     | X-axis encoder A (PCNT)        | Input-only; no pull resistors |
-| `PIN_ENC_B`    | 36        | Input     | X-axis encoder B (PCNT)        | Input-only; no pull resistors |
-| `PIN_THETA_PWM`| **2**     | Output    | Theta servo PWM (LEDC)         | Floats at boot = normal boot OK |
+## GPIO Abstraction Behavior
 
-## GPIO Expander Abstraction (`gpio_expander`)
+`gpio_expander` behavior:
 
-The `gpio_expander` layer provides a unified read/write API:
-
-- **Pins 0–15** → routed to MCP23S17 via SPI.
-- **Pins ≥ 16** → treated as direct ESP32 GPIO numbers.
-
-`gpio_expander_init()` requires a **non-NULL** `mcp23s17_config_t*`. There is no fallback "direct-only" mode. If MCP23S17 initialization fails, the system logs an error and GPIO operations on pins 0–15 will fail.
+- pins `0..15` are MCP23S17 pins.
+- pins `>=16` are direct ESP32 GPIO numbers.
 
 ## Runtime Verification
 
 Use serial console commands:
 
-- `pins` — prints the active runtime pin mapping used by `main.cpp`.
-- `limits` — reads and prints active limit switch states via `gpio_expander_read()`.
+- `pins`: prints active runtime pin mapping used by `main.cpp`.
+- `limits`: reads and prints active limit switch states.
 
 The `pins` command prints from runtime-configured values (not hardcoded display constants).
 
-## Reference
+## Pinout Spreadsheets
 
-- Pin defines: `include/gantry_app_constants.h`
-- Full pinout spreadsheet: `pinout.csv`
-- MCP23S17 driver: `lib/MCP23S17/src/`
-- GPIO expander abstraction: `src/gpio_expander.c`, `include/gpio_expander.h`
+- Main mapping: `pinout.csv`
