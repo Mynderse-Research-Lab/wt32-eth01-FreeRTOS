@@ -6,7 +6,7 @@
 
 // MCP23S17 SPI pins (direct ESP32 GPIO)
 #define PIN_SPI_MISO 4
-#define PIN_SPI_MOSI 15
+#define PIN_SPI_MOSI 12
 #define PIN_SPI_SCLK 14
 #define PIN_SPI_CS 5
 
@@ -38,8 +38,10 @@
 #define PIN_X_ENC_A 35
 #define PIN_X_ENC_B 36
 #define PIN_Y_ENC_A 39
-#define PIN_Y_ENC_B 34
-#define PIN_THETA_PWM 13
+// GPIO2 is a boot strapping pin; keep LOW/floating during reset.
+#define PIN_Y_ENC_B 2
+// GPIO15 is a boot strapping pin; keep HIGH during reset for normal boot logs.
+#define PIN_THETA_PWM 15
 
 // Hardware peripheral channel allocation
 #define X_PULSE_LEDC_CHANNEL 0

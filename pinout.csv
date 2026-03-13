@@ -1,6 +1,6 @@
 Symbol,Domain,Pin,MCP_Port_Bit,Direction,Function,Notes
 PIN_SPI_MISO,ESP32 GPIO,4,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
-PIN_SPI_MOSI,ESP32 GPIO,15,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI
+PIN_SPI_MOSI,ESP32 GPIO,12,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI (strapping pin, must stay LOW at reset)
 PIN_SPI_SCLK,ESP32 GPIO,14,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
 PIN_SPI_CS,ESP32 GPIO,5,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
 PIN_X_DIR,MCP23S17,0,Port A bit 0,Output,X-axis direction signal,Servo SIGN/DIR
@@ -24,5 +24,5 @@ PIN_Y_PULSE,ESP32 GPIO,33,,Output,Y-axis pulse output,LEDC-capable direct GPIO o
 PIN_X_ENC_A,ESP32 GPIO,35,,Input,X-axis encoder A,PCNT input (unit 0)
 PIN_X_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,PCNT input (unit 0)
 PIN_Y_ENC_A,ESP32 GPIO,39,,Input,Y-axis encoder A,PCNT input (unit 1)
-PIN_Y_ENC_B,ESP32 GPIO,34,,Input,Y-axis encoder B,PCNT input (unit 1)
-PIN_THETA_PWM,ESP32 GPIO,13,,Output,Theta servo PWM output,LEDC PWM output (must stay direct)
+PIN_Y_ENC_B,ESP32 GPIO,2,,Input,Y-axis encoder B,PCNT input (unit 1; strapping pin, keep LOW/floating at reset)
+PIN_THETA_PWM,ESP32 GPIO,15,,Output,Theta servo PWM output,LEDC PWM output (must stay direct; strapping pin, keep HIGH at reset)
