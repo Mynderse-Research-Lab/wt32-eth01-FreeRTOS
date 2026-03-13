@@ -69,8 +69,7 @@ esp_err_t gpio_expander_set_pullup(uint8_t pin, bool enable) {
     } else {
         // Direct GPIO pin - configure pull-up
         gpio_num_t gpio_num = (gpio_num_t)pin;
-        gpio_set_pull_mode(gpio_num, enable ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
-        return ESP_OK;
+        return gpio_set_pull_mode(gpio_num, enable ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
     }
 }
 
@@ -85,8 +84,7 @@ esp_err_t gpio_expander_write(uint8_t pin, uint8_t level) {
     } else {
         // Direct GPIO pin (raw GPIO number, no offset encoding)
         gpio_num_t gpio_num = (gpio_num_t)pin;
-        gpio_set_level(gpio_num, level);
-        return ESP_OK;
+        return gpio_set_level(gpio_num, level);
     }
 }
 
