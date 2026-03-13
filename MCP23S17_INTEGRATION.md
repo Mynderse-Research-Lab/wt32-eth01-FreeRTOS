@@ -1,61 +1,74 @@
-# MCP23S17 Integration and Direct GPIO Test Mode
+# MCP23S17 Integration
 
 ## Overview
 
-The application supports two X-axis IO modes:
+This application runs in **MCP23S17 mode only** (`APP_USE_MCP23S17=1`).
 
-- `APP_USE_MCP23S17=1`: Extended IO through MCP23S17.
-- `APP_USE_MCP23S17=0`: Temporary direct WT32 GPIO test mode (no MCP hardware connected).
+- X/Y axis digital control and status IO is routed through MCP23S17.
+- End-effector (gripper) IO is routed through MCP23S17.
+- Only hardware-peripheral pins remain direct on WT32:
+  - X/Y encoder A/B on PCNT-capable direct GPIO.
+  - X/Y pulse output and Theta PWM output on direct LEDC/PWM GPIO.
 
-In both modes:
+> Note: MCP23S17 cannot provide ESP32 hardware PCNT/LEDC peripherals, so encoder and PWM-class signals must remain on direct ESP32 GPIO.
 
-- Limit switches are required for any active X-axis.
-- Encoder pins stay on direct ESP32 GPIO.
-- Theta servo PWM stays on direct ESP32 GPIO.
+## SPI wiring (WT32-ETH01 -> MCP23S17)
 
-## Active Modes
+| Signal | WT32-ETH01 GPIO | MCP23S17 Pin | Direction | Notes |
+|---|---:|---|---|---|
+| CS | 5 | CS | Output | SPI chip select |
+| MISO | 4 | SO | Input | Data from MCP23S17 to ESP32 |
+| MOSI | 15 | SI | Output | Data from ESP32 to MCP23S17 |
+| SCLK | 14 | SCK | Output | SPI clock |
 
-### MCP Mode (`APP_USE_MCP23S17=1`)
+## MCP23S17 pin assignments
 
-SPI wiring:
+### Port A (GPA0..GPA7 / logical 0..7)
 
-- CS: GPIO 5
-- MISO: GPIO 19
-- MOSI: GPIO 23
-- SCLK: GPIO 18
+| Logical Pin | MCP Pin | Symbol | Direction | Function |
+|---:|---|---|---|---|
+| 0 | GPA0 | `PIN_X_DIR` | Output | X-axis direction |
+| 1 | GPA1 | `PIN_X_ENABLE` | Output | X-axis enable |
+| 2 | GPA2 | `PIN_X_LIMIT_MIN` | Input (pull-up) | X home limit (active-low) |
+| 3 | GPA3 | `PIN_X_LIMIT_MAX` | Input (pull-up) | X end limit (active-low) |
+| 4 | GPA4 | `PIN_X_ALARM_STATUS` | Input (pull-up) | X alarm input |
+| 5 | GPA5 | `PIN_X_ALARM_RESET` | Output | X alarm reset output |
+| 6 | GPA6 | *(available)* | - | Available for future assignment |
+| 7 | GPA7 | `PIN_GRIPPER` | Output | End-effector/gripper control |
 
-X-axis signals:
+### Port B (GPB0..GPB7 / logical 8..15)
 
-- Pulse: `PIN_PULSE` (direct GPIO 32, LEDC)
-- DIR / ENABLE / status and control lines: MCP pins
-- Limits: MCP `PIN_LIMIT_MIN` / `PIN_LIMIT_MAX`
+| Logical Pin | MCP Pin | Symbol | Direction | Function |
+|---:|---|---|---|---|
+| 8 | GPB0 | `PIN_Y_DIR` | Output | Y-axis direction |
+| 9 | GPB1 | `PIN_Y_ENABLE` | Output | Y-axis enable |
+| 10 | GPB2 | `PIN_Y_LIMIT_MIN` | Input (pull-up) | Y home limit (active-low) |
+| 11 | GPB3 | `PIN_Y_LIMIT_MAX` | Input (pull-up) | Y end limit (active-low) |
+| 12 | GPB4 | `PIN_Y_ALARM_STATUS` | Input (pull-up) | Y alarm input |
+| 13 | GPB5 | `PIN_Y_ALARM_RESET` | Output | Y alarm reset output |
+| 14 | GPB6 | `PIN_THETA_LIMIT_MIN` | Input (pull-up) | Theta minimum limit switch (active-low) |
+| 15 | GPB7 | `PIN_THETA_LIMIT_MAX` | Input (pull-up) | Theta maximum limit switch (active-low) |
 
-### Temporary Direct Mode (`APP_USE_MCP23S17=0`)
+## Direct WT32 GPIO pins
 
-Direct WT32 mapping is aligned to `SDF08NK8X-Driver-library` test app:
+| Symbol | WT32-ETH01 GPIO | Peripheral | Direction | Function |
+|---|---:|---|---|---|
+| `PIN_X_PULSE` | 32 | LEDC (ch 0) | Output | X pulse output |
+| `PIN_Y_PULSE` | 33 | LEDC (ch 1 reserved) | Output | Y pulse output |
+| `PIN_X_ENC_A` | 35 | PCNT (unit 0) | Input | X encoder A |
+| `PIN_X_ENC_B` | 36 | PCNT (unit 0) | Input | X encoder B |
+| `PIN_Y_ENC_A` | 39 | PCNT (unit 1) | Input | Y encoder A |
+| `PIN_Y_ENC_B` | 34 | PCNT (unit 1) | Input | Y encoder B |
+| `PIN_THETA_PWM` | 13 | LEDC (ch 2) | Output | Theta PWM |
 
-- X Pulse: GPIO 2
-- X DIR: GPIO 12
-- X ENABLE: GPIO 15
-- X ALM input: GPIO 17
-- X Limit MIN: GPIO 33
-- X Limit MAX: GPIO 5
-- X ALM reset: disabled (`-1`) in this mode
-
-Additional direct pins still used:
-
-- Encoder A: GPIO 35
-- Encoder B: GPIO 36
-- Theta PWM: GPIO 13
+> X and Y are now configured with identical SDF08NK8X servo-driver paths: each axis uses dedicated pulse (LEDC), encoder (PCNT), alarm input/reset, and MCP23S17 digital control/status lines.
 
 ## GPIO Abstraction Behavior
 
-`gpio_expander` now behaves as:
+`gpio_expander` behavior:
 
-- MCP initialized: pins `0..15` are MCP pins, others are direct GPIO.
-- MCP not initialized (`gpio_expander_init(NULL)`): all pins are treated as direct GPIO.
-
-This is required so direct-mode mappings like GPIO `2`, `5`, `12`, and `15` work correctly.
+- pins `0..15` are MCP23S17 pins.
+- pins `>=16` are direct ESP32 GPIO numbers.
 
 ## Runtime Verification
 
@@ -69,4 +82,3 @@ The `pins` command prints from runtime-configured values (not hardcoded display 
 ## Pinout Spreadsheets
 
 - Main mapping: `pinout.csv`
-- Temporary direct-mode mapping: `pinout_temporary_direct_gpio.csv`
