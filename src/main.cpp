@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "gpio_expander.h"
@@ -25,6 +26,23 @@
 #include "gantry_app_constants.h"
 
 static const char *TAG = "GantryExample";
+
+static const char* resetReasonToString(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_UNKNOWN: return "UNKNOWN";
+        case ESP_RST_POWERON: return "POWERON";
+        case ESP_RST_EXT: return "EXTERNAL_PIN";
+        case ESP_RST_SW: return "SOFTWARE";
+        case ESP_RST_PANIC: return "PANIC";
+        case ESP_RST_INT_WDT: return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT: return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        case ESP_RST_SDIO: return "SDIO";
+        default: return "UNMAPPED";
+    }
+}
 
 struct UpdateTaskConfig {
     Gantry::Gantry *gantry;
@@ -54,6 +72,27 @@ void gantryUpdateTask(void *param) {
  * @brief ESP-IDF app_main entry point
  */
 extern "C" void app_main(void) {
+    const esp_reset_reason_t resetReason = esp_reset_reason();
+    ESP_LOGW(TAG, "Boot reset reason: %s (%d)", resetReasonToString(resetReason), (int)resetReason);
+    ESP_LOGW(TAG, "Strapping snapshot at app_main entry: GPIO2=%d GPIO12=%d GPIO15=%d",
+             gpio_get_level((gpio_num_t)2),
+             gpio_get_level((gpio_num_t)12),
+             gpio_get_level((gpio_num_t)15));
+
+    uint32_t bootStep = 0;
+    auto logStep = [&](const char *message) {
+        bootStep++;
+        ESP_LOGI(TAG, "[BOOT-STEP %lu] %s", (unsigned long)bootStep, message);
+    };
+    auto checkErr = [&](const char *op, esp_err_t err) -> bool {
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "[BOOT-STEP %lu] %s failed: %s",
+                     (unsigned long)bootStep, op, esp_err_to_name(err));
+            return false;
+        }
+        return true;
+    };
+
     ESP_LOGI(TAG, "\n========================================");
     ESP_LOGI(TAG, "Gantry Library Example");
     ESP_LOGI(TAG, "========================================\n");
@@ -65,7 +104,7 @@ extern "C" void app_main(void) {
     // ========================================================================
     // Initialize MCP23S17 GPIO Expander
     // ========================================================================
-    ESP_LOGI(TAG, "Initializing MCP23S17 GPIO expander...");
+    logStep("Initializing MCP23S17 GPIO expander");
     mcp23s17_config_t mcp_config = {};
     mcp_config.spi_host = SPI2_HOST;
     mcp_config.cs_pin = (gpio_num_t)PIN_SPI_CS;
@@ -81,42 +120,56 @@ extern "C" void app_main(void) {
     }
     ESP_LOGI(TAG, "MCP23S17 initialized successfully");
 
-    // Configure MCP23S17 pins
-    // Output pins
-    gpio_expander_set_direction(PIN_X_DIR, true);
-    gpio_expander_set_direction(PIN_X_ENABLE, true);
-    gpio_expander_set_direction(PIN_Y_DIR, true);
-    gpio_expander_set_direction(PIN_Y_ENABLE, true);
-    gpio_expander_set_direction(PIN_GRIPPER, true);
-    gpio_expander_set_direction(PIN_X_ALARM_RESET, true);
-    gpio_expander_set_direction(PIN_Y_ALARM_RESET, true);
+    // Configure MCP23S17 pins with fine-grained step diagnostics.
+    const uint8_t outputPins[] = {
+        PIN_X_DIR, PIN_X_ENABLE, PIN_Y_DIR, PIN_Y_ENABLE,
+        PIN_GRIPPER, PIN_X_ALARM_RESET, PIN_Y_ALARM_RESET
+    };
+    for (uint8_t pin : outputPins) {
+        logStep("MCP set output direction");
+        if (!checkErr("gpio_expander_set_direction(output)",
+                      gpio_expander_set_direction(pin, true))) {
+            return;
+        }
+    }
 
-    // Input pins with pull-ups
-    gpio_expander_set_direction(PIN_X_LIMIT_MIN, false);
-    gpio_expander_set_pullup(PIN_X_LIMIT_MIN, true);
-    gpio_expander_set_direction(PIN_X_LIMIT_MAX, false);
-    gpio_expander_set_pullup(PIN_X_LIMIT_MAX, true);
-    gpio_expander_set_direction(PIN_Y_LIMIT_MIN, false);
-    gpio_expander_set_pullup(PIN_Y_LIMIT_MIN, true);
-    gpio_expander_set_direction(PIN_Y_LIMIT_MAX, false);
-    gpio_expander_set_pullup(PIN_Y_LIMIT_MAX, true);
-    gpio_expander_set_direction(PIN_X_ALARM_STATUS, false);
-    gpio_expander_set_pullup(PIN_X_ALARM_STATUS, true);
-    gpio_expander_set_direction(PIN_Y_ALARM_STATUS, false);
-    gpio_expander_set_pullup(PIN_Y_ALARM_STATUS, true);
-    gpio_expander_set_direction(PIN_THETA_LIMIT_MIN, false);
-    gpio_expander_set_pullup(PIN_THETA_LIMIT_MIN, true);
-    gpio_expander_set_direction(PIN_THETA_LIMIT_MAX, false);
-    gpio_expander_set_pullup(PIN_THETA_LIMIT_MAX, true);
+    const uint8_t inputPullupPins[] = {
+        PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX, PIN_Y_LIMIT_MIN, PIN_Y_LIMIT_MAX,
+        PIN_X_ALARM_STATUS, PIN_Y_ALARM_STATUS, PIN_THETA_LIMIT_MIN, PIN_THETA_LIMIT_MAX
+    };
+    for (uint8_t pin : inputPullupPins) {
+        logStep("MCP set input direction");
+        if (!checkErr("gpio_expander_set_direction(input)",
+                      gpio_expander_set_direction(pin, false))) {
+            return;
+        }
+        logStep("MCP enable pull-up");
+        if (!checkErr("gpio_expander_set_pullup(true)",
+                      gpio_expander_set_pullup(pin, true))) {
+            return;
+        }
+    }
 
-    // Initialize outputs to safe states
-    gpio_expander_write(PIN_X_DIR, 0);
-    gpio_expander_write(PIN_X_ENABLE, 0);  // Disabled
-    gpio_expander_write(PIN_Y_DIR, 0);
-    gpio_expander_write(PIN_Y_ENABLE, 0);  // Disabled
-    gpio_expander_write(PIN_GRIPPER, 0);  // Open
-    gpio_expander_write(PIN_X_ALARM_RESET, 0);
-    gpio_expander_write(PIN_Y_ALARM_RESET, 0);
+    struct InitialOutputState {
+        uint8_t pin;
+        uint8_t level;
+    };
+    const InitialOutputState initialStates[] = {
+        {PIN_X_DIR, 0},
+        {PIN_X_ENABLE, 0},  // Disabled
+        {PIN_Y_DIR, 0},
+        {PIN_Y_ENABLE, 0},  // Disabled
+        {PIN_GRIPPER, 0},   // Open
+        {PIN_X_ALARM_RESET, 0},
+        {PIN_Y_ALARM_RESET, 0},
+    };
+    for (const auto &s : initialStates) {
+        logStep("MCP write initial output level");
+        if (!checkErr("gpio_expander_write(initial)",
+                      gpio_expander_write(s.pin, s.level))) {
+            return;
+        }
+    }
 
     ESP_LOGI(TAG, "MCP23S17 pins configured");
 
