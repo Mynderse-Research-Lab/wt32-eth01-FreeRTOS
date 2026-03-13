@@ -121,10 +121,15 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "MCP23S17 pins configured");
 
     // Configure direct WT32 pulse outputs (LEDC-capable routing)
-    pinMode(PIN_X_PULSE, OUTPUT);
-    digitalWrite(PIN_X_PULSE, LOW);
-    pinMode(PIN_Y_PULSE, OUTPUT);
-    digitalWrite(PIN_Y_PULSE, LOW);
+    gpio_config_t pulse_io_conf = {};
+    pulse_io_conf.pin_bit_mask = (1ULL << PIN_X_PULSE) | (1ULL << PIN_Y_PULSE);
+    pulse_io_conf.mode = GPIO_MODE_OUTPUT;
+    pulse_io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    pulse_io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    pulse_io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&pulse_io_conf);
+    gpio_set_level((gpio_num_t)PIN_X_PULSE, 0);
+    gpio_set_level((gpio_num_t)PIN_Y_PULSE, 0);
     
     // ========================================================================
     // Configure X-axis servo driver
@@ -209,7 +214,6 @@ extern "C" void app_main(void) {
     gantry.setThetaLimits(GANTRY_THETA_MIN_DEG, GANTRY_THETA_MAX_DEG);
     gantry.setThetaPulseRange(GANTRY_THETA_MIN_PULSE_US, GANTRY_THETA_MAX_PULSE_US);
 
-    
     // Set safe height
     gantry.setSafeYHeight(GANTRY_SAFE_Y_MM);
     
@@ -286,4 +290,3 @@ extern "C" void app_main(void) {
     // Main task can exit - FreeRTOS tasks handle everything
     vTaskDelete(NULL);
 }
- 
