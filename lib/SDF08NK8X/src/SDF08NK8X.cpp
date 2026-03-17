@@ -5,12 +5,85 @@
  */
 
 #include "SDF08NK8X.h"
+#include "gpio_expander.h"
+#include "driver/gpio.h"
 #include <cmath>
 #include <esp_log.h>
 #include <inttypes.h>
 
 using namespace BergerdaServo;
 static const char *TAG = "SDF08NK8X";
+
+namespace {
+inline bool isEncodedDirectPin(int pin) {
+  return (pin & GPIO_EXPANDER_DIRECT_FLAG) != 0;
+}
+
+inline bool isMcpLogicalPin(int pin) {
+  return pin >= 0 && pin < GPIO_DIRECT_PIN_BASE && !isEncodedDirectPin(pin);
+}
+
+inline int resolveDirectGpioPin(int pin) {
+  if (pin < 0) {
+    return -1;
+  }
+  if (isEncodedDirectPin(pin)) {
+    return pin & GPIO_EXPANDER_DIRECT_MASK;
+  }
+  if (pin >= GPIO_DIRECT_PIN_BASE) {
+    return pin;
+  }
+  return -1;
+}
+
+bool configurePinDirectionSafe(int pin, bool isOutput) {
+  if (pin < 0) {
+    return true;
+  }
+  if (isMcpLogicalPin(pin)) {
+    return gpio_expander_set_direction(pin, isOutput) == ESP_OK;
+  }
+  const int gpio = resolveDirectGpioPin(pin);
+  if (gpio < 0) {
+    return false;
+  }
+  gpio_config_t io_conf = {};
+  io_conf.pin_bit_mask = (1ULL << gpio);
+  io_conf.mode = isOutput ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT;
+  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  return gpio_config(&io_conf) == ESP_OK;
+}
+
+bool writePinSafe(int pin, bool high) {
+  if (pin < 0) {
+    return false;
+  }
+  if (isMcpLogicalPin(pin)) {
+    return gpio_expander_write(pin, high ? 1 : 0) == ESP_OK;
+  }
+  const int gpio = resolveDirectGpioPin(pin);
+  if (gpio < 0) {
+    return false;
+  }
+  return gpio_set_level((gpio_num_t)gpio, high ? 1 : 0) == ESP_OK;
+}
+
+int readPinSafe(int pin) {
+  if (pin < 0) {
+    return 0;
+  }
+  if (isMcpLogicalPin(pin)) {
+    return gpio_expander_read(pin);
+  }
+  const int gpio = resolveDirectGpioPin(pin);
+  if (gpio < 0) {
+    return 0;
+  }
+  return gpio_get_level((gpio_num_t)gpio);
+}
+} // namespace
 
 // version constants
 #define SDF08NK8X_VERSION_MAJOR "1"
@@ -221,45 +294,61 @@ bool ServoDriver::initialize() {
     return false;
   }
 
-  // Configure GPIO pins
+  // Configure IO pins via gpio_expander abstraction so MCP logical pins
+  // (0..15) and direct GPIO pins (>=16) are both handled safely.
   for (size_t i = 0; i < DriverConfig::OUTPUT_PIN_COUNT; i++) {
     if (config_.output_pin_nos[i] >= 0) {
-      pinMode(config_.output_pin_nos[i], OUTPUT);
+      if (!configurePinDirectionSafe(config_.output_pin_nos[i], true)) {
+        DEBUG_PRINTLN("ServoDriver: Failed to configure output pin direction");
+        return false;
+      }
       // Default to logical LOW (inactive), respecting output inversion.
       bool idle_level = config_.invert_output_logic ? HIGH : LOW;
-      digitalWrite(config_.output_pin_nos[i], idle_level);
+      if (!writePinSafe(config_.output_pin_nos[i], idle_level == HIGH)) {
+        DEBUG_PRINTLN("ServoDriver: Failed to set output idle level");
+        return false;
+      }
     }
   }
   for (size_t i = 0; i < DriverConfig::INPUT_PIN_COUNT; i++) {
     if (config_.input_pin_nos[i] >= 0) {
-      pinMode(config_.input_pin_nos[i], INPUT);
+      if (!configurePinDirectionSafe(config_.input_pin_nos[i], false)) {
+        DEBUG_PRINTLN("ServoDriver: Failed to configure input pin direction");
+        return false;
+      }
     }
   }
 
   // Initialize LEDC channel for pulse output
   if (config_.output_pin_nos[6] >= 0) {
     // Ensure ledc_pulse_pin is synced with output_pin_nos[6] for internal use
-    config_.ledc_pulse_pin = config_.output_pin_nos[6];
+    config_.ledc_pulse_pin = resolveDirectGpioPin(config_.output_pin_nos[6]);
+    if (config_.ledc_pulse_pin < 0) {
+      DEBUG_PRINTLN("ServoDriver: Invalid pulse pin mapping for LEDC");
+      return false;
+    }
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     // Arduino ESP32 v3.0+ API - attach with initial frequency
-    if (!ledcAttach(config_.output_pin_nos[6], 1000, config_.ledc_resolution)) {
+    if (!ledcAttach(config_.ledc_pulse_pin, 1000, config_.ledc_resolution)) {
       DEBUG_PRINTLN("ServoDriver: LEDC Attach Failed!");
       return false;
     }
-    ledcWrite(config_.output_pin_nos[6], 0); // Start idle (0% duty)
+    ledcWrite(config_.ledc_pulse_pin, 0); // Start idle (0% duty)
 #else
     // Arduino ESP32 v2.x API
     ledcSetup(config_.ledc_channel, 1000, config_.ledc_resolution);
-    ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
+    ledcAttachPin(config_.ledc_pulse_pin, config_.ledc_channel);
     ledcWrite(config_.ledc_channel, 0); // Start idle
 #endif
     DEBUG_PRINTLN("ServoDriver: LEDC channel initialized");
   }
 
   // Initialize modern pulse counter (PCNT v2) for encoder quadrature decoding
-  if (config_.enable_encoder_feedback && config_.input_pin_nos[3] > 0 &&
-      config_.input_pin_nos[4] > 0) {
+  const int encoder_a_gpio = resolveDirectGpioPin(config_.input_pin_nos[3]);
+  const int encoder_b_gpio = resolveDirectGpioPin(config_.input_pin_nos[4]);
+  if (config_.enable_encoder_feedback && encoder_a_gpio > 0 &&
+      encoder_b_gpio > 0) {
     pcnt_unit_config_t unit_config = {};
     unit_config.low_limit = -32768;
     unit_config.high_limit = 32767;
@@ -269,16 +358,16 @@ bool ServoDriver::initialize() {
     }
 
     pcnt_chan_config_t chan_a_config = {};
-    chan_a_config.edge_gpio_num = config_.input_pin_nos[3];
-    chan_a_config.level_gpio_num = config_.input_pin_nos[4];
+    chan_a_config.edge_gpio_num = encoder_a_gpio;
+    chan_a_config.level_gpio_num = encoder_b_gpio;
     if (pcnt_new_channel(pcnt_unit_handle_, &chan_a_config, &pcnt_chan_a_handle_) != ESP_OK) {
       DEBUG_PRINTLN("ServoDriver: Failed to allocate PCNT channel A");
       return false;
     }
 
     pcnt_chan_config_t chan_b_config = {};
-    chan_b_config.edge_gpio_num = config_.input_pin_nos[4];
-    chan_b_config.level_gpio_num = config_.input_pin_nos[3];
+    chan_b_config.edge_gpio_num = encoder_b_gpio;
+    chan_b_config.level_gpio_num = encoder_a_gpio;
     if (pcnt_new_channel(pcnt_unit_handle_, &chan_b_config, &pcnt_chan_b_handle_) != ESP_OK) {
       DEBUG_PRINTLN("ServoDriver: Failed to allocate PCNT channel B");
       return false;
@@ -395,10 +484,11 @@ bool ServoDriver::disable() {
 bool ServoDriver::isEnabled() const { return enabled_; }
 
 bool ServoDriver::isAlarmActive() const {
-  if (!initialized_ || config_.input_pin_nos[2] <= 0) {
+  if (!initialized_ || config_.input_pin_nos[2] < 0) {
     return false;
   }
-  return digitalRead(config_.input_pin_nos[2]); // Active LOW
+  // ALM is active LOW: electrical LOW means logical alarm active.
+  return !readPinSafe(config_.input_pin_nos[2]);
 }
 
 bool ServoDriver::clearAlarm() {
@@ -645,12 +735,9 @@ void ServoDriver::updateMotionProfile() {
     }
     
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    (void)ledcChangeFrequency(config_.ledc_pulse_pin, freq_hz, resolution);
-    // Re-apply duty cycle after frequency change (it may get reset)
-    // For 1-bit resolution, we need duty=1 (50% of range 0-1), not 0
-    uint8_t max_duty = (1 << resolution) - 1;
-    uint8_t duty = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
-    ledcWrite(config_.ledc_pulse_pin, duty);
+    // v3 API: force hardware-generated 50% pulse train at requested frequency.
+    (void)resolution;
+    (void)ledcWriteTone(config_.ledc_pulse_pin, freq_hz);
 #else
     // For ESP32 v2.x, ledcSetup reconfigures the channel
     // Track resolution changes and re-attach pin when resolution changes
@@ -658,7 +745,7 @@ void ServoDriver::updateMotionProfile() {
     if (last_resolution != resolution) {
       // Resolution changed - re-attach pin to ensure it's properly configured
       ledcSetup(config_.ledc_channel, freq_hz, resolution);
-      ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
+      ledcAttachPin(config_.ledc_pulse_pin, config_.ledc_channel);
       last_resolution = resolution;
     } else {
       // Same resolution - just update frequency (ledcSetup should handle this)
@@ -743,10 +830,10 @@ void ServoDriver::updateMotionProfile() {
 
   // Read status input pins (active LOW)
   if (config_.input_pin_nos[0] >= 0) {
-    status_.position_reached = !digitalRead(config_.input_pin_nos[0]);
+    status_.position_reached = !readPinSafe(config_.input_pin_nos[0]);
   }
   if (config_.input_pin_nos[1] >= 0) {
-    status_.brake_released = !digitalRead(config_.input_pin_nos[1]);
+    status_.brake_released = !readPinSafe(config_.input_pin_nos[1]);
   }
 
   // Check for alarm condition and invoke callback
@@ -855,6 +942,10 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   uint8_t max_duty = (1 << init_resolution) - 1;
   // For 1-bit resolution, duty must be 1 (not 0) to generate pulses
   uint8_t duty = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  (void)max_duty;
+  (void)duty;
+#endif
   uint32_t init_freq_hz = (uint32_t)(init_freq + 0.5);
 
 #if SDF08NK8X_DEBUG
@@ -875,9 +966,9 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
     ESP_LOGI(TAG, "[%lu] ServoDriver: ERROR - ledcAttach failed", millis());
     return;
   }
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcAttach OK, calling ledcWrite with duty=%d", millis(), duty);
-  ledcWrite(config_.ledc_pulse_pin, duty);
-  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done", millis());
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcAttach OK, calling ledcWriteTone at %lu Hz", millis(), (unsigned long)init_freq_hz);
+  (void)ledcWriteTone(config_.ledc_pulse_pin, init_freq_hz);
+  ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWriteTone done", millis());
 #else
   // For ESP32 v2.x, stop LEDC output first, then reconfigure
   ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite(0)", millis());
@@ -886,7 +977,7 @@ void ServoDriver::startMotionProfile(uint32_t total_pulses, double max_freq,
   ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcSetup", millis());
   ledcSetup(config_.ledc_channel, init_freq_hz, init_resolution);
   ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcAttachPin", millis());
-  ledcAttachPin(config_.output_pin_nos[6], config_.ledc_channel);
+  ledcAttachPin(config_.ledc_pulse_pin, config_.ledc_channel);
   ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] Calling ledcWrite with duty=%d", millis(), duty);
   ledcWrite(config_.ledc_channel, duty);
   ESP_LOGI(TAG, "[%lu] ServoDriver: [DBG] ledcWrite done", millis());
@@ -1269,8 +1360,7 @@ bool ServoDriver::writeOutputPin(size_t index, bool state) {
                   millis(), state, config_.invert_dir_pin, physical_state,
                   config_.output_pin_nos[index]);
   }
-  digitalWrite(config_.output_pin_nos[index], physical_state ? HIGH : LOW);
-  return true;
+  return writePinSafe(config_.output_pin_nos[index], physical_state);
 }
 
 bool ServoDriver::setDirectionPin(bool state) {
