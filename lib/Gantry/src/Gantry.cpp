@@ -13,6 +13,18 @@ using namespace Gantry::Constants;
 namespace Gantry {
 static const char *TAG = "Gantry";
 
+#ifndef GANTRY_DIAG_SKIP_AXIS_X_INIT
+#define GANTRY_DIAG_SKIP_AXIS_X_INIT 0
+#endif
+
+#ifndef GANTRY_DIAG_SKIP_AXIS_Y_INIT
+#define GANTRY_DIAG_SKIP_AXIS_Y_INIT 0
+#endif
+
+#ifndef GANTRY_DIAG_SKIP_THETA_INIT
+#define GANTRY_DIAG_SKIP_THETA_INIT 0
+#endif
+
 // ============================================================================
 // CONSTRUCTOR
 // ============================================================================
@@ -48,12 +60,15 @@ bool Gantry::begin() {
     if (initialized_) {
         return true;
     }
+    ESP_LOGI(TAG, "[BEGIN] Enter Gantry::begin()");
     
     // Initialize end-effector (gripper) pin
     if (gripperPin_ >= 0) {
+        ESP_LOGI(TAG, "[BEGIN] Configure end-effector pin=%d", gripperPin_);
         endEffector_.configurePin(gripperPin_, true);
         endEffector_.begin();
         gripperActive_ = false;
+        ESP_LOGI(TAG, "[BEGIN] End-effector initialized");
     }
     
     // Limits are handled by reusable GantryLimitSwitch objects in this library.
@@ -65,27 +80,51 @@ bool Gantry::begin() {
 
     xMinSwitch_.begin();
     xMaxSwitch_.begin();
+    ESP_LOGI(TAG, "[BEGIN] Limit switch objects initialized");
     
     // Initialize X-axis servo driver (will configure limit switches if pins are set)
+    if (GANTRY_DIAG_SKIP_AXIS_X_INIT) {
+        ESP_LOGW(TAG, "[BEGIN] Skipping X-axis initialize (diagnostic toggle)");
+    } else {
+        ESP_LOGI(TAG, "[BEGIN] Initializing X-axis driver");
     if (!axisX_.initialize()) {
+            ESP_LOGE(TAG, "[BEGIN] X-axis initialize failed");
         return false;
+        }
+        ESP_LOGI(TAG, "[BEGIN] X-axis initialize OK");
     }
     
     // Initialize Y-axis servo (preferred when configured), otherwise stepper.
+    if (GANTRY_DIAG_SKIP_AXIS_Y_INIT) {
+        ESP_LOGW(TAG, "[BEGIN] Skipping Y-axis initialize (diagnostic toggle)");
+    } else {
     if (yServoConfigured_) {
+            ESP_LOGI(TAG, "[BEGIN] Initializing Y-axis servo driver");
         if (!axisYServo_.initialize()) {
+                ESP_LOGE(TAG, "[BEGIN] Y-axis servo initialize failed");
             return false;
         }
+            ESP_LOGI(TAG, "[BEGIN] Y-axis servo initialize OK");
     } else if (axisY_.isConfigured()) {
+            ESP_LOGI(TAG, "[BEGIN] Initializing Y-axis stepper");
         axisY_.begin();
+            ESP_LOGI(TAG, "[BEGIN] Y-axis stepper initialize OK");
+        }
     }
 
     // Initialize theta servo if configured
+    if (GANTRY_DIAG_SKIP_THETA_INIT) {
+        ESP_LOGW(TAG, "[BEGIN] Skipping theta initialize (diagnostic toggle)");
+    } else {
     if (axisTheta_.isConfigured()) {
+            ESP_LOGI(TAG, "[BEGIN] Initializing theta servo");
         axisTheta_.begin();
+            ESP_LOGI(TAG, "[BEGIN] Theta initialize OK");
+        }
     }
 
     initialized_ = true;
+    ESP_LOGI(TAG, "[BEGIN] Gantry::begin() complete");
     return true;
 }
 
