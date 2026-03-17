@@ -4,14 +4,21 @@
 // MCP23S17 is mandatory for this application.
 #define APP_USE_MCP23S17 1
 
-// MCP23S17 SPI pins (direct ESP32 GPIO)
-#define PIN_SPI_MISO 4
-#define PIN_SPI_MOSI 12
-#define PIN_SPI_SCLK 14
-#define PIN_SPI_CS 5
+// Known-good MCP23S17 SPI mapping/clock validated on WT32-ETH01 + MIKROE-951.
+#define MCP23S17_SPI_CS_PIN 15
+#define MCP23S17_SPI_MISO_PIN 35
+#define MCP23S17_SPI_MOSI_PIN 12
+#define MCP23S17_SPI_SCLK_PIN 5
+#define MCP23S17_SPI_CLOCK_HZ_WORKING 1000000
+
+// Backward-compatible aliases (legacy name style used in older modules/docs).
+#define PIN_SPI_CS MCP23S17_SPI_CS_PIN
+#define PIN_SPI_MISO MCP23S17_SPI_MISO_PIN
+#define PIN_SPI_MOSI MCP23S17_SPI_MOSI_PIN
+#define PIN_SPI_SCLK MCP23S17_SPI_SCLK_PIN
 
 // MCP23S17 pin assignments (0-15)
-// X-axis signals are on Port A (0-7), Y-axis signals are on Port B (8-15).
+// X-axis signals are on Port A (0-7), Y-axis and Theta signals are on Port B (8-15).
 // Available/unused: GPA6(6)
 #define PIN_X_DIR 0
 #define PIN_X_ENABLE 1
@@ -33,15 +40,16 @@
 // NOTE:
 // - Encoder A/B must stay on direct GPIO for PCNT.
 // - X/Y pulse and Theta PWM stay on direct GPIO for LEDC/PWM generation.
-#define PIN_X_PULSE 32
-#define PIN_Y_PULSE 33
-#define PIN_X_ENC_A 35
+// IMPORTANT: avoid driving GPIO32/33 as pulse outputs on this hardware setup.
+// For Ethernet compatibility, avoid GPIO17 pulse usage (ETH clock output).
+#define PIN_X_PULSE 14
+#define PIN_Y_PULSE 2
+#define PIN_X_ENC_A 34
 #define PIN_X_ENC_B 36
 #define PIN_Y_ENC_A 39
-// GPIO2 is a boot strapping pin; keep LOW/floating during reset.
-#define PIN_Y_ENC_B 2
-// GPIO15 is a boot strapping pin; keep HIGH during reset for normal boot logs.
-#define PIN_THETA_PWM 15
+#define PIN_Y_ENC_B 32
+// GPIO0 is a boot strapping pin; keep HIGH during reset for normal boot.
+#define PIN_THETA_PWM 0
 
 // Hardware peripheral channel allocation
 #define X_PULSE_LEDC_CHANNEL 0
@@ -53,6 +61,8 @@
 // MCP23S17 defaults
 #define MCP23S17_DEVICE_ADDRESS 0x00
 #define MCP23S17_CLOCK_HZ 10000000
+// Keep MCP diagnostics available by default; set to 0 for lean production console.
+#define MCP_DEBUG_CMDS 1
 
 // Gantry motion defaults
 #define GANTRY_HOMING_SPEED_PPS 6000

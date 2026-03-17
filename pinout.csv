@@ -1,8 +1,8 @@
 Symbol,Domain,Pin,MCP_Port_Bit,Direction,Function,Notes
-PIN_SPI_MISO,ESP32 GPIO,4,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
+PIN_SPI_MISO,ESP32 GPIO,35,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
 PIN_SPI_MOSI,ESP32 GPIO,12,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI (strapping pin, must stay LOW at reset)
-PIN_SPI_SCLK,ESP32 GPIO,14,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
-PIN_SPI_CS,ESP32 GPIO,5,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
+PIN_SPI_SCLK,ESP32 GPIO,5,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
+PIN_SPI_CS,ESP32 GPIO,15,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
 PIN_X_DIR,MCP23S17,0,Port A bit 0,Output,X-axis direction signal,Servo SIGN/DIR
 PIN_X_ENABLE,MCP23S17,1,Port A bit 1,Output,X-axis servo enable,Servo SON
 PIN_X_LIMIT_MIN,MCP23S17,2,Port A bit 2,Input (pull-up),X-axis home limit switch,Active low
@@ -19,10 +19,10 @@ PIN_Y_ALARM_STATUS,MCP23S17,12,Port B bit 4,Input (pull-up),Y-axis alarm status,
 PIN_Y_ALARM_RESET,MCP23S17,13,Port B bit 5,Output,Y-axis alarm reset command,Alarm reset pulse output
 PIN_THETA_LIMIT_MIN,MCP23S17,14,Port B bit 6,Input (pull-up),Theta minimum limit switch,Active low
 PIN_THETA_LIMIT_MAX,MCP23S17,15,Port B bit 7,Input (pull-up),Theta maximum limit switch,Active low
-PIN_X_PULSE,ESP32 GPIO,32,,Output,X-axis pulse output,LEDC hardware pulse generation (channel 0)
-PIN_Y_PULSE,ESP32 GPIO,33,,Output,Y-axis pulse output,LEDC-capable direct GPIO on WT32
+PIN_X_PULSE,ESP32 GPIO,14,,Output,X-axis pulse output,LEDC hardware pulse generation (channel 0)
+PIN_Y_PULSE,ESP32 GPIO,2,,Output,Y-axis pulse output,LEDC-capable direct GPIO on WT32 (strapping pin; keep LOW/floating at reset)
 PIN_X_ENC_A,ESP32 GPIO,35,,Input,X-axis encoder A,PCNT input (unit 0)
 PIN_X_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,PCNT input (unit 0)
 PIN_Y_ENC_A,ESP32 GPIO,39,,Input,Y-axis encoder A,PCNT input (unit 1)
-PIN_Y_ENC_B,ESP32 GPIO,2,,Input,Y-axis encoder B,PCNT input (unit 1; strapping pin, keep LOW/floating at reset)
-PIN_THETA_PWM,ESP32 GPIO,15,,Output,Theta servo PWM output,LEDC PWM output (must stay direct; strapping pin, keep HIGH at reset)
+PIN_Y_ENC_B,ESP32 GPIO,32,,Input,Y-axis encoder B,PCNT input (unit 1)
+PIN_THETA_PWM,ESP32 GPIO,0,,Output,Theta servo PWM output,LEDC PWM output (must stay direct; strapping pin, keep HIGH at reset)

@@ -53,13 +53,13 @@ This application runs in **MCP23S17 mode only** (`APP_USE_MCP23S17=1`).
 
 | Symbol | WT32-ETH01 GPIO | Peripheral | Direction | Function |
 |---|---:|---|---|---|
-| `PIN_X_PULSE` | 32 | LEDC (ch 0) | Output | X pulse output |
-| `PIN_Y_PULSE` | 33 | LEDC (ch 1 reserved) | Output | Y pulse output |
+| `PIN_X_PULSE` | 15 | LEDC (ch 0) | Output | X pulse output (strapping pin: keep HIGH at reset) |
+| `PIN_Y_PULSE` | 2 | LEDC (ch 1 reserved) | Output | Y pulse output (strapping pin: keep LOW/floating at reset) |
 | `PIN_X_ENC_A` | 35 | PCNT (unit 0) | Input | X encoder A |
 | `PIN_X_ENC_B` | 36 | PCNT (unit 0) | Input | X encoder B |
 | `PIN_Y_ENC_A` | 39 | PCNT (unit 1) | Input | Y encoder A |
-| `PIN_Y_ENC_B` | 2 | PCNT (unit 1) | Input | Y encoder B (strapping pin: keep LOW/floating at reset) |
-| `PIN_THETA_PWM` | 15 | LEDC (ch 2) | Output | Theta PWM (strapping pin: keep HIGH at reset for normal boot logs) |
+| `PIN_Y_ENC_B` | 33 | PCNT (unit 1) | Input | Y encoder B |
+| `PIN_THETA_PWM` | 0 | LEDC (ch 2) | Output | Theta PWM (strapping pin: keep HIGH at reset for normal boot) |
 
 > X and Y are now configured with identical SDF08NK8X servo-driver paths: each axis uses dedicated pulse (LEDC), encoder (PCNT), alarm input/reset, and MCP23S17 digital control/status lines.
 
