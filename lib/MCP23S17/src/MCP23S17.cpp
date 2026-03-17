@@ -5,6 +5,8 @@
 
 #include "MCP23S17.h"
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 // MCP23S17 Register addresses
 #define MCP23S17_IODIRA   0x00  // I/O Direction Port A
@@ -36,6 +38,7 @@
 struct mcp23s17_handle {
     spi_device_handle_t spi_device;
     spi_host_device_t spi_host;  // Stored for proper cleanup in deinit
+    SemaphoreHandle_t spi_mutex; // Serialize SPI device access across tasks
     uint8_t device_address;
     uint8_t port_a_dir;      // Cached direction register
     uint8_t port_b_dir;
@@ -47,7 +50,25 @@ struct mcp23s17_handle {
 
 static const char *TAG = "MCP23S17";
 
+static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
+    if (handle == NULL || handle->spi_mutex == NULL) {
+        return false;
+    }
+    return xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
+    if (handle != NULL && handle->spi_mutex != NULL) {
+        xSemaphoreGive(handle->spi_mutex);
+    }
+}
+
 static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
+    if (!mcp23s17_lock(handle)) {
+        ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X", reg);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     uint8_t tx_data[3];
     tx_data[0] = MCP23S17_WRITE_OPCODE | (handle->device_address << 1);
     tx_data[1] = reg;
@@ -62,10 +83,16 @@ static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, 
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Write register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
+    mcp23s17_unlock(handle);
     return ret;
 }
 
 static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
+    if (!mcp23s17_lock(handle)) {
+        ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X", reg);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     uint8_t tx_data[3];
     uint8_t rx_data[3];
     
@@ -84,6 +111,7 @@ static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, u
     } else {
         ESP_LOGE(TAG, "Read register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
+    mcp23s17_unlock(handle);
     return ret;
 }
 
@@ -102,6 +130,12 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     memset(handle, 0, sizeof(struct mcp23s17_handle));
     handle->device_address = config->device_address & 0x07;  // Lower 3 bits only
     handle->spi_host = config->spi_host;
+    handle->spi_mutex = xSemaphoreCreateMutex();
+    if (handle->spi_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create SPI mutex");
+        free(handle);
+        return NULL;
+    }
 
     // Configure SPI bus
     spi_bus_config_t bus_cfg = {};
@@ -115,6 +149,7 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     esp_err_t ret = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(ret));
+        vSemaphoreDelete(handle->spi_mutex);
         free(handle);
         return NULL;
     }
@@ -132,6 +167,7 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI device add failed: %s", esp_err_to_name(ret));
         spi_bus_free(config->spi_host);
+        vSemaphoreDelete(handle->spi_mutex);
         free(handle);
         return NULL;
     }
@@ -171,6 +207,10 @@ void mcp23s17_deinit(mcp23s17_handle_t handle) {
         spi_bus_remove_device(handle->spi_device);
     }
     spi_bus_free(handle->spi_host);
+    if (handle->spi_mutex) {
+        vSemaphoreDelete(handle->spi_mutex);
+        handle->spi_mutex = NULL;
+    }
     free(handle);
 }
 
@@ -316,4 +356,18 @@ esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pi
         defval_val |= (1 << bit);   // Trigger when pin goes LOW (was HIGH)
     }
     return mcp23s17_write_register(handle, defval_reg, defval_val);
+}
+
+esp_err_t mcp23s17_debug_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t *value) {
+    if (handle == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return mcp23s17_read_register(handle, reg, value);
+}
+
+esp_err_t mcp23s17_debug_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
+    if (handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return mcp23s17_write_register(handle, reg, value);
 }
