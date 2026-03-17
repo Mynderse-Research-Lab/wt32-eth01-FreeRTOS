@@ -5,6 +5,7 @@
  */
 
 #include "GantryRotaryServo.h"
+#include "gpio_expander.h"
 
 namespace Gantry {
 
@@ -12,6 +13,19 @@ namespace {
 constexpr uint32_t kServoFreqHz = 50;
 constexpr uint8_t kPwmResolutionBits = 16;
 constexpr uint32_t kServoPeriodUs = 1000000UL / kServoFreqHz;
+
+int resolveDirectGpioPin(int pin) {
+    if (pin < 0) {
+        return -1;
+    }
+    if ((pin & GPIO_EXPANDER_DIRECT_FLAG) != 0) {
+        return pin & GPIO_EXPANDER_DIRECT_MASK;
+    }
+    if (pin >= GPIO_DIRECT_PIN_BASE) {
+        return pin;
+    }
+    return -1;
+}
 } // namespace
 
 GantryRotaryServo::GantryRotaryServo()
@@ -54,15 +68,21 @@ bool GantryRotaryServo::begin() {
         return false;
     }
 
+    const int resolvedPwmPin = resolveDirectGpioPin(pwmPin_);
+    if (resolvedPwmPin < 0) {
+        // LEDC can only drive native ESP32 GPIO, not MCP23S17 expander pins.
+        return false;
+    }
+
 #if defined(ARDUINO_ARCH_ESP32)
-    active_ = ledcAttach(static_cast<uint8_t>(pwmPin_), kServoFreqHz, kPwmResolutionBits);
+    active_ = ledcAttach(static_cast<uint8_t>(resolvedPwmPin), kServoFreqHz, kPwmResolutionBits);
     if (!active_) {
         return false;
     }
     moveToDeg(currentDeg_);
     return true;
 #else
-    servoAttached_ = servo_.attach(pwmPin_, minPulseUs_, maxPulseUs_);
+    servoAttached_ = servo_.attach(resolvedPwmPin, minPulseUs_, maxPulseUs_);
     if (servoAttached_) {
         servo_.write(currentDeg_);
     }

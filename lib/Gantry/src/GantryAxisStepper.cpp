@@ -6,8 +6,71 @@
 
 #include "GantryAxisStepper.h"
 #include <cmath>
+#include "gpio_expander.h"
+#include "driver/gpio.h"
 
 namespace Gantry {
+
+namespace {
+inline bool isValidPin(int pin) {
+    return pin >= 0 && pin <= 255;
+}
+
+inline bool isEncodedDirectPin(int pin) {
+    return (pin & GPIO_EXPANDER_DIRECT_FLAG) != 0;
+}
+
+inline bool isMcpLogicalPin(int pin) {
+    return pin >= 0 && pin < GPIO_DIRECT_PIN_BASE && !isEncodedDirectPin(pin);
+}
+
+inline int resolveDirectGpioPin(int pin) {
+    if (pin < 0) {
+        return -1;
+    }
+    if (isEncodedDirectPin(pin)) {
+        return pin & GPIO_EXPANDER_DIRECT_MASK;
+    }
+    if (pin >= GPIO_DIRECT_PIN_BASE) {
+        return pin;
+    }
+    return -1;
+}
+
+inline bool configureOutputPin(int pin) {
+    if (!isValidPin(pin)) {
+        return false;
+    }
+    if (isMcpLogicalPin(pin)) {
+        return gpio_expander_set_direction(pin, true) == ESP_OK;
+    }
+    int gpioPin = resolveDirectGpioPin(pin);
+    if (gpioPin < 0) {
+        return false;
+    }
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << gpioPin);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    return gpio_config(&io_conf) == ESP_OK;
+}
+
+inline void writePinLevel(int pin, bool high) {
+    if (!isValidPin(pin)) {
+        return;
+    }
+    if (isMcpLogicalPin(pin)) {
+        (void)gpio_expander_write(pin, high ? 1 : 0);
+        return;
+    }
+    int gpioPin = resolveDirectGpioPin(pin);
+    if (gpioPin >= 0) {
+        (void)gpio_set_level((gpio_num_t)gpioPin, high ? 1 : 0);
+    }
+}
+}  // namespace
 
 GantryAxisStepper::GantryAxisStepper()
     : stepPin_(-1),
@@ -32,7 +95,10 @@ GantryAxisStepper::GantryAxisStepper()
       accelStepsPerS2_(0.0f),
       decelStepsPerS2_(0.0f),
       stepAccumulator_(0.0f),
-      lastUpdateUs_(0) {}
+      lastUpdateUs_(0),
+      stepDirectGpio_(-1),
+      stepUseLedc_(false),
+      lastLedcFreqHz_(0) {}
 
 void GantryAxisStepper::configurePins(int stepPin, int dirPin, int enablePin,
                                       bool invertDir, bool enableActiveLow) {
@@ -80,12 +146,30 @@ bool GantryAxisStepper::begin() {
         return false;
     }
 
-    pinMode(stepPin_, OUTPUT);
-    pinMode(dirPin_, OUTPUT);
-    digitalWrite(stepPin_, LOW);
+    if (!configureOutputPin(stepPin_)) {
+        return false;
+    }
+    if (!configureOutputPin(dirPin_)) {
+        return false;
+    }
+    stepDirectGpio_ = resolveDirectGpioPin(stepPin_);
+    stepUseLedc_ = (stepDirectGpio_ >= 0);
+
+    if (stepUseLedc_) {
+        // Direct pulse pin uses LEDC hardware pulse train generation.
+        if (!ledcAttach(static_cast<uint8_t>(stepDirectGpio_), 1000, 1)) {
+            return false;
+        }
+        ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 0);
+        lastLedcFreqHz_ = 1000;
+    } else {
+        writePinLevel(stepPin_, false);
+    }
 
     if (enablePin_ >= 0) {
-        pinMode(enablePin_, OUTPUT);
+        if (!configureOutputPin(enablePin_)) {
+            return false;
+        }
         disable();
     }
 
@@ -94,16 +178,19 @@ bool GantryAxisStepper::begin() {
 
 void GantryAxisStepper::enable() {
     if (enablePin_ >= 0) {
-        digitalWrite(enablePin_, enableActiveLow_ ? LOW : HIGH);
+        writePinLevel(enablePin_, !enableActiveLow_);
     }
     enabled_ = true;
 }
 
 void GantryAxisStepper::disable() {
     if (enablePin_ >= 0) {
-        digitalWrite(enablePin_, enableActiveLow_ ? HIGH : LOW);
+        writePinLevel(enablePin_, enableActiveLow_);
     }
     enabled_ = false;
+    if (stepUseLedc_ && stepDirectGpio_ >= 0) {
+        ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 0);
+    }
     stop();
 }
 
@@ -145,6 +232,9 @@ void GantryAxisStepper::stop() {
     moving_ = false;
     currentSpeedStepsPerS_ = 0.0f;
     stepAccumulator_ = 0.0f;
+    if (stepUseLedc_ && stepDirectGpio_ >= 0) {
+        ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 0);
+    }
 }
 
 void GantryAxisStepper::update() {
@@ -168,6 +258,9 @@ void GantryAxisStepper::update() {
     }
 
     bool dirPositive = remainingSteps > 0;
+    bool dirLevel = dirPositive ^ invertDir_;
+    writePinLevel(dirPin_, dirLevel);
+
     float remaining = fabsf(static_cast<float>(remainingSteps));
     float decelDistance = (currentSpeedStepsPerS_ * currentSpeedStepsPerS_) /
                           (2.0f * decelStepsPerS2_);
@@ -186,9 +279,26 @@ void GantryAxisStepper::update() {
     }
 
     stepAccumulator_ += currentSpeedStepsPerS_ * dt;
+
+    if (stepUseLedc_ && stepDirectGpio_ >= 0) {
+        uint32_t freqHz = static_cast<uint32_t>(currentSpeedStepsPerS_ + 0.5f);
+        if (freqHz == 0) {
+            ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 0);
+        } else {
+            if (freqHz != lastLedcFreqHz_) {
+                (void)ledcChangeFrequency(static_cast<uint8_t>(stepDirectGpio_), freqHz, 1);
+                lastLedcFreqHz_ = freqHz;
+            }
+            // 1-bit LEDC duty: 1 = 50% pulse train.
+            ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 1);
+        }
+    }
+
     int32_t maxStepsThisUpdate = 200;
     while (stepAccumulator_ >= 1.0f && maxStepsThisUpdate-- > 0) {
-        stepOnce(dirPositive);
+        if (!stepUseLedc_) {
+            stepOnce(dirPositive);
+        }
         currentSteps_ += dirPositive ? 1 : -1;
         stepAccumulator_ -= 1.0f;
 
@@ -196,6 +306,9 @@ void GantryAxisStepper::update() {
             moving_ = false;
             currentSpeedStepsPerS_ = 0.0f;
             stepAccumulator_ = 0.0f;
+            if (stepUseLedc_ && stepDirectGpio_ >= 0) {
+                ledcWrite(static_cast<uint8_t>(stepDirectGpio_), 0);
+            }
             break;
         }
     }
@@ -211,10 +324,10 @@ float GantryAxisStepper::getTargetMm() const {
 
 void GantryAxisStepper::stepOnce(bool dirPositive) {
     bool dirLevel = dirPositive ^ invertDir_;
-    digitalWrite(dirPin_, dirLevel ? HIGH : LOW);
-    digitalWrite(stepPin_, HIGH);
+    writePinLevel(dirPin_, dirLevel);
+    writePinLevel(stepPin_, true);
     delayMicroseconds(stepPulseWidthUs_);
-    digitalWrite(stepPin_, LOW);
+    writePinLevel(stepPin_, false);
 }
 
 bool GantryAxisStepper::withinLimits(float targetMm) const {

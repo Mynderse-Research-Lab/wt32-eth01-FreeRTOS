@@ -83,6 +83,9 @@ private:
     float decelStepsPerS2_;
     float stepAccumulator_;
     uint32_t lastUpdateUs_;
+    int stepDirectGpio_;
+    bool stepUseLedc_;
+    uint32_t lastLedcFreqHz_;
 };
 
 } // namespace Gantry

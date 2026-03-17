@@ -1,8 +1,42 @@
 #include "GantryLimitSwitch.h"
 
 #include "gpio_expander.h"
+#include "driver/gpio.h"
 
 namespace Gantry {
+namespace {
+bool isEncodedDirectPin(int pin) {
+    return (pin & GPIO_EXPANDER_DIRECT_FLAG) != 0;
+}
+
+bool isMcpLogicalPin(int pin) {
+    return pin >= 0 && pin < GPIO_DIRECT_PIN_BASE && !isEncodedDirectPin(pin);
+}
+
+int resolveDirectGpioPin(int pin) {
+    if (pin < 0) {
+        return -1;
+    }
+    if (isEncodedDirectPin(pin)) {
+        return pin & GPIO_EXPANDER_DIRECT_MASK;
+    }
+    if (pin >= GPIO_DIRECT_PIN_BASE) {
+        return pin;
+    }
+    return -1;
+}
+
+uint8_t readPinLevel(int pin) {
+    if (isMcpLogicalPin(pin)) {
+        return gpio_expander_read(pin);
+    }
+    int gpioPin = resolveDirectGpioPin(pin);
+    if (gpioPin < 0) {
+        return 0;
+    }
+    return (uint8_t)gpio_get_level((gpio_num_t)gpioPin);
+}
+} // namespace
 
 GantryLimitSwitch::GantryLimitSwitch()
     : pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(3),
@@ -26,10 +60,26 @@ bool GantryLimitSwitch::begin() {
     }
 
     // Input pin for switch signal (LOW/HIGH interpretation handled by activeLow_).
-    gpio_expander_set_direction((uint8_t)pin_, false);
-    if (enablePullup_) {
-        // Most limit wiring in this project uses active-low switches with pullups.
-        gpio_expander_set_pullup((uint8_t)pin_, true);
+    if (isMcpLogicalPin(pin_)) {
+        gpio_expander_set_direction(pin_, false);
+        if (enablePullup_) {
+            // Most limit wiring in this project uses active-low switches with pullups.
+            gpio_expander_set_pullup(pin_, true);
+        }
+    } else {
+        const int gpioPin = resolveDirectGpioPin(pin_);
+        if (gpioPin < 0) {
+            return false;
+        }
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << gpioPin);
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_up_en = enablePullup_ ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        if (gpio_config(&io_conf) != ESP_OK) {
+            return false;
+        }
     }
 
     update(true);
@@ -43,8 +93,8 @@ void GantryLimitSwitch::update(bool force) {
     }
 
     // Convert electrical level to logical "active" state.
-    bool rawActive = activeLow_ ? (gpio_expander_read((uint8_t)pin_) == 0)
-                                : (gpio_expander_read((uint8_t)pin_) != 0);
+    bool rawActive = activeLow_ ? (readPinLevel(pin_) == 0)
+                                : (readPinLevel(pin_) != 0);
 
     if (force) {
         sampleState_ = rawActive;
