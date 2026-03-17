@@ -136,6 +136,26 @@ uint8_t mcp23s17_read_port(mcp23s17_handle_t handle, mcp23s17_port_t port);
 esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pin, 
                                       bool enable, bool trigger_on_rising);
 
+/**
+ * @brief Debug helper: read any MCP23S17 register directly.
+ *
+ * @param handle MCP23S17 handle
+ * @param reg Register address
+ * @param value Output register value
+ * @return ESP_OK on success
+ */
+esp_err_t mcp23s17_debug_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t *value);
+
+/**
+ * @brief Debug helper: write any MCP23S17 register directly.
+ *
+ * @param handle MCP23S17 handle
+ * @param reg Register address
+ * @param value Register value to write
+ * @return ESP_OK on success
+ */
+esp_err_t mcp23s17_debug_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value);
+
 #ifdef __cplusplus
 }
 #endif
