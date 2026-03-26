@@ -58,6 +58,7 @@ This journal captures the full development path of the current Gantry + SDF08NK8
 - Limit switches required in active axis modes and monitored in runtime diagnostics.
 - Added spreadsheet-friendly pinout artifacts:
   - `pinout.csv`
+  - `pinout_temporary_direct_gpio.csv`
 
 ---
 
