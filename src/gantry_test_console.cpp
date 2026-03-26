@@ -157,7 +157,7 @@ void printDirectPinState(int pin, const char *label) {
 }
 
 bool isAllowedDrivePin(int pin) {
-  static const int kAllowedPins[] = {PIN_PULSE, PIN_THETA_PWM};
+  static const int kAllowedPins[] = {PIN_X_PULSE, PIN_Y_PULSE, PIN_THETA_PWM};
   for (size_t i = 0; i < sizeof(kAllowedPins) / sizeof(kAllowedPins[0]); i++) {
     if (kAllowedPins[i] == pin) {
       return true;
@@ -220,7 +220,7 @@ void calibrationTask(void *param) {
     ESP_LOGI(TAG, "Calibration aborted by stop request");
   } else {
     g_calibratedThisSession = hadCalibration;
-    ESP_LOGI(TAG, "ERROR: Calibration failed");
+    ESP_LOGE(TAG, "Calibration failed");
     if (hadCalibration) {
       ESP_LOGI(TAG, "Keeping previous calibrated X max (no successful recalibration)");
     }
@@ -324,7 +324,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
 
 void printStatus(Gantry::Gantry *gantry) {
   if (gantry == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -363,7 +363,7 @@ void printStatus(Gantry::Gantry *gantry) {
 
 void printLimits(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr || cfg->gantry == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -385,40 +385,41 @@ void printLimits(const GantryTestConsoleConfig *cfg) {
 
 void printActivePins(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr) {
-    ESP_LOGI(TAG, "ERROR: Pin configuration not available");
+    ESP_LOGE(TAG, "Pin configuration not available");
     return;
   }
 
-  ESP_LOGI(TAG, "=== Active Pin Configuration ===");
-  ESP_LOGI(TAG, "Mode: %s", cfg->use_mcp23s17 ? "MCP23S17 IO Expander" : "Direct WT32 GPIO (temporary)");
+  ESP_LOGI(TAG, "=== Active Pin State ===");
+  ESP_LOGI(TAG, "X Pulse LEDC: ch %d", cfg->x_pulse_ledc_channel);
+  ESP_LOGI(TAG, "Y Pulse LEDC: ch %d", cfg->y_pulse_ledc_channel);
 
-  if (cfg->use_mcp23s17) {
-    printMcpPinState(cfg->x_dir_pin, "X DIR       ");
-    printMcpPinState(cfg->x_enable_pin, "X ENABLE    ");
-    printMcpPinState(cfg->x_alarm_pin, "X ALARM IN  ");
-    if (cfg->x_alarm_reset_pin >= 0) {
-      printMcpPinState(cfg->x_alarm_reset_pin, "X ARST      ");
-    }
-    printMcpPinState(cfg->limit_min_pin, "X LMIN      ");
-    printMcpPinState(cfg->limit_max_pin, "X LMAX      ");
-    printMcpPinState(PIN_Y_DIR, "Y DIR       ");
-    printMcpPinState(PIN_Y_ENABLE, "Y ENABLE    ");
-    printMcpPinState(PIN_GRIPPER, "GRIPPER     ");
-  } else {
-    printDirectPinState(cfg->x_dir_pin, "X DIR       ");
-    printDirectPinState(cfg->x_enable_pin, "X ENABLE    ");
-    printDirectPinState(cfg->x_alarm_pin, "X ALARM IN  ");
-    if (cfg->x_alarm_reset_pin >= 0) {
-      printDirectPinState(cfg->x_alarm_reset_pin, "X ARST      ");
-    }
-    printDirectPinState(cfg->limit_min_pin, "X LMIN      ");
-    printDirectPinState(cfg->limit_max_pin, "X LMAX      ");
+  printMcpPinState(cfg->x_dir_pin, "X DIR       ");
+  printMcpPinState(cfg->x_enable_pin, "X ENABLE    ");
+  printMcpPinState(cfg->x_alarm_pin, "X ALARM IN  ");
+  if (cfg->x_alarm_reset_pin >= 0) {
+    printMcpPinState(cfg->x_alarm_reset_pin, "X ARST      ");
   }
+  printMcpPinState(cfg->y_alarm_pin, "Y ALARM IN  ");
+  if (cfg->y_alarm_reset_pin >= 0) {
+    printMcpPinState(cfg->y_alarm_reset_pin, "Y ARST      ");
+  }
+  printMcpPinState(cfg->limit_min_pin, "X LMIN      ");
+  printMcpPinState(cfg->limit_max_pin, "X LMAX      ");
+  printMcpPinState(PIN_Y_DIR, "Y DIR       ");
+  printMcpPinState(PIN_Y_ENABLE, "Y ENABLE    ");
+  printMcpPinState(PIN_Y_LIMIT_MIN, "Y LMIN      ");
+  printMcpPinState(PIN_Y_LIMIT_MAX, "Y LMAX      ");
+  printMcpPinState(PIN_THETA_LIMIT_MIN, "T LMIN      ");
+  printMcpPinState(PIN_THETA_LIMIT_MAX, "T LMAX      ");
+  printMcpPinState(PIN_GRIPPER, "GRIPPER     ");
 
   printDirectPinState(cfg->x_pulse_pin, "X PULSE     ");
+  printDirectPinState(cfg->y_pulse_pin, "Y PULSE     ");
   printDirectPinState(cfg->theta_pwm_pin, "THETA PWM   ");
   printDirectPinState(cfg->x_encoder_a_pin, "X ENC A     ");
   printDirectPinState(cfg->x_encoder_b_pin, "X ENC B     ");
+  printDirectPinState(cfg->y_encoder_a_pin, "Y ENC A     ");
+  printDirectPinState(cfg->y_encoder_b_pin, "Y ENC B     ");
 
   ESP_LOGI(TAG, "=========================");
 }
@@ -436,7 +437,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   }
 
   if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0) {
-    ESP_LOGI(TAG, "ERROR: Gantry not initialized");
+    ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
@@ -544,8 +545,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     if (!isAllowedDrivePin(pin)) {
-      ESP_LOGE(TAG, "gpio_drive blocked for GPIO%d (allowed: %d,%d)",
-               pin, PIN_PULSE, PIN_THETA_PWM);
+      ESP_LOGE(TAG, "gpio_drive blocked for GPIO%d (allowed: %d,%d,%d)",
+               pin, PIN_X_PULSE, PIN_Y_PULSE, PIN_THETA_PWM);
       return;
     }
     gpio_config_t ioConf = {};
@@ -621,7 +622,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int speedDeg = -1;
     int parsed = sscanf(cmd, "speed %d %d", &speedMm, &speedDeg);
     if (parsed < 1 || speedMm <= 0) {
-      ESP_LOGI(TAG, "ERROR: Usage: speed <mm_per_s> [deg_per_s]");
+      ESP_LOGE(TAG, "Usage: speed <mm_per_s> [deg_per_s]");
       return;
     }
     const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)speedMm);
@@ -645,11 +646,11 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int decel = -1;
     int parsed = sscanf(cmd, "accel %d %d", &accel, &decel);
     if (parsed < 1 || accel <= 0) {
-      ESP_LOGI(TAG, "ERROR: Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
+      ESP_LOGE(TAG, "Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
       return;
     }
     if (parsed >= 2 && decel <= 0) {
-      ESP_LOGI(TAG, "ERROR: Decel must be > 0");
+      ESP_LOGE(TAG, "Decel must be > 0");
       return;
     }
     const uint32_t requestedAccel = (uint32_t)convertSelectedToMm((float)accel);
@@ -684,7 +685,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     char unitStr[16] = {0};
     int parsed = sscanf(cmd, "units %15s", unitStr);
     if (parsed < 1) {
-      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
     for (int i = 0; unitStr[i]; i++) {
@@ -695,7 +696,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     } else if (strcmp(unitStr, "in") == 0 || strcmp(unitStr, "inch") == 0 || strcmp(unitStr, "inches") == 0) {
       g_linearUnitMode = LinearUnitMode::INCH;
     } else {
-      ESP_LOGI(TAG, "ERROR: Usage: units <mm|in>");
+      ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
     ESP_LOGI(TAG, "OK Linear units set to %s (internal storage remains mm)", getLinearUnitLabel());
@@ -703,7 +704,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int enabled = -1;
     int parsed = sscanf(cmd, "rangelimit %d", &enabled);
     if (parsed < 1 || (enabled != 0 && enabled != 1)) {
-      ESP_LOGI(TAG, "ERROR: Usage: rangelimit <0|1>");
+      ESP_LOGE(TAG, "Usage: rangelimit <0|1>");
       return;
     }
     g_motionProfileRangeLimitEnabled = (enabled == 1);
@@ -721,7 +722,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     float theta = 0.0f;
     int parsed = sscanf(cmd, "move %f %f %f", &x, &y, &theta);
     if (parsed < 3) {
-      ESP_LOGI(TAG, "ERROR: Usage: move <x_%s> <y_%s> <theta_deg>",
+      ESP_LOGE(TAG, "Usage: move <x_%s> <y_%s> <theta_deg>",
                getLinearUnitLabel(), getLinearUnitLabel());
       return;
     }
@@ -744,7 +745,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     int value = 0;
     int parsed = sscanf(cmd, "grip %d", &value);
     if (parsed < 1) {
-      ESP_LOGI(TAG, "ERROR: Usage: grip <0|1>");
+      ESP_LOGE(TAG, "Usage: grip <0|1>");
       return;
     }
     cfg->gantry->grip(value != 0);
