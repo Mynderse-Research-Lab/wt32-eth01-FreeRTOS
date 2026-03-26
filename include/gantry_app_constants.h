@@ -1,54 +1,50 @@
 #ifndef GANTRY_APP_CONSTANTS_H
 #define GANTRY_APP_CONSTANTS_H
 
-// MCP23S17 is mandatory for this application.
-#define APP_USE_MCP23S17 1
+// Temporary hardware mode switch for app-level testing.
+// 0 = No MCP23S17 connected (direct WT32 GPIO only for critical X-axis signals)
+// 1 = MCP23S17 connected and used for extended IO
+#define APP_USE_MCP23S17 0
 
 // MCP23S17 SPI pins (direct ESP32 GPIO)
-#define PIN_SPI_MISO 4
-#define PIN_SPI_MOSI 12
-#define PIN_SPI_SCLK 14
+#define PIN_SPI_MISO 19
+#define PIN_SPI_MOSI 23
+#define PIN_SPI_SCLK 18
 #define PIN_SPI_CS 5
 
 // MCP23S17 pin assignments (0-15)
-// X-axis signals are on Port A (0-7), Y-axis signals are on Port B (8-15).
-// Available/unused: GPA6(6)
-#define PIN_X_DIR 0
-#define PIN_X_ENABLE 1
-#define PIN_X_LIMIT_MIN 2
-#define PIN_X_LIMIT_MAX 3
-#define PIN_X_ALARM_STATUS 4
-#define PIN_X_ALARM_RESET 5
-#define PIN_GRIPPER 7
-#define PIN_Y_DIR 8
-#define PIN_Y_ENABLE 9
-#define PIN_Y_LIMIT_MIN 10
-#define PIN_Y_LIMIT_MAX 11
-#define PIN_Y_ALARM_STATUS 12
-#define PIN_Y_ALARM_RESET 13
-#define PIN_THETA_LIMIT_MIN 14
-#define PIN_THETA_LIMIT_MAX 15
+#define PIN_DIR 1
+#define PIN_ENABLE 2
+#define PIN_LIMIT_MIN 3
+#define PIN_LIMIT_MAX 4
+#define PIN_Y_STEP 5
+#define PIN_Y_DIR 6
+#define PIN_Y_ENABLE 7
+#define PIN_GRIPPER 8
+#define PIN_LED 9
+#define PIN_X_POS_REACHED 10
+#define PIN_X_BRAKE_STATUS 11
+#define PIN_X_ALARM_STATUS 12
+#define PIN_X_ALARM_RESET 13
+#define PIN_X_CWCCW_PROHIB 14
+#define PIN_X_PULSE_INHIB 15
 
-// Direct ESP32 GPIO pins (hardware peripheral requirements)
-// NOTE:
-// - Encoder A/B must stay on direct GPIO for PCNT.
-// - X/Y pulse and Theta PWM stay on direct GPIO for LEDC/PWM generation.
-#define PIN_X_PULSE 32
-#define PIN_Y_PULSE 33
-#define PIN_X_ENC_A 35
-#define PIN_X_ENC_B 36
-#define PIN_Y_ENC_A 39
-// GPIO2 is a boot strapping pin; keep LOW/floating during reset.
-#define PIN_Y_ENC_B 2
-// GPIO15 is a boot strapping pin; keep HIGH during reset for normal boot logs.
-#define PIN_THETA_PWM 15
+// Direct ESP32 GPIO pins
+#define PIN_PULSE 32
+#define PIN_ENC_A 35
+#define PIN_ENC_B 36
+#define PIN_THETA_PWM 13
 
-// Hardware peripheral channel allocation
-#define X_PULSE_LEDC_CHANNEL 0
-#define Y_PULSE_LEDC_CHANNEL 1
-#define THETA_PWM_LEDC_CHANNEL 2
-#define X_ENCODER_PCNT_UNIT 0
-#define Y_ENCODER_PCNT_UNIT 1
+// Direct WT32 test pins for X-axis (used when APP_USE_MCP23S17 == 0)
+// These intentionally mirror SDF08NK8X-Driver-library test mappings.
+#define PIN_X_PULSE_DIRECT 2
+#define PIN_X_DIR_DIRECT 12
+#define PIN_X_ENABLE_DIRECT 15
+#define PIN_X_ALARM_DIRECT 17
+// ARST output enabled for testing.
+#define PIN_X_ALARM_RESET_DIRECT 32
+#define PIN_X_LIMIT_MIN_DIRECT 33
+#define PIN_X_LIMIT_MAX_DIRECT 5
 
 // MCP23S17 defaults
 #define MCP23S17_DEVICE_ADDRESS 0x00

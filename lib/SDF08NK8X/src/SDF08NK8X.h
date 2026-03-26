@@ -24,7 +24,7 @@
 #endif
 
 #include <Arduino.h>
-#include <driver/pulse_cnt.h>
+#include <driver/pcnt.h>
 #include <esp_timer.h>
 
 // Optional FreeRTOS support - define SDF08NK8X_USE_FREERTOS=1 for thread safety
@@ -135,15 +135,14 @@ struct DriverConfig {
    *                                    (requires enable_encoder_feedback to be true)
    * @param invert_output_logic: Treat LOW (GND) as logical HIGH for outputs
    * @param invert_dir_pin: Invert DIR pin logic (true = swap direction)
-   * @param pcnt_unit: Logical PCNT unit id for app-level bookkeeping
-   *                   (driver/pulse_cnt allocates hardware units dynamically)
+   * @param pcnt_unit: ESP32 PCNT unit (0-7) for encoder counting
    * @param home_on_boot: Automatically home to MIN limit switch on first boot
    */
   bool enable_encoder_feedback;
   bool enable_closed_loop_control;
   bool invert_output_logic;
   bool invert_dir_pin;
-  int pcnt_unit;
+  pcnt_unit_t pcnt_unit;
   bool home_on_boot;
   uint32_t homing_speed_pps;
 
@@ -183,7 +182,7 @@ struct DriverConfig {
         enable_closed_loop_control(false),
         invert_output_logic(true),
         invert_dir_pin(false),
-        pcnt_unit(0),
+        pcnt_unit(PCNT_UNIT_0),
         home_on_boot(HOME_ON_BOOT),
         homing_speed_pps(6000),
         limit_debounce_cycles(10),
@@ -392,6 +391,24 @@ public:
   uint32_t getTravelDistance() const;
 
   /**
+   * @brief Notify driver of a limit switch GPIO interrupt
+   * @note Call from an ISR to force debounce update on next loop/timer tick.
+   */
+  void notifyLimitIrq();
+
+  /**
+   * @brief Update limit switch debounce state
+   * @param force When true, update immediately regardless of sample interval
+   */
+  void updateLimitDebounce(bool force = false);
+
+  /**
+   * @brief Read debounced limit switch states
+   */
+  bool getLimitMinDebounced() const;
+  bool getLimitMaxDebounced() const;
+
+  /**
    * @brief Emergency stop - immediately disable motor
    * @return true if successful
    */
@@ -519,10 +536,7 @@ private:
   bool initialized_, enabled_;
   // Encoder Tracking
   int64_t encoder_accumulator_;
-  int last_pcnt_count_;
-  pcnt_unit_handle_t pcnt_unit_handle_;
-  pcnt_channel_handle_t pcnt_chan_a_handle_;
-  pcnt_channel_handle_t pcnt_chan_b_handle_;
+  int16_t last_pcnt_count_;
   
   // Callbacks
   AlarmCallback alarm_callback_;
@@ -537,6 +551,22 @@ private:
   // Travel measurement state (MIN->MAX distance)
   bool travel_distance_valid_;
   uint32_t travel_distance_steps_;
+
+  // Limit switch debounce state
+  // These track the last sampled value and the number of consecutive
+  // matching samples required before accepting a change.
+  uint8_t limit_min_sample_, limit_max_sample_;
+  uint8_t limit_min_stable_, limit_max_stable_;
+  bool limit_min_state_, limit_max_state_;
+  uint32_t last_limit_sample_ms_;
+  volatile bool limit_irq_pending_;
+
+  // Alarm debounce state (used in motion update loop to reject short EMI spikes)
+  bool alarm_sample_state_;
+  bool alarm_state_debounced_;
+  uint8_t alarm_stable_count_;
+
+
 
   // Private helper methods
   bool writeOutputPin(size_t index, bool state);

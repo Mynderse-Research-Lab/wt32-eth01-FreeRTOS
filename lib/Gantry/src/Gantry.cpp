@@ -18,15 +18,7 @@ static const char *TAG = "Gantry";
 // ============================================================================
 
 Gantry::Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)
-    : Gantry(xConfig, BergerdaServo::DriverConfig(), gripperPin) {
-}
-
-Gantry::Gantry(const BergerdaServo::DriverConfig &xConfig,
-               const BergerdaServo::DriverConfig &yConfig,
-               int gripperPin)
-    : axisX_(xConfig), axisYServo_(yConfig), yServoConfigured_(yConfig.output_pin_nos[6] >= 0),
-      yServoUseEncoder_(yConfig.enable_encoder_feedback),
-      gripperPin_(gripperPin), xMinPin_(-1), xMaxPin_(-1),
+    : axisX_(xConfig), gripperPin_(gripperPin), xMinPin_(-1), xMaxPin_(-1),
       initialized_(false), enabled_(false), abortRequested_(false),
       homingInProgress_(false), calibrationInProgress_(false), gripperActive_(false),
       currentX_mm_(0.0f), currentY_(0), currentTheta_(0), targetY_(0), targetTheta_(0),
@@ -71,12 +63,8 @@ bool Gantry::begin() {
         return false;
     }
     
-    // Initialize Y-axis servo (preferred when configured), otherwise stepper.
-    if (yServoConfigured_) {
-        if (!axisYServo_.initialize()) {
-            return false;
-        }
-    } else if (axisY_.isConfigured()) {
+    // Initialize Y-axis stepper if configured
+    if (axisY_.isConfigured()) {
         axisY_.begin();
     }
 
@@ -97,13 +85,7 @@ void Gantry::enable() {
     GANTRY_CHECK_INITIALIZED();
     // Consider already-enabled driver as success.
     bool xEnabled = axisX_.isEnabled() || axisX_.enable();
-    if (yServoConfigured_) {
-        if (xEnabled) {
-            axisYServo_.enable();
-        } else {
-            axisYServo_.disable();
-        }
-    } else if (axisY_.isConfigured()) {
+    if (axisY_.isConfigured()) {
         if (xEnabled) {
             axisY_.enable();
         } else {
@@ -119,9 +101,7 @@ void Gantry::disable() {
         stopAllMotion();
     }
     axisX_.disable();
-    if (yServoConfigured_) {
-        axisYServo_.disable();
-    } else if (axisY_.isConfigured()) {
+    if (axisY_.isConfigured()) {
         axisY_.disable();
     }
     enabled_ = false;
@@ -211,9 +191,8 @@ void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
     // Store target positions for Y and Theta
     targetY_ = y;
     targetTheta_ = theta;
-    const float speed_mm_s = (float)speed / getPulsesPerMm();
-    if (isYAxisConfigured()) {
-        if (!moveYAxisTo((float)y, speed_mm_s, 0.0f, 0.0f)) {
+    if (axisY_.isConfigured()) {
+        if (!axisY_.moveToMm((float)y)) {
             stopAllMotion();
             return;
         }
@@ -295,7 +274,7 @@ bool Gantry::isBusy() const {
     }
     return motionState_ != MotionState::IDLE ||
            axisX_.isMotionActive() || axisX_.isHoming() ||
-           isYAxisBusy();
+           (axisY_.isConfigured() && axisY_.isBusy());
 }
 
 bool Gantry::isEnabled() const {
@@ -538,20 +517,14 @@ bool Gantry::isAlarmActive() const {
         return false;
     }
     // Use driver-maintained alarm status instead of raw GPIO reads.
-    const bool xAlarm = axisX_.getStatus().alarm_active;
-    const bool yAlarm = yServoConfigured_ ? axisYServo_.getStatus().alarm_active : false;
-    return xAlarm || yAlarm;
+    return axisX_.getStatus().alarm_active;
 }
 
 bool Gantry::clearAlarm() {
     if (!initialized_) {
         return false;
     }
-    bool ok = axisX_.clearAlarm();
-    if (yServoConfigured_) {
-        ok = axisYServo_.clearAlarm() || ok;
-    }
-    return ok;
+    return axisX_.clearAlarm();
 }
 
 void Gantry::setHomingSpeed(uint32_t speed_pps) {
@@ -585,11 +558,7 @@ JointConfig Gantry::getCurrentJointConfig() const {
 JointConfig Gantry::getTargetJointConfig() const {
     JointConfig joint;
     joint.x = pulsesToMm(getXEncoder());  // Current X (target tracking not implemented)
-    if (yServoConfigured_) {
-        joint.y = targetY_mm_;
-    } else {
-        joint.y = axisY_.isConfigured() ? axisY_.getTargetMm() : (float)targetY_;
-    }
+    joint.y = axisY_.isConfigured() ? axisY_.getTargetMm() : (float)targetY_;
     joint.theta = (float)targetTheta_;
     return joint;
 }
@@ -639,9 +608,6 @@ int32_t Gantry::mmToPulses(float mm) const {
 // ============================================================================
 
 float Gantry::getCurrentYPosition() const {
-    if (yServoConfigured_) {
-        return getCurrentYFromServoMm();
-    }
     return axisY_.isConfigured() ? axisY_.getCurrentMm() : (float)currentY_;
 }
 
@@ -651,47 +617,12 @@ uint32_t Gantry::getHomingSpeed() const {
 }
 
 bool Gantry::moveYAxisTo(float targetY, float speed, float accel, float decel) {
-    if (yServoConfigured_) {
-        const int32_t currentYCounts = yServoUseEncoder_
-            ? axisYServo_.getEncoderPosition()
-            : (int32_t)axisYServo_.getPosition();
-        const int32_t targetYCounts = mmToPulses(targetY);
-        const int32_t deltaY = targetYCounts - currentYCounts;
-        if (deltaY == 0) {
-            return true;
-        }
-        const float pulsesPerMm = getPulsesPerMm();
-        uint32_t speed_pps = (uint32_t)(speed * pulsesPerMm);
-        uint32_t accel_pps = (accel > 0.0f) ? (uint32_t)(accel * pulsesPerMm) : (speed_pps / 2);
-        uint32_t decel_pps = (decel > 0.0f) ? (uint32_t)(decel * pulsesPerMm) : (speed_pps / 2);
-        if (speed_pps == 0) speed_pps = 1;
-        if (accel_pps == 0) accel_pps = 1;
-        if (decel_pps == 0) decel_pps = 1;
-        return axisYServo_.moveRelative(deltaY, speed_pps, accel_pps, decel_pps);
-    } else if (axisY_.isConfigured()) {
+    if (axisY_.isConfigured()) {
         return axisY_.moveToMm(targetY, speed, accel, decel);
     } else {
         currentY_ = (int32_t)targetY;
         return true;
     }
-}
-
-bool Gantry::isYAxisConfigured() const {
-    return yServoConfigured_ || axisY_.isConfigured();
-}
-
-bool Gantry::isYAxisBusy() const {
-    if (yServoConfigured_) {
-        return axisYServo_.isMotionActive();
-    }
-    return axisY_.isConfigured() && axisY_.isBusy();
-}
-
-float Gantry::getCurrentYFromServoMm() const {
-    const int32_t yCounts = yServoUseEncoder_
-        ? axisYServo_.getEncoderPosition()
-        : (int32_t)axisYServo_.getPosition();
-    return pulsesToMm(yCounts);
 }
 
 void Gantry::updateAxisPositions() {
@@ -726,9 +657,7 @@ void Gantry::updateAxisPositions() {
     // Refresh X joint position every update tick from encoder feedback.
     currentX_mm_ = pulsesToMm(getXEncoder());
 
-    if (yServoConfigured_) {
-        currentY_ = (int32_t)getCurrentYFromServoMm();
-    } else if (axisY_.isConfigured()) {
+    if (axisY_.isConfigured()) {
         axisY_.update();
         currentY_ = (int32_t)axisY_.getCurrentMm();
     }
@@ -739,9 +668,7 @@ void Gantry::updateAxisPositions() {
 
 void Gantry::stopAllMotion() {
     axisX_.stopMotion(0);
-    if (yServoConfigured_) {
-        axisYServo_.stopMotion(0);
-    } else if (axisY_.isConfigured()) {
+    if (axisY_.isConfigured()) {
         axisY_.stop();
     }
     homingInProgress_ = false;
@@ -772,7 +699,7 @@ void Gantry::startSequentialMotion() {
             stopAllMotion();
             return;
         }
-        if (!isYAxisConfigured()) {
+        if (!axisY_.isConfigured()) {
             motionState_ = MotionState::X_MOVING;
             startXAxisMotion();
         }
@@ -784,7 +711,7 @@ void Gantry::startSequentialMotion() {
             stopAllMotion();
             return;
         }
-        if (!isYAxisConfigured()) {
+        if (!axisY_.isConfigured()) {
             motionState_ = MotionState::GRIPPER_ACTUATING;
             grip(gripperTargetState_);
             gripperActuateStart_ms_ = millis();
@@ -816,7 +743,7 @@ void Gantry::processSequentialMotion() {
     switch (motionState_) {
         case MotionState::Y_DESCENDING:
             // Wait for Y-axis to reach target
-            if (!isYAxisConfigured() || !isYAxisBusy()) {
+            if (!axisY_.isConfigured() || !axisY_.isBusy()) {
                 // Y-axis reached target, actuate gripper
                 motionState_ = MotionState::GRIPPER_ACTUATING;
                 grip(gripperTargetState_);
@@ -832,7 +759,7 @@ void Gantry::processSequentialMotion() {
                     stopAllMotion();
                     return;
                 }
-                if (!isYAxisConfigured()) {
+                if (!axisY_.isConfigured()) {
                     motionState_ = MotionState::X_MOVING;
                     startXAxisMotion();
                 }
@@ -840,7 +767,7 @@ void Gantry::processSequentialMotion() {
             break;
             
         case MotionState::Y_RETRACTING:
-            if (!isYAxisConfigured() || !isYAxisBusy()) {
+            if (!axisY_.isConfigured() || !axisY_.isBusy()) {
                 float currentY = getCurrentYPosition();
                 if (targetY_mm_ < currentY) {
                     motionState_ = MotionState::Y_DESCENDING;
@@ -849,7 +776,7 @@ void Gantry::processSequentialMotion() {
                         stopAllMotion();
                         return;
                     }
-                    if (!isYAxisConfigured()) {
+                    if (!axisY_.isConfigured()) {
                         motionState_ = MotionState::GRIPPER_ACTUATING;
                         grip(gripperTargetState_);
                         gripperActuateStart_ms_ = millis();
