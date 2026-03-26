@@ -3,8 +3,7 @@
  * @brief GPIO Expander Abstraction Layer for MCP23S17
  * @version 1.0.0
  * 
- * Provides GPIO abstraction that works with both direct ESP32 GPIO
- * and MCP23S17 GPIO expander.
+ * Provides GPIO abstraction for MCP23S17 GPIO expander pins only.
  */
 
 #ifndef GPIO_EXPANDER_H
@@ -22,16 +21,9 @@ extern "C" {
 typedef struct mcp23s17_config_t mcp23s17_config_t;
 typedef struct mcp23s17_handle* mcp23s17_handle_t;
 
-// Pin mapping:
-// - Pins 0..15 are MCP23S17 pins (require MCP23S17 initialization)
-// - Pins >= 16 are treated as direct ESP32 GPIO numbers
-
-#define GPIO_EXPANDER_PIN_BASE 0x00  // MCP23S17 pins start at 0
-#define GPIO_DIRECT_PIN_BASE   0x10  // Values >= 16 are treated as direct GPIO
-
-// Pin type flags
-#define PIN_TYPE_MCP23S17  0x00
-#define PIN_TYPE_DIRECT    0x10
+// MCP23S17 logical pin mapping for this module: 0..15 only.
+#define GPIO_EXPANDER_PIN_BASE 0x00
+#define GPIO_EXPANDER_PIN_MAX  0x0F
 
 /**
  * @brief Initialize GPIO expander system
@@ -49,7 +41,7 @@ void gpio_expander_deinit(void);
 /**
  * @brief Configure pin as input or output
  * 
- * @param pin Logical pin number (0-15 for MCP23S17, 16+ for direct GPIO)
+ * @param pin Logical MCP23S17 pin number (0-15)
  * @param is_output true for output, false for input
  * @return ESP_OK on success
  */
@@ -58,7 +50,7 @@ esp_err_t gpio_expander_set_direction(uint8_t pin, bool is_output);
 /**
  * @brief Set pin pull-up resistor
  * 
- * @param pin Logical pin number
+ * @param pin Logical MCP23S17 pin number (0-15)
  * @param enable true to enable pull-up
  * @return ESP_OK on success
  */
@@ -67,7 +59,7 @@ esp_err_t gpio_expander_set_pullup(uint8_t pin, bool enable);
 /**
  * @brief Write pin level
  * 
- * @param pin Logical pin number
+ * @param pin Logical MCP23S17 pin number (0-15)
  * @param level Pin level (0 or 1)
  * @return ESP_OK on success
  */
@@ -76,7 +68,7 @@ esp_err_t gpio_expander_write(uint8_t pin, uint8_t level);
 /**
  * @brief Read pin level
  * 
- * @param pin Logical pin number
+ * @param pin Logical MCP23S17 pin number (0-15)
  * @return Pin level (0 or 1)
  */
 uint8_t gpio_expander_read(uint8_t pin);
