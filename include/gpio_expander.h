@@ -1,10 +1,10 @@
 /**
  * @file gpio_expander.h
- * @brief GPIO Expander Abstraction Layer for MCP23S17
+ * @brief GPIO abstraction for MCP23S17 and direct ESP32 GPIO
  * @version 1.0.0
- * 
+ *
  * Provides GPIO abstraction that works with both direct ESP32 GPIO
- * and MCP23S17 GPIO expander. Maps logical pin numbers to physical pins.
+ * and MCP23S17 GPIO expander.
  */
 
 #ifndef GPIO_EXPANDER_H
@@ -49,7 +49,7 @@ void gpio_expander_deinit(void);
 /**
  * @brief Configure pin as input or output
  * 
- * @param pin Logical pin number (0-15 for MCP23S17, 16+ for direct GPIO)
+ * @param pin Pin identifier (MCP pin 0-15 or direct ESP32 GPIO number)
  * @param is_output true for output, false for input
  * @return ESP_OK on success
  */
@@ -58,7 +58,7 @@ esp_err_t gpio_expander_set_direction(uint8_t pin, bool is_output);
 /**
  * @brief Set pin pull-up resistor
  * 
- * @param pin Logical pin number
+ * @param pin Pin identifier (MCP pin 0-15 or direct ESP32 GPIO number)
  * @param enable true to enable pull-up
  * @return ESP_OK on success
  */
@@ -67,7 +67,7 @@ esp_err_t gpio_expander_set_pullup(uint8_t pin, bool enable);
 /**
  * @brief Write pin level
  * 
- * @param pin Logical pin number
+ * @param pin Pin identifier (MCP pin 0-15 or direct ESP32 GPIO number)
  * @param level Pin level (0 or 1)
  * @return ESP_OK on success
  */
@@ -76,7 +76,7 @@ esp_err_t gpio_expander_write(uint8_t pin, uint8_t level);
 /**
  * @brief Read pin level
  * 
- * @param pin Logical pin number
+ * @param pin Pin identifier (MCP pin 0-15 or direct ESP32 GPIO number)
  * @return Pin level (0 or 1)
  */
 uint8_t gpio_expander_read(uint8_t pin);
