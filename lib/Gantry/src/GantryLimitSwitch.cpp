@@ -5,7 +5,7 @@
 namespace Gantry {
 
 GantryLimitSwitch::GantryLimitSwitch()
-    : pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(3),
+    : pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(6),
       sampleState_(false), stableState_(false), stableCount_(0), initialized_(false) {}
 
 void GantryLimitSwitch::configure(int pin, bool activeLow, bool enablePullup,

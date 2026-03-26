@@ -134,8 +134,8 @@ void Gantry::disable() {
 void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
     xMinPin_ = xMinPin;
     xMaxPin_ = xMaxPin;
-    xMinSwitch_.configure(xMinPin_, true, true, 3);
-    xMaxSwitch_.configure(xMaxPin_, true, true, 3);
+    xMinSwitch_.configure(xMinPin_, true, true, 6);
+    xMaxSwitch_.configure(xMaxPin_, true, true, 6);
 }
 
 void Gantry::setYAxisPins(int stepPin, int dirPin, int enablePin,
