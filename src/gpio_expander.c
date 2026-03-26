@@ -5,7 +5,6 @@
 
 #include "gpio_expander.h"
 #include "MCP23S17.h"
-#include "driver/gpio.h"
 #include "esp_log.h"
 
 static const char *TAG = "GPIOExpander";
@@ -13,15 +12,13 @@ static const char *TAG = "GPIOExpander";
 static mcp23s17_handle_t g_mcp_handle = NULL;
 
 static bool is_mcp_pin(uint8_t pin) {
-    // MCP pins are meaningful only when an MCP device is initialized.
-    // In direct mode (no MCP attached), all pins are treated as direct GPIO.
-    return (g_mcp_handle != NULL) && (pin < GPIO_DIRECT_PIN_BASE);
+    return (pin <= GPIO_EXPANDER_PIN_MAX);
 }
 
 bool gpio_expander_init(const mcp23s17_config_t* mcp_config) {
     if (mcp_config == NULL) {
-        ESP_LOGW(TAG, "MCP23S17 config is NULL - using direct GPIO only");
-        return true;
+        ESP_LOGE(TAG, "MCP23S17 config is NULL");
+        return false;
     }
 
     g_mcp_handle = mcp23s17_init(mcp_config);
@@ -42,54 +39,46 @@ void gpio_expander_deinit(void) {
 }
 
 esp_err_t gpio_expander_set_direction(uint8_t pin, bool is_output) {
-    if (is_mcp_pin(pin)) {
-        if (g_mcp_handle == NULL) {
-            ESP_LOGE(TAG, "MCP23S17 not initialized");
-            return ESP_ERR_INVALID_STATE;
-        }
-        return mcp23s17_set_pin_direction(g_mcp_handle, pin, is_output);
+    if (!is_mcp_pin(pin)) {
+        return ESP_ERR_INVALID_ARG;
     }
-
-    return gpio_set_direction((gpio_num_t)pin, is_output ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT);
+    if (g_mcp_handle == NULL) {
+        ESP_LOGE(TAG, "MCP23S17 not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return mcp23s17_set_pin_direction(g_mcp_handle, pin, is_output);
 }
 
 esp_err_t gpio_expander_set_pullup(uint8_t pin, bool enable) {
-    if (is_mcp_pin(pin)) {
-        // MCP23S17 pin
-        if (g_mcp_handle == NULL) {
-            return ESP_ERR_INVALID_STATE;
-        }
-        return mcp23s17_set_pin_pullup(g_mcp_handle, pin, enable);
+    if (!is_mcp_pin(pin)) {
+        return ESP_ERR_INVALID_ARG;
     }
-
-    // Direct GPIO pin - configure pull-up
-    gpio_num_t gpio_num = (gpio_num_t)pin;
-    return gpio_set_pull_mode(gpio_num, enable ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
+    if (g_mcp_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return mcp23s17_set_pin_pullup(g_mcp_handle, pin, enable);
 }
 
 esp_err_t gpio_expander_write(uint8_t pin, uint8_t level) {
-    if (is_mcp_pin(pin)) {
-        // MCP23S17 pin
-        if (g_mcp_handle == NULL) {
-            ESP_LOGE(TAG, "MCP23S17 not initialized");
-            return ESP_ERR_INVALID_STATE;
-        }
-        return mcp23s17_write_pin(g_mcp_handle, pin, level);
+    if (!is_mcp_pin(pin)) {
+        return ESP_ERR_INVALID_ARG;
     }
-
-    // Direct GPIO pin (raw GPIO number, no offset encoding)
-    return gpio_set_level((gpio_num_t)pin, level);
+    if (g_mcp_handle == NULL) {
+        ESP_LOGE(TAG, "MCP23S17 not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return mcp23s17_write_pin(g_mcp_handle, pin, level);
 }
 
 uint8_t gpio_expander_read(uint8_t pin) {
-    if (is_mcp_pin(pin)) {
-        if (g_mcp_handle == NULL) {
-            ESP_LOGE(TAG, "MCP23S17 not initialized");
-            return 0;
-        }
-        return mcp23s17_read_pin(g_mcp_handle, pin);
+    if (!is_mcp_pin(pin)) {
+        return 0;
     }
-    return (uint8_t)gpio_get_level((gpio_num_t)pin);
+    if (g_mcp_handle == NULL) {
+        ESP_LOGE(TAG, "MCP23S17 not initialized");
+        return 0;
+    }
+    return mcp23s17_read_pin(g_mcp_handle, pin);
 }
 
 mcp23s17_handle_t gpio_expander_get_mcp_handle(void) {
