@@ -4,6 +4,8 @@
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
 #include "gpio_expander.h"
+#include "MCP23S17.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 
 #include <ctype.h>
@@ -60,6 +62,7 @@ static constexpr uint32_t kMinSpeedMmPerS = 1;
 static constexpr uint32_t kMaxSpeedMmPerS = 500;
 static constexpr uint32_t kMinAccelMmPerS2 = 100;
 static constexpr uint32_t kMaxAccelMmPerS2 = 900;
+static constexpr uint8_t kMcpPinMax = 15;
 
 uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
   if (!enabled) {
@@ -90,6 +93,77 @@ float convertSelectedToMm(float valueSelected) {
     return valueSelected * kMmPerInch;
   }
   return valueSelected;
+}
+
+bool isMcpLogicalPin(int pin) {
+  return (pin >= 0 && pin <= kMcpPinMax);
+}
+
+esp_err_t readMcpReg(mcp23s17_handle_t handle, uint8_t reg, uint8_t *value) {
+  if (handle == nullptr || value == nullptr) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  return mcp23s17_debug_read_register(handle, reg, value);
+}
+
+void printMcpPinState(int pin, const char *label) {
+  mcp23s17_handle_t handle = gpio_expander_get_mcp_handle();
+  if (handle == nullptr) {
+    ESP_LOGE(TAG, "MCP handle unavailable");
+    return;
+  }
+  if (!isMcpLogicalPin(pin)) {
+    ESP_LOGW(TAG, "%s pin=%d is not an MCP pin", label, pin);
+    return;
+  }
+
+  const uint8_t bit = (uint8_t)(pin & 0x07);
+  const bool isPortA = (pin < 8);
+  const uint8_t iodirReg = isPortA ? 0x00 : 0x01;
+  const uint8_t gppuReg = isPortA ? 0x0C : 0x0D;
+  const uint8_t olatReg = isPortA ? 0x14 : 0x15;
+  const uint8_t gpioReg = isPortA ? 0x12 : 0x13;
+  const char port = isPortA ? 'A' : 'B';
+
+  uint8_t iodir = 0;
+  uint8_t gppu = 0;
+  uint8_t olat = 0;
+  uint8_t gpio = 0;
+  if (readMcpReg(handle, iodirReg, &iodir) != ESP_OK ||
+      readMcpReg(handle, gppuReg, &gppu) != ESP_OK ||
+      readMcpReg(handle, olatReg, &olat) != ESP_OK ||
+      readMcpReg(handle, gpioReg, &gpio) != ESP_OK) {
+    ESP_LOGE(TAG, "Failed reading MCP state for pin %d", pin);
+    return;
+  }
+
+  const int dirIn = (iodir >> bit) & 0x01;
+  const int pu = (gppu >> bit) & 0x01;
+  const int latch = (olat >> bit) & 0x01;
+  const int level = (gpio >> bit) & 0x01;
+  ESP_LOGI(TAG, "%s MCP P%d (P%c%d): dir=%s level=%d pullup=%d olat=%d",
+           label, pin, port, bit, dirIn ? "IN" : "OUT", level, pu, latch);
+}
+
+void printDirectPinState(int pin, const char *label) {
+  if (pin < 0 || pin >= GPIO_NUM_MAX) {
+    ESP_LOGW(TAG, "%s GPIO%d invalid", label, pin);
+    return;
+  }
+
+  const int level = gpio_get_level((gpio_num_t)pin);
+  ESP_LOGI(TAG, "%s GPIO%d: mode=UNK level=%d pull=UNK latch=%d",
+           label, pin, level, level);
+}
+
+bool isAllowedDrivePin(int pin) {
+  static const int kAllowedPins[] = {PIN_PULSE, PIN_THETA_PWM};
+  for (size_t i = 0; i < sizeof(kAllowedPins) / sizeof(kAllowedPins[0]); i++) {
+    if (kAllowedPins[i] == pin) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
@@ -318,28 +392,35 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "=== Active Pin Configuration ===");
   ESP_LOGI(TAG, "Mode: %s", cfg->use_mcp23s17 ? "MCP23S17 IO Expander" : "Direct WT32 GPIO (temporary)");
 
-  ESP_LOGI(TAG, "X Pulse      : %d", cfg->x_pulse_pin);
-  ESP_LOGI(TAG, "X Dir        : %d", cfg->x_dir_pin);
-  ESP_LOGI(TAG, "X Enable     : %d", cfg->x_enable_pin);
-  ESP_LOGI(TAG, "X Alarm In   : %d", cfg->x_alarm_pin);
-  if (cfg->x_alarm_reset_pin >= 0) {
-    ESP_LOGI(TAG, "X Alarm Reset: %d", cfg->x_alarm_reset_pin);
-  } else {
-    ESP_LOGI(TAG, "X Alarm Reset: disabled");
-  }
-  ESP_LOGI(TAG, "X Encoder A  : %d", cfg->x_encoder_a_pin);
-  ESP_LOGI(TAG, "X Encoder B  : %d", cfg->x_encoder_b_pin);
-  ESP_LOGI(TAG, "Theta PWM    : %d", cfg->theta_pwm_pin);
-
   if (cfg->use_mcp23s17) {
-    ESP_LOGI(TAG, "X Min Limit  : MCP P%d", cfg->limit_min_pin);
-    ESP_LOGI(TAG, "X Max Limit  : MCP P%d", cfg->limit_max_pin);
+    printMcpPinState(cfg->x_dir_pin, "X DIR       ");
+    printMcpPinState(cfg->x_enable_pin, "X ENABLE    ");
+    printMcpPinState(cfg->x_alarm_pin, "X ALARM IN  ");
+    if (cfg->x_alarm_reset_pin >= 0) {
+      printMcpPinState(cfg->x_alarm_reset_pin, "X ARST      ");
+    }
+    printMcpPinState(cfg->limit_min_pin, "X LMIN      ");
+    printMcpPinState(cfg->limit_max_pin, "X LMAX      ");
+    printMcpPinState(PIN_Y_DIR, "Y DIR       ");
+    printMcpPinState(PIN_Y_ENABLE, "Y ENABLE    ");
+    printMcpPinState(PIN_GRIPPER, "GRIPPER     ");
   } else {
-    ESP_LOGI(TAG, "X Min Limit  : GPIO %d", cfg->limit_min_pin);
-    ESP_LOGI(TAG, "X Max Limit  : GPIO %d", cfg->limit_max_pin);
+    printDirectPinState(cfg->x_dir_pin, "X DIR       ");
+    printDirectPinState(cfg->x_enable_pin, "X ENABLE    ");
+    printDirectPinState(cfg->x_alarm_pin, "X ALARM IN  ");
+    if (cfg->x_alarm_reset_pin >= 0) {
+      printDirectPinState(cfg->x_alarm_reset_pin, "X ARST      ");
+    }
+    printDirectPinState(cfg->limit_min_pin, "X LMIN      ");
+    printDirectPinState(cfg->limit_max_pin, "X LMAX      ");
   }
 
-  ESP_LOGI(TAG, "========================================");
+  printDirectPinState(cfg->x_pulse_pin, "X PULSE     ");
+  printDirectPinState(cfg->theta_pwm_pin, "THETA PWM   ");
+  printDirectPinState(cfg->x_encoder_a_pin, "X ENC A     ");
+  printDirectPinState(cfg->x_encoder_b_pin, "X ENC B     ");
+
+  ESP_LOGI(TAG, "=========================");
 }
 
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
@@ -367,6 +448,119 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     printLimits(cfg);
   } else if (strcmp(cmdLower, "pins") == 0) {
     printActivePins(cfg);
+#if MCP_DEBUG_CMDS
+  } else if (strncmp(cmdLower, "mcp_reg", 7) == 0) {
+    mcp23s17_handle_t handle = gpio_expander_get_mcp_handle();
+    if (handle == nullptr) {
+      ESP_LOGE(TAG, "MCP not initialized");
+      return;
+    }
+    unsigned int reg = 0;
+    unsigned int value = 0;
+    int parsed = sscanf(cmd, "mcp_reg %x %x", &reg, &value);
+    if (parsed < 1 || reg > 0x1F) {
+      ESP_LOGE(TAG, "Usage: mcp_reg <hex_reg> [hex_value]");
+      return;
+    }
+    if (parsed == 1) {
+      uint8_t readVal = 0;
+      if (mcp23s17_debug_read_register(handle, (uint8_t)reg, &readVal) != ESP_OK) {
+        ESP_LOGE(TAG, "mcp_reg read failed for 0x%02X", reg);
+        return;
+      }
+      ESP_LOGI(TAG, "MCP REG[0x%02X] = 0x%02X", reg, readVal);
+    } else {
+      if (mcp23s17_debug_write_register(handle, (uint8_t)reg, (uint8_t)value) != ESP_OK) {
+        ESP_LOGE(TAG, "mcp_reg write failed for 0x%02X", reg);
+        return;
+      }
+      uint8_t verify = 0;
+      mcp23s17_debug_read_register(handle, (uint8_t)reg, &verify);
+      ESP_LOGI(TAG, "MCP REG[0x%02X] <= 0x%02X (verify=0x%02X)",
+               reg, value & 0xFF, verify);
+    }
+  } else if (strcmp(cmdLower, "mcp_dump") == 0) {
+    mcp23s17_handle_t handle = gpio_expander_get_mcp_handle();
+    if (handle == nullptr) {
+      ESP_LOGE(TAG, "MCP not initialized");
+      return;
+    }
+    uint8_t iodira = 0;
+    uint8_t iodirb = 0;
+    uint8_t gppua = 0;
+    uint8_t gppub = 0;
+    uint8_t olata = 0;
+    uint8_t olatb = 0;
+    uint8_t gpioa = 0;
+    uint8_t gpiob = 0;
+    if (readMcpReg(handle, 0x00, &iodira) != ESP_OK ||
+        readMcpReg(handle, 0x01, &iodirb) != ESP_OK ||
+        readMcpReg(handle, 0x0C, &gppua) != ESP_OK ||
+        readMcpReg(handle, 0x0D, &gppub) != ESP_OK ||
+        readMcpReg(handle, 0x14, &olata) != ESP_OK ||
+        readMcpReg(handle, 0x15, &olatb) != ESP_OK ||
+        readMcpReg(handle, 0x12, &gpioa) != ESP_OK ||
+        readMcpReg(handle, 0x13, &gpiob) != ESP_OK) {
+      ESP_LOGE(TAG, "mcp_dump failed");
+      return;
+    }
+    ESP_LOGI(TAG, "MCP: IODIRA=0x%02X IODIRB=0x%02X", iodira, iodirb);
+    ESP_LOGI(TAG, "MCP: GPPUA=0x%02X GPPUB=0x%02X", gppua, gppub);
+    ESP_LOGI(TAG, "MCP: OLATA=0x%02X OLATB=0x%02X", olata, olatb);
+    ESP_LOGI(TAG, "MCP: GPIOA=0x%02X GPIOB=0x%02X", gpioa, gpiob);
+    ESP_LOGI(TAG, "PB4 : dir=%s pullup=%d olat=%d gpio=%d",
+             ((iodirb & (1 << 4)) != 0) ? "IN" : "OUT",
+             (gppub >> 4) & 0x1, (olatb >> 4) & 0x1, (gpiob >> 4) & 0x1);
+  } else if (strncmp(cmdLower, "mcp_pin_test", 12) == 0) {
+    int pin = -1;
+    if (sscanf(cmd, "mcp_pin_test %d", &pin) != 1 || !isMcpLogicalPin(pin)) {
+      ESP_LOGE(TAG, "Usage: mcp_pin_test <pin 0..15>");
+      return;
+    }
+
+    ESP_LOGI(TAG, "mcp_pin_test P%d begin", pin);
+    gpio_expander_set_direction((uint8_t)pin, false);
+    gpio_expander_set_pullup((uint8_t)pin, false);
+    ESP_LOGI(TAG, "P%d input/no-pull: level=%d", pin, gpio_expander_read((uint8_t)pin));
+
+    gpio_expander_set_pullup((uint8_t)pin, true);
+    ESP_LOGI(TAG, "P%d input/pullup : level=%d", pin, gpio_expander_read((uint8_t)pin));
+
+    gpio_expander_set_direction((uint8_t)pin, true);
+    gpio_expander_write((uint8_t)pin, 0);
+    ESP_LOGI(TAG, "P%d output LOW   : level=%d", pin, gpio_expander_read((uint8_t)pin));
+
+    gpio_expander_write((uint8_t)pin, 1);
+    ESP_LOGI(TAG, "P%d output HIGH  : level=%d", pin, gpio_expander_read((uint8_t)pin));
+
+    gpio_expander_set_direction((uint8_t)pin, false);
+    gpio_expander_set_pullup((uint8_t)pin, true);
+    ESP_LOGI(TAG, "mcp_pin_test P%d done (restored input/pullup)", pin);
+  } else if (strncmp(cmdLower, "gpio_drive", 10) == 0) {
+    int pin = -1;
+    int level = -1;
+    if (sscanf(cmd, "gpio_drive %d %d", &pin, &level) != 2 || (level != 0 && level != 1)) {
+      ESP_LOGE(TAG, "Usage: gpio_drive <gpio_pin> <0|1>");
+      return;
+    }
+    if (!isAllowedDrivePin(pin)) {
+      ESP_LOGE(TAG, "gpio_drive blocked for GPIO%d (allowed: %d,%d)",
+               pin, PIN_PULSE, PIN_THETA_PWM);
+      return;
+    }
+    gpio_config_t ioConf = {};
+    ioConf.pin_bit_mask = (1ULL << pin);
+    ioConf.mode = GPIO_MODE_INPUT_OUTPUT;
+    ioConf.pull_up_en = GPIO_PULLUP_DISABLE;
+    ioConf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    ioConf.intr_type = GPIO_INTR_DISABLE;
+    if (gpio_config(&ioConf) != ESP_OK) {
+      ESP_LOGE(TAG, "gpio_drive config failed for GPIO%d", pin);
+      return;
+    }
+    gpio_set_level((gpio_num_t)pin, level);
+    printDirectPinState(pin, "GPIO DRIVE  ");
+#endif
   } else if (strcmp(cmdLower, "enable") == 0) {
     cfg->gantry->enable();
     if (cfg->gantry->isEnabled()) {
@@ -585,7 +779,13 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
   ESP_LOGI(TAG, "  limits               - read limit switches");
-  ESP_LOGI(TAG, "  pins                 - print active pin configuration");
+  ESP_LOGI(TAG, "  pins                 - print live MCP/GPIO pin states");
+#if MCP_DEBUG_CMDS
+  ESP_LOGI(TAG, "  mcp_reg <r> [v]      - read/write raw MCP register (hex)");
+  ESP_LOGI(TAG, "  mcp_dump             - dump MCP IODIR/GPPU/OLAT/GPIO (A+B + PB4)");
+  ESP_LOGI(TAG, "  mcp_pin_test <p>     - input/pullup/output-low/high test for MCP pin");
+  ESP_LOGI(TAG, "  gpio_drive <p> <0|1> - drive allowed direct GPIO outputs");
+#endif
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
   ESP_LOGI(TAG, "  home                 - home X-axis");
