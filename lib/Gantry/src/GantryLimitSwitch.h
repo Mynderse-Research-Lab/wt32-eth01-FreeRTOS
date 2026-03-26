@@ -10,7 +10,7 @@ public:
     GantryLimitSwitch();
 
     void configure(int pin, bool activeLow = true, bool enablePullup = true,
-                   uint8_t debounceCycles = 3);
+                   uint8_t debounceCycles = 6);
     bool begin();
     void update(bool force = false);
 
