@@ -317,3 +317,17 @@ esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pi
     }
     return mcp23s17_write_register(handle, defval_reg, defval_val);
 }
+
+esp_err_t mcp23s17_debug_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t *value) {
+    if (handle == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return mcp23s17_read_register(handle, reg, value);
+}
+
+esp_err_t mcp23s17_debug_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
+    if (handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return mcp23s17_write_register(handle, reg, value);
+}
