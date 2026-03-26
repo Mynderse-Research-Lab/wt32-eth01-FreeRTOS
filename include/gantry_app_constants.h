@@ -49,6 +49,7 @@
 // MCP23S17 defaults
 #define MCP23S17_DEVICE_ADDRESS 0x00
 #define MCP23S17_CLOCK_HZ 10000000
+#define MCP_DEBUG_CMDS 1
 
 // Gantry motion defaults
 #define GANTRY_HOMING_SPEED_PPS 6000
