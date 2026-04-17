@@ -824,7 +824,13 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     Gantry::GantryError result = cfg->gantry->moveTo(
         target, g_moveSpeedMmPerS, g_moveSpeedDegPerS, g_moveAccelMmPerS2, g_moveDecelMmPerS2);
     if (result == Gantry::GantryError::OK) {
-      ESP_LOGI(TAG, "OK Move started (use 'stop' to abort, 'status' to monitor)");
+      vTaskDelay(pdMS_TO_TICKS(20));
+      if (cfg->gantry->isBusy()) {
+        ESP_LOGI(TAG, "OK Move started (use 'stop' to abort, 'status' to monitor)");
+      } else {
+        ESP_LOGE(TAG, "ERROR: Move command accepted but motion did not start");
+        ESP_LOGI(TAG, "Check alarm/limits and commanded-vs-encoder X position in status logs");
+      }
     } else {
       ESP_LOGE(TAG, "ERROR: Move failed: %d", (int)result);
     }
