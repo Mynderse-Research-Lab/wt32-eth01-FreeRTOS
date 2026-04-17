@@ -837,8 +837,19 @@ void Gantry::startSequentialMotion() {
     // Theta moves independently
     if (axisTheta_.isConfigured()) {
         if (!axisTheta_.moveToDeg(targetTheta_deg_)) {
-            stopAllMotion();
-            return;
+            const float currentTheta = axisTheta_.getCurrentDeg();
+            // Some servo backends report "false" for no-op commands when target
+            // already equals current angle. Do not abort X/Y motion in that case.
+            if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
+                ESP_LOGE(TAG,
+                         "[THETA] moveToDeg failed (current=%.2f target=%.2f) - aborting sequence",
+                         currentTheta, targetTheta_deg_);
+                stopAllMotion();
+                return;
+            }
+            ESP_LOGI(TAG,
+                     "[THETA] moveToDeg no-op treated as success (current=%.2f target=%.2f)",
+                     currentTheta, targetTheta_deg_);
         }
         currentTheta_ = (int32_t)axisTheta_.getCurrentDeg();
     } else {
@@ -880,23 +891,11 @@ void Gantry::processSequentialMotion() {
             
         case MotionState::Y_RETRACTING:
             if (!isYAxisConfigured() || !isYAxisBusy()) {
-                float currentY = getCurrentYPosition();
-                if (targetY_mm_ < currentY) {
-                    motionState_ = MotionState::Y_DESCENDING;
-                    if (!moveYAxisTo(targetY_mm_, (float)speed_mm_per_s_,
-                                     (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_)) {
-                        stopAllMotion();
-                        return;
-                    }
-                    if (!isYAxisConfigured()) {
-                        motionState_ = MotionState::GRIPPER_ACTUATING;
-                        grip(gripperTargetState_);
-                        gripperActuateStart_ms_ = millis();
-                    }
-                } else {
-                    motionState_ = MotionState::X_MOVING;
-                    startXAxisMotion();
-                }
+                // After retracting to safe Y, continue with X motion.
+                // Re-entering Y_DESCENDING here can create a Y-only loop that
+                // prevents X from ever starting for some target combinations.
+                motionState_ = MotionState::X_MOVING;
+                startXAxisMotion();
             }
             break;
             
@@ -922,10 +921,41 @@ void Gantry::processSequentialMotion() {
 }
 
 void Gantry::startXAxisMotion() {
-    // Calculate X-axis movement in pulses
-    int32_t currentX_pulses = axisX_.getPosition();
+    // Calculate X-axis movement in pulses.
+    // Use the driver commanded counter as the motion-planning source of truth.
+    // Home/calibrate already prove this counter tracks real X travel in this setup.
+    // Using encoder here can collapse delta to zero when encoder feedback is not
+    // available/reliable, which prevents any X pulse train from starting in move().
+    const int32_t driverReportedPulses = (int32_t)axisX_.getPosition();
+    int32_t currentX_pulses = driverReportedPulses;
+    const int32_t trackedPulses = mmToPulses(currentX_mm_);
+    const int32_t encoderPulses = axisX_.getEncoderPosition();
+    if (axisX_.getConfig().enable_encoder_feedback) {
+        const int32_t encDrvMismatch = encoderPulses - driverReportedPulses;
+        if (encDrvMismatch > 10 || encDrvMismatch < -10) {
+            ESP_LOGW(TAG,
+                     "[X_MOVE] encoder/driver mismatch: encoder=%ld driver=%ld mismatch=%ld (planning uses driver)",
+                     (long)encoderPulses, (long)driverReportedPulses, (long)encDrvMismatch);
+        }
+    }
+    // Keep visibility when internal tracked state diverges from driver.
+    const int32_t trackedMismatch = trackedPulses - driverReportedPulses;
+    if (trackedMismatch > 10 || trackedMismatch < -10) {
+        ESP_LOGW(TAG,
+                 "[X_MOVE] tracked/driver mismatch: tracked=%ld driver=%ld mismatch=%ld",
+                 (long)trackedPulses, (long)driverReportedPulses, (long)trackedMismatch);
+    }
+    axisX_.setPosition((uint32_t)currentX_pulses);
     int32_t targetX_pulses = mmToPulses(targetX_mm_);
     int32_t deltaX = targetX_pulses - currentX_pulses;
+
+    ESP_LOGI(TAG,
+             "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld speed=%lu accel=%lu decel=%lu",
+             (long)currentX_pulses, (long)trackedPulses, (long)driverReportedPulses,
+             (long)encoderPulses,
+             (long)targetX_pulses, (long)deltaX,
+             (unsigned long)speed_mm_per_s_, (unsigned long)acceleration_mm_per_s2_,
+             (unsigned long)deceleration_mm_per_s2_);
     
     if (deltaX == 0) {
         // Already at target X
@@ -953,6 +983,10 @@ void Gantry::startXAxisMotion() {
     
     // Move X-axis; if command fails, force-stop to avoid any stale motion profile.
     if (!axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)) {
+        ESP_LOGE(TAG,
+                 "[X_MOVE] moveRelative rejected (delta=%ld, speed_pps=%lu, accel_pps=%lu, decel_pps=%lu)",
+                 (long)deltaX, (unsigned long)speed_pps, (unsigned long)accel_pps,
+                 (unsigned long)decel_pps);
         stopAllMotion();
     }
 }
