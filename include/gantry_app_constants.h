@@ -44,7 +44,11 @@
 // For Ethernet compatibility, avoid GPIO17 pulse usage (ETH clock output).
 #define PIN_X_PULSE 14
 #define PIN_Y_PULSE 2
-#define PIN_X_ENC_A 34
+// PIN_X_ENC_A: GPIO4 (general-purpose header pin). Previously GPIO34 which is
+// not routed to any WT32-ETH01 header pad, and before that GPIO35 which shares
+// a trace with MCP23S17 SPI MISO. GPIO4 has no strap/Ethernet conflict and
+// PCNT can route any GPIO via the input matrix.
+#define PIN_X_ENC_A 4
 #define PIN_X_ENC_B 36
 #define PIN_Y_ENC_A 39
 #define PIN_Y_ENC_B 32

@@ -163,7 +163,7 @@ extern "C" void app_main(void) {
     xConfig.input_pin_nos[2] = PIN_X_ALARM_STATUS;   // MCP PA4 (ALM)
 
     // Encoder on direct ESP32 GPIO (PCNT hardware)
-    xConfig.input_pin_nos[3] = PIN_X_ENC_A;           // GPIO 35
+    xConfig.input_pin_nos[3] = PIN_X_ENC_A;           // GPIO 4
     xConfig.input_pin_nos[4] = PIN_X_ENC_B;           // GPIO 36
     xConfig.enable_encoder_feedback = true;
     xConfig.pcnt_unit = X_ENCODER_PCNT_UNIT;

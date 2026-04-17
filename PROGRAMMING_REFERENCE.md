@@ -31,7 +31,7 @@ This document is the single-source programming reference for the firmware. It co
 |---|---|
 | ESP-IDF | 5.x (tested on v5.1.x and v6.0) |
 | Target chip | `esp32` |
-| Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see §11.3) |
+| Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see §11.2) |
 | `arduino-esp32` | `^3.0.0` (via `idf_component.yml`) |
 | `CONFIG_FREERTOS_HZ` | must be `1000` |
 
@@ -63,7 +63,7 @@ lib/
 └── MCP23S17/                 # SPI GPIO expander driver
 ```
 
-`idf/main/CMakeLists.txt` compiles application + library sources **directly** — there are no separate ESP-IDF custom components under `idf/components/`. If you see `Failed to resolve component 'SDF08NK8X'` (or similar), the `main/CMakeLists.txt` was regenerated with component dependencies and needs to be reverted to compile-from-lib-tree mode (see §11.4 below).
+`idf/main/CMakeLists.txt` compiles application + library sources **directly** — there are no separate ESP-IDF custom components under `idf/components/`. If you see `Failed to resolve component 'SDF08NK8X'` (or similar), the `main/CMakeLists.txt` was regenerated with component dependencies and needs to be reverted to compile-from-lib-tree mode (see §11.3 below).
 
 ### 1.3 Build
 
@@ -142,20 +142,20 @@ The `app_main` task calls `vTaskDelete(NULL)` after task creation — the two Fr
 
 ## 3. Pin Map
 
-Source of truth: `include/gantry_app_constants.h` and `pinout.csv`.
+Source of truth: `include/gantry_app_constants.h`. `pinout.csv` mirrors the same values as a spreadsheet-friendly artifact.
 
 ### 3.1 Direct ESP32 GPIO (WT32-ETH01)
 
 | Signal | GPIO | Peripheral | Notes |
 |---|---|---|---|
 | `MCP23S17_SPI_CS_PIN` | 15 | SPI2 CS | Strap pin; safe at reset. |
-| `MCP23S17_SPI_MISO_PIN` | 35 | SPI2 MISO | **Input-only. Shared electrical trace with `PIN_X_ENC_A`.** |
+| `MCP23S17_SPI_MISO_PIN` | 35 | SPI2 MISO | Input-only. |
 | `MCP23S17_SPI_MOSI_PIN` | 12 | SPI2 MOSI | Strap pin — must be LOW at reset. |
 | `MCP23S17_SPI_SCLK_PIN` | 5 | SPI2 SCK | |
 | `PIN_X_PULSE` | 14 | LEDC ch0 | X-axis step pulse output. |
 | `PIN_Y_PULSE` | 2 | LEDC ch1 | Y-axis step pulse output. Strap pin — must be LOW/floating at reset. |
 | `PIN_THETA_PWM` | 0 | LEDC ch2 | Theta servo PWM. Strap pin — must be HIGH at reset. |
-| `PIN_X_ENC_A` | 35 | PCNT unit 0 | Encoder A+. |
+| `PIN_X_ENC_A` | 4 | PCNT unit 0 | Encoder A+. General-purpose header pin. |
 | `PIN_X_ENC_B` | 36 | PCNT unit 0 | Encoder B+. Input-only. |
 | `PIN_Y_ENC_A` | 39 | PCNT unit 1 | Encoder A+. Input-only. |
 | `PIN_Y_ENC_B` | 32 | PCNT unit 1 | Encoder B+. |
@@ -377,7 +377,7 @@ static float interpolate(const TrapezoidalProfile&,
 - `Gantry::GantryAxisStepper` — cooperative step/dir stepper (Y-axis). `configurePins`, `setStepsPerMm`, `setLimits`, `setMotionLimits`, `begin`, `enable`/`disable`, `moveToMm`, `stop`, `update`, `getCurrentMm`, `getCurrentSteps`.
 - `Gantry::GantryRotaryServo` — LEDC-based PWM servo (Theta). `configurePin`, `setAngleRange`, `setPulseRange`, `begin`, `moveToDeg`, `getCurrentDeg`.
 - `Gantry::GantryEndEffector` — digital gripper. `configurePin`, `begin`, `setActive`, `isActive`, `getPin`. **Correctly routes pins `<16` through `gpio_expander_*`, pins `>=16` (or direct-flagged) through Arduino `pinMode`/`digitalWrite`.**
-- `Gantry::GantryLimitSwitch` — debounced input. `configure(pin, activeLow=true, enablePullup=true, debounceCycles=3)`, `begin`, `update(force=false)`, `isActive`.
+- `Gantry::GantryLimitSwitch` — debounced input. `configure(pin, activeLow=true, enablePullup=true, debounceCycles=6)`, `begin`, `update(force=false)`, `isActive`. (Default raised from 3 → 6 cycles; a `debounceCycles` of `0` is silently clamped to `1`.)
 
 ### 4.6 Constants (`Gantry::Constants`)
 
@@ -609,7 +609,7 @@ The console reads from stdin (USB serial via `idf.py monitor` or equivalent) wit
 | `speed <v> [deg/s]` | Set move speed in selected linear units/s (optional Theta deg/s). |
 | `accel <a> [d]` | Set accel (and optional decel) in selected linear units/s². Zero is rejected. |
 | `rangelimit <0\|1>` | Enable/disable speed+accel range clamps. |
-| `move <x> <y> <t>` | Move to absolute `(x, y, theta)`. Requires `home` **and** `calibrate` to have run this session. **See §11.1 for the known move bug.** |
+| `move <x> <y> <t>` | Move to absolute `(x, y, theta)`. Requires `home` **and** `calibrate` to have run this session. See §11.1 — move now drives the X axis correctly; encoder feedback is a separate hardware concern. |
 | `grip <0\|1>` | `gantry.grip()`. 1 = closed, 0 = open. |
 | `stop` | `requestAbort()` + `disable()`. |
 | `alarmreset` / `arst` | `gantry.clearAlarm()` — pulses ARST on any configured drive. |
@@ -693,30 +693,20 @@ Full rationale: `RESET_LOOP_DIAGNOSTICS.md`.
 
 ## 11. Known Bugs & Gotchas
 
-### 11.1 `move <x> <y> <theta>` accepts the command but does not drive any axis
+### 11.1 X-axis encoder feedback (history and current state)
 
-**Symptom:** Console reports `OK Move started (use 'stop' to abort, 'status' to monitor)` or the `ERROR: Move command accepted but motion did not start` branch; `LIVE POS` shows `x_cmd`/`x_enc` flat.
+**Motion command path — resolved.** The original "`move` accepts the command but motion never starts" symptom (`x_cmd` flat after `OK Move started`) is no longer reproducible on the consolidated `main`. The state machine exercises the full path: `startSequentialMotion` → `Y_DESCENDING` → `X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`, and `LIVE POS` shows `x_cmd` ramping smoothly to the commanded target.
 
-**Where to look first** (code pointers):
+**Encoder feedback pin — fixed in firmware.** An earlier hardware trace showed `x_enc=0.00 mm` across the entire ramp while `x_cmd` advanced normally, and the `[X_MOVE] ... encoder=0 ...` log confirmed PCNT was seeing no counts. Root cause was `PIN_X_ENC_A` being mapped to **GPIO34**, which `WT32_ETH01_PINOUT.md` lists as *"Not routed to header"* — i.e. no physical pad existed to wire the encoder A+ signal to. GPIO34 was itself a remap away from the original `35`, which had shared an electrical trace with `MCP23S17_SPI_MISO_PIN`. Firmware now maps `PIN_X_ENC_A` to **GPIO4**, a general-purpose header pin with no strap, Ethernet, or peripheral-allocation conflict; PCNT routes any GPIO through the input matrix (see `WT32_ETH01_PINOUT.md` §"Design notes"). After re-wiring encoder A+ from whatever pad was previously in use to the GPIO4 header pin and rebuilding, `x_enc` should track `x_cmd` under motion. `PIN_X_ENC_B` remains on GPIO36 (unaffected, exposed on the right header).
 
-- `src/gantry_test_console.cpp:802-836` — `move` handler. Calls `cfg->gantry->moveTo(target, ...)` then waits 20 ms and checks `isBusy()`.
-- `lib/Gantry/src/Gantry.cpp:284-312` — `moveTo(JointConfig, ...)`. Stores targets, validates via `Kinematics::validate(joint, config_.limits)`, then `startSequentialMotion()`.
-- `lib/Gantry/src/Gantry.cpp:795-978` — state machine: `startSequentialMotion` → `Y_DESCENDING`/`X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)`.
-- `lib/Gantry/src/Gantry.cpp:923-978` — `startXAxisMotion` diagnostic log line `[X_MOVE] current=... driver=... tracked=... target=... delta=...` is the first thing to read when reproducing.
+**Code pointers (still useful for diagnosis):**
 
-**Likely root causes to check in order:**
+- `src/gantry_test_console.cpp` — `move` handler around the `g_homeCompletedThisSession && g_calibratedThisSession` gate.
+- `lib/Gantry/src/Gantry.cpp:280-310` — `moveTo(JointConfig, ...)` validates via `Kinematics::validate(joint, config_.limits)` then `startSequentialMotion()`.
+- `lib/Gantry/src/Gantry.cpp:795-980` — state machine: `startSequentialMotion` → `Y_DESCENDING`/`X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`.
+- `lib/Gantry/src/Gantry.cpp:923-978` — `startXAxisMotion` emits `[X_MOVE] current=... tracked=... driver=... encoder=... target=... delta=... speed=... accel=... decel=...` once per move; the `encoder=` field is the first place to look when chasing zero-feedback issues.
 
-1. `config_.limits` was never populated (call to `setJointLimits` is missing from `main.cpp`) → `Kinematics::validate` returns `false` → `moveTo` returns `INVALID_POSITION`. The console branch treats that as a generic `Move failed: <code>` error.
-2. `targetX_pulses == currentX_pulses` (`deltaX == 0`) → `startXAxisMotion` sets state back to `IDLE` without issuing a `moveRelative`. Check whether the synthetic-homing seed or encoder readback is making the driver position equal to the target.
-3. The state machine parks in `Y_DESCENDING` waiting for Y to reach `safeYHeight_mm_` before starting X, and Y never moves because `isYAxisConfigured()` is true but the stepper debounces or limit-switch gating blocks the motion.
-
-**First diagnostic pass**: watch the `[X_MOVE]` line in the monitor after typing `move 50 0 0`, and compare to what `status` reports for X encoder and commanded positions immediately before the command.
-
-### 11.2 `PIN_X_ENC_A` and `MCP23S17_SPI_MISO_PIN` both use GPIO35
-
-Both are defined to `35` in `gantry_app_constants.h`. GPIO35 is input-only, and the WT32-ETH01 board routes encoder-A and the MCP MISO line to the same pad. If you rework the harness, keep this alignment — changing one side without the other will break both.
-
-### 11.3 ESP-IDF component cache corruption
+### 11.2 ESP-IDF component cache corruption
 
 The attached build log shows:
 
@@ -739,7 +729,7 @@ idf.py build
 
 The IDF Component Manager will re-download every managed component. Ensure ESP-IDF's bundled Python (`C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe`) is the one in use — the traceback shows it fell through to `scoop\apps\python313` once, which can also corrupt the cache on Windows.
 
-### 11.4 `idf/` is gitignored — state lives only locally
+### 11.3 `idf/` is gitignored — state lives only locally
 
 If you wipe `idf/` or clone fresh, you must regenerate four files before `idf.py build`:
 
@@ -757,7 +747,7 @@ project(wt32_eth01_base)
 
 Do not regenerate `main/CMakeLists.txt` with a `REQUIRES SDF08NK8X MCP23S17 Gantry` line; those aren't separate components. If that happens, `idf.py reconfigure` fails with `Failed to resolve component 'SDF08NK8X'`. Revert to the compile-from-lib-tree layout (sources listed directly via `SRC_DIRS` / `INCLUDE_DIRS`).
 
-### 11.5 Strap pins and boot stability
+### 11.4 Strap pins and boot stability
 
 `GPIO0` (Theta PWM), `GPIO2` (Y pulse), and `GPIO12` (MCP MOSI) are ESP32 strap pins. They are safe **only** because:
 
@@ -767,6 +757,6 @@ Do not regenerate `main/CMakeLists.txt` with a `REQUIRES SDF08NK8X MCP23S17 Gant
 
 Any rework that drives these pins externally during reset will brick the boot.
 
-### 11.6 `home` + `calibrate` are required after every startup before `move` is allowed
+### 11.5 `home` + `calibrate` are required after every startup before `move` is allowed
 
 `gantry_test_console.cpp` gates `move` on `g_homeCompletedThisSession && g_calibratedThisSession`. This is by design, not a bug — report as `ERROR: Move blocked. Run 'home' then 'calibrate' after every startup.`
