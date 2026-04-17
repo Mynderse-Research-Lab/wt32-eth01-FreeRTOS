@@ -115,7 +115,8 @@ This journal captures the full development path of the current Gantry + SDF08NK8
   - `lib/SDF08NK8X/src/SDF08NK8X.cpp`
   - `lib/SDF08NK8X/src/SDF08NK8X.h`
 - Integration docs:
-  - `MCP23S17_INTEGRATION.md`
+  - `PROGRAMMING_REFERENCE.md` (root)
+  - `LIBRARIES_OVERVIEW.md` (root)
   - `lib/Gantry/docs/API_REFERENCE.md`
-  - `lib/Gantry/docs/DEVELOPMENT_STATUS.md`
+  - `lib/Gantry/docs/ARCHITECTURE.md`
 

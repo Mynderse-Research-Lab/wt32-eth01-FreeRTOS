@@ -215,8 +215,9 @@ Gantry Library
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and design
 - **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - Setup and tuning
-- **[Development Status](docs/DEVELOPMENT_STATUS.md)** - Current implementation status
 - **[Examples](docs/EXAMPLES.md)** - Code examples and tutorials
+- **[Development Journal](docs/DEVELOPMENT_JOURNAL.md)** - Chronological engineering journal
+- **[Changelog](CHANGELOG.md)** - Version history
 
 ---
 
@@ -245,7 +246,7 @@ Gantry Library
 - 🟡 Partial implementation
 - 🔴 Not started
 
-See [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed status.
+See [CHANGELOG.md](CHANGELOG.md) and [DEVELOPMENT_JOURNAL.md](docs/DEVELOPMENT_JOURNAL.md) for the history behind these statuses.
 
 ---
 
@@ -559,7 +560,7 @@ Well within ESP32's 320KB RAM limit.
 
 ## Contributing
 
-This library is currently in active development. See [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for areas needing work.
+This library is currently in active development. Known bugs and in-progress items are tracked in the root-level `PROGRAMMING_REFERENCE.md` (§12 "Known Bugs & Gotchas") and in `lib/Gantry/CHANGELOG.md`.
 
 ---
 
@@ -572,7 +573,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Support
 
 For issues, questions, or contributions:
-- Check [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for known issues
+- Check the root-level `PROGRAMMING_REFERENCE.md` (§12) for known issues
 - Review [API_REFERENCE.md](docs/API_REFERENCE.md) for API details
 - See [EXAMPLES.md](docs/EXAMPLES.md) for usage examples
 
