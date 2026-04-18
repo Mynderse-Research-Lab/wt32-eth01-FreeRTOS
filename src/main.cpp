@@ -16,6 +16,14 @@
  * Mechanical / drivetrain / envelope tuning lives in axis_drivetrain_params.h.
  */
 
+// Ask axis_drivetrain_params.h to emit its deployment-time reminders in this
+// TU only. This keeps the geometry-freeze warning (and any future
+// single-point-of-truth reminders) to ONE copy per build instead of one per
+// translation unit that transitively pulls the header in. MUST be defined
+// before any include that may transitively pull axis_drivetrain_params.h
+// (e.g. "Gantry.h" -> "GantryConfig.h" -> "axis_drivetrain_params.h").
+#define AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS
+
 #include "Gantry.h"
 #include "PulseMotor.h"
 #include "freertos/task.h"
@@ -179,9 +187,7 @@ static PulseMotor::DriverConfig makeXDriverConfig() {
 static PulseMotor::DrivetrainConfig makeXDrivetrainConfig() {
     PulseMotor::DrivetrainConfig dt;
     dt.type                   = (PulseMotor::DrivetrainType)AXIS_X_DRIVETRAIN;
-    dt.belt_lead_mm_per_rev   = AXIS_X_BELT_LEAD_MM_PER_REV;
-    dt.belt_pulley_teeth      = AXIS_X_BELT_PULLEY_TEETH;
-    dt.belt_pitch_mm          = AXIS_X_BELT_PITCH_MM;
+    dt.belt_lead_mm_per_rev   = AXIS_X_LEAD_MM_PER_REV;
     dt.encoder_ppr            = AXIS_X_ENCODER_PPR;
     dt.motor_reducer_ratio    = AXIS_X_MOTOR_REDUCER_RATIO;
     return dt;
@@ -220,8 +226,8 @@ static PulseMotor::DriverConfig makeYDriverConfig() {
 static PulseMotor::DrivetrainConfig makeYDrivetrainConfig() {
     PulseMotor::DrivetrainConfig dt;
     dt.type                    = (PulseMotor::DrivetrainType)AXIS_Y_DRIVETRAIN;
-    dt.ballscrew_lead_mm       = AXIS_Y_BALLSCREW_LEAD_MM;
-    dt.ballscrew_critical_rpm  = AXIS_Y_BALLSCREW_CRITICAL_RPM;
+    dt.ballscrew_lead_mm       = AXIS_Y_LEAD_MM_PER_REV;
+    dt.ballscrew_critical_rpm  = AXIS_Y_CRITICAL_RPM;
     dt.encoder_ppr             = AXIS_Y_ENCODER_PPR;
     dt.motor_reducer_ratio     = AXIS_Y_MOTOR_REDUCER_RATIO;
     return dt;
@@ -298,12 +304,15 @@ extern "C" void app_main(void) {
     // X-axis limit switches (via MCP23S17)
     gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
 
-    // Soft joint limits / workspace envelope
-    gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM,     AXIS_X_TRAVEL_MAX_MM,
-                          AXIS_Y_TRAVEL_MIN_MM,     AXIS_Y_TRAVEL_MAX_MM,
-                          AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
-    gantry.setYAxisLimits(AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM);
-    gantry.setThetaLimits(AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
+    // Seed the joint-limit envelope with the MECHANICAL hard limits from
+    // axis_drivetrain_params.h. Soft limits derived from the homing /
+    // calibration sweep will override these on boot-reset via
+    // Gantry::calibrate() and the homing task.
+    gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM,     AXIS_X_HARD_LIMIT_MAX_MM,
+                          AXIS_Y_HARD_LIMIT_MIN_MM,     AXIS_Y_HARD_LIMIT_MAX_MM,
+                          AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    gantry.setYAxisLimits(AXIS_Y_HARD_LIMIT_MIN_MM, AXIS_Y_HARD_LIMIT_MAX_MM);
+    gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
 
     // ------------------------------------------------------------------

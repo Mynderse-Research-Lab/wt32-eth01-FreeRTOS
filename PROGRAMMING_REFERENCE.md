@@ -727,25 +727,27 @@ Motor + driver + optional gearbox parameters. One block per axis (X / Y / Theta)
 
 ### 9.3 `include/axis_drivetrain_params.h` — per-axis mechanical tuning
 
-Drivetrain topology + travel envelope + motion caps + position tolerance + gripper timing + kinematic offsets. Each axis picks a `DrivetrainType` independently:
+Drivetrain topology + hard-limit envelope + motion caps + position tolerance + gripper timing + kinematic offsets. Each axis picks a `DrivetrainType` independently. Macros here are drivetrain-AGNOSTIC: for any linear axis the kinematic constant is `AXIS_*_LEAD_MM_PER_REV` regardless of whether the topology is belt, ballscrew, or rack-pinion. `AXIS_*_HARD_LIMIT_MIN/MAX_*` is the mechanical envelope the axis must never exceed (for Theta — whose hardware is unlimited — this is the firmware cable-clamp and acts as the effective hard envelope). **Soft limits are not defined here**; they are derived on boot from the homing / calibration sweep (see `Gantry::calibrate()` and the console homing task) and may be tighter than the hard envelope.
 
 ```c
 // X: SCHUNK Beta 100-ZRS belt actuator
-#define AXIS_X_DRIVETRAIN             DRIVETRAIN_BELT
-#define AXIS_X_BELT_LEAD_MM_PER_REV   200.0f      // datasheet "stroke per round"
-#define AXIS_X_TRAVEL_MAX_MM          550.0f      // mechanical stroke
+#define AXIS_X_DRIVETRAIN             DT_BELT
+#define AXIS_X_LEAD_MM_PER_REV        200.0f      // datasheet "stroke per round"
+#define AXIS_X_HARD_LIMIT_MAX_MM      550.0f      // mechanical stroke
 #define AXIS_X_POSITION_TOLERANCE_MM    0.08f     // datasheet repeatability
 
 // Y: SCHUNK Beta 80-SRS ballscrew actuator
-#define AXIS_Y_DRIVETRAIN             DRIVETRAIN_BALLSCREW
-#define AXIS_Y_BALLSCREW_LEAD_MM       20.0f
-#define AXIS_Y_BALLSCREW_CRITICAL_RPM  3000u
-#define AXIS_Y_TRAVEL_MAX_MM          150.0f
+#define AXIS_Y_DRIVETRAIN             DT_BALLSCREW
+#define AXIS_Y_LEAD_MM_PER_REV         20.0f      // screw pitch
+#define AXIS_Y_CRITICAL_RPM            3000u      // whip-speed ceiling
+#define AXIS_Y_HARD_LIMIT_MAX_MM      150.0f
 #define AXIS_Y_POSITION_TOLERANCE_MM    0.03f
 
 // Theta: SCHUNK ERD 04-40-D-H-N rotary module
-#define AXIS_THETA_DRIVETRAIN             DRIVETRAIN_ROTARY_DIRECT
+#define AXIS_THETA_DRIVETRAIN             DT_ROTARY_DIRECT
 #define AXIS_THETA_OUTPUT_GEAR_RATIO        1.0f
+#define AXIS_THETA_HARD_LIMIT_MIN_DEG    -180.0f  // firmware cable-clamp
+#define AXIS_THETA_HARD_LIMIT_MAX_DEG     180.0f
 #define AXIS_THETA_MAX_SPEED_DEG_PER_S   3600.0f  // 600 rpm cap
 #define AXIS_THETA_POSITION_TOLERANCE_DEG   0.01f
 
@@ -764,6 +766,30 @@ Drivetrain topology + travel envelope + motion caps + position tolerance + gripp
 Runtime code generally prefers `PulseMotor::pulsesPerMm(dt)` / `PulseMotor::pulsesPerDeg(dt)` applied to a `DrivetrainConfig` rather than the macros — the macros are mainly for diagnostics and unit tests.
 
 `axis_drivetrain_params.h` also reserves a commented-out block for Trap Move values (reflected inertia, required torque, cycle-time target) that will be populated once the SCHUNK Trap Move PDFs are obtained; see `driver_datasheets_and_calculations/INDEX.md`.
+
+#### 9.3.1 Geometry freeze gate
+
+The kinematic offsets in `axis_drivetrain_params.h` — `GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM` — are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder to update them against the frozen production design before deployment.
+
+Deployment attestation procedure:
+
+1. Measure the five offsets against the frozen CAD drawings, or on the as-built assembly with a calibration fixture / CMM.
+2. Overwrite the five macros in `axis_drivetrain_params.h` with the measured values (do not set them at runtime; this header is consumed at compile time and also feeds `AXIS_*_PULSES_PER_MM` / `AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`).
+3. Define `GANTRY_GEOMETRY_FROZEN` as a compile definition to silence the reminder and attest that the geometry has been frozen. Typical wiring in an ESP-IDF deployment component:
+
+   ```cmake
+   target_compile_definitions(${COMPONENT_LIB} PUBLIC GANTRY_GEOMETRY_FROZEN)
+   ```
+
+   or, one-shot on the command line:
+
+   ```sh
+   idf.py -C idf build -DCMAKE_CXX_FLAGS=-DGANTRY_GEOMETRY_FROZEN
+   ```
+
+A second, weaker silencer — `GANTRY_SUPPRESS_GEOMETRY_WARNING` — bypasses the reminder WITHOUT claiming the geometry has been frozen. Use it only for CI or bring-up builds that are knowingly running with dev-rig geometry.
+
+The gate is implemented so that only the `src/main.cpp` translation unit emits the reminder (via `#define AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS` ahead of the include chain). This keeps the build log clean of duplicate copies from the dozen-or-so other TUs that transitively pull the header in.
 
 ---
 

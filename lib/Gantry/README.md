@@ -406,7 +406,7 @@ xDrv.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
 
 PulseMotor::DrivetrainConfig xDt;
 xDt.type                 = PulseMotor::DRIVETRAIN_BELT;
-xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
+xDt.belt_lead_mm_per_rev = AXIS_X_LEAD_MM_PER_REV;
 xDt.encoder_ppr          = xDrv.encoder_ppr;
 xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
 ```
@@ -418,6 +418,16 @@ Runtime-tunable knobs on the Gantry instance are limited to soft limits (`setYAx
 ```cpp
 gantry.setSafeYHeight(150.0f);  // Safe height for X-axis travel (mm)
 ```
+
+### Geometry Freeze Gate
+
+The kinematic offsets and safe-Y height in `include/axis_drivetrain_params.h` (`GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` until you:
+
+1. Re-measure against the frozen production design.
+2. Overwrite the five macros.
+3. Define `GANTRY_GEOMETRY_FROZEN` (e.g. `target_compile_definitions(${COMPONENT_LIB} PUBLIC GANTRY_GEOMETRY_FROZEN)`) to attest the freeze and silence the reminder.
+
+A weaker escape hatch, `GANTRY_SUPPRESS_GEOMETRY_WARNING`, silences the reminder without attesting the freeze - use it only for CI or bring-up builds. See `docs/CONFIGURATION_GUIDE.md` for the full deployment attestation procedure.
 
 ---
 
