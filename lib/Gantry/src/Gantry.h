@@ -27,13 +27,11 @@
 #include "GantryLimitSwitch.h"
 #include "GantryUtils.h"
 #include "PulseMotor.h"
-#include <Arduino.h>
 #include <memory>
+#include <cstdint>
 
-#if defined(ARDUINO_ARCH_ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#endif
 
 namespace Gantry {
 

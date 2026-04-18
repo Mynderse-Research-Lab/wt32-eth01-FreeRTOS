@@ -6,6 +6,7 @@
 
 #include "GantryEndEffector.h"
 #include "gpio_expander.h"
+#include "driver/gpio.h"
 
 namespace Gantry {
 
@@ -50,11 +51,19 @@ bool GantryEndEffector::begin() {
             return false;
         }
     } else {
-    const int gpioPin = resolveDirectGpioPin(pin_);
-    if (gpioPin < 0) {
-        return false;
-    }
-    pinMode(gpioPin, OUTPUT);
+        const int gpioPin = resolveDirectGpioPin(pin_);
+        if (gpioPin < 0) {
+            return false;
+        }
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << gpioPin);
+        io_conf.mode         = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en   = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type    = GPIO_INTR_DISABLE;
+        if (gpio_config(&io_conf) != ESP_OK) {
+            return false;
+        }
     }
     setActive(false);
     return true;
@@ -72,7 +81,7 @@ void GantryEndEffector::setActive(bool active) {
         if (gpioPin < 0) {
             return;
         }
-        digitalWrite(gpioPin, level ? HIGH : LOW);
+        gpio_set_level((gpio_num_t)gpioPin, level);
     }
     active_ = active;
 }

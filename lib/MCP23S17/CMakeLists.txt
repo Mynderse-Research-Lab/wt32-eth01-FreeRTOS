@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "src/MCP23S17.cpp"
+    INCLUDE_DIRS
+        "src"
+    REQUIRES
+        driver
+        esp_common
+        log
+)

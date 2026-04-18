@@ -9,6 +9,19 @@
 #include "GantryPulseMotorRotaryAxis.h"
 #include <cmath>
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+namespace {
+// Arduino-compat helpers, pure ESP-IDF implementation.
+static inline unsigned long gantry_millis() {
+    return (unsigned long)(esp_timer_get_time() / 1000LL);
+}
+static inline void gantry_delay(uint32_t ms) {
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+}  // namespace
 
 using namespace Gantry::Constants;
 
@@ -427,8 +440,8 @@ int Gantry::calibrate() {
 
     home();
 
-    unsigned long start_ms = millis();
-    while (homingInProgress_ && (millis() - start_ms) < CALIBRATION_TIMEOUT_MS) {
+    unsigned long start_ms = gantry_millis();
+    while (homingInProgress_ && (gantry_millis() - start_ms) < CALIBRATION_TIMEOUT_MS) {
         if (abortRequested_) {
             stopAllMotion();
             calibrationInProgress_ = false;
@@ -436,7 +449,7 @@ int Gantry::calibrate() {
         }
         xMinSwitch_.update();
         xMaxSwitch_.update();
-        delay(10);
+        gantry_delay(10);
     }
 
     if (homingInProgress_ || !xMinSwitch_.isActive()) {
@@ -454,10 +467,10 @@ int Gantry::calibrate() {
         return 0;
     }
 
-    start_ms = millis();
+    start_ms = gantry_millis();
     bool minReleased = false;
     while (axisX_->isMotionActive() &&
-           (millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+           (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
         if (abortRequested_) {
             stopAllMotion();
             calibrationInProgress_ = false;
@@ -469,7 +482,7 @@ int Gantry::calibrate() {
         if (!minReleased) {
             if (!xMinSwitch_.isActive()) {
                 minReleased = true;
-            } else if ((millis() - start_ms) > kMinReleaseTimeoutMs) {
+            } else if ((gantry_millis() - start_ms) > kMinReleaseTimeoutMs) {
                 ESP_LOGW(TAG,
                          "Calibration abort: MIN limit did not release within %lu ms",
                          (unsigned long)kMinReleaseTimeoutMs);
@@ -479,7 +492,7 @@ int Gantry::calibrate() {
             }
         }
 
-        delay(10);
+        gantry_delay(10);
         if (axisX_->isAlarmActive()) {
             stopAllMotion();
             calibrationInProgress_ = false;
@@ -755,7 +768,7 @@ void Gantry::startSequentialMotion() {
         if (!axisY_) {
             motionState_ = MotionState::GRIPPER_ACTUATING;
             grip(gripperTargetState_);
-            gripperActuateStart_ms_ = millis();
+            gripperActuateStart_ms_ = gantry_millis();
         }
     } else {
         motionState_ = MotionState::X_MOVING;
@@ -795,12 +808,12 @@ void Gantry::processSequentialMotion() {
             if (!axisY_ || !axisY_->isBusy()) {
                 motionState_ = MotionState::GRIPPER_ACTUATING;
                 grip(gripperTargetState_);
-                gripperActuateStart_ms_ = millis();
+                gripperActuateStart_ms_ = gantry_millis();
             }
             break;
 
         case MotionState::GRIPPER_ACTUATING:
-            if (millis() - gripperActuateStart_ms_ >= gripperActuateDurationMs_) {
+            if (gantry_millis() - gripperActuateStart_ms_ >= gripperActuateDurationMs_) {
                 motionState_ = MotionState::Y_RETRACTING;
                 if (!moveYAxisTo(safeYHeight_mm_, (float)speed_mm_per_s_,
                                  (float)acceleration_mm_per_s2_,

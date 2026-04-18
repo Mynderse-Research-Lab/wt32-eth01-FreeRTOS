@@ -24,13 +24,15 @@
 #include "axis_pulse_motor_params.h"
 
 /* ---------------------------------------------------------------------------
- * DrivetrainType enum values. Mirrors PulseMotor::DrivetrainType so the macro
- * assignments below remain readable even in C-preprocessed contexts.
+ * Preprocessor mirrors of PulseMotor::DrivetrainType. A DT_ prefix is used to
+ * avoid colliding with the enumerator names in PulseMotor.h (the enum is the
+ * source of truth; these macros just make the AXIS_*_DRIVETRAIN selectors
+ * readable at preprocessor time).
  * --------------------------------------------------------------------------- */
-#define DRIVETRAIN_BALLSCREW                1
-#define DRIVETRAIN_BELT                     2
-#define DRIVETRAIN_RACKPINION               3
-#define DRIVETRAIN_ROTARY_DIRECT            4
+#define DT_BALLSCREW                        1
+#define DT_BELT                             2
+#define DT_RACKPINION                       3
+#define DT_ROTARY_DIRECT                    4
 
 /* ===========================================================================
  * X AXIS  -  SCHUNK Beta 100-ZRS toothed-belt linear actuator
@@ -39,7 +41,7 @@
  *   stroke per round: 200 mm  -> AXIS_X_BELT_LEAD_MM_PER_REV
  *   mech. stroke:     550 mm  -> AXIS_X_TRAVEL_MAX_MM
  *   repeatability:    +/-0.08 mm */
-#define AXIS_X_DRIVETRAIN                   DRIVETRAIN_BELT
+#define AXIS_X_DRIVETRAIN                   DT_BELT
 #define AXIS_X_BELT_LEAD_MM_PER_REV         200.0f
 #define AXIS_X_BELT_PULLEY_TEETH                0u  /* metadata only; lead_per_rev is authoritative */
 #define AXIS_X_BELT_PITCH_MM                  0.0f
@@ -57,7 +59,7 @@
  *   pitch 20 mm, thread dia 20 mm, critical speed 3000 rpm
  *   mech. stroke:  150 mm
  *   axial tolerance: 0.08 mm; repeat accuracy: +/-0.03 mm */
-#define AXIS_Y_DRIVETRAIN                   DRIVETRAIN_BALLSCREW
+#define AXIS_Y_DRIVETRAIN                   DT_BALLSCREW
 #define AXIS_Y_BALLSCREW_LEAD_MM             20.0f
 #define AXIS_Y_BALLSCREW_SHAFT_DIA_MM        20.0f  /* informational */
 #define AXIS_Y_BALLSCREW_CRITICAL_RPM        3000u
@@ -80,7 +82,7 @@
  *   max Fx/Fz: 150 N; max My: 2.5 Nm
  * The rotary hardware allows unlimited rotation; the firmware clamps to the
  * soft-limit range below to keep gripper cabling unwound. */
-#define AXIS_THETA_DRIVETRAIN               DRIVETRAIN_ROTARY_DIRECT
+#define AXIS_THETA_DRIVETRAIN               DT_ROTARY_DIRECT
 #define AXIS_THETA_OUTPUT_GEAR_RATIO          1.0f  /* output_rev / motor_rev; 1.0 = direct drive */
 #define AXIS_THETA_TRAVEL_MIN_DEG          -180.0f
 #define AXIS_THETA_TRAVEL_MAX_DEG           180.0f

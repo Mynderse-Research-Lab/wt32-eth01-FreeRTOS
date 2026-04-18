@@ -6,8 +6,13 @@
 #include "PulseMotor.h"
 #include "gpio_expander.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "esp_rom_sys.h"
 #include <cmath>
+#include <cstdlib>
+#include <cstdio>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <inttypes.h>
 
 using namespace PulseMotor;
@@ -15,7 +20,7 @@ static const char* TAG = "PulseMotor";
 
 // Version
 #define PULSE_MOTOR_VERSION_MAJOR "2"
-#define PULSE_MOTOR_VERSION_MINOR "0"
+#define PULSE_MOTOR_VERSION_MINOR "1"
 #define PULSE_MOTOR_VERSION_PATCH "0"
 #define PULSE_MOTOR_VERSION \
     PULSE_MOTOR_VERSION_MAJOR "." PULSE_MOTOR_VERSION_MINOR "." PULSE_MOTOR_VERSION_PATCH
@@ -25,14 +30,25 @@ static const char* TAG = "PulseMotor";
 #endif
 
 #if PULSE_MOTOR_DEBUG
-#define DEBUG_PRINT(...) \
-    do { ESP_LOGD(TAG, "%s", String(__VA_ARGS__).c_str()); } while (0)
-#define DEBUG_PRINTLN(...) \
-    do { ESP_LOGD(TAG, "%s", String(__VA_ARGS__).c_str()); } while (0)
+#define DEBUG_LOGD(fmt, ...) ESP_LOGD(TAG, fmt, ##__VA_ARGS__)
 #else
-#define DEBUG_PRINT(...)
-#define DEBUG_PRINTLN(...)
+#define DEBUG_LOGD(fmt, ...) ((void)0)
 #endif
+
+// Monotonic millisecond clock (replaces Arduino millis()). Returns unsigned
+// long so it prints cleanly with "%lu" in existing ESP_LOG call-sites.
+static inline unsigned long pm_millis() {
+    return (unsigned long)(esp_timer_get_time() / 1000LL);
+}
+
+// Blocking microsecond delay that does not pump FreeRTOS scheduler. Safe at
+// the short timescales used here (<=1ms).
+static inline void pm_delay_us(uint32_t us) {
+    esp_rom_delay_us(us);
+}
+
+// LEDC speed mode: LOW_SPEED works on ESP32 classic and all -S/-C variants.
+static constexpr ledc_mode_t PM_LEDC_MODE = LEDC_LOW_SPEED_MODE;
 
 namespace {
 
@@ -131,6 +147,9 @@ PulseMotorDriver::PulseMotorDriver(const DriverConfig& config)
     pcnt_chan_a_handle_(nullptr),
     pcnt_chan_b_handle_(nullptr),
     resolved_pulse_gpio_(-1),
+    ledc_chan_(LEDC_CHANNEL_0),
+    ledc_tmr_(LEDC_TIMER_0),
+    ledc_ready_(false),
     ramp_timer_(nullptr),
     alarm_callback_(nullptr),
     position_reached_callback_(nullptr),
@@ -155,9 +174,9 @@ PulseMotorDriver::PulseMotorDriver(const DriverConfig& config)
     ramp_args.name     = "pulse_motor_ramp";
     esp_err_t timer_err = esp_timer_create(&ramp_args, &ramp_timer_);
     ESP_LOGI(TAG, "[%lu] PulseMotorDriver: esp_timer_create returned %d, ramp_timer_=%p",
-             millis(), timer_err, ramp_timer_);
+             pm_millis(), (int)timer_err, ramp_timer_);
     if (timer_err != ESP_OK) {
-        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: Failed to create ramp timer!", millis());
+        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: Failed to create ramp timer!", pm_millis());
         ramp_timer_ = nullptr;
     }
 
@@ -166,7 +185,7 @@ PulseMotorDriver::PulseMotorDriver(const DriverConfig& config)
 #if PULSE_MOTOR_USE_FREERTOS
     mutex_ = xSemaphoreCreateMutex();
     if (mutex_ == nullptr) {
-        DEBUG_PRINTLN("PulseMotorDriver: Failed to create mutex!");
+        DEBUG_LOGD("PulseMotorDriver: Failed to create mutex!");
     }
 #endif
 }
@@ -212,57 +231,50 @@ PulseMotorDriver::~PulseMotorDriver() {
 
 bool PulseMotorDriver::initialize() {
     if (initialized_) {
-        DEBUG_PRINTLN("PulseMotorDriver: Already initialized");
+        DEBUG_LOGD("PulseMotorDriver: Already initialized");
         return false;
     }
 
-#if PULSE_MOTOR_DEBUG
-    DEBUG_PRINT("PulseMotorDriver: ESP_ARDUINO_VERSION=");
-    DEBUG_PRINTLN(ESP_ARDUINO_VERSION);
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    DEBUG_PRINTLN("PulseMotorDriver: LEDC API v3+");
-#else
-    DEBUG_PRINTLN("PulseMotorDriver: LEDC API v2");
-#endif
-#endif
+    DEBUG_LOGD("PulseMotorDriver: initialising (pure ESP-IDF LEDC API)");
 
     if (!ramp_timer_) {
-        DEBUG_PRINTLN("PulseMotorDriver: Timer not created - init failed");
+        DEBUG_LOGD("PulseMotorDriver: Timer not created - init failed");
         return false;
     }
 
 #if PULSE_MOTOR_USE_FREERTOS
     if (!mutex_) {
-        DEBUG_PRINTLN("PulseMotorDriver: Mutex not created - init failed");
+        DEBUG_LOGD("PulseMotorDriver: Mutex not created - init failed");
         return false;
     }
 #endif
 
     if (config_.pulse_mode != PulseMode::PULSE_DIRECTION) {
-        DEBUG_PRINTLN("PulseMotorDriver: Only PULSE_DIRECTION mode is supported");
+        DEBUG_LOGD("PulseMotorDriver: Only PULSE_DIRECTION mode is supported");
         return false;
     }
 
     if (config_.pulse_pin < 0) {
-        DEBUG_PRINTLN("PulseMotorDriver: pulse_pin must be configured");
+        DEBUG_LOGD("PulseMotorDriver: pulse_pin must be configured");
         return false;
     }
     if (config_.dir_pin < 0) {
-        DEBUG_PRINTLN("PulseMotorDriver: dir_pin must be configured");
+        DEBUG_LOGD("PulseMotorDriver: dir_pin must be configured");
         return false;
     }
     if (config_.enable_pin < 0) {
-        DEBUG_PRINTLN("PulseMotorDriver: enable_pin must be configured");
+        DEBUG_LOGD("PulseMotorDriver: enable_pin must be configured");
         return false;
     }
 
-    if (config_.ledc_channel < 0 || config_.ledc_channel > 15) {
-        DEBUG_PRINTLN("PulseMotorDriver: ledc_channel must be 0..15");
+    if (config_.ledc_channel < 0 || config_.ledc_channel > (int)LEDC_CHANNEL_MAX - 1) {
+        ESP_LOGE(TAG, "PulseMotorDriver: ledc_channel out of range (%d)",
+                 config_.ledc_channel);
         return false;
     }
 
     if (config_.enable_closed_loop_control && !config_.enable_encoder_feedback) {
-        DEBUG_PRINTLN("PulseMotorDriver: closed-loop requires encoder feedback");
+        DEBUG_LOGD("PulseMotorDriver: closed-loop requires encoder feedback");
         return false;
     }
 
@@ -295,25 +307,60 @@ bool PulseMotorDriver::initialize() {
     if (!configInput(config_.limit_min_pin))    return false;
     if (!configInput(config_.limit_max_pin))    return false;
 
-    // LEDC pulse channel
+    // LEDC pulse channel (pure ESP-IDF)
     resolved_pulse_gpio_ = resolveDirectGpioPin(config_.pulse_pin);
     if (resolved_pulse_gpio_ < 0) {
-        DEBUG_PRINTLN("PulseMotorDriver: pulse_pin must resolve to a direct GPIO");
+        DEBUG_LOGD("PulseMotorDriver: pulse_pin must resolve to a direct GPIO");
         return false;
     }
 
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    if (!ledcAttach(resolved_pulse_gpio_, 1000, config_.ledc_resolution)) {
-        DEBUG_PRINTLN("PulseMotorDriver: ledcAttach failed");
+    // Resolve LEDC channel + timer. If config_.ledc_timer < 0, auto-derive a
+    // timer index from the channel so each axis gets its own timer (required
+    // because changing freq on a shared timer affects all sibling channels).
+    ledc_chan_ = (ledc_channel_t)config_.ledc_channel;
+    int timer_idx = (config_.ledc_timer >= 0)
+        ? config_.ledc_timer
+        : (config_.ledc_channel % LEDC_TIMER_MAX);
+    if (timer_idx < 0 || timer_idx >= (int)LEDC_TIMER_MAX) {
+        ESP_LOGE(TAG, "PulseMotorDriver: ledc_timer out of range (%d)", timer_idx);
         return false;
     }
-    ledcWrite(resolved_pulse_gpio_, 0);
-#else
-    ledcSetup(config_.ledc_channel, 1000, config_.ledc_resolution);
-    ledcAttachPin(resolved_pulse_gpio_, config_.ledc_channel);
-    ledcWrite(config_.ledc_channel, 0);
-#endif
-    DEBUG_PRINTLN("PulseMotorDriver: LEDC channel initialized");
+    ledc_tmr_ = (ledc_timer_t)timer_idx;
+
+    uint8_t res_bits = config_.ledc_resolution;
+    if (res_bits < 1) res_bits = 1;
+    if (res_bits > (uint8_t)LEDC_TIMER_14_BIT) res_bits = (uint8_t)LEDC_TIMER_14_BIT;
+
+    ledc_timer_config_t ledc_tcfg = {};
+    ledc_tcfg.speed_mode      = PM_LEDC_MODE;
+    ledc_tcfg.timer_num       = ledc_tmr_;
+    ledc_tcfg.duty_resolution = (ledc_timer_bit_t)res_bits;
+    ledc_tcfg.freq_hz         = 1000;
+    ledc_tcfg.clk_cfg         = LEDC_AUTO_CLK;
+    esp_err_t tc_err = ledc_timer_config(&ledc_tcfg);
+    if (tc_err != ESP_OK) {
+        ESP_LOGE(TAG, "PulseMotorDriver: ledc_timer_config failed (%d)", (int)tc_err);
+        return false;
+    }
+
+    ledc_channel_config_t ledc_ccfg = {};
+    ledc_ccfg.speed_mode     = PM_LEDC_MODE;
+    ledc_ccfg.channel        = ledc_chan_;
+    ledc_ccfg.timer_sel      = ledc_tmr_;
+    ledc_ccfg.intr_type      = LEDC_INTR_DISABLE;
+    ledc_ccfg.gpio_num       = resolved_pulse_gpio_;
+    ledc_ccfg.duty           = 0;
+    ledc_ccfg.hpoint         = 0;
+    esp_err_t cc_err = ledc_channel_config(&ledc_ccfg);
+    if (cc_err != ESP_OK) {
+        ESP_LOGE(TAG, "PulseMotorDriver: ledc_channel_config failed (%d)", (int)cc_err);
+        return false;
+    }
+    ledc_set_duty(PM_LEDC_MODE, ledc_chan_, 0);
+    ledc_update_duty(PM_LEDC_MODE, ledc_chan_);
+    ledc_ready_ = true;
+    DEBUG_LOGD("PulseMotorDriver: LEDC channel initialized (ch=%d tmr=%d res=%u)",
+               (int)ledc_chan_, (int)ledc_tmr_, (unsigned)res_bits);
 
     // PCNT encoder
     const int enc_a_gpio = resolveDirectGpioPin(config_.encoder_a_pin);
@@ -323,7 +370,7 @@ bool PulseMotorDriver::initialize() {
         unit_config.low_limit  = -32768;
         unit_config.high_limit = 32767;
         if (pcnt_new_unit(&unit_config, &pcnt_unit_handle_) != ESP_OK) {
-            DEBUG_PRINTLN("PulseMotorDriver: Failed to allocate PCNT unit");
+            DEBUG_LOGD("%s", "PulseMotorDriver: Failed to allocate PCNT unit");
             return false;
         }
 
@@ -331,7 +378,7 @@ bool PulseMotorDriver::initialize() {
         chan_a_config.edge_gpio_num  = enc_a_gpio;
         chan_a_config.level_gpio_num = enc_b_gpio;
         if (pcnt_new_channel(pcnt_unit_handle_, &chan_a_config, &pcnt_chan_a_handle_) != ESP_OK) {
-            DEBUG_PRINTLN("PulseMotorDriver: Failed to allocate PCNT channel A");
+            DEBUG_LOGD("%s", "PulseMotorDriver: Failed to allocate PCNT channel A");
             return false;
         }
 
@@ -339,7 +386,7 @@ bool PulseMotorDriver::initialize() {
         chan_b_config.edge_gpio_num  = enc_b_gpio;
         chan_b_config.level_gpio_num = enc_a_gpio;
         if (pcnt_new_channel(pcnt_unit_handle_, &chan_b_config, &pcnt_chan_b_handle_) != ESP_OK) {
-            DEBUG_PRINTLN("PulseMotorDriver: Failed to allocate PCNT channel B");
+            DEBUG_LOGD("%s", "PulseMotorDriver: Failed to allocate PCNT channel B");
             return false;
         }
 
@@ -365,12 +412,12 @@ bool PulseMotorDriver::initialize() {
         pcnt_unit_start(pcnt_unit_handle_);
         last_pcnt_count_ = 0;
 
-        DEBUG_PRINTLN("PulseMotorDriver: Encoder PCNT initialized");
+        DEBUG_LOGD("PulseMotorDriver: Encoder PCNT initialized");
     }
 
     initialized_           = true;
-    last_status_update_ms_ = millis();
-    DEBUG_PRINTLN("PulseMotorDriver: Initialized successfully");
+    last_status_update_ms_ = pm_millis();
+    DEBUG_LOGD("PulseMotorDriver: Initialized successfully");
     return true;
 }
 
@@ -380,7 +427,7 @@ bool PulseMotorDriver::initialize() {
 
 bool PulseMotorDriver::enable() {
     ESP_LOGI(TAG, "[%lu] PulseMotorDriver: enable() called, init=%d en=%d",
-             millis(), initialized_, enabled_);
+             pm_millis(), initialized_, enabled_);
 #if PULSE_MOTOR_USE_FREERTOS
     xSemaphoreTake(mutex_, portMAX_DELAY);
 #endif
@@ -402,7 +449,7 @@ bool PulseMotorDriver::enable() {
 #if PULSE_MOTOR_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
-    ESP_LOGI(TAG, "[%lu] PulseMotorDriver: enable() OK", millis());
+    ESP_LOGI(TAG, "[%lu] PulseMotorDriver: enable() OK", pm_millis());
     return true;
 }
 
@@ -427,7 +474,7 @@ bool PulseMotorDriver::disable() {
 #if PULSE_MOTOR_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
-    DEBUG_PRINTLN("PulseMotorDriver: Disabled");
+    DEBUG_LOGD("%s", "PulseMotorDriver: Disabled");
     return true;
 }
 
@@ -452,28 +499,24 @@ bool PulseMotorDriver::clearAlarm() {
         return false;
     }
     writePinLogical(config_.alarm_reset_pin, true, false);
-    delayMicroseconds(100);
+    pm_delay_us(100);
     writePinLogical(config_.alarm_reset_pin, false, false);
 #if PULSE_MOTOR_USE_FREERTOS
     xSemaphoreGive(mutex_);
 #endif
-    DEBUG_PRINTLN("PulseMotorDriver: Alarm reset pulse sent");
+    DEBUG_LOGD("%s", "PulseMotorDriver: Alarm reset pulse sent");
     return true;
 }
 
 void PulseMotorDriver::stopLEDC() {
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    if (resolved_pulse_gpio_ >= 0) {
-        ledcWrite(resolved_pulse_gpio_, 0);
-    }
-#else
-    ledcWrite(config_.ledc_channel, 0);
-#endif
+    if (!ledc_ready_) return;
+    ledc_set_duty(PM_LEDC_MODE, ledc_chan_, 0);
+    ledc_update_duty(PM_LEDC_MODE, ledc_chan_);
 }
 
 void PulseMotorDriver::stopMotionFromIsr(const char* reason, bool set_home) {
     if (reason) {
-        ESP_LOGI(TAG, "[%lu] PulseMotorDriver: %s", millis(), reason);
+        ESP_LOGI(TAG, "[%lu] PulseMotorDriver: %s", pm_millis(), reason);
     }
     if (set_home) {
         homing_active_    = false;
@@ -491,7 +534,7 @@ void PulseMotorDriver::stopMotionFromIsr(const char* reason, bool set_home) {
 void PulseMotorDriver::handleMoveComplete() {
     motion_active_ = false;
     ESP_LOGI(TAG, "[%lu] PulseMotorDriver: Motion stopped at position=%lu",
-             millis(), (unsigned long)current_position_);
+             pm_millis(), (unsigned long)current_position_);
     if (position_reached_callback_) {
         position_reached_callback_(current_position_);
     }
@@ -544,11 +587,10 @@ void PulseMotorDriver::updateMotionProfile() {
             ? 0
             : (profile_.total_pulses - profile_.pulses_generated);
 
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    // Minimum frequency that the LEDC timer can reliably produce at the
+    // configured resolution. Below this the ramp finishes the decel phase and
+    // the LEDC output is muted by stopLEDC().
     const double ABSOLUTE_MIN_FREQ = 5000.0;
-#else
-    const double ABSOLUTE_MIN_FREQ = 40000.0;
-#endif
 
     switch (profile_.phase) {
     case MotionProfile::ACCEL:
@@ -589,12 +631,8 @@ void PulseMotorDriver::updateMotionProfile() {
         break;
     }
 
-    if (profile_.current_freq > 0) {
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    if (profile_.current_freq > 0 && ledc_ready_) {
         const double LEDC_MIN_HZ = 1000.0;
-#else
-        const double LEDC_MIN_HZ = 40000.0;
-#endif
         double freq = profile_.current_freq;
         if (freq < LEDC_MIN_HZ) {
             freq                  = LEDC_MIN_HZ;
@@ -604,22 +642,13 @@ void PulseMotorDriver::updateMotionProfile() {
         if (freq_hz < (uint32_t)LEDC_MIN_HZ) {
             freq_hz = (uint32_t)LEDC_MIN_HZ;
         }
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-        (void)ledcWriteTone(resolved_pulse_gpio_, freq_hz);
-#else
-        static uint8_t last_resolution = 255;
-        const uint8_t  resolution      = 1;
-        if (last_resolution != resolution) {
-            ledcSetup(config_.ledc_channel, freq_hz, resolution);
-            ledcAttachPin(resolved_pulse_gpio_, config_.ledc_channel);
-            last_resolution = resolution;
-        } else {
-            ledcSetup(config_.ledc_channel, freq_hz, resolution);
-        }
-        const uint8_t max_duty_v2 = (1 << resolution) - 1;
-        const uint8_t duty_v2     = (max_duty_v2 > 0) ? ((max_duty_v2 + 1) / 2) : 1;
-        ledcWrite(config_.ledc_channel, duty_v2);
-#endif
+        // Update timer frequency only if it materially changed; and keep duty
+        // at ~50% (square wave) which is what a pulse-train driver expects.
+        ledc_set_freq(PM_LEDC_MODE, ledc_tmr_, freq_hz);
+        const uint32_t max_duty = (1u << config_.ledc_resolution) - 1u;
+        const uint32_t duty     = (max_duty > 0) ? ((max_duty + 1u) / 2u) : 1u;
+        ledc_set_duty(PM_LEDC_MODE, ledc_chan_, duty);
+        ledc_update_duty(PM_LEDC_MODE, ledc_chan_);
         current_speed_pps_ = (uint32_t)profile_.current_freq;
     }
 
@@ -665,7 +694,7 @@ void PulseMotorDriver::updateMotionProfile() {
         status_.position_error =
             (int32_t)profile_.target_position - (int32_t)current_position_;
     }
-    status_.last_update_ms = millis();
+    status_.last_update_ms = pm_millis();
 
     if (config_.in_position_pin >= 0) {
         status_.position_reached = !readPinSafe(config_.in_position_pin);
@@ -688,7 +717,7 @@ void PulseMotorDriver::startMotionProfile(uint32_t total_pulses, double max_freq
                                           double accel_rate, double decel_rate,
                                           bool direction) {
     if (accel_rate <= 0.0 || decel_rate <= 0.0) {
-        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: Invalid accel/decel rates", millis());
+        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: Invalid accel/decel rates", pm_millis());
         return;
     }
 
@@ -724,46 +753,43 @@ void PulseMotorDriver::startMotionProfile(uint32_t total_pulses, double max_freq
     motion_active_     = true;
     current_direction_ = direction;
     setDirectionPin(direction);
-    delayMicroseconds(10);
+    pm_delay_us(10);
 
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    if (!ledc_ready_) {
+        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: LEDC not ready, cannot start motion",
+                 pm_millis());
+        return;
+    }
+
     const double LEDC_MIN_HZ = 500.0;
-#else
-    const double LEDC_MIN_HZ = 40000.0;
-#endif
     double init_freq = profile_.current_freq;
     if (init_freq < LEDC_MIN_HZ) {
         init_freq = LEDC_MIN_HZ;
     }
     profile_.current_freq = init_freq;
 
-    const uint8_t  init_resolution = 1;
-    const uint8_t  max_duty        = (1 << init_resolution) - 1;
-    const uint8_t  duty            = (max_duty > 0) ? ((max_duty + 1) / 2) : 1;
-    const uint32_t init_freq_hz    = (uint32_t)(init_freq + 0.5);
-    (void)duty;
-    (void)max_duty;
+    const uint32_t init_freq_hz = (uint32_t)(init_freq + 0.5);
+    const uint32_t max_duty     = (1u << config_.ledc_resolution) - 1u;
+    const uint32_t duty         = (max_duty > 0) ? ((max_duty + 1u) / 2u) : 1u;
 
-#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(resolved_pulse_gpio_, 0);
-    ledcDetach(resolved_pulse_gpio_);
-    if (!ledcAttach(resolved_pulse_gpio_, init_freq_hz, init_resolution)) {
-        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: ledcAttach failed", millis());
+    // Silence the channel, retune the timer to the start-of-ramp frequency,
+    // then re-arm the channel at ~50% duty. Pure ESP-IDF path - no Arduino.
+    ledc_set_duty(PM_LEDC_MODE, ledc_chan_, 0);
+    ledc_update_duty(PM_LEDC_MODE, ledc_chan_);
+    pm_delay_us(100);
+    esp_err_t freq_err = ledc_set_freq(PM_LEDC_MODE, ledc_tmr_, init_freq_hz);
+    if (freq_err != ESP_OK) {
+        ESP_LOGE(TAG, "[%lu] PulseMotorDriver: ledc_set_freq failed (%d)",
+                 pm_millis(), (int)freq_err);
         return;
     }
-    (void)ledcWriteTone(resolved_pulse_gpio_, init_freq_hz);
-#else
-    ledcWrite(config_.ledc_channel, 0);
-    delayMicroseconds(100);
-    ledcSetup(config_.ledc_channel, init_freq_hz, init_resolution);
-    ledcAttachPin(resolved_pulse_gpio_, config_.ledc_channel);
-    ledcWrite(config_.ledc_channel, duty);
-#endif
+    ledc_set_duty(PM_LEDC_MODE, ledc_chan_, duty);
+    ledc_update_duty(PM_LEDC_MODE, ledc_chan_);
 
     esp_err_t start_err = esp_timer_start_periodic(ramp_timer_, RAMP_INTERVAL_US);
     if (start_err != ESP_OK) {
         ESP_LOGE(TAG, "[%lu] PulseMotorDriver: timer start failed (%d)",
-                 millis(), start_err);
+                 pm_millis(), start_err);
     }
 }
 
@@ -870,7 +896,7 @@ bool PulseMotorDriver::stopMotion(uint32_t deceleration) {
 bool PulseMotorDriver::startHoming(uint32_t speed) {
     (void)speed;
     ESP_LOGW(TAG, "[%lu] PulseMotorDriver: startHoming not supported - use gantry layer",
-             millis());
+             pm_millis());
     return false;
 }
 
@@ -883,7 +909,7 @@ bool PulseMotorDriver::measureTravelDistance(uint32_t speed, uint32_t accelerati
     travel_distance_valid_ = false;
     travel_distance_steps_ = 0;
     ESP_LOGW(TAG, "[%lu] PulseMotorDriver: measureTravelDistance not supported - use gantry layer",
-             millis());
+             pm_millis());
     return false;
 }
 
@@ -905,7 +931,7 @@ bool PulseMotorDriver::eStop() {
 #endif
     stopMotion(0);
     disable();
-    DEBUG_PRINTLN("PulseMotorDriver: EMERGENCY STOP");
+    DEBUG_LOGD("%s", "PulseMotorDriver: EMERGENCY STOP");
     return true;
 }
 
@@ -969,25 +995,25 @@ void PulseMotorDriver::setStatusUpdateCallback(StatusUpdateCallback cb)       { 
 const DriverConfig& PulseMotorDriver::getConfig() const           { return config_; }
 void                PulseMotorDriver::setConfig(const DriverConfig& c) { config_ = c; }
 
-String PulseMotorDriver::getConfigStatus() const {
+std::string PulseMotorDriver::getConfigStatus() const {
     char buf[256];
     snprintf(buf, sizeof(buf),
              "PulseMotor v%s\nInitialized: %s\nEnabled: %s\nPosition: %" PRIu32 "\nSpeed: %" PRIu32 " pps",
              PULSE_MOTOR_VERSION, initialized_ ? "Yes" : "No",
              enabled_ ? "Yes" : "No", current_position_, current_speed_pps_);
-    return String(buf);
+    return std::string(buf);
 }
 
-String PulseMotorDriver::getVersion() { return String(PULSE_MOTOR_VERSION); }
+std::string PulseMotorDriver::getVersion() { return std::string(PULSE_MOTOR_VERSION); }
 
-String PulseMotorDriver::getDriverInfo() const {
+std::string PulseMotorDriver::getDriverInfo() const {
     char buf[256];
     snprintf(buf, sizeof(buf),
              "PulseMotor v%s\nPulse: %d | Dir: %d | Enable: %d | Alarm: %d\nMax Freq: %" PRIu32 " Hz | Encoder PPR: %" PRIu32,
              PULSE_MOTOR_VERSION, config_.pulse_pin, config_.dir_pin,
              config_.enable_pin, config_.alarm_pin, config_.max_pulse_freq,
              config_.encoder_ppr);
-    return String(buf);
+    return std::string(buf);
 }
 
 // ============================================================================
@@ -1005,7 +1031,7 @@ bool PulseMotorDriver::writePinLogical(int pin, bool logical_high, bool is_dir_p
 }
 
 bool PulseMotorDriver::setDirectionPin(bool state) {
-    ESP_LOGI(TAG, "[%lu] setDirectionPin: logical=%d", millis(), state);
+    ESP_LOGI(TAG, "[%lu] setDirectionPin: logical=%d", pm_millis(), state);
     return writePinLogical(config_.dir_pin, state, true);
 }
 
