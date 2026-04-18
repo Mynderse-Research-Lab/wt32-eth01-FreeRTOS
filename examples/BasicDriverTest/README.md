@@ -1,138 +1,31 @@
-# Basic Driver Test
+# BasicDriverTest
 
-A minimal test program to verify the PulseMotor driver library is working correctly.
+Minimal test program for the `PulseMotor` library. Verifies:
 
-## Purpose
+1. Driver initialization
+2. Motor enable / disable
+3. Status read
+4. Limit-switch reads
+5. A short forward move (3000 pulses)
 
-This test program performs basic verification of the driver library:
-1. **Driver Initialization** - Tests if the driver can be initialized
-2. **Motor Enable** - Tests if the motor can be enabled
-3. **Status Check** - Verifies status reading works
-4. **Enable State** - Confirms enable state reporting
-5. **Limit Switch Reading** - Tests limit switch input reading
-6. **Limit Switch Protection** - Verifies limit switch logic
-7. **Simple Move** - Optional test move with limit switch monitoring
+## Hardware Requirements
 
-## Hardware Setup
+- WT32-ETH01 or any ESP32 development board
+- A pulse+direction motor driver (verified targets: Bergerda SDF08NK8X, Allen-Bradley Kinetix 5100, custom pulse-train driver for SCHUNK ERD 04-40-D-H-N)
+- Servo motor (optional for the basic tests; required for the move test)
 
-### Required
-- WT32-ETH01 or ESP32 development board
-- Pulse-train motor driver
-- USB cable
+## Pin Connections
 
-### Optional (for move test)
-- Servo motor connected to driver
-- Power supply for servo driver
-
-### Pin Connections
-
-| ESP32 GPIO | Signal | Driver CN1 Pin | Description |
-|------------|--------|----------------|-------------|
-| GPIO 2     | PULSE  | Pin 18         | Pulse signal |
-| GPIO 4     | DIR    | Pin 19         | Direction signal |
-| GPIO 12    | ENABLE | Pin 21 (IN0)   | Servo enable (SON) |
-| GPIO 14    | LIMIT_MIN | External switch | Home limit switch (active LOW) |
-| GPIO 32    | LIMIT_MAX | External switch | End limit switch (active LOW) |
-
-### Limit Switch Wiring
-
-```
-Limit Switch (Home)          ESP32
-─────────────────           ──────
-   COM ──────────────────── GND
-   NO  ──────────────────── GPIO 14 (with internal pullup)
-
-Limit Switch (End)
-─────────────────
-   COM ──────────────────── GND
-   NO  ──────────────────── GPIO 32 (with internal pullup)
-```
-
-**Note**: Limit switches use internal pullup resistors. When switch is open: GPIO reads HIGH. When switch is closed: GPIO reads LOW (ACTIVE).
-
-## Usage
-
-1. **Upload the program** to your ESP32
-2. **Open serial monitor** at 115200 baud
-3. **Observe test results** - All tests should pass if library is working
-
-## Expected Output
-
-```
-========================================
-Basic Driver Library Test
-========================================
-
-Test 1: Driver Initialization
--------------------------------
-✓ PASS: Driver initialized successfully
-
-Test 2: Motor Enable
--------------------------------
-✓ PASS: Motor enabled successfully
-
-Test 3: Status Check
--------------------------------
-  Servo Enabled: YES
-  Motion Active: NO
-  Current Position: 0 steps
-  Current Speed: 0 pps
-✓ PASS: Status read successfully
-
-Test 4: Enable State Check
--------------------------------
-✓ PASS: Driver reports enabled state correctly
-
-Test 5: Limit Switch Reading
--------------------------------
-  Limit MIN (Home): open (HIGH)
-  Limit MAX (End):  open (HIGH)
-✓ PASS: Limit switches read consistently
-
-Note: Limit switches should read HIGH (open) when not connected.
-      If switches are connected and closed, they will read LOW (ACTIVE).
-
-Test 6: Limit Switch Protection
--------------------------------
-✓ End limit (MAX) is open - forward movement allowed
-✓ Home limit (MIN) is open - backward movement allowed
-
-Test 7: Simple Move Test (10 steps)
--------------------------------
-Attempting to move 10 steps forward...
-✓ Move command accepted
-Waiting for motion to complete...
-✓ Motion completed
-  Final Position: 10 steps
-
-========================================
-Test Summary
-========================================
-Basic driver library tests completed.
-If all tests passed, the library is working correctly.
-```
-
-## Troubleshooting
-
-### Test 1 Fails (Initialization)
-- Check pin connections
-- Verify GPIO pins are correct
-- Check for compilation errors
-
-### Test 2 Fails (Motor Enable)
-- Verify driver is powered
-- Check ENABLE pin connection (GPIO 12)
-- Check if driver has alarm condition
-
-### Test 5 Fails (Move Test)
-- **This is normal if motor is not connected**
-- The move command will be accepted but motion won't occur
-- Connect motor and power supply to test actual movement
+| Signal   | ESP32 GPIO | Notes                                             |
+|----------|------------|---------------------------------------------------|
+| PULSE    | 2          | LEDC output (must be direct ESP32 GPIO)           |
+| DIR      | 4          | Direction input                                   |
+| ENABLE   | 12         | SON / servo-on                                    |
+| LIMIT_MIN| 14         | Active-low, internal pullup                       |
+| LIMIT_MAX| 32         | Active-low, internal pullup                       |
 
 ## Notes
 
-- This test does NOT require encoder feedback
-- Limit switches are optional - tests will pass even if switches are not connected
-- Move test is optional - library works even if motor isn't connected
-- All tests should pass to confirm library is functioning correctly
-- Limit switches use internal pullup resistors (active LOW when switch closes)
+- If the move test reports `ledc setup failed` in the ESP32 logs, inspect the
+  LEDC channel assignment and the `ledc_resolution` value in `DriverConfig`.
+- Limit switches default to active-low with internal pull-ups.

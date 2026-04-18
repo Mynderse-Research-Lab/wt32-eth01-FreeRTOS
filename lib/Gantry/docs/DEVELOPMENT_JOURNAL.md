@@ -1,36 +1,40 @@
 # Gantry Development Journal
 
 **Version:** 2.0.0
-**Last Updated:** Apr 18th 2026
+**Last Updated:** Apr 17, 2026
 
-This journal captures the full development path of the current Gantry + pulse-train driver integration branch, including architecture moves, behavior changes, safety fixes, console/diagnostic additions, and branch/merge decisions.
+This journal captures the full development path of the current Gantry library, including architecture moves, behavior changes, safety fixes, console/diagnostic additions, and branch/merge decisions.
 
 ---
 
-## 0) 2026-04 — Pulse-motor unification
+## 0) 2026-04: PulseMotor unification refactor
 
-- Retired `lib/SDF08NK8X` — its pulse-train motion engine was ported into
-  `lib/PulseMotor` with renamed namespace (`BergerdaServo` → `PulseMotor`),
-  renamed class (`ServoDriver` → `PulseMotorDriver`), and renamed macros
-  (`SDF08NK8X_USE_FREERTOS`/`_DEBUG` → `PULSE_MOTOR_USE_FREERTOS`/`_DEBUG`).
-- Replaced slot-index pin configuration (`output_pin_nos[N]` /
-  `input_pin_nos[N]`) with named fields (`pulse_pin`, `dir_pin`, `enable_pin`,
-  `alarm_pin`, `alarm_reset_pin`, `encoder_a_pin`, `encoder_b_pin`, etc.).
-- Retired `GantryAxisStepper` (Y step/dir) and `GantryRotaryServo` (theta PWM).
-  All three axes now run through `PulseMotor::PulseMotorDriver`.
-- Introduced `PulseMotor::DrivetrainConfig` + `DrivetrainType` enum.
-  Per-axis mm↔pulse / deg↔pulse conversion is driven from these configs via
-  `setXDrivetrain()` / `setYDrivetrain()` / `setThetaDrivetrain()` and exposed
-  as `xPulsesPerMm() / yPulsesPerMm() / thetaPulsesPerDeg()`.
-- Split per-axis tuning into two headers:
-  `include/axis_pulse_motor_params.h` (electrical) and
-  `include/axis_drivetrain_params.h` (mechanical).
-- Removed the misnamed `KinematicParameters::x_axis_ball_screw_pitch_mm`
-  field (scaling is owned by the per-axis drivetrain config now).
-- Removed dead gantry setters that only configured retired classes:
-  `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`,
-  `setThetaServo`, `setThetaPulseRange`, `setThetaPulsesPerDegree`,
-  `setStepsPerRevolution`, `getStepsPerRevolution`, `getPulsesPerMm`.
+- Generalised `lib/SDF08NK8X` into `lib/PulseMotor`.
+  - Namespace `BergerdaServo` -> `PulseMotor`; class `ServoDriver` -> `PulseMotorDriver`.
+  - Replaced the SDF08-specific pin slot arrays (`input_pin_nos[6]`, `output_pin_nos[8]`) with named fields on `DriverConfig` (`pulse_pin`, `dir_pin`, `enable_pin`, `alarm_pin`, `alarm_reset_pin`, `encoder_a_pin`, `encoder_b_pin`, ...).
+  - Removed the dead `ControlMode` enum (the library only ever supported `POSITION`).
+  - Introduced `PulseMotor::DrivetrainConfig` and `PulseMotor::DrivetrainType` (`DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, `DRIVETRAIN_RACKPINION`, `DRIVETRAIN_ROTARY_DIRECT`) with header-inline `pulsesPerMm` / `pulsesPerDeg` helpers. The driver itself stays strictly pulse-domain; unit conversion lives in the consumer.
+- Restructured the Gantry library around two abstract axis interfaces:
+  - `GantryLinearAxis` (mm) -> `GantryPulseMotorLinearAxis` (backs ballscrew / belt / rack-pinion).
+  - `GantryRotaryAxis` (deg) -> `GantryPulseMotorRotaryAxis` (backs rotary-direct).
+  - `Gantry::Gantry` now holds `std::unique_ptr<GantryLinearAxis>` for X and Y and `std::unique_ptr<GantryRotaryAxis>` for Theta. Concrete classes are factoried at construction time from the per-axis `DrivetrainType`.
+- Retired `GantryAxisStepper` (cooperative step/dir stepper) and `GantryRotaryServo` (50 Hz PWM hobby servo). All production axes are now pulse-train.
+- Split configuration across three headers:
+  - `include/gantry_app_constants.h` narrowed to pin map + peripheral allocation + task parameters.
+  - `include/axis_pulse_motor_params.h` (new) owns electrical tuning (encoder PPR, pulse bandwidth, gear ratios, inversion flags, homing, debounce) per axis.
+  - `include/axis_drivetrain_params.h` (new) owns mechanical tuning (drivetrain type + type-specific fields, travel envelope, motion caps, position tolerance, gripper timing, kinematic offsets). Includes derived helpers and a reserved slot for Trap-Move sizing values.
+- Updated `src/main.cpp` to build three `(DriverConfig, DrivetrainConfig)` pairs via per-axis helper functions that consume the two new headers.
+- Rewrote `examples/BasicDriverTest/` and `examples/Move100Steps/` against the new API.
+- Added `driver_datasheets_and_calculations/INDEX.md` listing present and pending hardware datasheets. Relocated the SDF08 datasheet to a normalised filename.
+- Build flag `SDF08NK8X_USE_FREERTOS` is aliased by `PULSE_MOTOR_USE_FREERTOS` so legacy `platformio.ini` flags do not silently flip the threading model during the rename.
+
+Verified target stacks after the refactor:
+
+| Axis  | Drivetrain        | Driver                      | Actuator                    |
+|-------|-------------------|-----------------------------|-----------------------------|
+| X     | DRIVETRAIN_BELT   | Allen-Bradley Kinetix 5100  | SCHUNK Beta 100-ZRS         |
+| Y     | DRIVETRAIN_BALLSCREW | Allen-Bradley Kinetix 5100 | SCHUNK Beta 80-SRS          |
+| Theta | DRIVETRAIN_ROTARY_DIRECT | Custom pulse-train driver | SCHUNK ERD 04-40-D-H-N |
 
 ---
 
@@ -94,7 +98,7 @@ This journal captures the full development path of the current Gantry + pulse-tr
 - Removed PlatformIO-centric index assumptions from active setup.
 - Added/updated IDF component registration and include wiring for:
   - Gantry
-  - PulseMotor
+  - SDF08NK8X
   - MCP23S17
 - Kept build validation loop with `idf.py build` after each substantive behavior change.
 
@@ -139,8 +143,8 @@ This journal captures the full development path of the current Gantry + pulse-tr
   - `lib/Gantry/src/GantryLimitSwitch.cpp`
   - `lib/Gantry/src/GantryLimitSwitch.h`
 - Driver integration:
-  - `lib/PulseMotor/src/PulseMotor.cpp`
-  - `lib/PulseMotor/src/PulseMotor.h`
+  - `lib/SDF08NK8X/src/SDF08NK8X.cpp`
+  - `lib/SDF08NK8X/src/SDF08NK8X.h`
 - Integration docs:
   - `PROGRAMMING_REFERENCE.md` (root)
   - `LIBRARIES_OVERVIEW.md` (root)

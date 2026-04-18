@@ -1,9 +1,16 @@
 # Gantry Library Configuration Guide
 
-**Version:** 1.0.0  
-**Last Updated:** Feb 10th 2026
+**Version:** 2.0.0
+**Last Updated:** Apr 2026
 
 Complete configuration guide for the Gantry library.
+
+> **Refactor note (2026-04):** Configuration has moved into two dedicated per-axis parameter headers:
+>
+> - `include/axis_pulse_motor_params.h` — electrical tuning (encoder PPR, pulse bandwidth, electronic gear, inversion, homing, debounce).
+> - `include/axis_drivetrain_params.h` — mechanical tuning (drivetrain type + type-specific fields, travel envelope, motion caps, position tolerance, kinematic offsets, gripper timing).
+>
+> Pin assignments and FreeRTOS task parameters remain in `include/gantry_app_constants.h`. Older snippets below referencing `BergerdaServo::DriverConfig`, `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, or `setThetaPulseRange` predate the refactor and do not reflect the current API. See `../../PROGRAMMING_REFERENCE.md` §9 for the new layout and `src/main.cpp` for helper functions that translate the parameter headers into `PulseMotor::DriverConfig` + `PulseMotor::DrivetrainConfig`.
 
 ---
 
@@ -46,123 +53,211 @@ static const char *TAG = "Gantry";
 #define GRIPPER_PIN 12
 
 void app_main(void) {
-    // Populate the three DriverConfigs (pins, encoder PPR, inversion, LEDC bits)
-    PulseMotor::DriverConfig xConfig, yConfig, thetaConfig;
-    xConfig.pulse_pin   = PIN_X_PULSE;
-    xConfig.dir_pin     = PIN_X_DIR;
-    xConfig.enable_pin  = PIN_X_ENABLE;
-    xConfig.encoder_ppr = AXIS_X_ENCODER_PPR;
-    // ... fill yConfig and thetaConfig in the same shape ...
-
-    static Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, GRIPPER_PIN);
-
-    // X-axis soft limits
+    // Configure X-axis driver
+    BergerdaServo::DriverConfig xConfig;
+    xConfig.step_pin = X_STEP_PIN;
+    xConfig.dir_pin = X_DIR_PIN;
+    xConfig.enable_pin = X_ENABLE_PIN;
+    xConfig.encoder_ppr = 6000;
+    xConfig.homing_speed_pps = 6000;
+    
+    // Create gantry
+    static Gantry::Gantry gantry(xConfig, GRIPPER_PIN);
+    
+    // Configure axes
     gantry.setLimitPins(X_MIN_LIMIT, X_MAX_LIMIT);
-
-    // Per-axis drivetrain conversion
-    PulseMotor::DrivetrainConfig xDt;
-    xDt.type                 = PulseMotor::DrivetrainType::BELT;
-    xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
-    xDt.encoder_ppr          = AXIS_X_ENCODER_PPR;
-    xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
-    gantry.setXDrivetrain(xDt);
-    // ... setYDrivetrain(...) and setThetaDrivetrain(...) ...
-
-    gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM, AXIS_X_TRAVEL_MAX_MM,
-                          AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
-                          AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
-    gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
-
+    gantry.setYAxisPins(Y_STEP_PIN, Y_DIR_PIN, Y_ENABLE_PIN);
+    gantry.setYAxisStepsPerMm(200.0f);
+    gantry.setYAxisLimits(0.0f, 200.0f);
+    gantry.setThetaServo(THETA_PWM_PIN, 0);
+    
+    // Create gantry update task
     xTaskCreate([](void* pvParams) {
-        Gantry::Gantry* g = (Gantry::Gantry*)pvParams;
-        g->begin();
-        g->enable();
+        Gantry::Gantry* gantry = (Gantry::Gantry*)pvParams;
+        gantry->begin();
+        gantry->enable();
         while (1) {
-            g->update();
+            gantry->update();
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }, "GantryUpdate", 4096, &gantry, 5, NULL);
+    
+    // Other initialization...
 }
 ```
 
 ---
 
-## X / Y / Theta Axis Configuration
+## X-Axis Configuration
 
-All three axes use the same driver library (`PulseMotor::PulseMotorDriver`).
-Each axis needs **two** configurations:
+### SDF08NK8X Driver Configuration
 
-1. **`PulseMotor::DriverConfig`** — electrical side (pins, encoder PPR,
-   pulse-frequency cap, inversion, LEDC bits). Fed into the `Gantry`
-   constructor.
-2. **`PulseMotor::DrivetrainConfig`** — mechanical side (drivetrain type +
-   lead/pitch, encoder PPR, motor reducer ratio). Installed via
-   `setXDrivetrain()`, `setYDrivetrain()`, `setThetaDrivetrain()`.
-
-### Example: X-axis (belt)
+The X-axis uses the SDF08NK8X servo driver library. Configure via `BergerdaServo::DriverConfig`:
 
 ```cpp
-PulseMotor::DriverConfig xConfig;
-xConfig.pulse_pin       = PIN_X_PULSE;
-xConfig.dir_pin         = PIN_X_DIR;
-xConfig.enable_pin      = PIN_X_ENABLE;
-xConfig.alarm_pin       = PIN_X_ALARM_STATUS;
-xConfig.alarm_reset_pin = PIN_X_ALARM_RESET;
-xConfig.encoder_a_pin   = PIN_X_ENC_A;
-xConfig.encoder_b_pin   = PIN_X_ENC_B;
-xConfig.enable_encoder_feedback = true;
-xConfig.encoder_ppr     = AXIS_X_ENCODER_PPR;
-xConfig.max_pulse_freq  = AXIS_X_MAX_PULSE_FREQ_HZ;
-xConfig.invert_dir_pin  = AXIS_X_INVERT_DIR;
+BergerdaServo::DriverConfig xConfig;
 
-PulseMotor::DrivetrainConfig xDt;
-xDt.type                 = PulseMotor::DrivetrainType::BELT;
-xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
-xDt.encoder_ppr          = AXIS_X_ENCODER_PPR;
-xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
-// ... later, after constructing the Gantry ...
-gantry.setXDrivetrain(xDt);
+// Pin Configuration
+xConfig.step_pin = 32;        // Step pulse pin
+xConfig.dir_pin = 33;         // Direction pin
+xConfig.enable_pin = 25;      // Enable pin (-1 to disable)
+xConfig.encoder_pin_a = 18;   // Encoder A pin
+xConfig.encoder_pin_b = 19;   // Encoder B pin
+
+// Motor Parameters
+xConfig.encoder_ppr = 6000;   // Encoder pulses per revolution
+xConfig.microsteps = 1;       // Microstepping (1, 2, 4, 8, etc.)
+
+// Motion Parameters
+xConfig.max_speed_pps = 10000;      // Maximum speed (pulses/sec)
+xConfig.max_accel_pps2 = 5000;      // Maximum acceleration
+xConfig.homing_speed_pps = 6000;    // Homing speed
+
+// Limit Switches (handled by driver)
+xConfig.limit_min_pin = 35;   // Minimum limit pin
+xConfig.limit_max_pin = 36;   // Maximum limit pin
+
+// Create gantry with X config
+Gantry::Gantry gantry(xConfig, GRIPPER_PIN);
 ```
 
-### Example: Y-axis (ballscrew)
+### X-Axis Steps Per Revolution
+
+Calculate based on your motor and ball screw:
 
 ```cpp
-PulseMotor::DrivetrainConfig yDt;
-yDt.type                = PulseMotor::DrivetrainType::BALLSCREW;
-yDt.lead_mm             = AXIS_Y_BALLSCREW_LEAD_MM;
-yDt.encoder_ppr         = AXIS_Y_ENCODER_PPR;
-yDt.motor_reducer_ratio = AXIS_Y_MOTOR_REDUCER_RATIO;
-gantry.setYDrivetrain(yDt);
+// Formula: steps_per_rev = encoder_ppr * microsteps
+// Example: 6000 encoder PPR * 1 microstep = 6000 steps/rev
 
-gantry.setYAxisLimits(AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM);
+gantry.setStepsPerRevolution(6000.0f);
 ```
 
-### Example: Theta-axis (rotary direct)
+### X-Axis Ball Screw Pitch
+
+Set the ball screw pitch for position conversion:
 
 ```cpp
-PulseMotor::DrivetrainConfig thetaDt;
-thetaDt.type                = PulseMotor::DrivetrainType::ROTARY_DIRECT;
-thetaDt.output_gear_ratio   = AXIS_THETA_OUTPUT_GEAR_RATIO;
-thetaDt.encoder_ppr         = AXIS_THETA_ENCODER_PPR;
-thetaDt.motor_reducer_ratio = AXIS_THETA_MOTOR_REDUCER_RATIO;
-gantry.setThetaDrivetrain(thetaDt);
+// Default: 40mm per revolution
+// This affects pulses-per-mm calculation:
+// pulses_per_mm = steps_per_rev / pitch_mm
+// Example: 6000 / 40 = 150 pulses/mm
 
-gantry.setThetaLimits(AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
+// Configure via kinematic parameters (if needed)
+Gantry::KinematicParameters params;
+params.x_axis_ball_screw_pitch_mm = 40.0f;
 ```
 
-### Per-move speed / accel / decel
+---
 
-Motion limits are passed per move through the `moveTo(JointConfig, ...)`
-arguments. The defaults live in `include/axis_drivetrain_params.h`:
+## Y-Axis Configuration
 
-```c
-#define AXIS_X_MAX_SPEED_MM_PER_S 500.0f
-#define AXIS_X_ACCEL_MM_PER_S2   3000.0f
-#define AXIS_X_DECEL_MM_PER_S2   3000.0f
+### Pin Configuration
+
+```cpp
+gantry.setYAxisPins(
+    Y_STEP_PIN,      // Step pulse pin (required)
+    Y_DIR_PIN,       // Direction pin (required)
+    Y_ENABLE_PIN,    // Enable pin (optional, -1 to disable)
+    false,           // Invert direction (optional, default: false)
+    true             // Enable active low (optional, default: true)
+);
 ```
 
-Call `gantry.moveTo(target, speed_mm_per_s, speed_deg_per_s, accel, decel)`
-to override them per command.
+### Steps Per Millimeter
+
+Calculate based on your motor and mechanical setup:
+
+```cpp
+// Formula: steps_per_mm = (steps_per_rev * microsteps) / (pitch_mm * gear_ratio)
+// Example: (200 steps/rev * 16 microsteps) / (2mm pitch * 1) = 1600 steps/mm
+
+gantry.setYAxisStepsPerMm(1600.0f);
+```
+
+**Common Values:**
+- Direct drive, 1.8° stepper, 2mm pitch: 100 steps/mm
+- Direct drive, 1.8° stepper, 5mm pitch: 40 steps/mm
+- With microstepping (16x): Multiply by 16
+
+### Travel Limits
+
+```cpp
+// Set Y-axis travel limits (mm)
+gantry.setYAxisLimits(
+    0.0f,    // Minimum Y position (mm)
+    200.0f   // Maximum Y position (mm)
+);
+
+// If limits are 0,0, limits are disabled
+```
+
+### Motion Limits
+
+```cpp
+// Set Y-axis motion limits
+gantry.setYAxisMotionLimits(
+    100.0f,  // Maximum speed (mm/s)
+    500.0f,  // Acceleration (mm/s²)
+    500.0f   // Deceleration (mm/s²)
+);
+```
+
+**Recommended Values:**
+- **Speed**: Start with 50-100 mm/s, increase gradually
+- **Acceleration**: Start with 200-500 mm/s²
+- **Deceleration**: Usually same as acceleration
+
+### Step Pulse Width
+
+```cpp
+// Configure step pulse width (microseconds)
+// Default: 2μs (minimum for most drivers)
+// Increase if driver requires longer pulses
+
+axisY_.setStepPulseWidthUs(5);  // 5μs pulse width
+```
+
+---
+
+## Theta-Axis Configuration
+
+### Pin Configuration
+
+```cpp
+// ESP32: Use LEDC channels (0-15)
+gantry.setThetaServo(
+    THETA_PWM_PIN,  // PWM output pin
+    0               // LEDC channel (0-15 for ESP32)
+);
+```
+
+### Angle Range
+
+```cpp
+// Set theta angular limits (degrees)
+gantry.setThetaLimits(
+    -90.0f,  // Minimum angle (degrees)
+    90.0f    // Maximum angle (degrees)
+);
+```
+
+### Pulse Width Range
+
+```cpp
+// Set servo pulse width range (microseconds)
+// Standard servos: 1000-2000μs (1-2ms)
+// Extended range: 500-2500μs
+
+gantry.setThetaPulseRange(
+    1000,  // Minimum pulse width (μs)
+    2000   // Maximum pulse width (μs)
+);
+```
+
+**Common Values:**
+- Standard servo: 1000-2000μs (±90°)
+- Extended servo: 500-2500μs (±180°)
+- Custom servo: Check datasheet
 
 ---
 
@@ -201,10 +296,11 @@ Adjust if needed (modify `GRIPPER_ACTUATE_TIME_MS` constant).
 
 ```cpp
 struct KinematicParameters {
-    float y_axis_z_offset_mm = 80.0f;    // Y-axis Z offset
-    float theta_x_offset_mm = -55.0f;    // Theta X offset
-    float gripper_y_offset_mm = 385.0f;  // Gripper Y offset
-    float gripper_z_offset_mm = 80.0f;   // Gripper Z offset
+    float y_axis_z_offset_mm = 80.0f;           // Y-axis Z offset
+    float theta_x_offset_mm = -55.0f;           // Theta X offset
+    float gripper_y_offset_mm = 385.0f;         // Gripper Y offset
+    float gripper_z_offset_mm = 80.0f;          // Gripper Z offset
+    float x_axis_ball_screw_pitch_mm = 40.0f;   // Ball screw pitch
 };
 ```
 
@@ -280,7 +376,7 @@ gantry.moveTo(target,
 
 Limit switches are configured in the actuator libraries:
 
-**X-axis (PulseMotor):**
+**X-axis (SDF08NK8X):**
 ```cpp
 xConfig.limit_min_pin = 35;  // Home position
 xConfig.limit_max_pin = 36;  // End position

@@ -1,9 +1,23 @@
 # Gantry Library API Reference
 
-**Version:** 1.0.0  
-**Last Updated:** Feb 10th 2026
+**Version:** 2.0.0
+**Last Updated:** Apr 2026
 
 Complete API documentation for the Gantry library.
+
+> **Refactor note (2026-04):** The library was generalised to drive all three axes (X / Y / Theta) with the generic `PulseMotor` library. Older code snippets in this document that reference `BergerdaServo::DriverConfig`, `GantryAxisStepper`, or `GantryRotaryServo` predate the refactor and will not compile against the current source tree. Authoritative references are the header files themselves (`Gantry.h`, `GantryLinearAxis.h`, `GantryRotaryAxis.h`, `GantryPulseMotorLinearAxis.h`, `GantryPulseMotorRotaryAxis.h`) and the overview in `../../PROGRAMMING_REFERENCE.md` §5. The constructor, as shown below, replaces the legacy single-X-driver form:
+>
+> ```cpp
+> Gantry(const PulseMotor::DriverConfig&     xDrv,
+>        const PulseMotor::DrivetrainConfig& xDt,
+>        const PulseMotor::DriverConfig&     yDrv,
+>        const PulseMotor::DrivetrainConfig& yDt,
+>        const PulseMotor::DriverConfig&     tDrv,
+>        const PulseMotor::DrivetrainConfig& tDt,
+>        int gripperPin);
+> ```
+>
+> Setter methods that are no longer part of the API (and will be removed from this document in a follow-up pass): `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, `setThetaPulseRange`.
 
 ---
 
@@ -141,10 +155,11 @@ Mechanical parameters for kinematics calculations.
 
 ```cpp
 struct KinematicParameters {
-    float y_axis_z_offset_mm;    // Default: 80mm
-    float theta_x_offset_mm;     // Default: -55mm
-    float gripper_y_offset_mm;   // Default: 385mm
-    float gripper_z_offset_mm;   // Default: 80mm
+    float y_axis_z_offset_mm;           // Default: 80mm
+    float theta_x_offset_mm;            // Default: -55mm
+    float gripper_y_offset_mm;          // Default: 385mm
+    float gripper_z_offset_mm;          // Default: 80mm
+    float x_axis_ball_screw_pitch_mm;   // Default: 40mm
 };
 ```
 
@@ -210,17 +225,17 @@ namespace Gantry::Constants {
 
 ### Construction & Initialization
 
-#### `Gantry(const PulseMotor::DriverConfig &xConfig, int gripperPin)`
+#### `Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)`
 
 Constructs a new Gantry object.
 
 **Parameters:**
-- `xConfig`: Configuration for X-axis pulse-train motor driver
+- `xConfig`: Configuration for X-axis servo driver (SDF08NK8X)
 - `gripperPin`: GPIO pin for gripper control (-1 to disable)
 
 **Example:**
 ```cpp
-PulseMotor::DriverConfig xConfig;
+BergerdaServo::DriverConfig xConfig;
 // ... configure xConfig ...
 Gantry::Gantry gantry(xConfig, 26);
 ```
@@ -263,33 +278,64 @@ Sets limit switch pins for X-axis.
 
 **Note:** Call before `begin()`.
 
-#### `void setXDrivetrain(const PulseMotor::DrivetrainConfig&)`
+#### `void setYAxisPins(int stepPin, int dirPin, int enablePin = -1, bool invertDir = false, bool enableActiveLow = true)`
 
-Installs the X-axis mm↔pulse scaling source.
+Configures Y-axis stepper motor pins.
 
-#### `void setYDrivetrain(const PulseMotor::DrivetrainConfig&)`
+**Parameters:**
+- `stepPin`: Step pulse pin
+- `dirPin`: Direction pin
+- `enablePin`: Enable pin (-1 to disable)
+- `invertDir`: Invert direction signal
+- `enableActiveLow`: Enable pin active low (true) or high (false)
 
-Installs the Y-axis mm↔pulse scaling source.
+#### `void setYAxisStepsPerMm(float stepsPerMm)`
 
-#### `void setThetaDrivetrain(const PulseMotor::DrivetrainConfig&)`
+Sets Y-axis steps-per-millimeter conversion.
 
-Installs the Theta-axis deg↔pulse scaling source.
+**Parameters:**
+- `stepsPerMm`: Steps per millimeter (e.g., 200 for 200 steps/mm)
 
 #### `void setYAxisLimits(float minMm, float maxMm)`
 
-Sets Y-axis travel limits (mirrors into `JointLimits`).
+Sets Y-axis travel limits.
 
 **Parameters:**
 - `minMm`: Minimum Y position (mm)
 - `maxMm`: Maximum Y position (mm)
 
+#### `void setYAxisMotionLimits(float maxSpeedMmPerS, float accelMmPerS2, float decelMmPerS2)`
+
+Sets Y-axis motion limits.
+
+**Parameters:**
+- `maxSpeedMmPerS`: Maximum speed (mm/s)
+- `accelMmPerS2`: Acceleration (mm/s²)
+- `decelMmPerS2`: Deceleration (mm/s²)
+
+#### `void setThetaServo(int pwmPin, int pwmChannel = 0)`
+
+Configures theta-axis servo PWM pin.
+
+**Parameters:**
+- `pwmPin`: PWM output pin
+- `pwmChannel`: PWM channel (ESP32 LEDC channel, 0-15)
+
 #### `void setThetaLimits(float minDeg, float maxDeg)`
 
-Sets theta-axis angular limits (mirrors into `JointLimits`).
+Sets theta-axis angular limits.
 
 **Parameters:**
 - `minDeg`: Minimum angle (degrees)
 - `maxDeg`: Maximum angle (degrees)
+
+#### `void setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs)`
+
+Sets theta servo pulse width range.
+
+**Parameters:**
+- `minPulseUs`: Minimum pulse width (microseconds)
+- `maxPulseUs`: Maximum pulse width (microseconds)
 
 #### `void setEndEffectorPin(int pin, bool activeHigh = true)`
 
@@ -568,19 +614,26 @@ Gets target end-effector pose.
 
 ---
 
-### Scaling Accessors
+### Configuration Accessors
 
-#### `double xPulsesPerMm() const`
+#### `void setStepsPerRevolution(float steps_per_rev)`
 
-Returns the X-axis pulses/mm derived from the installed `DrivetrainConfig`.
+Sets steps per motor revolution for X-axis.
 
-#### `double yPulsesPerMm() const`
+**Parameters:**
+- `steps_per_rev`: Steps per revolution (default: 6000)
 
-Returns the Y-axis pulses/mm derived from the installed `DrivetrainConfig`.
+#### `float getStepsPerRevolution() const`
 
-#### `double thetaPulsesPerDeg() const`
+Gets steps per motor revolution.
 
-Returns the Theta-axis pulses/deg derived from the installed `DrivetrainConfig`.
+**Returns:** Steps per revolution
+
+#### `float getPulsesPerMm() const`
+
+Gets pulses per millimeter for X-axis.
+
+**Returns:** Pulses per millimeter
 
 ---
 
@@ -591,52 +644,56 @@ Returns the Theta-axis pulses/deg derived from the installed `DrivetrainConfig`.
 ```cpp
 #include "Gantry.h"
 
-#include "axis_pulse_motor_params.h"
-#include "axis_drivetrain_params.h"
+// Pin definitions
+#define X_STEP_PIN 32
+#define X_DIR_PIN 33
+#define X_ENABLE_PIN 25
+#define X_MIN_LIMIT 35
+#define X_MAX_LIMIT 36
+#define Y_STEP_PIN 26
+#define Y_DIR_PIN 27
+#define Y_ENABLE_PIN 14
+#define THETA_PWM_PIN 13
+#define GRIPPER_PIN 12
 
-// Build the three DriverConfigs (pins/encoders/inversion flags)
-PulseMotor::DriverConfig xConfig, yConfig, thetaConfig;
-// ... populate pins, encoder_ppr, max_pulse_freq, invert flags ...
-
-static Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, GRIPPER_PIN);
+Gantry::Gantry gantry(BergerdaServo::DriverConfig(), GRIPPER_PIN);
 
 void setup() {
     Serial.begin(115200);
-
-    // Limits on X-axis soft-limit switches
+    
+    // Configure X-axis (via driver config)
+    BergerdaServo::DriverConfig xConfig;
+    xConfig.step_pin = X_STEP_PIN;
+    xConfig.dir_pin = X_DIR_PIN;
+    xConfig.enable_pin = X_ENABLE_PIN;
+    xConfig.encoder_ppr = 6000;
+    // ... more X-axis config ...
+    
+    // Create gantry with X config
+    gantry = Gantry::Gantry(xConfig, GRIPPER_PIN);
+    
+    // Configure limit switches
     gantry.setLimitPins(X_MIN_LIMIT, X_MAX_LIMIT);
-
-    // Install per-axis drivetrains (mm <-> pulse / deg <-> pulse)
-    PulseMotor::DrivetrainConfig xDt;
-    xDt.type                 = PulseMotor::DrivetrainType::BELT;
-    xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
-    xDt.encoder_ppr          = AXIS_X_ENCODER_PPR;
-    xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
-    gantry.setXDrivetrain(xDt);
-
-    PulseMotor::DrivetrainConfig yDt;
-    yDt.type                 = PulseMotor::DrivetrainType::BALLSCREW;
-    yDt.lead_mm              = AXIS_Y_BALLSCREW_LEAD_MM;
-    yDt.encoder_ppr          = AXIS_Y_ENCODER_PPR;
-    yDt.motor_reducer_ratio  = AXIS_Y_MOTOR_REDUCER_RATIO;
-    gantry.setYDrivetrain(yDt);
-
-    PulseMotor::DrivetrainConfig thetaDt;
-    thetaDt.type               = PulseMotor::DrivetrainType::ROTARY_DIRECT;
-    thetaDt.output_gear_ratio  = AXIS_THETA_OUTPUT_GEAR_RATIO;
-    thetaDt.encoder_ppr        = AXIS_THETA_ENCODER_PPR;
-    thetaDt.motor_reducer_ratio= AXIS_THETA_MOTOR_REDUCER_RATIO;
-    gantry.setThetaDrivetrain(thetaDt);
-
-    gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM, AXIS_X_TRAVEL_MAX_MM,
-                          AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
-                          AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
-    gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
-
+    
+    // Configure Y-axis
+    gantry.setYAxisPins(Y_STEP_PIN, Y_DIR_PIN, Y_ENABLE_PIN);
+    gantry.setYAxisStepsPerMm(200.0f);
+    gantry.setYAxisLimits(0.0f, 200.0f);
+    gantry.setYAxisMotionLimits(100.0f, 500.0f, 500.0f);
+    
+    // Configure theta-axis
+    gantry.setThetaServo(THETA_PWM_PIN, 0);
+    gantry.setThetaLimits(-90.0f, 90.0f);
+    
+    // Set safe height
+    gantry.setSafeYHeight(150.0f);
+    
+    // Initialize
     if (!gantry.begin()) {
         Serial.println("Initialization failed!");
         return;
     }
+    
     gantry.enable();
     
     // Home X-axis

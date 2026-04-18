@@ -1,75 +1,111 @@
 /**
  * @file Gantry.cpp
- * @brief Three-axis pulse-train gantry controller implementation.
+ * @brief Implementation of Gantry class.
  * @version 2.0.0
  */
 
 #include "Gantry.h"
+#include "GantryPulseMotorLinearAxis.h"
+#include "GantryPulseMotorRotaryAxis.h"
 #include <cmath>
 #include "esp_log.h"
 
 using namespace Gantry::Constants;
 
 namespace Gantry {
-static const char *TAG = "Gantry";
+static const char* TAG = "Gantry";
 
 #ifndef GANTRY_DIAG_SKIP_AXIS_X_INIT
 #define GANTRY_DIAG_SKIP_AXIS_X_INIT 0
 #endif
-
 #ifndef GANTRY_DIAG_SKIP_AXIS_Y_INIT
 #define GANTRY_DIAG_SKIP_AXIS_Y_INIT 0
 #endif
-
 #ifndef GANTRY_DIAG_SKIP_THETA_INIT
 #define GANTRY_DIAG_SKIP_THETA_INIT 0
 #endif
 
-// ============================================================================
-// CONSTRUCTORS
-// ============================================================================
+namespace {
 
-Gantry::Gantry(const PulseMotor::DriverConfig &xConfig, int gripperPin)
-    : Gantry(xConfig, PulseMotor::DriverConfig(), PulseMotor::DriverConfig(), gripperPin) {
+std::unique_ptr<GantryLinearAxis> makeLinearAxis(
+    const char* axisLabel,
+    const PulseMotor::DriverConfig& drv,
+    const PulseMotor::DrivetrainConfig& dt) {
+    switch (dt.type) {
+        case PulseMotor::DRIVETRAIN_BALLSCREW:
+        case PulseMotor::DRIVETRAIN_BELT:
+        case PulseMotor::DRIVETRAIN_RACKPINION:
+            return std::unique_ptr<GantryLinearAxis>(
+                new GantryPulseMotorLinearAxis(drv, dt));
+        default:
+            ESP_LOGE(TAG,
+                     "%s: DrivetrainType=%d is not linear; axis will not be created",
+                     axisLabel, (int)dt.type);
+            return nullptr;
+    }
 }
 
-Gantry::Gantry(const PulseMotor::DriverConfig &xConfig,
-               const PulseMotor::DriverConfig &yConfig,
-               int gripperPin)
-    : Gantry(xConfig, yConfig, PulseMotor::DriverConfig(), gripperPin) {}
+std::unique_ptr<GantryRotaryAxis> makeRotaryAxis(
+    const char* axisLabel,
+    const PulseMotor::DriverConfig& drv,
+    const PulseMotor::DrivetrainConfig& dt) {
+    if (dt.type == PulseMotor::DRIVETRAIN_ROTARY_DIRECT) {
+        return std::unique_ptr<GantryRotaryAxis>(
+            new GantryPulseMotorRotaryAxis(drv, dt));
+    }
+    ESP_LOGE(TAG,
+             "%s: DrivetrainType=%d is not rotary-direct; axis will not be created",
+             axisLabel, (int)dt.type);
+    return nullptr;
+}
 
-Gantry::Gantry(const PulseMotor::DriverConfig &xConfig,
-               const PulseMotor::DriverConfig &yConfig,
-               const PulseMotor::DriverConfig &thetaConfig,
+} // namespace
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
+Gantry::Gantry(const PulseMotor::DriverConfig&     xDrv,
+               const PulseMotor::DrivetrainConfig& xDt,
+               const PulseMotor::DriverConfig&     yDrv,
+               const PulseMotor::DrivetrainConfig& yDt,
+               const PulseMotor::DriverConfig&     tDrv,
+               const PulseMotor::DrivetrainConfig& tDt,
                int gripperPin)
-    : axisX_(xConfig), axisY_(yConfig), axisTheta_(thetaConfig),
-      yConfigured_(yConfig.pulse_pin >= 0),
-      yUseEncoder_(yConfig.enable_encoder_feedback),
-      thetaConfigured_(thetaConfig.pulse_pin >= 0),
-      thetaUseEncoder_(thetaConfig.enable_encoder_feedback),
-      xDrivetrain_(), yDrivetrain_(), thetaDrivetrain_(),
-      gripperPin_(gripperPin), xMinPin_(-1), xMaxPin_(-1),
-      initialized_(false), enabled_(false), abortRequested_(false),
-      homingInProgress_(false), calibrationInProgress_(false),
-      gripperActive_(false),
-      currentX_mm_(0.0f), currentY_(0), currentTheta_(0),
-      targetY_(0), targetTheta_(0), axisLength_(0),
-      config_(), kinematicParams_(),
-      motionState_(MotionState::IDLE),
-      targetX_mm_(0.0f), targetY_mm_(0.0f), targetTheta_deg_(0.0f),
-      safeYHeight_mm_(DEFAULT_SAFE_Y_HEIGHT_MM),
-      speed_mm_per_s_(DEFAULT_SPEED_MM_PER_S),
-      speed_deg_per_s_(DEFAULT_SPEED_DEG_PER_S),
-      acceleration_mm_per_s2_(0), deceleration_mm_per_s2_(0),
-      gripperTargetState_(false), gripperActuateStart_ms_(0),
-      lastXPositionCounts_(0) {
-  // Populate default drivetrain scaling from driver-provided encoder PPRs so
-  // simple single-config uses (no explicit setXDrivetrain call) still produce
-  // plausible pulse/mm output in tests.
-  xDrivetrain_.encoder_ppr = (float)xConfig.encoder_ppr;
-  yDrivetrain_.encoder_ppr = (float)yConfig.encoder_ppr;
-  thetaDrivetrain_.type = PulseMotor::DrivetrainType::ROTARY_DIRECT;
-  thetaDrivetrain_.encoder_ppr = (float)thetaConfig.encoder_ppr;
+  : axisX_(makeLinearAxis("X", xDrv, xDt)),
+    axisY_(makeLinearAxis("Y", yDrv, yDt)),
+    axisTheta_(makeRotaryAxis("Theta", tDrv, tDt)),
+    gripperPin_(gripperPin),
+    xMinPin_(-1),
+    xMaxPin_(-1),
+    initialized_(false),
+    enabled_(false),
+    abortRequested_(false),
+    homingInProgress_(false),
+    calibrationInProgress_(false),
+    gripperActive_(false),
+    currentX_mm_(0.0f),
+    currentY_(0),
+    currentTheta_(0),
+    targetY_(0),
+    targetTheta_(0),
+    axisLength_(0),
+    config_(),
+    kinematicParams_(),
+    stepsPerRev_(DEFAULT_STEPS_PER_REV),
+    motionState_(MotionState::IDLE),
+    targetX_mm_(0.0f),
+    targetY_mm_(0.0f),
+    targetTheta_deg_(0.0f),
+    safeYHeight_mm_(DEFAULT_SAFE_Y_HEIGHT_MM),
+    speed_mm_per_s_(DEFAULT_SPEED_MM_PER_S),
+    speed_deg_per_s_(DEFAULT_SPEED_DEG_PER_S),
+    acceleration_mm_per_s2_(0),
+    deceleration_mm_per_s2_(0),
+    gripperTargetState_(false),
+    gripperActuateStart_ms_(0),
+    gripperActuateDurationMs_(GRIPPER_ACTUATE_TIME_MS),
+    lastXPositionCounts_(0) {
 }
 
 // ============================================================================
@@ -90,48 +126,48 @@ bool Gantry::begin() {
         ESP_LOGI(TAG, "[BEGIN] End-effector initialized");
     }
 
-    // Limit switches are handled at the Gantry layer; keep the driver internal
-    // limit logic disabled for X.
-    PulseMotor::DriverConfig xConfig = axisX_.getConfig();
-    xConfig.limit_min_pin = -1;
-    xConfig.limit_max_pin = -1;
-    axisX_.setConfig(xConfig);
-
     xMinSwitch_.begin();
     xMaxSwitch_.begin();
     ESP_LOGI(TAG, "[BEGIN] Limit switch objects initialized");
 
     if (GANTRY_DIAG_SKIP_AXIS_X_INIT) {
         ESP_LOGW(TAG, "[BEGIN] Skipping X-axis initialize (diagnostic toggle)");
-    } else {
+    } else if (axisX_) {
         ESP_LOGI(TAG, "[BEGIN] Initializing X-axis driver");
-        if (!axisX_.initialize()) {
+        if (!axisX_->begin()) {
             ESP_LOGE(TAG, "[BEGIN] X-axis initialize failed");
             return false;
         }
         ESP_LOGI(TAG, "[BEGIN] X-axis initialize OK");
+    } else {
+        ESP_LOGE(TAG, "[BEGIN] X-axis is null (misconfigured DrivetrainType)");
+        return false;
     }
 
     if (GANTRY_DIAG_SKIP_AXIS_Y_INIT) {
         ESP_LOGW(TAG, "[BEGIN] Skipping Y-axis initialize (diagnostic toggle)");
-    } else if (yConfigured_) {
+    } else if (axisY_) {
         ESP_LOGI(TAG, "[BEGIN] Initializing Y-axis driver");
-        if (!axisY_.initialize()) {
+        if (!axisY_->begin()) {
             ESP_LOGE(TAG, "[BEGIN] Y-axis initialize failed");
             return false;
         }
         ESP_LOGI(TAG, "[BEGIN] Y-axis initialize OK");
+    } else {
+        ESP_LOGW(TAG, "[BEGIN] Y-axis is null (misconfigured DrivetrainType)");
     }
 
     if (GANTRY_DIAG_SKIP_THETA_INIT) {
         ESP_LOGW(TAG, "[BEGIN] Skipping theta initialize (diagnostic toggle)");
-    } else if (thetaConfigured_) {
+    } else if (axisTheta_) {
         ESP_LOGI(TAG, "[BEGIN] Initializing theta driver");
-        if (!axisTheta_.initialize()) {
-            ESP_LOGE(TAG, "[BEGIN] Theta initialize failed");
-            return false;
+        if (!axisTheta_->begin()) {
+            ESP_LOGW(TAG, "[BEGIN] Theta initialize failed (proceeding without rotary axis)");
+        } else {
+            ESP_LOGI(TAG, "[BEGIN] Theta initialize OK");
         }
-        ESP_LOGI(TAG, "[BEGIN] Theta initialize OK");
+    } else {
+        ESP_LOGW(TAG, "[BEGIN] Theta-axis is null (misconfigured DrivetrainType)");
     }
 
     initialized_ = true;
@@ -140,24 +176,27 @@ bool Gantry::begin() {
 }
 
 // ============================================================================
-// ENABLE / DISABLE
+// ENABLE/DISABLE
 // ============================================================================
 
 void Gantry::enable() {
     GANTRY_CHECK_INITIALIZED();
-    bool xEnabled = axisX_.isEnabled() || axisX_.enable();
-    if (yConfigured_) {
+    bool xEnabled = false;
+    if (axisX_) {
+        xEnabled = axisX_->isEnabled() || axisX_->enable();
+    }
+    if (axisY_) {
         if (xEnabled) {
-            axisY_.enable();
+            axisY_->enable();
         } else {
-            axisY_.disable();
+            axisY_->disable();
         }
     }
-    if (thetaConfigured_) {
+    if (axisTheta_) {
         if (xEnabled) {
-            axisTheta_.enable();
+            axisTheta_->enable();
         } else {
-            axisTheta_.disable();
+            axisTheta_->disable();
         }
     }
     enabled_ = xEnabled;
@@ -168,13 +207,9 @@ void Gantry::disable() {
     if (isBusy()) {
         stopAllMotion();
     }
-    axisX_.disable();
-    if (yConfigured_) {
-        axisY_.disable();
-    }
-    if (thetaConfigured_) {
-        axisTheta_.disable();
-    }
+    if (axisX_)     axisX_->disable();
+    if (axisY_)     axisY_->disable();
+    if (axisTheta_) axisTheta_->disable();
     enabled_ = false;
 }
 
@@ -189,18 +224,6 @@ void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
     xMaxSwitch_.configure(xMaxPin_, true, true, 6);
 }
 
-void Gantry::setXDrivetrain(const PulseMotor::DrivetrainConfig &cfg) {
-    xDrivetrain_ = cfg;
-}
-
-void Gantry::setYDrivetrain(const PulseMotor::DrivetrainConfig &cfg) {
-    yDrivetrain_ = cfg;
-}
-
-void Gantry::setThetaDrivetrain(const PulseMotor::DrivetrainConfig &cfg) {
-    thetaDrivetrain_ = cfg;
-}
-
 void Gantry::setYAxisLimits(float minMm, float maxMm) {
     config_.limits.y_min = minMm;
     config_.limits.y_max = maxMm;
@@ -209,17 +232,23 @@ void Gantry::setYAxisLimits(float minMm, float maxMm) {
 void Gantry::setThetaLimits(float minDeg, float maxDeg) {
     config_.limits.theta_min = minDeg;
     config_.limits.theta_max = maxDeg;
+    if (axisTheta_) {
+        axisTheta_->setAngleRange(minDeg, maxDeg);
+    }
 }
 
 void Gantry::setJointLimits(float xMin, float xMax,
                             float yMin, float yMax,
                             float thetaMin, float thetaMax) {
-    config_.limits.x_min = xMin;
-    config_.limits.x_max = xMax;
-    config_.limits.y_min = yMin;
-    config_.limits.y_max = yMax;
+    config_.limits.x_min     = xMin;
+    config_.limits.x_max     = xMax;
+    config_.limits.y_min     = yMin;
+    config_.limits.y_max     = yMax;
     config_.limits.theta_min = thetaMin;
     config_.limits.theta_max = thetaMax;
+    if (axisTheta_) {
+        axisTheta_->setAngleRange(thetaMin, thetaMax);
+    }
 }
 
 void Gantry::setEndEffectorPin(int pin, bool activeHigh) {
@@ -240,22 +269,25 @@ void Gantry::setSafeYHeight(float safeHeight_mm) {
 // MOTION CONTROL
 // ============================================================================
 
-void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed_mm_per_s) {
+void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
     if (!initialized_ || !enabled_) {
         return;
     }
-
-    if (speed_mm_per_s == 0) {
-        speed_mm_per_s = 50;
+    if (speed == 0) {
+        speed = 5000;
     }
 
     targetY_ = y;
     targetTheta_ = theta;
 
-    targetX_mm_ = (float)x;
-    targetY_mm_ = (float)y;
-    targetTheta_deg_ = (float)theta;
-    speed_mm_per_s_ = speed_mm_per_s;
+    targetX_mm_       = (float)x;
+    targetY_mm_       = (float)y;
+    targetTheta_deg_  = (float)theta;
+    // Convert X pulses/s to mm/s using X axis scaling.
+    const float xPpm = (axisX_ && axisX_->pulsesPerMm() > 0.0)
+        ? (float)axisX_->pulsesPerMm()
+        : DEFAULT_PULSES_PER_MM;
+    speed_mm_per_s_        = (uint32_t)((float)speed / xPpm);
     acceleration_mm_per_s2_ = 0;
     deceleration_mm_per_s2_ = 0;
 
@@ -271,7 +303,7 @@ GantryError Gantry::moveTo(const JointConfig& joint,
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
     GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
 
-    if (axisX_.isAlarmActive()) {
+    if (axisX_ && axisX_->isAlarmActive()) {
         return GantryError::TIMEOUT;
     }
 
@@ -279,11 +311,11 @@ GantryError Gantry::moveTo(const JointConfig& joint,
         return GantryError::INVALID_POSITION;
     }
 
-    targetX_mm_ = joint.x;
-    targetY_mm_ = joint.y;
-    targetTheta_deg_ = joint.theta;
-    speed_mm_per_s_ = speed_mm_per_s;
-    speed_deg_per_s_ = speed_deg_per_s;
+    targetX_mm_       = joint.x;
+    targetY_mm_       = joint.y;
+    targetTheta_deg_  = joint.theta;
+    speed_mm_per_s_   = speed_mm_per_s;
+    speed_deg_per_s_  = speed_deg_per_s;
     acceleration_mm_per_s2_ = acceleration_mm_per_s2;
     deceleration_mm_per_s2_ = deceleration_mm_per_s2;
 
@@ -313,15 +345,14 @@ bool Gantry::isBusy() const {
     if (!initialized_) {
         return false;
     }
-    return motionState_ != MotionState::IDLE ||
-           axisX_.isMotionActive() || axisX_.isHoming() ||
-           isYAxisBusy() ||
-           (thetaConfigured_ && axisTheta_.isMotionActive());
+    const bool xBusy = axisX_ && (axisX_->isMotionActive());
+    const bool yBusy = axisY_ && axisY_->isBusy();
+    const bool tBusy = axisTheta_ && axisTheta_->isMotionActive();
+    return motionState_ != MotionState::IDLE || xBusy || yBusy || tBusy ||
+           homingInProgress_ || calibrationInProgress_;
 }
 
-bool Gantry::isEnabled() const {
-    return initialized_ && enabled_;
-}
+bool Gantry::isEnabled() const { return initialized_ && enabled_; }
 
 void Gantry::requestAbort() {
     abortRequested_ = true;
@@ -330,9 +361,7 @@ void Gantry::requestAbort() {
     }
 }
 
-bool Gantry::isAbortRequested() const {
-    return abortRequested_;
-}
+bool Gantry::isAbortRequested() const { return abortRequested_; }
 
 void Gantry::update() {
     GANTRY_CHECK_INITIALIZED();
@@ -354,9 +383,8 @@ void Gantry::home() {
     abortRequested_ = false;
     homingInProgress_ = false;
 
-    if (axisX_.isAlarmActive()) {
-        return;
-    }
+    if (!axisX_) return;
+    if (axisX_->isAlarmActive()) return;
 
     if (!xMinSwitch_.isConfigured() || !xMaxSwitch_.isConfigured()) {
         return;
@@ -366,15 +394,15 @@ void Gantry::home() {
     xMaxSwitch_.update(true);
 
     if (xMinSwitch_.isActive()) {
-        axisX_.stopMotion(0);
-        axisX_.setPosition(0);
+        axisX_->stopMotion();
+        axisX_->setCurrentPulses(0);
         return;
     }
 
     constexpr uint32_t kHomingStartPosition = 100000000;
-    uint32_t speed = getHomingSpeed();
-    axisX_.setPosition(kHomingStartPosition);
-    if (!axisX_.moveToPosition(0, speed, speed, speed)) {
+    const uint32_t     speed                = getHomingSpeed();
+    axisX_->setCurrentPulses(kHomingStartPosition);
+    if (!axisX_->moveToPulses(0, speed, speed, speed)) {
         stopAllMotion();
         return;
     }
@@ -386,9 +414,9 @@ int Gantry::calibrate() {
     GANTRY_CHECK_ENABLED_RET(0);
     abortRequested_ = false;
 
-    if (axisX_.isAlarmActive()) {
-        return 0;
-    }
+    if (!axisX_) return 0;
+    if (axisX_->isAlarmActive()) return 0;
+
     calibrationInProgress_ = true;
 
     if (!xMinSwitch_.isConfigured() || !xMaxSwitch_.isConfigured()) {
@@ -417,10 +445,10 @@ int Gantry::calibrate() {
         return 0;
     }
 
-    uint32_t speed = getHomingSpeed();
+    const uint32_t speed = getHomingSpeed();
     constexpr uint32_t kCalibrationTarget = 1000000000UL;
     constexpr uint32_t kMinReleaseTimeoutMs = 3000;
-    if (!axisX_.moveToPosition(kCalibrationTarget, speed, speed, speed)) {
+    if (!axisX_->moveToPulses(kCalibrationTarget, speed, speed, speed)) {
         stopAllMotion();
         calibrationInProgress_ = false;
         return 0;
@@ -428,7 +456,8 @@ int Gantry::calibrate() {
 
     start_ms = millis();
     bool minReleased = false;
-    while (axisX_.isMotionActive() && (millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+    while (axisX_->isMotionActive() &&
+           (millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
         if (abortRequested_) {
             stopAllMotion();
             calibrationInProgress_ = false;
@@ -451,7 +480,7 @@ int Gantry::calibrate() {
         }
 
         delay(10);
-        if (axisX_.isAlarmActive()) {
+        if (axisX_->isAlarmActive()) {
             stopAllMotion();
             calibrationInProgress_ = false;
             return 0;
@@ -465,13 +494,13 @@ int Gantry::calibrate() {
         return 0;
     }
 
-    axisLength_ = (int32_t)xPulsesToMm((int32_t)axisX_.getPosition());
+    axisLength_ = (int32_t)(axisX_->getCurrentMm() + 0.5f);
     calibrationInProgress_ = false;
     return axisLength_;
 }
 
 // ============================================================================
-// GRIPPER CONTROL
+// GRIPPER
 // ============================================================================
 
 void Gantry::grip(bool active) {
@@ -487,52 +516,42 @@ void Gantry::grip(bool active) {
 // ============================================================================
 
 int Gantry::getXEncoder() const {
-    if (!initialized_) {
-        return 0;
+    if (!initialized_ || !axisX_) return 0;
+    if (axisX_->isEncoderFeedbackEnabled()) {
+        return axisX_->getEncoderPulses();
     }
-    if (axisX_.getConfig().enable_encoder_feedback) {
-        return axisX_.getEncoderPosition();
-    }
-    return (int32_t)axisX_.getPosition();
+    return (int32_t)axisX_->getCurrentPulses();
 }
 
 int Gantry::getXEncoderRaw() const {
-    if (!initialized_) {
-        return 0;
-    }
-    return axisX_.getEncoderPosition();
+    if (!initialized_ || !axisX_) return 0;
+    return axisX_->getEncoderPulses();
 }
 
 int32_t Gantry::getXCommandedPulses() const {
-    if (!initialized_) {
+    if (!initialized_ || !axisX_) return 0;
+    if (homingInProgress_ || calibrationInProgress_) {
         return 0;
     }
-    if (axisX_.isHoming() || homingInProgress_ || calibrationInProgress_) {
-        return 0;
-    }
-    return (int32_t)axisX_.getPosition();
+    return (int32_t)axisX_->getCurrentPulses();
 }
 
 float Gantry::getXCommandedMm() const {
-    return xPulsesToMm(getXCommandedPulses());
+    if (!axisX_ || axisX_->pulsesPerMm() <= 0.0) return 0.0f;
+    return (float)((double)getXCommandedPulses() / axisX_->pulsesPerMm());
 }
 
 float Gantry::getXEncoderMm() const {
-    return xPulsesToMm(getXEncoderRaw());
+    if (!axisX_ || axisX_->pulsesPerMm() <= 0.0) return 0.0f;
+    return (float)((double)getXEncoderRaw() / axisX_->pulsesPerMm());
 }
 
 int Gantry::getCurrentY() const {
-    return (int)getCurrentYPosition();
+    return (int)(axisY_ ? axisY_->getCurrentMm() : (float)currentY_);
 }
 
 int Gantry::getCurrentTheta() const {
-    if (thetaConfigured_) {
-        const int32_t thetaCounts = thetaUseEncoder_
-            ? axisTheta_.getEncoderPosition()
-            : (int32_t)axisTheta_.getPosition();
-        return (int)thetaPulsesToDeg(thetaCounts);
-    }
-    return currentTheta_;
+    return axisTheta_ ? (int)axisTheta_->getCurrentDeg() : currentTheta_;
 }
 
 // ============================================================================
@@ -540,39 +559,34 @@ int Gantry::getCurrentTheta() const {
 // ============================================================================
 
 bool Gantry::isAlarmActive() const {
-    if (!initialized_) {
-        return false;
-    }
-    const bool xAlarm = axisX_.getStatus().alarm_active;
-    const bool yAlarm = yConfigured_ ? axisY_.getStatus().alarm_active : false;
-    const bool thetaAlarm = thetaConfigured_ ? axisTheta_.getStatus().alarm_active : false;
-    return xAlarm || yAlarm || thetaAlarm;
+    if (!initialized_) return false;
+    const bool xAlarm = axisX_     && axisX_->isAlarmActive();
+    const bool yAlarm = axisY_     && axisY_->isAlarmActive();
+    const bool tAlarm = axisTheta_ && axisTheta_->isAlarmActive();
+    return xAlarm || yAlarm || tAlarm;
 }
 
 bool Gantry::clearAlarm() {
-    if (!initialized_) {
-        return false;
-    }
-    bool ok = axisX_.clearAlarm();
-    if (yConfigured_) {
-        ok = axisY_.clearAlarm() || ok;
-    }
-    if (thetaConfigured_) {
-        ok = axisTheta_.clearAlarm() || ok;
-    }
+    if (!initialized_) return false;
+    bool ok = false;
+    if (axisX_)     ok = axisX_->clearAlarm()     || ok;
+    if (axisY_)     ok = axisY_->clearAlarm()     || ok;
+    if (axisTheta_) ok = axisTheta_->clearAlarm() || ok;
     return ok;
 }
 
 void Gantry::setHomingSpeed(uint32_t speed_pps) {
-    if (initialized_) {
-        PulseMotor::DriverConfig config = axisX_.getConfig();
-        config.homing_speed_pps = speed_pps;
-        axisX_.setConfig(config);
-    }
+    // Homing speed lives in the driver config; route via the X driver
+    // (and Y when its own home command is added) by mutating the config.
+    if (!initialized_ || !axisX_) return;
+    auto* xImpl = static_cast<GantryPulseMotorLinearAxis*>(axisX_.get());
+    PulseMotor::DriverConfig& cfg =
+        const_cast<PulseMotor::DriverConfig&>(xImpl->driver().getConfig());
+    cfg.homing_speed_pps = speed_pps;
 }
 
 // ============================================================================
-// ENHANCED KINEMATICS API
+// KINEMATICS
 // ============================================================================
 
 EndEffectorPose Gantry::forwardKinematics(const JointConfig& joint) const {
@@ -585,24 +599,17 @@ JointConfig Gantry::inverseKinematics(const EndEffectorPose& pose) const {
 
 JointConfig Gantry::getCurrentJointConfig() const {
     JointConfig joint;
-    joint.x = currentX_mm_;
-    joint.y = getCurrentYPosition();
-    if (thetaConfigured_) {
-        const int32_t thetaCounts = thetaUseEncoder_
-            ? axisTheta_.getEncoderPosition()
-            : (int32_t)axisTheta_.getPosition();
-        joint.theta = thetaPulsesToDeg(thetaCounts);
-    } else {
-        joint.theta = (float)currentTheta_;
-    }
+    joint.x     = currentX_mm_;
+    joint.y     = axisY_     ? axisY_->getCurrentMm()     : (float)currentY_;
+    joint.theta = axisTheta_ ? axisTheta_->getCurrentDeg() : (float)currentTheta_;
     return joint;
 }
 
 JointConfig Gantry::getTargetJointConfig() const {
     JointConfig joint;
-    joint.x = xPulsesToMm(getXEncoder());
-    joint.y = targetY_mm_;
-    joint.theta = (float)targetTheta_;
+    joint.x     = targetX_mm_;
+    joint.y     = axisY_ ? axisY_->getTargetMm() : targetY_mm_;
+    joint.theta = axisTheta_ ? axisTheta_->getTargetDeg() : (float)targetTheta_;
     return joint;
 }
 
@@ -615,156 +622,101 @@ EndEffectorPose Gantry::getTargetEndEffectorPose() const {
 }
 
 // ============================================================================
-// UNIT CONVERSION HELPERS
-// ============================================================================
-
-double Gantry::xPulsesPerMm() const {
-    const double v = PulseMotor::pulsesPerMm(xDrivetrain_);
-    return v > 0.0 ? v : 1.0;
-}
-
-double Gantry::yPulsesPerMm() const {
-    const double v = PulseMotor::pulsesPerMm(yDrivetrain_);
-    return v > 0.0 ? v : 1.0;
-}
-
-double Gantry::thetaPulsesPerDeg() const {
-    const double v = PulseMotor::pulsesPerDeg(thetaDrivetrain_);
-    return v > 0.0 ? v : 1.0;
-}
-
-float Gantry::xPulsesToMm(int32_t pulses) const {
-    return (float)((double)pulses / xPulsesPerMm());
-}
-
-int32_t Gantry::xMmToPulses(float mm) const {
-    return (int32_t)((double)mm * xPulsesPerMm());
-}
-
-float Gantry::yPulsesToMm(int32_t pulses) const {
-    return (float)((double)pulses / yPulsesPerMm());
-}
-
-int32_t Gantry::yMmToPulses(float mm) const {
-    return (int32_t)((double)mm * yPulsesPerMm());
-}
-
-float Gantry::thetaPulsesToDeg(int32_t pulses) const {
-    return (float)((double)pulses / thetaPulsesPerDeg());
-}
-
-int32_t Gantry::thetaDegToPulses(float deg) const {
-    return (int32_t)((double)deg * thetaPulsesPerDeg());
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
-float Gantry::getCurrentYPosition() const {
-    if (yConfigured_) {
-        return getCurrentYFromServoMm();
+void Gantry::setStepsPerRevolution(float steps_per_rev) {
+    if (steps_per_rev > 0) {
+        stepsPerRev_ = steps_per_rev;
     }
-    return (float)currentY_;
+}
+
+float Gantry::getPulsesPerMm() const {
+    if (axisX_ && axisX_->pulsesPerMm() > 0.0) {
+        return (float)axisX_->pulsesPerMm();
+    }
+    return DEFAULT_PULSES_PER_MM;
+}
+
+float Gantry::pulsesToMm(int32_t pulses) const {
+    const float ppm = getPulsesPerMm();
+    if (ppm <= 0.0f) return 0.0f;
+    return (float)pulses / ppm;
+}
+
+int32_t Gantry::mmToPulses(float mm) const {
+    return (int32_t)(mm * getPulsesPerMm());
 }
 
 uint32_t Gantry::getHomingSpeed() const {
-    uint32_t speed = axisX_.getConfig().homing_speed_pps;
-    return (speed > 0) ? speed : DEFAULT_HOMING_SPEED_PPS;
+    if (axisX_) {
+        const uint32_t s = axisX_->homingSpeedPps();
+        if (s > 0) return s;
+    }
+    return DEFAULT_HOMING_SPEED_PPS;
 }
 
 bool Gantry::moveYAxisTo(float targetY, float speed, float accel, float decel) {
-    if (!yConfigured_) {
-        currentY_ = (int32_t)targetY;
-        return true;
+    if (axisY_) {
+        return axisY_->moveToMm(targetY, speed, accel, decel);
     }
-    const double yPpm = yPulsesPerMm();
-    const int32_t currentYCounts = yUseEncoder_
-        ? axisY_.getEncoderPosition()
-        : (int32_t)axisY_.getPosition();
-    const int32_t targetYCounts = (int32_t)((double)targetY * yPpm);
-    const int32_t deltaY = targetYCounts - currentYCounts;
-    if (deltaY == 0) {
-        return true;
-    }
-    uint32_t speed_pps = (uint32_t)((double)speed * yPpm);
-    uint32_t accel_pps = (accel > 0.0f) ? (uint32_t)((double)accel * yPpm) : (speed_pps / 2);
-    uint32_t decel_pps = (decel > 0.0f) ? (uint32_t)((double)decel * yPpm) : (speed_pps / 2);
-    if (speed_pps == 0) speed_pps = 1;
-    if (accel_pps == 0) accel_pps = 1;
-    if (decel_pps == 0) decel_pps = 1;
-    return axisY_.moveRelative(deltaY, speed_pps, accel_pps, decel_pps);
-}
-
-bool Gantry::isYAxisConfigured() const {
-    return yConfigured_;
-}
-
-bool Gantry::isYAxisBusy() const {
-    return yConfigured_ && axisY_.isMotionActive();
-}
-
-float Gantry::getCurrentYFromServoMm() const {
-    const int32_t yCounts = yUseEncoder_
-        ? axisY_.getEncoderPosition()
-        : (int32_t)axisY_.getPosition();
-    return yPulsesToMm(yCounts);
+    currentY_ = (int32_t)targetY;
+    return true;
 }
 
 void Gantry::updateAxisPositions() {
     xMinSwitch_.update();
     xMaxSwitch_.update();
 
-    uint32_t currentXCounts = axisX_.getPosition();
-    if (axisX_.isMotionActive()) {
+    if (!axisX_) {
+        return;
+    }
+
+    uint32_t currentXCounts = axisX_->getCurrentPulses();
+    if (axisX_->isMotionActive()) {
         bool movingTowardMax = currentXCounts > lastXPositionCounts_;
         bool movingTowardMin = currentXCounts < lastXPositionCounts_;
 
         if (movingTowardMax && xMaxSwitch_.isConfigured() && xMaxSwitch_.isActive()) {
-            axisX_.stopMotion(0);
-            homingInProgress_ = false;
+            axisX_->stopMotion();
+            homingInProgress_      = false;
             calibrationInProgress_ = false;
         } else if (movingTowardMin && xMinSwitch_.isConfigured() && xMinSwitch_.isActive()) {
-            axisX_.stopMotion(0);
-            axisX_.setPosition(0);
+            axisX_->stopMotion();
+            axisX_->setCurrentPulses(0);
             homingInProgress_ = false;
         }
     } else if (homingInProgress_) {
         if (xMinSwitch_.isActive()) {
-            axisX_.setPosition(0);
+            axisX_->setCurrentPulses(0);
         }
         homingInProgress_ = false;
     }
     lastXPositionCounts_ = currentXCounts;
 
-    currentX_mm_ = xPulsesToMm(getXEncoder());
+    currentX_mm_ = axisX_->getCurrentMm();
 
-    if (yConfigured_) {
-        currentY_ = (int32_t)getCurrentYFromServoMm();
+    if (axisY_) {
+        axisY_->update();
+        currentY_ = (int32_t)axisY_->getCurrentMm();
     }
-    if (thetaConfigured_) {
-        const int32_t thetaCounts = thetaUseEncoder_
-            ? axisTheta_.getEncoderPosition()
-            : (int32_t)axisTheta_.getPosition();
-        currentTheta_ = (int32_t)thetaPulsesToDeg(thetaCounts);
+    if (axisTheta_) {
+        axisTheta_->update();
+        currentTheta_ = (int32_t)axisTheta_->getCurrentDeg();
     }
 }
 
 void Gantry::stopAllMotion() {
-    axisX_.stopMotion(0);
-    if (yConfigured_) {
-        axisY_.stopMotion(0);
-    }
-    if (thetaConfigured_) {
-        axisTheta_.stopMotion(0);
-    }
-    homingInProgress_ = false;
+    if (axisX_)     axisX_->stopMotion();
+    if (axisY_)     axisY_->stopMotion();
+    if (axisTheta_) axisTheta_->stopMotion();
+    homingInProgress_      = false;
     calibrationInProgress_ = false;
-    motionState_ = MotionState::IDLE;
+    motionState_           = MotionState::IDLE;
 }
 
 // ============================================================================
-// SEQUENTIAL MOTION IMPLEMENTATION
+// SEQUENTIAL MOTION
 // ============================================================================
 
 void Gantry::startSequentialMotion() {
@@ -772,29 +724,35 @@ void Gantry::startSequentialMotion() {
         return;
     }
 
-    float currentY = getCurrentYPosition();
+    const float currentY = axisY_ ? axisY_->getCurrentMm() : (float)currentY_;
 
+    // Descending = picking (grip close). Ascending = placing (grip open).
     gripperTargetState_ = (targetY_mm_ < currentY);
+    gripperActuateDurationMs_ = gripperTargetState_
+        ? GRIPPER_ACTUATE_TIME_MS   // close; see docs (Constants)
+        : GRIPPER_ACTUATE_TIME_MS;  // open;  see docs (Constants)
 
     if (currentY < safeYHeight_mm_) {
         motionState_ = MotionState::Y_RETRACTING;
         if (!moveYAxisTo(safeYHeight_mm_, (float)speed_mm_per_s_,
-                         (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_)) {
+                         (float)acceleration_mm_per_s2_,
+                         (float)deceleration_mm_per_s2_)) {
             stopAllMotion();
             return;
         }
-        if (!isYAxisConfigured()) {
+        if (!axisY_) {
             motionState_ = MotionState::X_MOVING;
             startXAxisMotion();
         }
     } else if (targetY_mm_ < currentY) {
         motionState_ = MotionState::Y_DESCENDING;
         if (!moveYAxisTo(targetY_mm_, (float)speed_mm_per_s_,
-                         (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_)) {
+                         (float)acceleration_mm_per_s2_,
+                         (float)deceleration_mm_per_s2_)) {
             stopAllMotion();
             return;
         }
-        if (!isYAxisConfigured()) {
+        if (!axisY_) {
             motionState_ = MotionState::GRIPPER_ACTUATING;
             grip(gripperTargetState_);
             gripperActuateStart_ms_ = millis();
@@ -804,28 +762,23 @@ void Gantry::startSequentialMotion() {
         startXAxisMotion();
     }
 
-    // Theta moves independently
-    if (thetaConfigured_) {
-        const int32_t currentThetaCounts = thetaUseEncoder_
-            ? axisTheta_.getEncoderPosition()
-            : (int32_t)axisTheta_.getPosition();
-        const int32_t targetThetaCounts = thetaDegToPulses(targetTheta_deg_);
-        const int32_t deltaTheta = targetThetaCounts - currentThetaCounts;
-        const double thetaPpd = thetaPulsesPerDeg();
-        const uint32_t thetaSpeedPps =
-            (uint32_t)((double)speed_deg_per_s_ * thetaPpd);
-        const uint32_t thetaAccelPps = (thetaSpeedPps > 1) ? thetaSpeedPps / 2 : 1;
-        const uint32_t thetaDecelPps = (thetaSpeedPps > 1) ? thetaSpeedPps / 2 : 1;
-        if (deltaTheta != 0 &&
-            !axisTheta_.moveRelative(deltaTheta, thetaSpeedPps > 0 ? thetaSpeedPps : 1,
-                                     thetaAccelPps, thetaDecelPps)) {
-            ESP_LOGE(TAG, "[THETA] moveRelative failed - aborting sequence");
-            stopAllMotion();
-            return;
+    if (axisTheta_) {
+        if (!axisTheta_->moveToDeg(targetTheta_deg_,
+                                   (float)speed_deg_per_s_,
+                                   0.0f, 0.0f)) {
+            const float currentTheta = axisTheta_->getCurrentDeg();
+            if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
+                ESP_LOGE(TAG,
+                         "[THETA] moveToDeg failed (current=%.2f target=%.2f) - aborting sequence",
+                         currentTheta, targetTheta_deg_);
+                stopAllMotion();
+                return;
+            }
+            ESP_LOGI(TAG,
+                     "[THETA] moveToDeg no-op treated as success (current=%.2f target=%.2f)",
+                     currentTheta, targetTheta_deg_);
         }
-        currentTheta_ = (int32_t)thetaPulsesToDeg(thetaUseEncoder_
-            ? axisTheta_.getEncoderPosition()
-            : (int32_t)axisTheta_.getPosition());
+        currentTheta_ = (int32_t)axisTheta_->getCurrentDeg();
     } else {
         currentTheta_ = (int32_t)targetTheta_deg_;
     }
@@ -839,47 +792,44 @@ void Gantry::processSequentialMotion() {
 
     switch (motionState_) {
         case MotionState::Y_DESCENDING:
-            if (!isYAxisConfigured() || !isYAxisBusy()) {
+            if (!axisY_ || !axisY_->isBusy()) {
                 motionState_ = MotionState::GRIPPER_ACTUATING;
                 grip(gripperTargetState_);
                 gripperActuateStart_ms_ = millis();
             }
             break;
 
-        case MotionState::GRIPPER_ACTUATING: {
-            const uint32_t gripperDelayMs =
-                gripperTargetState_ ? GANTRY_GRIPPER_CLOSE_TIME_MS
-                                    : GANTRY_GRIPPER_OPEN_TIME_MS;
-            if (millis() - gripperActuateStart_ms_ >= gripperDelayMs) {
+        case MotionState::GRIPPER_ACTUATING:
+            if (millis() - gripperActuateStart_ms_ >= gripperActuateDurationMs_) {
                 motionState_ = MotionState::Y_RETRACTING;
                 if (!moveYAxisTo(safeYHeight_mm_, (float)speed_mm_per_s_,
-                                 (float)acceleration_mm_per_s2_, (float)deceleration_mm_per_s2_)) {
+                                 (float)acceleration_mm_per_s2_,
+                                 (float)deceleration_mm_per_s2_)) {
                     stopAllMotion();
                     return;
                 }
-                if (!isYAxisConfigured()) {
+                if (!axisY_) {
                     motionState_ = MotionState::X_MOVING;
                     startXAxisMotion();
                 }
             }
             break;
-        }
 
         case MotionState::Y_RETRACTING:
-            if (!isYAxisConfigured() || !isYAxisBusy()) {
+            if (!axisY_ || !axisY_->isBusy()) {
                 motionState_ = MotionState::X_MOVING;
                 startXAxisMotion();
             }
             break;
 
         case MotionState::X_MOVING:
-            if (!axisX_.isMotionActive()) {
+            if (!axisX_ || !axisX_->isMotionActive()) {
                 motionState_ = MotionState::IDLE;
             }
             break;
 
         case MotionState::THETA_MOVING:
-            if (!thetaConfigured_ || !axisTheta_.isMotionActive()) {
+            if (!axisTheta_) {
                 motionState_ = MotionState::IDLE;
             }
             break;
@@ -891,11 +841,21 @@ void Gantry::processSequentialMotion() {
 }
 
 void Gantry::startXAxisMotion() {
-    const int32_t driverReportedPulses = (int32_t)axisX_.getPosition();
-    int32_t currentX_pulses = driverReportedPulses;
-    const int32_t trackedPulses = xMmToPulses(currentX_mm_);
-    const int32_t encoderPulses = axisX_.getEncoderPosition();
-    if (axisX_.getConfig().enable_encoder_feedback) {
+    if (!axisX_) {
+        motionState_ = MotionState::IDLE;
+        return;
+    }
+
+    const float xPpm = (axisX_->pulsesPerMm() > 0.0)
+        ? (float)axisX_->pulsesPerMm()
+        : DEFAULT_PULSES_PER_MM;
+
+    const int32_t driverReportedPulses = (int32_t)axisX_->getCurrentPulses();
+    const int32_t trackedPulses        = (int32_t)(currentX_mm_ * xPpm);
+    const int32_t encoderPulses        = axisX_->getEncoderPulses();
+    const int32_t targetPulses         = (int32_t)(targetX_mm_ * xPpm);
+
+    if (axisX_->isEncoderFeedbackEnabled()) {
         const int32_t encDrvMismatch = encoderPulses - driverReportedPulses;
         if (encDrvMismatch > 10 || encDrvMismatch < -10) {
             ESP_LOGW(TAG,
@@ -903,21 +863,21 @@ void Gantry::startXAxisMotion() {
                      (long)encoderPulses, (long)driverReportedPulses, (long)encDrvMismatch);
         }
     }
+
     const int32_t trackedMismatch = trackedPulses - driverReportedPulses;
     if (trackedMismatch > 10 || trackedMismatch < -10) {
         ESP_LOGW(TAG,
                  "[X_MOVE] tracked/driver mismatch: tracked=%ld driver=%ld mismatch=%ld",
                  (long)trackedPulses, (long)driverReportedPulses, (long)trackedMismatch);
     }
-    axisX_.setPosition((uint32_t)currentX_pulses);
-    int32_t targetX_pulses = xMmToPulses(targetX_mm_);
-    int32_t deltaX = targetX_pulses - currentX_pulses;
+
+    axisX_->setCurrentPulses((uint32_t)driverReportedPulses);
+    const int32_t deltaX = targetPulses - driverReportedPulses;
 
     ESP_LOGI(TAG,
              "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld speed=%lu accel=%lu decel=%lu",
-             (long)currentX_pulses, (long)trackedPulses, (long)driverReportedPulses,
-             (long)encoderPulses,
-             (long)targetX_pulses, (long)deltaX,
+             (long)driverReportedPulses, (long)trackedPulses, (long)driverReportedPulses,
+             (long)encoderPulses, (long)targetPulses, (long)deltaX,
              (unsigned long)speed_mm_per_s_, (unsigned long)acceleration_mm_per_s2_,
              (unsigned long)deceleration_mm_per_s2_);
 
@@ -926,26 +886,20 @@ void Gantry::startXAxisMotion() {
         return;
     }
 
-    const double xPpm = xPulsesPerMm();
-    uint32_t speed_pps = (uint32_t)((double)speed_mm_per_s_ * xPpm);
-
-    uint32_t accel_pps = 0;
-    uint32_t decel_pps = 0;
-    if (acceleration_mm_per_s2_ > 0) {
-        accel_pps = (uint32_t)((double)acceleration_mm_per_s2_ * xPpm);
-    }
-    if (deceleration_mm_per_s2_ > 0) {
-        decel_pps = (uint32_t)((double)deceleration_mm_per_s2_ * xPpm);
-    }
-
+    const uint32_t speed_pps = (uint32_t)(speed_mm_per_s_ * xPpm);
+    uint32_t accel_pps = (acceleration_mm_per_s2_ > 0)
+        ? (uint32_t)(acceleration_mm_per_s2_ * xPpm) : 0;
+    uint32_t decel_pps = (deceleration_mm_per_s2_ > 0)
+        ? (uint32_t)(deceleration_mm_per_s2_ * xPpm) : 0;
     if (accel_pps == 0) accel_pps = speed_pps / 2;
     if (decel_pps == 0) decel_pps = speed_pps / 2;
 
-    if (!axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)) {
+    const uint32_t target_counts = (uint32_t)((int32_t)driverReportedPulses + deltaX);
+    if (!axisX_->moveToPulses(target_counts, speed_pps, accel_pps, decel_pps)) {
         ESP_LOGE(TAG,
-                 "[X_MOVE] moveRelative rejected (delta=%ld, speed_pps=%lu, accel_pps=%lu, decel_pps=%lu)",
-                 (long)deltaX, (unsigned long)speed_pps, (unsigned long)accel_pps,
-                 (unsigned long)decel_pps);
+                 "[X_MOVE] moveToPulses rejected (delta=%ld, speed_pps=%lu, accel_pps=%lu, decel_pps=%lu)",
+                 (long)deltaX, (unsigned long)speed_pps,
+                 (unsigned long)accel_pps, (unsigned long)decel_pps);
         stopAllMotion();
     }
 }
