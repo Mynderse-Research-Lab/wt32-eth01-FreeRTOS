@@ -15,6 +15,7 @@
 
 #include <stdint.h>
 #include <Arduino.h>
+#include "axis_drivetrain_params.h"
 
 namespace Gantry {
 
@@ -99,18 +100,16 @@ struct EndEffectorPose {
  * These parameters define the mechanical layout of the gantry system
  */
 struct KinematicParameters {
-    float y_axis_z_offset_mm;           // Y-axis Z offset from X (default: 80mm)
-    float theta_x_offset_mm;            // Theta X offset from Y vertical (default: -55mm)
-    float gripper_y_offset_mm;          // Gripper Y offset (default: 385mm)
-    float gripper_z_offset_mm;          // Gripper Z offset (default: 80mm)
-    float x_axis_ball_screw_pitch_mm;   // Ball-screw pitch (default: 40mm)
-    
+    float y_axis_z_offset_mm;    // Y-axis Z offset from X (default: 80mm)
+    float theta_x_offset_mm;     // Theta X offset from Y vertical (default: -55mm)
+    float gripper_y_offset_mm;   // Gripper Y offset (default: 385mm)
+    float gripper_z_offset_mm;   // Gripper Z offset (default: 80mm)
+
     KinematicParameters()
-        : y_axis_z_offset_mm(80.0f),
-          theta_x_offset_mm(-55.0f),
-          gripper_y_offset_mm(385.0f),
-          gripper_z_offset_mm(80.0f),
-          x_axis_ball_screw_pitch_mm(40.0f) {}
+        : y_axis_z_offset_mm(GANTRY_Y_AXIS_Z_OFFSET_MM),
+          theta_x_offset_mm(GANTRY_THETA_X_OFFSET_MM),
+          gripper_y_offset_mm(GANTRY_GRIPPER_Y_OFFSET_MM),
+          gripper_z_offset_mm(GANTRY_GRIPPER_Z_OFFSET_MM) {}
 };
 
 /**

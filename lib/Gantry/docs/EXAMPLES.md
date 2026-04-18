@@ -82,41 +82,52 @@ void gantryUpdateTask(void *pvParameters) {
 }
 
 void app_main(void) {
-    // Configure X-axis servo driver
-    BergerdaServo::DriverConfig xConfig;
-    xConfig.step_pin = X_STEP_PIN;
-    xConfig.dir_pin = X_DIR_PIN;
-    xConfig.enable_pin = X_ENABLE_PIN;
-    xConfig.encoder_ppr = 6000;
-    xConfig.homing_speed_pps = 6000;
-    xConfig.max_speed_pps = 10000;
-    xConfig.max_accel_pps2 = 5000;
-    
-    // Create gantry instance
-    static Gantry::Gantry gantry(xConfig, GRIPPER_PIN);
+    // Build the three DriverConfigs (pins + encoder + inversion).
+    PulseMotor::DriverConfig xConfig, yConfig, thetaConfig;
+    xConfig.pulse_pin       = PIN_X_PULSE;
+    xConfig.dir_pin         = PIN_X_DIR;
+    xConfig.enable_pin      = PIN_X_ENABLE;
+    xConfig.encoder_a_pin   = PIN_X_ENC_A;
+    xConfig.encoder_b_pin   = PIN_X_ENC_B;
+    xConfig.enable_encoder_feedback = true;
+    xConfig.encoder_ppr     = AXIS_X_ENCODER_PPR;
+    xConfig.max_pulse_freq  = AXIS_X_MAX_PULSE_FREQ_HZ;
+    xConfig.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
+    // ... repeat for yConfig and thetaConfig ...
+
+    static Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, GRIPPER_PIN);
     g_gantry = &gantry;
-    
-    // Configure limit switches
+
     gantry.setLimitPins(X_MIN_LIMIT, X_MAX_LIMIT);
-    
-    // Configure Y-axis stepper
-    gantry.setYAxisPins(Y_STEP_PIN, Y_DIR_PIN, Y_ENABLE_PIN);
-    gantry.setYAxisStepsPerMm(200.0f);  // 200 steps/mm
-    gantry.setYAxisLimits(0.0f, 200.0f);
-    gantry.setYAxisMotionLimits(100.0f, 500.0f, 500.0f);
-    
-    // Configure theta servo
-    gantry.setThetaServo(THETA_PWM_PIN, 0);
-    gantry.setThetaLimits(-90.0f, 90.0f);
-    gantry.setThetaPulseRange(1000, 2000);
-    
-    // Set safe height
-    gantry.setSafeYHeight(150.0f);
-    
-    // Create gantry update task
+
+    // Install per-axis drivetrain scaling.
+    PulseMotor::DrivetrainConfig xDt;
+    xDt.type                 = PulseMotor::DrivetrainType::BELT;
+    xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
+    xDt.encoder_ppr          = AXIS_X_ENCODER_PPR;
+    xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
+    gantry.setXDrivetrain(xDt);
+
+    PulseMotor::DrivetrainConfig yDt;
+    yDt.type                = PulseMotor::DrivetrainType::BALLSCREW;
+    yDt.lead_mm             = AXIS_Y_BALLSCREW_LEAD_MM;
+    yDt.encoder_ppr         = AXIS_Y_ENCODER_PPR;
+    yDt.motor_reducer_ratio = AXIS_Y_MOTOR_REDUCER_RATIO;
+    gantry.setYDrivetrain(yDt);
+
+    PulseMotor::DrivetrainConfig thetaDt;
+    thetaDt.type                = PulseMotor::DrivetrainType::ROTARY_DIRECT;
+    thetaDt.output_gear_ratio   = AXIS_THETA_OUTPUT_GEAR_RATIO;
+    thetaDt.encoder_ppr         = AXIS_THETA_ENCODER_PPR;
+    thetaDt.motor_reducer_ratio = AXIS_THETA_MOTOR_REDUCER_RATIO;
+    gantry.setThetaDrivetrain(thetaDt);
+
+    gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM, AXIS_X_TRAVEL_MAX_MM,
+                          AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
+                          AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
+    gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
+
     xTaskCreate(gantryUpdateTask, "GantryUpdate", 4096, &gantry, 5, NULL);
-    
-    // Other initialization...
 }
 ```
 
@@ -383,7 +394,7 @@ void gantryTask(void *pvParameters) {
 
 void app_main(void) {
     // Configure gantry (same as basic setup)
-    BergerdaServo::DriverConfig xConfig;
+    PulseMotor::DriverConfig xConfig;
     // ... configure ...
     
     static Gantry::Gantry gantry(xConfig, GRIPPER_PIN);
@@ -456,7 +467,7 @@ void app_main(void) {
     gantryMutex = xSemaphoreCreateMutex();
     
     // Configure and create gantry instance
-    BergerdaServo::DriverConfig xConfig;
+    PulseMotor::DriverConfig xConfig;
     // ... configure ...
     static Gantry::Gantry gantry(xConfig, GRIPPER_PIN);
     // ... configure axes ...

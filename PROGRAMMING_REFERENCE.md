@@ -13,7 +13,7 @@ This document is the single-source programming reference for the firmware. It co
 2. [Application Entry Point & Task Layout](#2-application-entry-point--task-layout)
 3. [Pin Map](#3-pin-map)
 4. [Public API: `Gantry` library](#4-public-api-gantry-library)
-5. [Public API: `SDF08NK8X` servo driver](#5-public-api-sdf08nk8x-servo-driver)
+5. [Public API: `PulseMotor` driver](#5-public-api-pulsemotor-driver)
 6. [Public API: `MCP23S17` SPI GPIO expander](#6-public-api-mcp23s17-spi-gpio-expander)
 7. [Public API: `gpio_expander` abstraction](#7-public-api-gpio_expander-abstraction)
 8. [Serial Console Commands](#8-serial-console-commands)
@@ -59,11 +59,11 @@ include/                      # project-wide headers
 
 lib/
 ├── Gantry/                   # 3-axis gantry controller
-├── SDF08NK8X/                # Bergerda servo driver (X-axis)
+├── PulseMotor/               # Generic pulse-train driver
 └── MCP23S17/                 # SPI GPIO expander driver
 ```
 
-`idf/main/CMakeLists.txt` compiles application + library sources **directly** — there are no separate ESP-IDF custom components under `idf/components/`. If you see `Failed to resolve component 'SDF08NK8X'` (or similar), the `main/CMakeLists.txt` was regenerated with component dependencies and needs to be reverted to compile-from-lib-tree mode (see §11.3 below).
+`idf/main/CMakeLists.txt` compiles application + library sources **directly** — there are no separate ESP-IDF custom components under `idf/components/`. If you see `Failed to resolve component 'PulseMotor'` (or similar), the `main/CMakeLists.txt` was regenerated with component dependencies and needs to be reverted to compile-from-lib-tree mode (see §11.3 below).
 
 ### 1.3 Build
 
@@ -105,18 +105,18 @@ Defined in `src/main.cpp`. Startup order:
 
 1. **`initMcp23s17()`** — brings up SPI2 bus, creates the MCP23S17 handle (mutex included), sets every MCP pin's direction / pull-up / initial level. All control/limit/alarm pins flow through this.
 2. **`gpio_config` for `PIN_Y_PULSE`** — direct ESP32 GPIO (LEDC will take over later).
-3. **Construct `BergerdaServo::DriverConfig xConfig`** with pulse on `PIN_X_PULSE` (direct, LEDC ch0), DIR/EN/ARST/ALM on MCP pins, encoder A/B on direct GPIO via PCNT unit 0. `xConfig.invert_dir_pin = true`.
-4. **Construct `Gantry::Gantry gantry(xConfig, PIN_GRIPPER)`** as a `static` (lives for program lifetime).
-5. **`gantry.setLimitPins()`, `setYAxisPins()`, `setYAxisStepsPerMm()`, `setYAxisLimits()`, `setYAxisMotionLimits()`, `setThetaServo()`, `setThetaLimits()`, `setThetaPulseRange()`, `setSafeYHeight()`** — full axis configuration.
-6. **`gantry.begin()`** — initializes X (SDF08NK8X), Y (stepper), Theta (LEDC servo), end-effector (MCP pin).
-7. **`gantry.enable()`** — sets SON for X, enables Y stepper.
+3. **Construct `PulseMotor::DriverConfig` objects** for X, Y, and Theta with pulse on direct GPIO (LEDC) and DIR/EN/ARST/ALM on MCP pins as applicable.
+4. **Construct `Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, PIN_GRIPPER)`** as a `static` (lives for program lifetime).
+5. **`gantry.setLimitPins()`, `setXDrivetrain()`, `setYDrivetrain()`, `setThetaDrivetrain()`, `setJointLimits()`, `setSafeYHeight()`** — full axis configuration.
+6. **`gantry.begin()`** — initializes X/Y/Theta pulse-train axes and end-effector (MCP pin).
+7. **`gantry.enable()`** — enables pulse-train axes.
 8. **Create FreeRTOS tasks.**
 
 ### 2.2 FreeRTOS tasks
 
 | Task | Core | Priority | Stack | Purpose |
 |---|---|---|---|---|
-| `GantryUpdate` | 1 | 5 | 4096 B | Calls `gantry.update()` at 100 Hz. Drives stepper pulses, limit debounce, sequential motion state machine. |
+| `GantryUpdate` | 1 | 5 | 4096 B | Calls `gantry.update()` at 100 Hz. Drives limit debounce and the sequential motion state machine. |
 | `SerialCmd` | 0 | 1 | 4096 B | `gantry_test_console` — line-buffered stdin reader, command dispatcher, LIVE POS telemetry. |
 
 Task stack/priority/core constants live in `include/gantry_app_constants.h`:
@@ -135,8 +135,8 @@ The `app_main` task calls `vTaskDelete(NULL)` after task creation — the two Fr
 ### 2.3 Thread safety notes
 
 - `lib/MCP23S17/src/MCP23S17.cpp` holds a **FreeRTOS mutex per device**; all `read_register`/`write_register` paths take it. Concurrent access from `GantryUpdate` (reading limit/alarm pins) and `SerialCmd` (register dumps, `grip`) is safe.
-- `lib/SDF08NK8X/src/SDF08NK8X.h` has optional `SDF08NK8X_USE_FREERTOS` (default `1`) which adds a `SemaphoreHandle_t mutex_` around state.
-- The motion profile is driven by an `esp_timer` callback (`rampTimerCallback`) running at 5 ms intervals. That ISR must remain short and must not block on heap or non-ISR-safe FreeRTOS APIs (see header comment in `SDF08NK8X.h`).
+- `lib/PulseMotor/src/PulseMotor.h` fronts the pulse-train motion engine and keeps FreeRTOS-safe behavior.
+- The motion profile is driven by an `esp_timer` callback (`rampTimerCallback`) running at 5 ms intervals. That ISR must remain short and must not block on heap or non-ISR-safe FreeRTOS APIs.
 
 ---
 
@@ -154,7 +154,7 @@ Source of truth: `include/gantry_app_constants.h`. `pinout.csv` mirrors the same
 | `MCP23S17_SPI_SCLK_PIN` | 5 | SPI2 SCK | |
 | `PIN_X_PULSE` | 14 | LEDC ch0 | X-axis step pulse output. |
 | `PIN_Y_PULSE` | 2 | LEDC ch1 | Y-axis step pulse output. Strap pin — must be LOW/floating at reset. |
-| `PIN_THETA_PWM` | 0 | LEDC ch2 | Theta servo PWM. Strap pin — must be HIGH at reset. |
+| `PIN_THETA_PULSE` | 0 | LEDC ch2 | Theta pulse-train output. Strap pin — must be HIGH at reset. |
 | `PIN_X_ENC_A` | 4 | PCNT unit 0 | Encoder A+. General-purpose header pin. |
 | `PIN_X_ENC_B` | 36 | PCNT unit 0 | Encoder B+. Input-only. |
 | `PIN_Y_ENC_A` | 39 | PCNT unit 1 | Encoder A+. Input-only. |
@@ -180,8 +180,8 @@ MCP SPI bus runs at **1 MHz** (`MCP23S17_SPI_CLOCK_HZ_WORKING`).
 | `PIN_Y_LIMIT_MAX` | 11 | B.3 | In pull-up | Active-low |
 | `PIN_Y_ALARM_STATUS` | 12 | B.4 | In pull-up | Active-low |
 | `PIN_Y_ALARM_RESET` | 13 | B.5 | Out | |
-| `PIN_THETA_LIMIT_MIN` | 14 | B.6 | In pull-up | Active-low |
-| `PIN_THETA_LIMIT_MAX` | 15 | B.7 | In pull-up | Active-low |
+| `PIN_THETA_DIR` | 14 | B.6 | Out | Theta pulse-train direction |
+| `PIN_THETA_ENABLE` | 15 | B.7 | Out | Theta pulse-train enable |
 
 ### 3.3 Pin-identifier encoding
 
@@ -240,11 +240,10 @@ struct EndEffectorPose {    // workspace coordinates (mm, mm, mm, deg)
 };
 
 struct KinematicParameters {
-    float y_axis_z_offset_mm;           // default 80
-    float theta_x_offset_mm;            // default -55
-    float gripper_y_offset_mm;          // default 385
-    float gripper_z_offset_mm;          // default 80
-    float x_axis_ball_screw_pitch_mm;   // default 40
+    float y_axis_z_offset_mm;    // default 80
+    float theta_x_offset_mm;     // default -55
+    float gripper_y_offset_mm;   // default 385
+    float gripper_z_offset_mm;   // default 80
 };
 
 struct GantryStatus { /* position, targets, flags, timestamps */ };
@@ -264,9 +263,12 @@ class WaypointQueue { /* push/pop/size/empty/full/clear */ };
 Construction:
 
 ```cpp
-Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin);
-Gantry(const BergerdaServo::DriverConfig &xConfig,
-       const BergerdaServo::DriverConfig &yConfig, int gripperPin);
+Gantry(const PulseMotor::DriverConfig &xConfig, int gripperPin);
+Gantry(const PulseMotor::DriverConfig &xConfig,
+       const PulseMotor::DriverConfig &yConfig, int gripperPin);
+Gantry(const PulseMotor::DriverConfig &xConfig,
+       const PulseMotor::DriverConfig &yConfig,
+       const PulseMotor::DriverConfig &thetaConfig, int gripperPin);
 ```
 
 #### Configuration (call before `begin()`)
@@ -274,25 +276,22 @@ Gantry(const BergerdaServo::DriverConfig &xConfig,
 | Method | Purpose |
 |---|---|
 | `void setLimitPins(int xMin, int xMax)` | X-axis limit switch pins (MCP or direct). |
-| `void setYAxisPins(int step, int dir, int enable = -1, bool invertDir = false, bool enableActiveLow = true)` | Y stepper wiring. |
-| `void setYAxisStepsPerMm(float stepsPerMm)` | Y scaling. |
-| `void setYAxisLimits(float minMm, float maxMm)` | Y travel envelope. |
-| `void setYAxisMotionLimits(float maxSpeedMmPerS, float accelMmPerS2, float decelMmPerS2)` | Y speed profile caps. |
-| `void setThetaServo(int pwmPin, int pwmChannel = 0)` | Theta LEDC PWM pin/channel. |
-| `void setThetaLimits(float minDeg, float maxDeg)` | Theta angular limits. |
-| `void setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs)` | Pulse window for the analog servo. |
+| `void setXDrivetrain(const PulseMotor::DrivetrainConfig&)` | Install X-axis mm↔pulse scaling (ballscrew/belt/rack-pinion). |
+| `void setYDrivetrain(const PulseMotor::DrivetrainConfig&)` | Install Y-axis mm↔pulse scaling. |
+| `void setThetaDrivetrain(const PulseMotor::DrivetrainConfig&)` | Install theta deg↔pulse scaling (rotary direct). |
+| `void setYAxisLimits(float minMm, float maxMm)` | Y travel envelope (mirrors into `JointLimits`). |
+| `void setThetaLimits(float minDeg, float maxDeg)` | Theta angular envelope (mirrors into `JointLimits`). |
 | `void setJointLimits(float xMin, float xMax, float yMin, float yMax, float thetaMin, float thetaMax)` | Joint validation envelope used by `moveTo(JointConfig)`. |
 | `void setEndEffectorPin(int pin, bool activeHigh = true)` | Override constructor gripper pin. |
 | `void setSafeYHeight(float mm)` | Safe retraction height used before X travel. Default 150 mm. |
-| `void setHomingSpeed(uint32_t pps)` | Homing speed (pulses/s). |
-| `void setStepsPerRevolution(float steps)` | Default 6000; drives `getPulsesPerMm()`. |
+| `void setHomingSpeed(uint32_t pps)` | Homing speed for X axis (pulses/s). |
 
 #### Lifecycle
 
 ```cpp
-bool begin();          // initialize all axes; returns false on any failure
-void enable();         // enable X servo + Y stepper
-void disable();        // disable both (motors freewheel)
+bool begin();          // initialize all configured axes; returns false on any failure
+void enable();         // enable all configured axes
+void disable();        // disable all configured axes (motors freewheel)
 bool isEnabled() const;
 void update();         // call from GantryUpdate task @100 Hz
 ```
@@ -300,7 +299,7 @@ void update();         // call from GantryUpdate task @100 Hz
 #### Motion
 
 ```cpp
-void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed_pps);
+void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed_mm_per_s);
 GantryError moveTo(const JointConfig& joint,
                    uint32_t speed_mm_per_s = 50,
                    uint32_t speed_deg_per_s = 30,
@@ -344,8 +343,9 @@ EndEffectorPose   getTargetEndEffectorPose() const;
 EndEffectorPose   forwardKinematics(const JointConfig&) const;
 JointConfig       inverseKinematics(const EndEffectorPose&) const;
 
-float getStepsPerRevolution() const;
-float getPulsesPerMm() const;
+double xPulsesPerMm() const;
+double yPulsesPerMm() const;
+double thetaPulsesPerDeg() const;
 ```
 
 ### 4.3 `Gantry::Kinematics` (static helpers)
@@ -374,10 +374,10 @@ static float interpolate(const TrapezoidalProfile&,
 
 ### 4.5 Sub-axis classes (normally used through `Gantry`)
 
-- `Gantry::GantryAxisStepper` — cooperative step/dir stepper (Y-axis). `configurePins`, `setStepsPerMm`, `setLimits`, `setMotionLimits`, `begin`, `enable`/`disable`, `moveToMm`, `stop`, `update`, `getCurrentMm`, `getCurrentSteps`.
-- `Gantry::GantryRotaryServo` — LEDC-based PWM servo (Theta). `configurePin`, `setAngleRange`, `setPulseRange`, `begin`, `moveToDeg`, `getCurrentDeg`.
 - `Gantry::GantryEndEffector` — digital gripper. `configurePin`, `begin`, `setActive`, `isActive`, `getPin`. **Correctly routes pins `<16` through `gpio_expander_*`, pins `>=16` (or direct-flagged) through Arduino `pinMode`/`digitalWrite`.**
 - `Gantry::GantryLimitSwitch` — debounced input. `configure(pin, activeLow=true, enablePullup=true, debounceCycles=6)`, `begin`, `update(force=false)`, `isActive`. (Default raised from 3 → 6 cycles; a `debounceCycles` of `0` is silently clamped to `1`.)
+
+> The previous `GantryAxisStepper` (Y-axis step/dir) and `GantryRotaryServo` (theta PWM) helpers were retired when all three axes moved to the PulseMotor pulse-train driver. Motion on every axis now runs through `PulseMotor::PulseMotorDriver`.
 
 ### 4.6 Constants (`Gantry::Constants`)
 
@@ -395,33 +395,61 @@ constexpr uint32_t TRAVEL_MEASUREMENT_TIMEOUT_MS  = 90000;
 
 ---
 
-## 5. Public API: `SDF08NK8X` servo driver
+## 5. Public API: `PulseMotor` driver
 
-Namespace: `BergerdaServo`. Header: `lib/SDF08NK8X/src/SDF08NK8X.h`.
+Namespace: `PulseMotor`. Header: `lib/PulseMotor/src/PulseMotor.h`.
 
 ### 5.1 Types
 
 ```cpp
-enum class PulseMode   : uint8_t { PULSE_DIRECTION = 0, CW_CCW = 1, QUADRATURE = 2 };
-enum class ControlMode : uint8_t { POSITION = 0, SPEED = 1, TORQUE = 2, JOG = 3 };
+enum class PulseMode : uint8_t { PULSE_DIRECTION = 0, CW_CCW = 1, QUADRATURE = 2 };
+
+enum class DrivetrainType : uint8_t {
+    BALLSCREW = 1,
+    BELT = 2,
+    RACKPINION = 3,
+    ROTARY_DIRECT = 4
+};
+
+struct DrivetrainConfig {
+    DrivetrainType type;                   // default BALLSCREW
+    float lead_mm;                         // ballscrew lead (mm/rev)
+    float belt_lead_mm_per_rev;            // belt lead (mm/rev)
+    float pinion_pitch_diameter_mm;        // rack-and-pinion pitch diameter
+    float output_gear_ratio;               // rotary direct, output:motor
+    float encoder_ppr;                     // encoder pulses per rev
+    float motor_reducer_ratio;             // reducer between motor and drivetrain input
+};
+
+// Free-function helpers:
+double pulsesPerMm (const DrivetrainConfig&);
+double pulsesPerDeg(const DrivetrainConfig&);
 
 struct DriverConfig {
-    // Pin indices (see header doxygen for slot semantics):
-    int input_pin_nos[6];     // [0]POS_reached [1]BRAKE [2]ALM [3]A+ [4]B+ [5]Z+
-    int output_pin_nos[8];    // [0]SON [1]ARST [2]CW/CCW [3]CLE [4]INH [5]GEARI [6]PULS [7]SIGN
+    // Named electrical pins (all default -1 when not routed):
+    int pulse_pin;
+    int dir_pin;
+    int enable_pin;
+    int alarm_reset_pin;
+    int alarm_pin;
+    int in_position_pin;
+    int brake_pin;
+    int encoder_a_pin;
+    int encoder_b_pin;
+    int encoder_z_pin;
+    int limit_min_pin;
+    int limit_max_pin;
 
-    PulseMode    pulse_mode;      // default PULSE_DIRECTION
-    ControlMode  control_mode;    // default POSITION
-
-    uint32_t max_pulse_freq;      // Hz, default 600 000
-    uint32_t encoder_ppr;         // default 12 000
-    double   gear_numerator;      // default 1.0
-    double   gear_denominator;    // default 1.0
+    PulseMode pulse_mode;           // default PULSE_DIRECTION
+    uint32_t  max_pulse_freq;       // Hz, default 600 000
+    uint32_t  encoder_ppr;          // default 12 000
+    double    gear_numerator;       // default 1.0
+    double    gear_denominator;     // default 1.0
 
     // LEDC pulse generation
-    int     ledc_channel;         // default 0
-    int     ledc_pulse_pin;       // default -1 (falls back to output_pin_nos[6])
-    uint8_t ledc_resolution;      // default 2 bits (for high freq)
+    int     ledc_channel;           // default 0
+    int     ledc_pulse_pin;         // default -1 (auto-synced from pulse_pin at init)
+    uint8_t ledc_resolution;        // default 2 bits
 
     bool enable_encoder_feedback;   // default false
     bool enable_closed_loop_control;// default false
@@ -434,8 +462,6 @@ struct DriverConfig {
     uint8_t  limit_debounce_cycles;     // default 10
     uint16_t limit_sample_interval_ms;  // default 3
     bool     limit_log_changes;         // default true
-    int      limit_min_pin;             // default -1
-    int      limit_max_pin;             // default -1
 };
 
 struct DriveStatus {
@@ -455,11 +481,11 @@ using PositionReachedCallback = void (*)(uint32_t position);
 using StatusUpdateCallback    = void (*)(const DriveStatus&);
 ```
 
-### 5.2 `BergerdaServo::ServoDriver`
+### 5.2 `PulseMotor::PulseMotorDriver`
 
 ```cpp
-explicit ServoDriver(const DriverConfig& config);
-~ServoDriver();
+explicit PulseMotorDriver(const DriverConfig& config);
+~PulseMotorDriver();
 bool initialize();
 
 bool enable();
@@ -510,7 +536,7 @@ Key implementation details:
 - Pulse output via **LEDC** (default ch0, 2-bit resolution to allow very high freq).
 - Encoder via **`pulse_cnt`** (ESP-IDF v5+ API), with 64-bit `encoder_accumulator_` to survive 16-bit wrap.
 - `esp_timer_handle_t ramp_timer_` fires `rampTimerCallback` every 5 ms to update the trapezoidal profile.
-- All public methods take `mutex_` when `SDF08NK8X_USE_FREERTOS=1` (default).
+- The underlying pulse engine remains FreeRTOS-safe with the legacy mutex path enabled.
 
 ---
 
@@ -632,15 +658,20 @@ The console reads from stdin (USB serial via `idf.py monitor` or equivalent) wit
 
 ## 9. Application-Level Constants
 
-All in `include/gantry_app_constants.h`.
+Commissioning-facing constants live in three headers, each with a different
+separation of concerns. `gantry_app_constants.h` is the top-level one, and it
+transitively includes the other two.
+
+### 9.1 `include/gantry_app_constants.h` — pin map + task/peripheral wiring
 
 ```c
 // Hardware peripheral channels
 #define X_PULSE_LEDC_CHANNEL      0
 #define Y_PULSE_LEDC_CHANNEL      1
-#define THETA_PWM_LEDC_CHANNEL    2
+#define THETA_PULSE_LEDC_CHANNEL  2
 #define X_ENCODER_PCNT_UNIT       0
 #define Y_ENCODER_PCNT_UNIT       1
+#define THETA_ENCODER_PCNT_UNIT   2
 
 // MCP defaults
 #define MCP23S17_DEVICE_ADDRESS         0x00
@@ -648,23 +679,88 @@ All in `include/gantry_app_constants.h`.
 #define MCP23S17_SPI_CLOCK_HZ_WORKING    1000000   // actually used
 #define MCP_DEBUG_CMDS                  1
 
-// Motion defaults
-#define GANTRY_HOMING_SPEED_PPS    6000
-#define GANTRY_ENCODER_PPR         6000
-#define GANTRY_MAX_PULSE_FREQ      10000
-#define GANTRY_X_MIN_MM            0.0f
-#define GANTRY_X_MAX_MM            200.0f
-#define GANTRY_Y_STEPS_PER_MM      200.0f
-#define GANTRY_Y_MIN_MM            0.0f
-#define GANTRY_Y_MAX_MM            200.0f
-#define GANTRY_Y_MAX_SPEED_MMPS    100.0f
-#define GANTRY_Y_ACCEL_MMPS2       500.0f
-#define GANTRY_Y_DECEL_MMPS2       500.0f
-#define GANTRY_THETA_MIN_DEG      -90.0f
-#define GANTRY_THETA_MAX_DEG       90.0f
-#define GANTRY_THETA_MIN_PULSE_US  1000
-#define GANTRY_THETA_MAX_PULSE_US  2000
-#define GANTRY_SAFE_Y_MM           150.0f
+// Task defaults
+#define GANTRY_UPDATE_TASK_STACK    4096
+#define GANTRY_UPDATE_TASK_PRIORITY 5
+#define GANTRY_UPDATE_TASK_CORE     1
+#define CONSOLE_TASK_STACK          4096
+#define CONSOLE_TASK_PRIORITY       1
+#define CONSOLE_TASK_CORE           0
+```
+
+### 9.2 `include/axis_pulse_motor_params.h` — per-axis electrical tuning
+
+Motor/driver/gearbox-side values. Edited when a motor, driver, or reducer is
+swapped. Per-axis prefix (`AXIS_X_*`, `AXIS_Y_*`, `AXIS_THETA_*`).
+
+```c
+#define AXIS_X_ENCODER_PPR              10000
+#define AXIS_X_MAX_PULSE_FREQ_HZ        200000
+#define AXIS_X_GEAR_NUMERATOR           1.0f
+#define AXIS_X_GEAR_DENOMINATOR         1.0f
+#define AXIS_X_MOTOR_REDUCER_RATIO      1.0f
+#define AXIS_X_INVERT_DIR               1
+#define AXIS_X_INVERT_OUTPUT_LOGIC      1
+#define AXIS_X_LEDC_RESOLUTION_BITS     2
+#define AXIS_X_HOMING_SPEED_PPS         6000
+#define AXIS_X_LIMIT_DEBOUNCE_CYCLES    10
+#define AXIS_X_LIMIT_SAMPLE_INTERVAL_MS 3
+// ... AXIS_Y_* and AXIS_THETA_* mirror the same shape.
+```
+
+### 9.3 `include/axis_drivetrain_params.h` — per-axis mechanical tuning
+
+Gantry-side mechanical values. Edited when a ballscrew lead, belt, pulley, or
+gearbox is swapped. The *drivetrain category* (ballscrew / belt / rack-pinion /
+rotary-direct) is selected in code via the `PulseMotor::DrivetrainType` enum
+when building the `PulseMotor::DrivetrainConfig`. The numbers below feed the
+type-specific fields.
+
+```c
+// X axis: SCHUNK Beta 100-ZRS toothed belt, 200 mm/rev
+#define AXIS_X_BELT_LEAD_MM_PER_REV     200.0f
+#define AXIS_X_TRAVEL_MIN_MM              0.0f
+#define AXIS_X_TRAVEL_MAX_MM            550.0f
+#define AXIS_X_MAX_SPEED_MM_PER_S       500.0f
+#define AXIS_X_ACCEL_MM_PER_S2         3000.0f
+#define AXIS_X_DECEL_MM_PER_S2         3000.0f
+#define AXIS_X_POSITION_TOLERANCE_MM     0.08f
+
+// Y axis: SCHUNK Beta 80-SRS ballscrew, 20 mm lead
+#define AXIS_Y_BALLSCREW_LEAD_MM         20.0f
+#define AXIS_Y_BALLSCREW_CRITICAL_RPM    3000
+#define AXIS_Y_TRAVEL_MIN_MM              0.0f
+#define AXIS_Y_TRAVEL_MAX_MM            150.0f
+// ... speed/accel caps, tolerance ...
+
+// Theta: SCHUNK ERD 04-40-D-H-N, rotary direct
+#define AXIS_THETA_OUTPUT_GEAR_RATIO     1.0f
+#define AXIS_THETA_TRAVEL_MIN_DEG      -180.0f
+#define AXIS_THETA_TRAVEL_MAX_DEG       180.0f
+#define AXIS_THETA_POSITION_TOLERANCE_DEG 0.01f
+
+// Gantry kinematic offsets and gripper timing
+#define GANTRY_Y_AXIS_Z_OFFSET_MM        80.0f
+#define GANTRY_THETA_X_OFFSET_MM        -55.0f
+#define GANTRY_GRIPPER_Y_OFFSET_MM      385.0f
+#define GANTRY_GRIPPER_Z_OFFSET_MM       80.0f
+#define GANTRY_SAFE_Y_HEIGHT_MM         150.0f
+#define GANTRY_GRIPPER_OPEN_TIME_MS      190
+#define GANTRY_GRIPPER_CLOSE_TIME_MS     150
+```
+
+Derived helpers (exposed for diagnostics and inline constants):
+
+```c
+#define AXIS_X_PULSES_PER_MM \
+  ((AXIS_X_ENCODER_PPR * AXIS_X_MOTOR_REDUCER_RATIO) / AXIS_X_BELT_LEAD_MM_PER_REV)
+#define AXIS_Y_PULSES_PER_MM \
+  ((AXIS_Y_ENCODER_PPR * AXIS_Y_MOTOR_REDUCER_RATIO) / AXIS_Y_BALLSCREW_LEAD_MM)
+#define AXIS_THETA_PULSES_PER_DEG \
+  ((AXIS_THETA_ENCODER_PPR * AXIS_THETA_MOTOR_REDUCER_RATIO * \
+    AXIS_THETA_OUTPUT_GEAR_RATIO) / 360.0f)
+#define AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
+  ((AXIS_Y_BALLSCREW_CRITICAL_RPM / 60.0f) * AXIS_Y_BALLSCREW_LEAD_MM)
 ```
 
 ---
@@ -745,7 +841,7 @@ project(wt32_eth01_base)
 - `idf/main/idf_component.yml` — must declare `espressif/arduino-esp32` and any other managed components.
 - `idf/sdkconfig.defaults` — board/feature defaults for the WT32-ETH01.
 
-Do not regenerate `main/CMakeLists.txt` with a `REQUIRES SDF08NK8X MCP23S17 Gantry` line; those aren't separate components. If that happens, `idf.py reconfigure` fails with `Failed to resolve component 'SDF08NK8X'`. Revert to the compile-from-lib-tree layout (sources listed directly via `SRC_DIRS` / `INCLUDE_DIRS`).
+Do not regenerate `main/CMakeLists.txt` with a `REQUIRES PulseMotor MCP23S17 Gantry` line; those aren't separate components. If that happens, `idf.py reconfigure` fails with `Failed to resolve component 'PulseMotor'`. Revert to the compile-from-lib-tree layout (sources listed directly via `SRC_DIRS` / `INCLUDE_DIRS`).
 
 ### 11.4 Strap pins and boot stability
 

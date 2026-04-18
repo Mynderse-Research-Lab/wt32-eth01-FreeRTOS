@@ -116,34 +116,26 @@ The Gantry library provides a modular, extensible architecture for controlling a
 - `TrapezoidalProfile`: Motion profile parameters
 - `TrajectoryPlanner`: Profile calculation
 
-#### 5. `GantryAxisStepper`
-**File:** `GantryAxisStepper.h/cpp`
+#### 5. `PulseMotor::PulseMotorDriver` (one instance per axis)
+**File:** `lib/PulseMotor/src/PulseMotor.{h,cpp}` (external library)
 
 **Responsibilities:**
-- Y-axis stepper motor control
-- Step/dir signal generation
-- Trapezoidal motion profiles
-- Limit checking
+- Pulse-train generation for X, Y, Theta axes (one driver per axis).
+- Trapezoidal velocity profiles on the driver side.
+- Encoder feedback via PCNT.
+- Alarm / position-reached / brake signal monitoring.
 
 **Key Features:**
-- Cooperative update loop
-- Acceleration/deceleration control
-- Position tracking
+- LEDC-backed pulse output (hardware PWM, glitch-free).
+- Per-axis `PulseMotor::DrivetrainConfig` installed by the Gantry layer for
+  mm/deg ↔ pulse conversion.
+- Optional FreeRTOS mutex (`PULSE_MOTOR_USE_FREERTOS`).
 
-#### 6. `GantryRotaryServo`
-**File:** `GantryRotaryServo.h/cpp`
+> Earlier versions of this library used `GantryAxisStepper` (step/dir Y) and
+> `GantryRotaryServo` (PWM-hobby theta). Both were retired when all three axes
+> moved to PulseMotor.
 
-**Responsibilities:**
-- Theta-axis PWM servo control
-- Angle-to-pulse conversion
-- Limit enforcement
-
-**Key Features:**
-- ESP32 LEDC support
-- Standard Servo library fallback
-- Configurable pulse ranges
-
-#### 7. `GantryEndEffector`
+#### 6. `GantryEndEffector`
 **File:** `GantryEndEffector.h/cpp`
 
 **Responsibilities:**
@@ -155,7 +147,7 @@ The Gantry library provides a modular, extensible architecture for controlling a
 - Simple on/off control
 - Configurable polarity
 
-#### 8. `GantryUtils`
+#### 7. `GantryUtils`
 **File:** `GantryUtils.h`
 
 **Responsibilities:**
@@ -363,9 +355,9 @@ Velocity
 - Acceleration (mm/s²)
 - Deceleration (mm/s²)
 
-#### X-axis Motion (SDF08NK8X)
+#### X-axis Motion (PulseMotor)
 
-X-axis uses the SDF08NK8X driver's built-in motion profiles:
+X-axis uses the PulseMotor driver's built-in motion profiles:
 - Trapezoidal velocity profiles
 - Configurable acceleration/deceleration
 - Encoder feedback for position control
@@ -438,11 +430,11 @@ void Gantry::update() {
 
 ### Limit Switch Handling
 
-**Architecture:** Limit switches are handled by actuator libraries, not the Gantry class.
-
-- **X-axis**: SDF08NK8X driver handles limit switch debouncing and safety
-- **Y-axis**: GantryAxisStepper validates limits before movement
-- **Gantry class**: Only calls actuator library methods
+**Architecture:** Limit switches are owned by the Gantry layer via two
+`GantryLimitSwitch` instances for the X axis. `PulseMotor::PulseMotorDriver`
+exposes `limit_min_pin`/`limit_max_pin` fields, but the Gantry library leaves
+them at `-1` so the shared debouncing + safe-direction logic can run in one
+place for all three axes.
 
 **Benefits:**
 - Separation of concerns
@@ -458,7 +450,7 @@ bool Gantry::isAlarmActive() const {
 ```
 
 **Alarm Sources:**
-- X-axis driver alarms (SDF08NK8X)
+- X-axis driver alarms (PulseMotor)
 - Motion timeouts
 - Limit switch violations
 
@@ -522,10 +514,15 @@ Well within ESP32's 320KB RAM limit.
 
 ### 1. Strategy Pattern
 
-Each axis type uses a different driver strategy:
-- X-axis: SDF08NK8X driver
-- Y-axis: GantryAxisStepper
-- Theta: GantryRotaryServo
+Each axis type uses a `PulseMotor::DrivetrainConfig` to express its
+mechanical strategy:
+- X-axis: belt drivetrain
+- Y-axis: ballscrew drivetrain
+- Theta: rotary-direct drivetrain
+
+Every axis runs on the same `PulseMotor::PulseMotorDriver` implementation;
+the `DrivetrainConfig` is what makes each behave differently at the
+mm/deg ↔ pulse conversion layer.
 
 ### 2. State Pattern
 

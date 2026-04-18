@@ -1,6 +1,9 @@
 #ifndef GANTRY_APP_CONSTANTS_H
 #define GANTRY_APP_CONSTANTS_H
 
+#include "axis_pulse_motor_params.h"
+#include "axis_drivetrain_params.h"
+
 // MCP23S17 is mandatory for this application.
 #define APP_USE_MCP23S17 1
 
@@ -33,8 +36,8 @@
 #define PIN_Y_LIMIT_MAX 11
 #define PIN_Y_ALARM_STATUS 12
 #define PIN_Y_ALARM_RESET 13
-#define PIN_THETA_LIMIT_MIN 14
-#define PIN_THETA_LIMIT_MAX 15
+#define PIN_THETA_DIR 14
+#define PIN_THETA_ENABLE 15
 
 // Direct ESP32 GPIO pins (hardware peripheral requirements)
 // NOTE:
@@ -52,15 +55,17 @@
 #define PIN_X_ENC_B 36
 #define PIN_Y_ENC_A 39
 #define PIN_Y_ENC_B 32
-// GPIO0 is a boot strapping pin; keep HIGH during reset for normal boot.
-#define PIN_THETA_PWM 0
+#define PIN_THETA_PULSE 0
+#define PIN_THETA_ENC_A -1
+#define PIN_THETA_ENC_B -1
 
 // Hardware peripheral channel allocation
 #define X_PULSE_LEDC_CHANNEL 0
 #define Y_PULSE_LEDC_CHANNEL 1
-#define THETA_PWM_LEDC_CHANNEL 2
+#define THETA_PULSE_LEDC_CHANNEL 2
 #define X_ENCODER_PCNT_UNIT 0
 #define Y_ENCODER_PCNT_UNIT 1
+#define THETA_ENCODER_PCNT_UNIT 2
 
 // MCP23S17 defaults
 #define MCP23S17_DEVICE_ADDRESS 0x00
@@ -68,23 +73,21 @@
 // Keep MCP diagnostics available by default; set to 0 for lean production console.
 #define MCP_DEBUG_CMDS 1
 
-// Gantry motion defaults
-#define GANTRY_HOMING_SPEED_PPS 6000
-#define GANTRY_ENCODER_PPR 6000
-#define GANTRY_MAX_PULSE_FREQ 10000
-#define GANTRY_X_MIN_MM 0.0f
-#define GANTRY_X_MAX_MM 200.0f
-#define GANTRY_Y_STEPS_PER_MM 200.0f
-#define GANTRY_Y_MIN_MM 0.0f
-#define GANTRY_Y_MAX_MM 200.0f
-#define GANTRY_Y_MAX_SPEED_MMPS 100.0f
-#define GANTRY_Y_ACCEL_MMPS2 500.0f
-#define GANTRY_Y_DECEL_MMPS2 500.0f
-#define GANTRY_THETA_MIN_DEG -90.0f
-#define GANTRY_THETA_MAX_DEG 90.0f
-#define GANTRY_THETA_MIN_PULSE_US 1000
-#define GANTRY_THETA_MAX_PULSE_US 2000
-#define GANTRY_SAFE_Y_MM 150.0f
+// Backwards-compatible aliases for existing call sites
+#define GANTRY_HOMING_SPEED_PPS AXIS_X_HOMING_SPEED_PPS
+#define GANTRY_ENCODER_PPR AXIS_X_ENCODER_PPR
+#define GANTRY_MAX_PULSE_FREQ AXIS_X_MAX_PULSE_FREQ_HZ
+#define GANTRY_X_MIN_MM AXIS_X_TRAVEL_MIN_MM
+#define GANTRY_X_MAX_MM AXIS_X_TRAVEL_MAX_MM
+#define GANTRY_Y_STEPS_PER_MM AXIS_Y_PULSES_PER_MM
+#define GANTRY_Y_MIN_MM AXIS_Y_TRAVEL_MIN_MM
+#define GANTRY_Y_MAX_MM AXIS_Y_TRAVEL_MAX_MM
+#define GANTRY_Y_MAX_SPEED_MMPS AXIS_Y_MAX_SPEED_MM_PER_S
+#define GANTRY_Y_ACCEL_MMPS2 AXIS_Y_ACCEL_MM_PER_S2
+#define GANTRY_Y_DECEL_MMPS2 AXIS_Y_DECEL_MM_PER_S2
+#define GANTRY_THETA_MIN_DEG AXIS_THETA_TRAVEL_MIN_DEG
+#define GANTRY_THETA_MAX_DEG AXIS_THETA_TRAVEL_MAX_DEG
+#define GANTRY_SAFE_Y_MM GANTRY_SAFE_Y_HEIGHT_MM
 
 // Task defaults
 #define GANTRY_UPDATE_TASK_STACK 4096

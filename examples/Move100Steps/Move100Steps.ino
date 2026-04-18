@@ -14,7 +14,7 @@
  * 
  * Hardware Requirements:
  * - WT32-ETH01 or ESP32 development board
- * - SDF08NK8X servo driver
+ * - Pulse-train motor driver
  * - Servo motor (encoder not required)
  * 
  * Pin Connections (WT32-ETH01):
@@ -25,9 +25,9 @@
  * - GPIO 32 -> Limit switch MAX (End position, active LOW)
  */
 
-#include "SDF08NK8X.h"
+#include "PulseMotor.h"
 
-using namespace BergerdaServo;
+using namespace PulseMotor;
 
 // Pin Definitions (WT32-ETH01 Safe)
 #define PIN_PULSE    2   // Output: Pulse signal to servo driver
@@ -38,7 +38,7 @@ using namespace BergerdaServo;
 
 // Servo Driver Configuration
 DriverConfig driverConfig;
-ServoDriver* driver = nullptr;
+PulseMotorDriver* driver = nullptr;
 
 // Motion Parameters
 const uint32_t STEPS_TO_MOVE = 100;        // Number of steps to move
@@ -55,9 +55,9 @@ void setup() {
   Serial.println("========================================\n");
   
   // Configure servo driver pins
-  driverConfig.output_pin_nos[6] = PIN_PULSE;   // PULSE output
-  driverConfig.output_pin_nos[7] = PIN_DIR;      // DIR output
-  driverConfig.output_pin_nos[0] = PIN_ENABLE;  // ENABLE output
+  driverConfig.pulse_pin = PIN_PULSE;
+  driverConfig.dir_pin = PIN_DIR;
+  driverConfig.enable_pin = PIN_ENABLE;
   
   // Disable encoder feedback - use internal step counting only
   driverConfig.enable_encoder_feedback = false;
@@ -68,10 +68,9 @@ void setup() {
   
   // Set control mode
   driverConfig.pulse_mode = PulseMode::PULSE_DIRECTION;
-  driverConfig.control_mode = ControlMode::POSITION;
   
   // Create servo driver instance
-  driver = new ServoDriver(driverConfig);
+  driver = new PulseMotorDriver(driverConfig);
   
   // Initialize driver
   Serial.println("Initializing servo driver...");
