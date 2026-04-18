@@ -1,10 +1,10 @@
 # Gantry Library
 
-**Version:** 2.0.0
-**Platform:** ESP32 (WT32-ETH01)
-**Framework:** ESP-IDF (FreeRTOS) / Arduino-ESP32
+**Version:** 1.0.0 (In Development)  
+**Platform:** ESP32 (WT32-ETH01)  
+**Framework:** ESP-IDF (FreeRTOS)  
 
-Multi-axis gantry control library for ESP32. Three pulse-train axes (X, Y, Theta) driven through `PulseMotor::PulseMotorDriver`, with safe-height motion sequencing, kinematics, and trajectory planning for pick-and-place applications.
+A comprehensive multi-axis gantry control library for ESP32 with 3-DoF support (X, Y, Theta) designed for pick-and-place applications with conveyor synchronization.
 
 ---
 
@@ -15,203 +15,334 @@ Multi-axis gantry control library for ESP32. Three pulse-train axes (X, Y, Theta
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Documentation](#documentation)
+- [Development Status](#development-status)
 - [Installation](#installation)
+- [Examples](#examples)
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Thread Safety](#thread-safety)
-- [Coordinate Systems](#coordinate-systems)
-- [Error Handling](#error-handling)
-- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
 
 ## Overview
 
-Three axes, one driver family:
+The Gantry library provides a complete motion control system for a 3-axis gantry robot. All three motion axes are driven by the generic `PulseMotor` library (see `lib/PulseMotor/`), so any mix of pulse-train driver hardware can be used. Per-axis drivetrain topology is configured independently via a `DrivetrainType` enum:
 
-- **X axis** — linear (belt or ballscrew), driven by `PulseMotor::PulseMotorDriver`.
-- **Y axis** — linear (belt or ballscrew), driven by `PulseMotor::PulseMotorDriver`.
-- **Theta axis** — rotary-direct, driven by `PulseMotor::PulseMotorDriver`.
-- **End-effector** — digital output (pneumatic gripper).
+- **X-axis**: Horizontal linear joint. Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt actuator (200 mm/rev).
+- **Y-axis**: Vertical linear joint. Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator (20 mm pitch).
+- **Theta-axis**: Rotational joint. Default deployment: custom pulse-train driver + SCHUNK ERD 04-40-D-H-N miniature rotary module.
+- **End-effector**: Digital output; default deployment is a SCHUNK KGG 100-80 pneumatic gripper.
 
-Per-axis mm↔pulse (and deg↔pulse for Theta) conversion is supplied by
-`PulseMotor::DrivetrainConfig` records installed via `setXDrivetrain()`,
-`setYDrivetrain()`, `setThetaDrivetrain()`.
+The library implements sequential motion planning, forward/inverse kinematics, trajectory planning, and safety features suitable for industrial automation applications.
 
 ---
 
 ## Features
 
-- **Three pulse-train axes** under a single driver family (`PulseMotor::PulseMotorDriver`) — no stepper or PWM-hobby-servo fallbacks.
-- **Sequential motion planning** — Y descends to target → gripper actuates → Y retracts to safe height → X translates.
-- **Kinematics** — forward/inverse mapping between joint space and workspace, plus joint-limit validation.
-- **Homing + calibration** for X-axis using MIN/MAX limit switches.
-- **Alarm propagation** from every configured driver and a unified `clearAlarm()`.
-- **Non-blocking FreeRTOS-compatible design.**
+### ✅ Implemented Features
+
+- **Multi-axis Control**
+  - X / Y / Theta: PulseMotor driver (pulse+direction), each with independent `DrivetrainConfig` (ballscrew, belt, rack-pinion, or rotary-direct).
+  - Encoder feedback per axis via PCNT (when wired).
+  - Trapezoidal velocity profiles in the driver, 5 ms ramp callback.
+  - End-effector: digital output gripper control (e.g. SCHUNK KGG 100-80).
+
+- **Sequential Motion Planning**
+  - Automatic Y-axis descent → gripper actuation → Y-axis retraction → X-axis movement
+  - Safe height management for collision avoidance
+  - Non-blocking state machine execution
+
+- **Kinematics**
+  - Forward kinematics (joint space → workspace)
+  - Inverse kinematics (workspace → joint space)
+  - Joint limit validation
+  - Workspace coordinate system
+
+- **Safety Features**
+  - Limit switch handling (delegated to actuator libraries)
+  - Alarm monitoring
+  - Motion state validation
+  - Emergency stop support
+
+- **Homing & Calibration**
+  - X-axis homing sequence
+  - Automatic axis length calibration
+  - Position reference management
+
+- **FreeRTOS Compatible**
+  - Non-blocking operations
+  - Cooperative update loop
+  - Task-safe design patterns
+
+### 🚧 In Progress
+
+- Trajectory waypoint queue execution
+- Enhanced error recovery
+- Performance optimization
+- Extended documentation
+
+### 📋 Planned Features
+
+- S-curve motion profiles
+- Collision detection
+- Advanced trajectory planning
+- Configuration persistence (EEPROM)
+- Network status reporting (MQTT)
 
 ---
 
 ## Quick Start
 
+### Basic Setup
+
 ```cpp
 #include "Gantry.h"
-#include "axis_pulse_motor_params.h"
-#include "axis_drivetrain_params.h"
+#include "PulseMotor.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
 
-// ---- 1) Build three PulseMotor::DriverConfig objects (X, Y, Theta) ----
-PulseMotor::DriverConfig xConfig;
-xConfig.pulse_pin        = PIN_X_PULSE_EXP;
-xConfig.dir_pin          = PIN_X_DIR;
-xConfig.enable_pin       = PIN_X_ENABLE;
-xConfig.alarm_pin        = PIN_X_ALARM_STATUS;
-xConfig.alarm_reset_pin  = PIN_X_ALARM_RESET;
-xConfig.encoder_a_pin    = PIN_X_ENC_A;
-xConfig.encoder_b_pin    = PIN_X_ENC_B;
-xConfig.enable_encoder_feedback = true;
-xConfig.encoder_ppr      = AXIS_X_ENCODER_PPR;
-xConfig.max_pulse_freq   = AXIS_X_MAX_PULSE_FREQ_HZ;
-xConfig.invert_dir_pin   = AXIS_X_INVERT_DIR;
-// ... populate yConfig and thetaConfig the same way.
+static const char *TAG = "Gantry";
 
-// ---- 2) Construct the Gantry with all three drivers ----
-static Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, PIN_GRIPPER);
+// Configure each axis's driver + drivetrain independently.
+// (Typically these come from include/axis_pulse_motor_params.h and
+//  include/axis_drivetrain_params.h in the full application; values shown
+//  inline here for clarity.)
+PulseMotor::DriverConfig xDrv;
+xDrv.pulse_pin      = X_PULSE_GPIO;
+xDrv.dir_pin        = X_DIR_PIN;
+xDrv.enable_pin     = X_ENABLE_PIN;
+xDrv.encoder_a_pin  = X_ENC_A_GPIO;
+xDrv.encoder_b_pin  = X_ENC_B_GPIO;
+xDrv.encoder_ppr    = 10000;
+xDrv.enable_encoder_feedback = true;
+xDrv.pulse_mode     = PulseMotor::PulseMode::PULSE_DIRECTION;
 
-// ---- 3) Install per-axis drivetrains (mm/deg <-> pulse scaling) ----
 PulseMotor::DrivetrainConfig xDt;
-xDt.type                  = PulseMotor::DrivetrainType::BELT;
-xDt.belt_lead_mm_per_rev  = AXIS_X_BELT_LEAD_MM_PER_REV;
-xDt.encoder_ppr           = AXIS_X_ENCODER_PPR;
-xDt.motor_reducer_ratio   = AXIS_X_MOTOR_REDUCER_RATIO;
-gantry.setXDrivetrain(xDt);
+xDt.type                 = PulseMotor::DRIVETRAIN_BELT;   // Beta 100-ZRS
+xDt.belt_lead_mm_per_rev = 200.0f;
+xDt.encoder_ppr          = xDrv.encoder_ppr;
+xDt.motor_reducer_ratio  = 1.0f;
 
-PulseMotor::DrivetrainConfig yDt;
-yDt.type                  = PulseMotor::DrivetrainType::BALLSCREW;
-yDt.lead_mm               = AXIS_Y_BALLSCREW_LEAD_MM;
-yDt.encoder_ppr           = AXIS_Y_ENCODER_PPR;
-yDt.motor_reducer_ratio   = AXIS_Y_MOTOR_REDUCER_RATIO;
-gantry.setYDrivetrain(yDt);
+// Repeat for yDrv/yDt (ballscrew) and tDrv/tDt (rotary-direct).
 
-PulseMotor::DrivetrainConfig thetaDt;
-thetaDt.type              = PulseMotor::DrivetrainType::ROTARY_DIRECT;
-thetaDt.output_gear_ratio = AXIS_THETA_OUTPUT_GEAR_RATIO;
-thetaDt.encoder_ppr       = AXIS_THETA_ENCODER_PPR;
-thetaDt.motor_reducer_ratio = AXIS_THETA_MOTOR_REDUCER_RATIO;
-gantry.setThetaDrivetrain(thetaDt);
+Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, GRIPPER_PIN);
+gantry.setLimitPins(MIN_LIMIT_PIN, MAX_LIMIT_PIN);
+gantry.setYAxisLimits(0.0f, 200.0f);  // 0-200mm travel
+gantry.setThetaLimits(-180.0f, 180.0f);  // soft angular limits
 
-// ---- 4) Limits + safe height ----
-gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
-gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM, AXIS_X_TRAVEL_MAX_MM,
-                      AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
-                      AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
-gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
-
-// ---- 5) Bring up ----
+// Initialize
 gantry.begin();
 gantry.enable();
+
+// Home X-axis
 gantry.home();
 
-// ---- 6) Move ----
+// Move to position (joint space)
 Gantry::JointConfig target;
-target.x     = 100.0f;
-target.y     =  50.0f;
-target.theta =  45.0f;
-gantry.moveTo(target, 50, 30);          // 50 mm/s, 30 deg/s
+target.x = 100.0f;    // 100mm
+target.y = 50.0f;     // 50mm
+target.theta = 45.0f; // 45 degrees
 
-// ---- 7) Update task ----
-void gantryUpdateTask(void *pv) {
-    auto *g = static_cast<Gantry::Gantry *>(pv);
+gantry.moveTo(target, 50, 30);  // 50 mm/s, 30 deg/s
+
+// Update task (call frequently)
+void gantryUpdateTask(void *pvParameters) {
     while (1) {
-        g->update();
-        vTaskDelay(pdMS_TO_TICKS(10));  // 100 Hz
+        gantry.update();
+        vTaskDelay(pdMS_TO_TICKS(10));  // 100 Hz update rate
     }
 }
+
+void app_main(void) {
+    // Create update task
+    xTaskCreate(gantryUpdateTask, "GantryUpdate", 4096, NULL, 5, NULL);
+    
+    // Other initialization...
+}
+```
+
+### Sequential Motion Example
+
+```cpp
+// The library automatically sequences:
+// 1. Y-axis descends to target Y
+// 2. Gripper actuates (close for picking, open for placing)
+// 3. Y-axis retracts to safe height
+// 4. X-axis moves to target X
+// 5. Theta moves independently
+
+Gantry::JointConfig pickPos;
+pickPos.x = 200.0f;
+pickPos.y = 30.0f;   // Low position for picking
+pickPos.theta = 0.0f;
+
+gantry.moveTo(pickPos, 50, 30);
+while (gantry.isBusy()) {
+    gantry.update();
+    delay(10);
+}
+
+// Now move to place position
+Gantry::JointConfig placePos;
+placePos.x = 400.0f;
+placePos.y = 30.0f;
+placePos.theta = 90.0f;
+
+gantry.moveTo(placePos, 50, 30);
 ```
 
 ---
 
 ## Architecture
 
+The library is organized into modular components:
+
 ```
 Gantry Library
-├── Gantry.h/cpp             — Main gantry control class + sequential state machine
-├── GantryConfig.h           — Configuration structs (JointConfig, JointLimits, KinematicParameters, ...)
-├── GantryKinematics.h/cpp   — Forward/inverse kinematics + validation
-├── GantryTrajectory.h/cpp   — Trapezoidal profile helpers
-├── GantryEndEffector.h/cpp  — Digital gripper
-├── GantryLimitSwitch.h/cpp  — Debounced limit input
-└── GantryUtils.h            — Constants + assert macros
+├── Gantry.h/cpp                         - Main gantry control class
+├── GantryConfig.h/cpp                   - Configuration structures (JointConfig, EndEffectorPose, KinematicParameters)
+├── GantryKinematics.h/cpp               - Forward/inverse kinematics
+├── GantryTrajectory.h/cpp               - Trajectory planning
+├── GantryLinearAxis.h                   - Abstract linear-axis interface (mm domain)
+├── GantryRotaryAxis.h                   - Abstract rotary-axis interface (deg domain)
+├── GantryPulseMotorLinearAxis.h/cpp     - Linear-axis implementation on PulseMotor
+├── GantryPulseMotorRotaryAxis.h/cpp     - Rotary-axis implementation on PulseMotor
+├── GantryEndEffector.h/cpp              - Gripper control
+├── GantryLimitSwitch.h/cpp              - Debounced limit switch input
+└── GantryUtils.h                        - Constants and macros
 ```
 
-### Design principles
+### Key Design Principles
 
-1. **One driver family** — all three axes run through `PulseMotor::PulseMotorDriver`.
-2. **Explicit drivetrain metadata** — mm/deg↔pulse conversion lives in `PulseMotor::DrivetrainConfig`, one per axis.
-3. **Gantry owns limit switches** — via `GantryLimitSwitch`. The driver's own `limit_min_pin`/`limit_max_pin` fields are left at `-1`.
-4. **FreeRTOS-friendly** — non-blocking `update()` loop, per-driver ramp timer on `esp_timer`.
-
-### Sequential motion state machine
-
-```
-IDLE
-  ↓ startSequentialMotion()
-Y_DESCENDING          ← Y moves down if target < current
-  ↓
-GRIPPER_ACTUATING     ← grip open/close; timing from GANTRY_GRIPPER_*_TIME_MS
-  ↓
-Y_RETRACTING          ← Y returns to safeYHeight_mm_ before X is allowed
-  ↓
-X_MOVING              ← axisX_.moveRelative(...)
-  ↓
-THETA_MOVING          ← runs in parallel; does not block the others
-  ↓
-IDLE
-```
+1. **Modularity**: Each axis type has its own driver class
+2. **Separation of Concerns**: Kinematics, trajectory, and control are separate
+3. **Reusability**: Helper functions eliminate code duplication
+4. **Safety First**: Limit switches and alarms handled by actuator libraries
+5. **FreeRTOS Friendly**: Non-blocking, cooperative design
 
 ---
 
 ## Documentation
 
-- **[API Reference](docs/API_REFERENCE.md)** — detailed function-by-function documentation.
-- **[Architecture Guide](docs/ARCHITECTURE.md)** — internals, state machine, PCNT/LEDC wiring.
-- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** — tuning and commissioning.
-- **[Examples](docs/EXAMPLES.md)** — code snippets for common tasks.
-- **[Development Journal](docs/DEVELOPMENT_JOURNAL.md)** — chronological engineering history.
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - Setup and tuning
+- **[Examples](docs/EXAMPLES.md)** - Code examples and tutorials
+- **[Development Journal](docs/DEVELOPMENT_JOURNAL.md)** - Chronological engineering journal
+- **[Changelog](CHANGELOG.md)** - Version history
+
+---
+
+## Development Status
+
+**Current Version:** 1.0.0 (In Development)
+
+### Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| X-axis (PulseMotor + belt) | ✅ Complete | Kinetix 5100 + SCHUNK Beta 100-ZRS |
+| Y-axis (PulseMotor + ballscrew) | ✅ Complete | Kinetix 5100 + SCHUNK Beta 80-SRS |
+| Theta-axis (PulseMotor + rotary-direct) | ✅ Complete | Custom driver + SCHUNK ERD 04-40-D-H-N |
+| End-effector | ✅ Complete | Digital output control |
+| Sequential Motion | ✅ Complete | Y→Gripper→Y→X sequence |
+| Kinematics | ✅ Complete | Forward/inverse kinematics |
+| Homing | ✅ Complete | X-axis homing sequence |
+| Calibration | ✅ Complete | Axis length measurement |
+| Trajectory Planning | 🟡 Partial | Basic waypoint support |
+| Error Recovery | 🟡 Partial | Basic alarm handling |
+| Documentation | 🟡 In Progress | Comprehensive docs being written |
+
+**Legend:**
+- ✅ Complete and tested
+- 🟡 Partial implementation
+- 🔴 Not started
+
+See [CHANGELOG.md](CHANGELOG.md) and [DEVELOPMENT_JOURNAL.md](docs/DEVELOPMENT_JOURNAL.md) for the history behind these statuses.
 
 ---
 
 ## Installation
 
-### PlatformIO
+### ESP-IDF Component
 
-`library.json` lists `PulseMotor` as the only first-party dependency. PlatformIO picks up both libraries from `lib/` automatically when the project is built.
+The Gantry library is designed as an ESP-IDF component. Add it to your project:
 
-### ESP-IDF component
+1. **Add as Component**: Copy `lib/Gantry` to your ESP-IDF project's `components/` directory, or add it as a submodule.
 
-If adopting as an ESP-IDF component, add a `CMakeLists.txt` next to `src/` that registers the sources in `lib/Gantry/src/` and declares `PulseMotor` as a required component.
+2. **Update CMakeLists.txt**: Add the component to your main `CMakeLists.txt`:
 
-### Runtime dependencies
+```cmake
+idf_component_register(
+    SRCS "main.cpp"
+    INCLUDE_DIRS "."
+    REQUIRES 
+        gantry
+        pulsemotor
+        freertos
+        driver
+        esp_timer
+)
+```
 
-- **PulseMotor** (`lib/PulseMotor`) — pulse-train driver used by all three axes.
-- **MCP23S17** (`lib/MCP23S17`) + the application-level `gpio_expander` shim — when driver pins are routed through the MCP expander.
-- **FreeRTOS** — included in ESP-IDF / Arduino-ESP32.
-- **ESP-IDF driver APIs** — `driver/gpio`, `driver/ledc`, `driver/pulse_cnt`, `esp_timer`.
+3. **Component CMakeLists.txt**: Ensure `lib/Gantry/CMakeLists.txt` registers the component properly:
+
+```cmake
+idf_component_register(
+    SRCS 
+        "src/Gantry.cpp"
+        "src/GantryConfig.cpp"
+        "src/GantryKinematics.cpp"
+        "src/GantryTrajectory.cpp"
+        "src/GantryPulseMotorLinearAxis.cpp"
+        "src/GantryPulseMotorRotaryAxis.cpp"
+        "src/GantryEndEffector.cpp"
+        "src/GantryLimitSwitch.cpp"
+    INCLUDE_DIRS 
+        "src"
+    REQUIRES
+        pulsemotor
+        freertos
+        driver
+        esp_timer
+)
+```
+
+### Dependencies
+
+- **PulseMotor**: Generic pulse+direction motor driver for all three axes (`lib/PulseMotor/`).
+- **FreeRTOS**: Included in ESP-IDF.
+- **ESP-IDF Driver APIs**: GPIO, LEDC, PCNT (included in ESP-IDF).
+- **ESP-IDF Timer**: `esp_timer` for timing functions.
+
+---
+
+## Examples
+
+See the [Examples Guide](docs/EXAMPLES.md) for complete examples:
+
+- **Basic Motion**: Simple point-to-point movement
+- **Homing Sequence**: X-axis homing and calibration
+- **Sequential Motion**: Pick-and-place sequence
+- **FreeRTOS Integration**: Multi-task usage
+- **Kinematics**: Forward/inverse kinematics usage
 
 ---
 
 ## API Reference
 
-### Main class: `Gantry::Gantry`
+### Main Class: `Gantry::Gantry`
 
 ```cpp
 // Construction
-Gantry(const PulseMotor::DriverConfig &xConfig, int gripperPin);
-Gantry(const PulseMotor::DriverConfig &xConfig,
-       const PulseMotor::DriverConfig &yConfig,
-       int gripperPin);
-Gantry(const PulseMotor::DriverConfig &xConfig,
-       const PulseMotor::DriverConfig &yConfig,
-       const PulseMotor::DriverConfig &thetaConfig,
+Gantry(const PulseMotor::DriverConfig&     xDrv,
+       const PulseMotor::DrivetrainConfig& xDt,
+       const PulseMotor::DriverConfig&     yDrv,
+       const PulseMotor::DrivetrainConfig& yDt,
+       const PulseMotor::DriverConfig&     tDrv,
+       const PulseMotor::DrivetrainConfig& tDt,
        int gripperPin);
 
 // Initialization
@@ -219,130 +350,128 @@ bool begin();
 void enable();
 void disable();
 
-// Drivetrain + limits
+// Configuration
 void setLimitPins(int xMinPin, int xMaxPin);
-void setXDrivetrain(const PulseMotor::DrivetrainConfig&);
-void setYDrivetrain(const PulseMotor::DrivetrainConfig&);
-void setThetaDrivetrain(const PulseMotor::DrivetrainConfig&);
 void setYAxisLimits(float minMm, float maxMm);
 void setThetaLimits(float minDeg, float maxDeg);
 void setJointLimits(float xMin, float xMax,
                     float yMin, float yMax,
                     float thetaMin, float thetaMax);
 void setSafeYHeight(float safeHeight_mm);
-void setEndEffectorPin(int pin, bool activeHigh = true);
-void setHomingSpeed(uint32_t speed_pps);
 
-// Motion
-void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed_mm_per_s);
-GantryError moveTo(const JointConfig& joint,
-                   uint32_t speed_mm_per_s = 50,
-                   uint32_t speed_deg_per_s = 30,
-                   uint32_t acceleration_mm_per_s2 = 0,
-                   uint32_t deceleration_mm_per_s2 = 0);
-GantryError moveTo(const EndEffectorPose& pose,
-                   uint32_t speed_mm_per_s = 50,
-                   uint32_t speed_deg_per_s = 30,
-                   uint32_t acceleration_mm_per_s2 = 0,
-                   uint32_t deceleration_mm_per_s2 = 0);
+// Motion Control
+GantryError moveTo(const JointConfig& joint, ...);
+GantryError moveTo(const EndEffectorPose& pose, ...);
 bool isBusy() const;
-void update();                 // call at ~100 Hz
+void update();  // Call frequently in loop
 
-// Homing / calibration
+// Homing & Calibration
 void home();
-int  calibrate();
-void requestAbort();
-bool isAbortRequested() const;
+int calibrate();
 
-// Gripper
+// Gripper Control
 void grip(bool active);
 
-// Alarms
+// Status & Information
+int getCurrentY() const;
+int getCurrentTheta() const;
 bool isAlarmActive() const;
-bool clearAlarm();
-
-// State queries
-int     getXEncoder() const;
-int     getXEncoderRaw() const;
-int32_t getXCommandedPulses() const;
-float   getXCommandedMm() const;
-float   getXEncoderMm() const;
-int     getCurrentY() const;
-int     getCurrentTheta() const;
-
-JointConfig     getCurrentJointConfig() const;
-JointConfig     getTargetJointConfig() const;
-EndEffectorPose getCurrentEndEffectorPose() const;
-EndEffectorPose getTargetEndEffectorPose() const;
-
-EndEffectorPose forwardKinematics(const JointConfig&) const;
-JointConfig     inverseKinematics(const EndEffectorPose&) const;
-
-// Scaling (derived from installed DrivetrainConfigs)
-double xPulsesPerMm() const;
-double yPulsesPerMm() const;
-double thetaPulsesPerDeg() const;
 ```
 
-See `docs/API_REFERENCE.md` for full function contracts and examples.
+See [API_REFERENCE.md](docs/API_REFERENCE.md) for complete documentation.
 
 ---
 
 ## Configuration
 
-### Axis drivetrains
+### Per-axis configuration
 
-Each axis needs both a `PulseMotor::DriverConfig` (electrical side: pins,
-encoder, LEDC) and a `PulseMotor::DrivetrainConfig` (mechanical side: lead,
-reducer, encoder PPR). The application fills these from
-`include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`
-respectively.
+Each axis is configured before construction via a `PulseMotor::DriverConfig` (electrical) and a `PulseMotor::DrivetrainConfig` (mechanical). The recommended source of values is the pair of parameter headers `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`; see `src/main.cpp` for the helper functions that translate them.
 
 ```cpp
+// X-axis example (SCHUNK Beta 100-ZRS belt via Kinetix 5100)
+PulseMotor::DriverConfig xDrv;
+xDrv.pulse_pin       = PIN_X_PULSE_EXP;
+xDrv.dir_pin         = PIN_X_DIR;
+xDrv.enable_pin      = PIN_X_ENABLE;
+xDrv.alarm_reset_pin = PIN_X_ALARM_RESET;
+xDrv.alarm_pin       = PIN_X_ALARM_STATUS;
+xDrv.encoder_a_pin   = PIN_X_ENC_A;
+xDrv.encoder_b_pin   = PIN_X_ENC_B;
+xDrv.encoder_ppr     = AXIS_X_ENCODER_PPR;
+xDrv.max_pulse_freq  = AXIS_X_MAX_PULSE_FREQ_HZ;
+xDrv.pulse_mode      = PulseMotor::PulseMode::PULSE_DIRECTION;
+xDrv.enable_encoder_feedback = true;
+xDrv.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
+
 PulseMotor::DrivetrainConfig xDt;
-xDt.type                  = PulseMotor::DrivetrainType::BELT;
-xDt.belt_lead_mm_per_rev  = AXIS_X_BELT_LEAD_MM_PER_REV;
-xDt.encoder_ppr           = AXIS_X_ENCODER_PPR;
-xDt.motor_reducer_ratio   = AXIS_X_MOTOR_REDUCER_RATIO;
-gantry.setXDrivetrain(xDt);
+xDt.type                 = PulseMotor::DRIVETRAIN_BELT;
+xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
+xDt.encoder_ppr          = xDrv.encoder_ppr;
+xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
 ```
 
-### Joint limits and safe height
+Runtime-tunable knobs on the Gantry instance are limited to soft limits (`setYAxisLimits`, `setThetaLimits`, `setJointLimits`), limit-switch wiring (`setLimitPins`), safe-Y (`setSafeYHeight`), and homing speed (`setHomingSpeed`).
+
+### Safe Height Configuration
 
 ```cpp
-gantry.setJointLimits(0.0f, 550.0f, 0.0f, 150.0f, -180.0f, 180.0f);
-gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
+gantry.setSafeYHeight(150.0f);  // Safe height for X-axis travel (mm)
 ```
-
-### Gripper timing
-
-Open/close times live in `axis_drivetrain_params.h` as
-`GANTRY_GRIPPER_OPEN_TIME_MS` and `GANTRY_GRIPPER_CLOSE_TIME_MS` and are
-consumed automatically by the sequential state machine.
 
 ---
 
 ## Thread Safety
 
-`Gantry` is **not** internally thread-safe. Call `update()` and every motion /
-status method from a single FreeRTOS task, or provide an external mutex.
+⚠️ **NOT thread-safe by default**
 
-Each `PulseMotor::PulseMotorDriver` has its own optional mutex gated by
-`PULSE_MOTOR_USE_FREERTOS`. Its ramp-timer ISR (5 ms) is the only context that
-touches driver state besides the caller.
+All methods must be called from:
+- Single FreeRTOS task (recommended), OR
+- Multiple tasks with mutex protection
 
-Recommended pattern:
+### Recommended Usage Pattern
 
 ```cpp
-void gantryTask(void *pv) {
-    auto *g = static_cast<Gantry::Gantry *>(pv);
-    g->begin();
-    g->enable();
-    g->home();
-    while (1) {
-        g->update();
+#include "Gantry.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// Single task approach (recommended)
+void gantryTask(void *pvParameters) {
+    Gantry::Gantry* gantry = (Gantry::Gantry*)pvParameters;
+    
+    // Initialize gantry in task
+    gantry->begin();
+    gantry->enable();
+    gantry->home();
+    
+    while (gantry->isBusy()) {
+        gantry->update();
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+    
+    // Main update loop
+    while (1) {
+        gantry->update();
+        vTaskDelay(pdMS_TO_TICKS(10));  // 100 Hz update rate
+    }
+}
+
+// In app_main():
+void app_main(void) {
+    // Configure and create gantry instance
+    PulseMotor::DriverConfig     xDrv, yDrv, tDrv;
+    PulseMotor::DrivetrainConfig xDt,  yDt,  tDt;
+    // ... populate each from include/axis_pulse_motor_params.h
+    //     and include/axis_drivetrain_params.h ...
+
+    static Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, GRIPPER_PIN);
+    // ... configure axes ...
+    
+    // Create gantry task
+    xTaskCreate(gantryTask, "Gantry", 4096, &gantry, 5, NULL);
+    
+    // Other initialization...
 }
 ```
 
@@ -350,54 +479,128 @@ void gantryTask(void *pv) {
 
 ## Coordinate Systems
 
-### Joint space
+### Joint Space
 
-- **X** — horizontal position (mm).
-- **Y** — vertical position (mm).
-- **Theta** — rotation angle (degrees) around Y.
+- **X**: Horizontal position (mm) - right-to-left
+- **Y**: Vertical position (mm) - down-to-up  
+- **Theta**: Rotation angle (degrees) - around Y-axis
 
-### Workspace (end-effector)
+### Workspace Space (End-Effector)
 
-- **X, Y, Z** — position (mm).
-- **Theta** — orientation (degrees).
+- **X, Y, Z**: Position (mm) in workspace coordinates
+- **Theta**: Orientation (degrees)
 
-Forward / inverse mapping is via `forwardKinematics()` / `inverseKinematics()`.
+### Transformations
+
+- Forward: `JointConfig` → `EndEffectorPose`
+- Inverse: `EndEffectorPose` → `JointConfig`
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed coordinate system documentation.
 
 ---
 
 ## Error Handling
 
+The library uses `GantryError` enum for error reporting:
+
 ```cpp
 enum class GantryError {
-    OK,
-    NOT_INITIALIZED,
-    MOTOR_NOT_ENABLED,
-    ALREADY_MOVING,
-    INVALID_POSITION,
-    INVALID_PARAMETER,
-    TIMEOUT,
-    LIMIT_SWITCH_FAILED,
-    CALIBRATION_FAILED,
-    CONVERSION_ERROR
+    OK,                      // Success
+    NOT_INITIALIZED,         // Gantry not initialized
+    MOTOR_NOT_ENABLED,       // Motors not enabled
+    ALREADY_MOVING,          // Motion in progress
+    INVALID_POSITION,        // Position out of range
+    INVALID_PARAMETER,       // Invalid parameter
+    TIMEOUT,                 // Operation timeout
+    LIMIT_SWITCH_FAILED,     // Limit switch error
+    CALIBRATION_FAILED,      // Calibration failed
+    CONVERSION_ERROR         // Unit conversion error
 };
 ```
 
-Always check the return value of `moveTo(JointConfig)` / `moveTo(EndEffectorPose)`.
+Always check return values:
+
+```cpp
+GantryError result = gantry.moveTo(target, 50, 30);
+if (result != GantryError::OK) {
+    Serial.printf("Move failed: %d\n", (int)result);
+}
+```
+
+---
+
+## Memory Usage
+
+**Estimated RAM Usage:** ~5-10 KB
+
+| Component | RAM Usage |
+|-----------|-----------|
+| Gantry class instance | ~2 KB |
+| Configuration structures | ~0.5 KB |
+| Motion state machine | ~0.5 KB |
+| Axis drivers | ~2-5 KB |
+| **Total** | **~5-10 KB** |
+
+Well within ESP32's 320KB RAM limit.
+
+---
+
+## Performance
+
+- **Update Rate**: 10-100 Hz recommended (call `update()` frequently)
+- **Motion Planning**: <1ms per update
+- **Kinematics**: <100μs per calculation
+- **Sequential Motion**: State machine overhead <1%
 
 ---
 
 ## Troubleshooting
 
-| Symptom | First checks |
-|---|---|
-| `moveTo` returns `NOT_INITIALIZED` | Did `gantry.begin()` succeed? |
-| `moveTo` returns `INVALID_POSITION` | Do the target values lie inside `setJointLimits()` bounds? |
-| X or Y not moving, no errors | Each axis has a matching `DrivetrainConfig`? `encoder_ppr` and `lead_mm` / `belt_lead_mm_per_rev` nonzero? |
-| Alarm keeps firing | Call `gantry.clearAlarm()`; verify the drive's alarm-reset wiring (`alarm_reset_pin`). |
-| Sequential motion stuck | Confirm `safeYHeight_mm_` is reachable and the Y drivetrain is installed. |
+### Common Issues
+
+1. **Motion not starting**
+   - Check `isBusy()` returns false
+   - Verify motors are enabled (`enable()`)
+   - Check alarm status (`isAlarmActive()`)
+
+2. **Y-axis not moving**
+   - Verify Y-axis pins configured (`setYAxisPins()`)
+   - Check steps-per-mm setting
+   - Verify limits are set correctly
+
+3. **Sequential motion stuck**
+   - Check safe Y height configuration
+   - Verify gripper actuation time
+   - Monitor motion state in debugger
+
+4. **Limit switch issues**
+   - Limit switches handled by actuator libraries
+   - Check PulseMotor driver configuration (`axis_pulse_motor_params.h`)
+   - Verify pin connections
+
+---
+
+## Contributing
+
+This library is currently in active development. Known bugs and in-progress items are tracked in the root-level `PROGRAMMING_REFERENCE.md` (§12 "Known Bugs & Gotchas") and in `lib/Gantry/CHANGELOG.md`.
 
 ---
 
 ## License
 
-MIT — see `LICENSE`.
+MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+For issues, questions, or contributions:
+- Check the root-level `PROGRAMMING_REFERENCE.md` (§12) for known issues
+- Review [API_REFERENCE.md](docs/API_REFERENCE.md) for API details
+- See [EXAMPLES.md](docs/EXAMPLES.md) for usage examples
+
+---
+
+**Last Updated:** Feb 10th 2026  
+**Version:** 1.0.0 (In Development)
+
