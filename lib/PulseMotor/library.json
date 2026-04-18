@@ -1,0 +1,20 @@
+{
+  "name": "PulseMotor",
+  "version": "1.0.0",
+  "description": "Generic pulse-train motor driver facade for ESP32 motion systems",
+  "keywords": [
+    "pulse-train",
+    "motion-control",
+    "esp32",
+    "servo",
+    "gantry"
+  ],
+  "authors": {
+    "name": "Gantry Library Authors"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src"
+  }
+}

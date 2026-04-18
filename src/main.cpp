@@ -4,9 +4,8 @@
  *
  * FreeRTOS application with:
  * - MCP23S17 SPI GPIO expander initialization
- * - X-axis servo control via SDF08NK8X driver (pulse on direct GPIO, control via MCP)
- * - Y-axis stepper control via MCP23S17 pins
- * - Theta-axis PWM servo on direct GPIO
+ * - Pulse-train axis control via PulseMotor driver (direct pulse GPIO, control via MCP)
+ * - Three-axis pulse-train configuration (X, Y, Theta)
  * - End-effector (gripper) on MCP23S17
  * - Interactive serial console (gantry_test_console)
  * - Periodic gantry update task at 100 Hz
@@ -30,7 +29,7 @@ static const int PIN_Y_PULSE_EXP = GPIO_EXPANDER_DIRECT_PIN(PIN_Y_PULSE);
 
 static void initDirectOutputs(void) {
     gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << PIN_Y_PULSE);
+    io_conf.pin_bit_mask = (1ULL << PIN_Y_PULSE) | (1ULL << PIN_THETA_PULSE);
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -98,6 +97,8 @@ static bool initMcp23s17(void) {
     initDirectOutputs();
     gpio_expander_set_direction(PIN_Y_DIR, true);
     gpio_expander_set_direction(PIN_Y_ENABLE, true);
+    gpio_expander_set_direction(PIN_THETA_DIR, true);
+    gpio_expander_set_direction(PIN_THETA_ENABLE, true);
     gpio_expander_set_direction(PIN_GRIPPER, true);
     gpio_expander_set_direction(PIN_X_ALARM_RESET, true);
     gpio_expander_set_direction(PIN_Y_ALARM_RESET, true);
@@ -122,6 +123,8 @@ static bool initMcp23s17(void) {
     // Direct Y pulse (GPIO2) is initialized in initDirectOutputs().
     gpio_expander_write(PIN_Y_DIR, 0);
     gpio_expander_write(PIN_Y_ENABLE, 0);      // stepper disabled
+    gpio_expander_write(PIN_THETA_DIR, 0);
+    gpio_expander_write(PIN_THETA_ENABLE, 0);
     gpio_expander_write(PIN_GRIPPER, 0);       // gripper open
     gpio_expander_write(PIN_X_ALARM_RESET, 0);
     gpio_expander_write(PIN_Y_ALARM_RESET, 0);
@@ -147,62 +150,121 @@ extern "C" void app_main(void) {
     }
 
     // ------------------------------------------------------------------
-    // 2) Configure X-axis servo driver (SDF08NK8X)
-    //    Pulse pin on direct ESP32 GPIO (LEDC); everything else via MCP
+    // 2) Configure pulse-train motor drivers
+    //    Pulse pins on direct ESP32 GPIO (LEDC); control/status via MCP where routed
     // ------------------------------------------------------------------
-    BergerdaServo::DriverConfig xConfig;
+    PulseMotor::DriverConfig xConfig;
+    PulseMotor::DriverConfig yConfig;
+    PulseMotor::DriverConfig thetaConfig;
 
-    // Outputs routed via MCP23S17
-    xConfig.output_pin_nos[6] = PIN_X_PULSE_EXP;    // direct ESP32 GPIO pulse out (LEDC)
-    xConfig.output_pin_nos[7] = PIN_X_DIR;          // MCP direction
-    xConfig.output_pin_nos[0] = PIN_X_ENABLE;       // MCP enable (SON)
-    xConfig.output_pin_nos[1] = PIN_X_ALARM_RESET;   // MCP PA5 (ARST)
-    xConfig.output_pin_nos[4] = -1;                  // INH not routed in current pin map
+    // X-axis outputs
+    xConfig.pulse_pin = PIN_X_PULSE_EXP;
+    xConfig.dir_pin = PIN_X_DIR;
+    xConfig.enable_pin = PIN_X_ENABLE;
+    xConfig.alarm_reset_pin = PIN_X_ALARM_RESET;
 
-    // Inputs routed via MCP23S17
-    xConfig.input_pin_nos[2] = PIN_X_ALARM_STATUS;   // MCP PA4 (ALM)
+    // X-axis inputs
+    xConfig.alarm_pin = PIN_X_ALARM_STATUS;
+    xConfig.in_position_pin = -1;
+    xConfig.brake_pin = -1;
 
-    // Encoder on direct ESP32 GPIO (PCNT hardware)
-    xConfig.input_pin_nos[3] = PIN_X_ENC_A;           // GPIO 4
-    xConfig.input_pin_nos[4] = PIN_X_ENC_B;           // GPIO 36
+    // X-axis encoder (PCNT hardware)
+    xConfig.encoder_a_pin = PIN_X_ENC_A;
+    xConfig.encoder_b_pin = PIN_X_ENC_B;
     xConfig.enable_encoder_feedback = true;
     xConfig.pcnt_unit = X_ENCODER_PCNT_UNIT;
 
-    // Limit switch handling is done in the Gantry library (not driver-internal)
+    // X-axis limit switches are handled by Gantry layer
     xConfig.limit_min_pin = -1;
     xConfig.limit_max_pin = -1;
-    xConfig.homing_speed_pps = GANTRY_HOMING_SPEED_PPS;
+    xConfig.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
 
-    // Motor parameters
-    xConfig.encoder_ppr = GANTRY_ENCODER_PPR;
-    xConfig.max_pulse_freq = GANTRY_MAX_PULSE_FREQ;
+    // X-axis motor parameters
+    xConfig.encoder_ppr = AXIS_X_ENCODER_PPR;
+    xConfig.max_pulse_freq = AXIS_X_MAX_PULSE_FREQ_HZ;
+    xConfig.gear_numerator = AXIS_X_GEAR_NUMERATOR;
+    xConfig.gear_denominator = AXIS_X_GEAR_DENOMINATOR;
+    xConfig.invert_dir_pin = AXIS_X_INVERT_DIR;
+    xConfig.invert_output_logic = AXIS_X_INVERT_OUTPUT_LOGIC;
+    xConfig.ledc_resolution = AXIS_X_LEDC_RESOLUTION_BITS;
+    xConfig.limit_debounce_cycles = AXIS_X_LIMIT_DEBOUNCE_CYCLES;
+    xConfig.limit_sample_interval_ms = AXIS_X_LIMIT_SAMPLE_INTERVAL_MS;
 
-    // Control mode
-    xConfig.pulse_mode = BergerdaServo::PulseMode::PULSE_DIRECTION;
-    xConfig.control_mode = BergerdaServo::ControlMode::POSITION;
-    xConfig.invert_dir_pin = true;
+    // Y-axis outputs and inputs (Kinetix 5100 pulse-train)
+    yConfig.pulse_pin = PIN_Y_PULSE_EXP;
+    yConfig.dir_pin = PIN_Y_DIR;
+    yConfig.enable_pin = PIN_Y_ENABLE;
+    yConfig.alarm_reset_pin = PIN_Y_ALARM_RESET;
+    yConfig.alarm_pin = PIN_Y_ALARM_STATUS;
+    yConfig.encoder_a_pin = PIN_Y_ENC_A;
+    yConfig.encoder_b_pin = PIN_Y_ENC_B;
+    yConfig.enable_encoder_feedback = false;
+    yConfig.pcnt_unit = Y_ENCODER_PCNT_UNIT;
+    yConfig.encoder_ppr = AXIS_Y_ENCODER_PPR;
+    yConfig.max_pulse_freq = AXIS_Y_MAX_PULSE_FREQ_HZ;
+    yConfig.gear_numerator = AXIS_Y_GEAR_NUMERATOR;
+    yConfig.gear_denominator = AXIS_Y_GEAR_DENOMINATOR;
+    yConfig.invert_dir_pin = AXIS_Y_INVERT_DIR;
+    yConfig.invert_output_logic = AXIS_Y_INVERT_OUTPUT_LOGIC;
+    yConfig.ledc_resolution = AXIS_Y_LEDC_RESOLUTION_BITS;
+    yConfig.limit_debounce_cycles = AXIS_Y_LIMIT_DEBOUNCE_CYCLES;
+    yConfig.limit_sample_interval_ms = AXIS_Y_LIMIT_SAMPLE_INTERVAL_MS;
+
+    // Theta-axis pulse-train driver
+    thetaConfig.pulse_pin = GPIO_EXPANDER_DIRECT_PIN(PIN_THETA_PULSE);
+    thetaConfig.dir_pin = PIN_THETA_DIR;
+    thetaConfig.enable_pin = PIN_THETA_ENABLE;
+    thetaConfig.alarm_pin = -1;
+    thetaConfig.alarm_reset_pin = -1;
+    thetaConfig.encoder_a_pin = PIN_THETA_ENC_A;
+    thetaConfig.encoder_b_pin = PIN_THETA_ENC_B;
+    thetaConfig.enable_encoder_feedback = false;
+    thetaConfig.pcnt_unit = THETA_ENCODER_PCNT_UNIT;
+    thetaConfig.encoder_ppr = AXIS_THETA_ENCODER_PPR;
+    thetaConfig.max_pulse_freq = AXIS_THETA_MAX_PULSE_FREQ_HZ;
+    thetaConfig.gear_numerator = AXIS_THETA_GEAR_NUMERATOR;
+    thetaConfig.gear_denominator = AXIS_THETA_GEAR_DENOMINATOR;
+    thetaConfig.invert_dir_pin = AXIS_THETA_INVERT_DIR;
+    thetaConfig.invert_output_logic = AXIS_THETA_INVERT_OUTPUT_LOGIC;
+    thetaConfig.ledc_resolution = AXIS_THETA_LEDC_RESOLUTION_BITS;
 
     // ------------------------------------------------------------------
     // 3) Create Gantry instance and configure all axes
     // ------------------------------------------------------------------
-    static Gantry::Gantry gantry(xConfig, PIN_GRIPPER);
+    static Gantry::Gantry gantry(xConfig, yConfig, thetaConfig, PIN_GRIPPER);
 
-    // X-axis limit switches (MCP23S17)
+    // X-axis soft-limit switches (MCP23S17)
     gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
 
-    // Y-axis stepper (Y pulse direct GPIO via expander encoding, DIR/EN on MCP Port B)
-    gantry.setYAxisPins(PIN_Y_PULSE_EXP, PIN_Y_DIR, PIN_Y_ENABLE);
-    gantry.setYAxisStepsPerMm(GANTRY_Y_STEPS_PER_MM);
-    gantry.setYAxisLimits(GANTRY_Y_MIN_MM, GANTRY_Y_MAX_MM);
-    gantry.setYAxisMotionLimits(GANTRY_Y_MAX_SPEED_MMPS, GANTRY_Y_ACCEL_MMPS2, GANTRY_Y_DECEL_MMPS2);
+    // Drivetrains (per-axis mm/deg <-> pulse conversion)
+    PulseMotor::DrivetrainConfig xDt;
+    xDt.type = PulseMotor::DrivetrainType::BELT;
+    xDt.belt_lead_mm_per_rev = AXIS_X_BELT_LEAD_MM_PER_REV;
+    xDt.encoder_ppr = AXIS_X_ENCODER_PPR;
+    xDt.motor_reducer_ratio = AXIS_X_MOTOR_REDUCER_RATIO;
+    gantry.setXDrivetrain(xDt);
 
-    // Theta servo (direct ESP32 GPIO, LEDC channel from constants)
-    gantry.setThetaServo(PIN_THETA_PWM, THETA_PWM_LEDC_CHANNEL);
-    gantry.setThetaLimits(GANTRY_THETA_MIN_DEG, GANTRY_THETA_MAX_DEG);
-    gantry.setThetaPulseRange(GANTRY_THETA_MIN_PULSE_US, GANTRY_THETA_MAX_PULSE_US);
+    PulseMotor::DrivetrainConfig yDt;
+    yDt.type = PulseMotor::DrivetrainType::BALLSCREW;
+    yDt.lead_mm = AXIS_Y_BALLSCREW_LEAD_MM;
+    yDt.encoder_ppr = AXIS_Y_ENCODER_PPR;
+    yDt.motor_reducer_ratio = AXIS_Y_MOTOR_REDUCER_RATIO;
+    gantry.setYDrivetrain(yDt);
+
+    PulseMotor::DrivetrainConfig thetaDt;
+    thetaDt.type = PulseMotor::DrivetrainType::ROTARY_DIRECT;
+    thetaDt.output_gear_ratio = AXIS_THETA_OUTPUT_GEAR_RATIO;
+    thetaDt.encoder_ppr = AXIS_THETA_ENCODER_PPR;
+    thetaDt.motor_reducer_ratio = AXIS_THETA_MOTOR_REDUCER_RATIO;
+    gantry.setThetaDrivetrain(thetaDt);
+
+    // Joint-space travel limits (used by move-command validation)
+    gantry.setJointLimits(AXIS_X_TRAVEL_MIN_MM, AXIS_X_TRAVEL_MAX_MM,
+                          AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
+                          AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
 
     // Safe Y height for pick-and-place sequences
-    gantry.setSafeYHeight(GANTRY_SAFE_Y_MM);
+    gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
 
     // ------------------------------------------------------------------
     // 4) Initialize and enable the gantry
@@ -245,8 +307,8 @@ extern "C" void app_main(void) {
     consoleCfg.use_mcp23s17 = true;
     consoleCfg.limit_switches_active = true;
     consoleCfg.x_pulse_pin = PIN_X_PULSE;
-    consoleCfg.x_dir_pin = xConfig.output_pin_nos[7];
-    consoleCfg.x_enable_pin = xConfig.output_pin_nos[0];
+    consoleCfg.x_dir_pin = xConfig.dir_pin;
+    consoleCfg.x_enable_pin = xConfig.enable_pin;
     consoleCfg.x_alarm_pin = PIN_X_ALARM_STATUS;
     consoleCfg.x_alarm_reset_pin = PIN_X_ALARM_RESET;
     consoleCfg.y_alarm_pin = PIN_Y_ALARM_STATUS;
@@ -258,7 +320,7 @@ extern "C" void app_main(void) {
     consoleCfg.y_encoder_b_pin = PIN_Y_ENC_B;
     consoleCfg.x_pulse_ledc_channel = X_PULSE_LEDC_CHANNEL;
     consoleCfg.y_pulse_ledc_channel = Y_PULSE_LEDC_CHANNEL;
-    consoleCfg.theta_pwm_pin = PIN_THETA_PWM;
+    consoleCfg.theta_pwm_pin = -1;
 
     result = xTaskCreatePinnedToCore(
         gantryTestConsoleTask,

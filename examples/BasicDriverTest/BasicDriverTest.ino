@@ -1,6 +1,6 @@
 /**
  * @file BasicDriverTest.ino
- * @brief Very basic test program for SDF08NK8X servo driver library
+ * @brief Very basic test program for PulseMotor driver library
  * 
  * This is a minimal test to verify the driver library works correctly.
  * It performs:
@@ -11,7 +11,7 @@
  * 
  * Hardware Requirements:
  * - WT32-ETH01 or ESP32
- * - SDF08NK8X servo driver
+ * - Pulse-train motor driver
  * - Servo motor (optional for basic test)
  * 
  * Pin Connections:
@@ -22,9 +22,9 @@
  * - GPIO 32 -> Limit switch MAX (End position, active LOW)
  */
 
-#include <SDF08NK8X.h>
+#include <PulseMotor.h>
 
-using namespace BergerdaServo;
+using namespace PulseMotor;
 
 // Pin Definitions
 #define PIN_PULSE    2   // Output: Pulse signal
@@ -40,7 +40,7 @@ using namespace BergerdaServo;
 
 // Servo Driver
 DriverConfig config;
-ServoDriver* driver = nullptr;
+PulseMotorDriver* driver = nullptr;
 
 void setup() {
   Serial.begin(115200);
@@ -51,9 +51,9 @@ void setup() {
   Serial.println("========================================\n");
   
   // Configure pins
-  config.output_pin_nos[6] = PIN_PULSE;   // PULSE
-  config.output_pin_nos[7] = PIN_DIR;    // DIR
-  config.output_pin_nos[0] = PIN_ENABLE; // ENABLE
+  config.pulse_pin = PIN_PULSE;
+  config.dir_pin = PIN_DIR;
+  config.enable_pin = PIN_ENABLE;
   
   // Disable encoder feedback for basic test
   config.enable_encoder_feedback = false;
@@ -64,10 +64,9 @@ void setup() {
   
   // Set control mode
   config.pulse_mode = PulseMode::PULSE_DIRECTION;
-  config.control_mode = ControlMode::POSITION;
   
   // Create driver instance
-  driver = new ServoDriver(config);
+  driver = new PulseMotorDriver(config);
   
   // Test 1: Initialize driver
   Serial.println("Test 1: Driver Initialization");

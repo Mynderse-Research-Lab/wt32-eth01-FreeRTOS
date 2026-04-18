@@ -1,6 +1,6 @@
 # Basic Driver Test
 
-A minimal test program to verify the SDF08NK8X servo driver library is working correctly.
+A minimal test program to verify the PulseMotor driver library is working correctly.
 
 ## Purpose
 
@@ -17,7 +17,7 @@ This test program performs basic verification of the driver library:
 
 ### Required
 - WT32-ETH01 or ESP32 development board
-- SDF08NK8X servo driver
+- Pulse-train motor driver
 - USB cable
 
 ### Optional (for move test)

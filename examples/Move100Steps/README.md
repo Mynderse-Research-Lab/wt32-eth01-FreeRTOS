@@ -1,6 +1,6 @@
 # Move 100 Steps Example
 
-This example demonstrates how to move a servo motor exactly 100 steps (pulses) using the SDF08NK8X servo driver library with **internal step counting only** (no encoder feedback).
+This example demonstrates how to move a servo motor exactly 100 steps (pulses) using the PulseMotor driver library with **internal step counting only** (no encoder feedback).
 
 ## Overview
 
@@ -16,7 +16,7 @@ The example performs the following sequence:
 
 ### Required Components
 - WT32-ETH01 or ESP32 development board
-- SDF08NK8X servo driver
+- Pulse-train motor driver
 - Servo motor (encoder not required)
 - Power supply for servo driver and motor
 - USB cable for programming
@@ -38,7 +38,7 @@ The example performs the following sequence:
 ### Wiring Diagram
 
 ```
-ESP32 (WT32-ETH01)          SDF08NK8X Driver
+ESP32 (WT32-ETH01)          Pulse-Train Driver
 ─────────────────          ─────────────────
 GPIO 2  ────────────────── CN1 Pin 18 (PULSE)
 GPIO 4  ────────────────── CN1 Pin 19 (DIR)
@@ -253,4 +253,4 @@ void loop() {
 ## Related Examples
 
 - See other examples in the `examples/` directory for more advanced usage
-- Check `lib/SDF08NK8X/ReadMe.md` for detailed API documentation
+- Check `lib/PulseMotor/README.md` for detailed API documentation
