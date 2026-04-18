@@ -14,7 +14,6 @@
 #define GANTRY_CONFIG_H
 
 #include <stdint.h>
-#include <Arduino.h>
 #include "axis_drivetrain_params.h"
 
 namespace Gantry {

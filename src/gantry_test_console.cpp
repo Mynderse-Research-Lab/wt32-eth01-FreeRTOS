@@ -3,6 +3,7 @@
 #include "basic_tests.h"
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
+#include "axis_drivetrain_params.h"
 #include "gpio_expander.h"
 #include "MCP23S17.h"
 #include "esp_log.h"
@@ -137,9 +138,9 @@ void calibrationTask(void *param) {
   ESP_LOGI(TAG, "Calibration task: started");
   int len = cfg->gantry->calibrate();
   if (len > 0) {
-    cfg->gantry->setJointLimits(GANTRY_X_MIN_MM, (float)len,
-                                GANTRY_Y_MIN_MM, GANTRY_Y_MAX_MM,
-                                GANTRY_THETA_MIN_DEG, GANTRY_THETA_MAX_DEG);
+    cfg->gantry->setJointLimits(AXIS_X_TRAVEL_MIN_MM, (float)len,
+                                AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
+                                AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK X joint max updated from calibration: %.1f mm", (float)len);

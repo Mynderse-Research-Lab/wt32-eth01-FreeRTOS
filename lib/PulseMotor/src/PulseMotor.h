@@ -29,10 +29,11 @@
 #define PULSE_MOTOR_HOME_ON_BOOT 1
 #endif
 
-#include <Arduino.h>
 #include <driver/pulse_cnt.h>
+#include <driver/ledc.h>
 #include <esp_timer.h>
 #include <stdint.h>
+#include <string>
 
 // Optional FreeRTOS support - define PULSE_MOTOR_USE_FREERTOS=1 for thread safety
 #ifndef PULSE_MOTOR_USE_FREERTOS
@@ -40,8 +41,8 @@
 #endif
 
 // Backward-compat: honor the legacy SDF08NK8X_USE_FREERTOS flag if the caller
-// still sets it (e.g. platformio.ini build_flags) so the build does not flip
-// silently during the rename.
+// still sets it (e.g. legacy build_flags) so the build does not flip silently
+// during the rename.
 #if defined(SDF08NK8X_USE_FREERTOS) && !defined(PULSE_MOTOR_FORCE_FREERTOS)
 #undef  PULSE_MOTOR_USE_FREERTOS
 #define PULSE_MOTOR_USE_FREERTOS SDF08NK8X_USE_FREERTOS
@@ -131,6 +132,7 @@ struct DriverConfig {
 
     // -------------------- LEDC / PCNT allocation --------------------
     int       ledc_channel;
+    int       ledc_timer;       // LEDC timer index (0..3). -1 -> derive from ledc_channel.
     uint8_t   ledc_resolution;  // bits (1..14); driver forces 1-bit at runtime
     int       pcnt_unit;        // Logical PCNT id for app-level bookkeeping
 
@@ -156,7 +158,7 @@ struct DriverConfig {
         pulse_mode(PulseMode::PULSE_DIRECTION),
         max_pulse_freq(600000), encoder_ppr(12000),
         gear_numerator(1.0), gear_denominator(1.0),
-        ledc_channel(0), ledc_resolution(2), pcnt_unit(0),
+        ledc_channel(0), ledc_timer(-1), ledc_resolution(2), pcnt_unit(0),
         enable_encoder_feedback(false),
         enable_closed_loop_control(false),
         invert_output_logic(true),
@@ -358,11 +360,11 @@ public:
     // ---------- Config management ----------
     const DriverConfig& getConfig() const;
     void                setConfig(const DriverConfig& config);
-    String              getConfigStatus() const;
+    std::string         getConfigStatus() const;
 
     // ---------- Misc ----------
-    static String getVersion();
-    String        getDriverInfo() const;
+    static std::string getVersion();
+    std::string        getDriverInfo() const;
 
 private:
     // ---------- Config ----------
@@ -390,6 +392,9 @@ private:
     pcnt_channel_handle_t   pcnt_chan_a_handle_;
     pcnt_channel_handle_t   pcnt_chan_b_handle_;
     int                     resolved_pulse_gpio_; // resolved native GPIO for LEDC
+    ledc_channel_t          ledc_chan_;
+    ledc_timer_t            ledc_tmr_;
+    bool                    ledc_ready_;
 
     // ---------- Profile ----------
     MotionProfile        profile_;

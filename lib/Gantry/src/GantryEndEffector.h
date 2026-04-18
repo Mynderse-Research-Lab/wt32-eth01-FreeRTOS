@@ -7,8 +7,6 @@
 #ifndef GANTRY_END_EFFECTOR_H
 #define GANTRY_END_EFFECTOR_H
 
-#include <Arduino.h>
-
 namespace Gantry {
 
 class GantryEndEffector {
