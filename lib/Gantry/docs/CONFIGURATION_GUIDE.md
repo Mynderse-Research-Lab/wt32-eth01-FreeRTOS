@@ -319,6 +319,28 @@ If your gantry has different mechanical dimensions:
 3. Measure gripper offsets from theta center
 4. Measure ball screw pitch
 
+### Geometry Freeze Attestation
+
+The defaults above (`GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM` in `include/axis_drivetrain_params.h`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder until the application engineer:
+
+1. Re-measures the offsets against the frozen production design (CAD dimension or CMM / calibration fixture on the as-built assembly).
+2. Overwrites the five macros in `axis_drivetrain_params.h` with the measured values.
+3. Defines `GANTRY_GEOMETRY_FROZEN` as a compile definition to attest the freeze and silence the reminder.
+
+Two silencing paths, pick one:
+
+| Intent | Macro | Typical use |
+|---|---|---|
+| Deployment build, geometry verified | `GANTRY_GEOMETRY_FROZEN` | Add `target_compile_definitions(... PUBLIC GANTRY_GEOMETRY_FROZEN)` in the deployment component, or pass `-DGANTRY_GEOMETRY_FROZEN` via CMake. |
+| CI / bring-up build knowingly running dev-rig geometry | `GANTRY_SUPPRESS_GEOMETRY_WARNING` | Same mechanism, but this one does NOT claim the geometry has been frozen - use it only to reduce noise during code-focused CI runs. |
+
+Example (ESP-IDF deployment `CMakeLists.txt`):
+
+```cmake
+idf_component_register(SRCS "deployment.cpp" ...)
+target_compile_definitions(${COMPONENT_LIB} PUBLIC GANTRY_GEOMETRY_FROZEN)
+```
+
 ---
 
 ## Motion Parameters

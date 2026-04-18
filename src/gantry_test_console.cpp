@@ -138,9 +138,9 @@ void calibrationTask(void *param) {
   ESP_LOGI(TAG, "Calibration task: started");
   int len = cfg->gantry->calibrate();
   if (len > 0) {
-    cfg->gantry->setJointLimits(AXIS_X_TRAVEL_MIN_MM, (float)len,
-                                AXIS_Y_TRAVEL_MIN_MM, AXIS_Y_TRAVEL_MAX_MM,
-                                AXIS_THETA_TRAVEL_MIN_DEG, AXIS_THETA_TRAVEL_MAX_DEG);
+    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)len,
+                                AXIS_Y_HARD_LIMIT_MIN_MM, AXIS_Y_HARD_LIMIT_MAX_MM,
+                                AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK X joint max updated from calibration: %.1f mm", (float)len);

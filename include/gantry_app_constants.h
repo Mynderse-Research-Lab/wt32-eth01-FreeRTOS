@@ -55,7 +55,9 @@
 // a PWM hobby-servo configuration. With theta moving to pulse-train control
 // (custom driver for SCHUNK ERD 04-40-D-H-N), these become DIR / ENABLE lines.
 // The ERD has unlimited rotation, so inductive limit switches are not used;
-// soft limits are enforced in firmware from AXIS_THETA_TRAVEL_MIN/MAX_DEG.
+// firmware clamps rotation to AXIS_THETA_HARD_LIMIT_MIN/MAX_DEG (cable
+// management), and soft limits derived at boot-time calibration may be
+// tighter.
 #define PIN_THETA_DIR        14
 #define PIN_THETA_ENABLE     15
 
