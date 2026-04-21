@@ -7,6 +7,7 @@
 #include "Gantry.h"
 #include "GantryPulseMotorLinearAxis.h"
 #include "GantryPulseMotorRotaryAxis.h"
+#include "gpio_expander.h"
 #include <cmath>
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -72,7 +73,75 @@ std::unique_ptr<GantryRotaryAxis> makeRotaryAxis(
     return nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// preparePinsForBoot helpers
+//
+// A pin integer passed through DriverConfig can mean:
+//   - -1                         -> not wired; skip.
+//   - GPIO_EXPANDER_DIRECT_FLAG  -> encoded direct ESP32 GPIO (e.g. pulse);
+//                                   owned by LEDC / driver/gpio, skip here.
+//   - >= GPIO_DIRECT_PIN_BASE    -> plain direct ESP32 GPIO; skip here.
+//   - 0..15                      -> MCP23S17 logical pin; seed via
+//                                   gpio_expander_*.
+// The helper below ONLY touches MCP-routed pins so the Gantry library does
+// not need driver/gpio at boot-seed time.
+// ---------------------------------------------------------------------------
+inline bool isMcpRoutedPin(int pin) {
+    if (pin < 0) return false;
+    if ((pin & GPIO_EXPANDER_DIRECT_FLAG) != 0) return false;
+    if (pin >= GPIO_DIRECT_PIN_BASE) return false;
+    return true;
+}
+
+void seedMcpOutputLow(const char* label, int pin) {
+    if (!isMcpRoutedPin(pin)) return;
+    esp_err_t dir = gpio_expander_set_direction(pin, /*is_output=*/true);
+    esp_err_t wr  = gpio_expander_write(pin, /*level=*/0);
+    if (dir != ESP_OK || wr != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "preparePinsForBoot: MCP pin %d (%s) seed failed (dir=%d wr=%d)",
+                 pin, label, (int)dir, (int)wr);
+    }
+}
+
+void seedMcpInputPullup(const char* label, int pin) {
+    if (!isMcpRoutedPin(pin)) return;
+    esp_err_t dir = gpio_expander_set_direction(pin, /*is_output=*/false);
+    esp_err_t pu  = gpio_expander_set_pullup   (pin, /*enable=*/true);
+    if (dir != ESP_OK || pu != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "preparePinsForBoot: MCP pin %d (%s) seed failed (dir=%d pu=%d)",
+                 pin, label, (int)dir, (int)pu);
+    }
+}
+
+void seedOneDriver(const char* axis, const PulseMotor::DriverConfig& drv) {
+    // Outputs: DIR, ENABLE/SON, ALARM_RESET (if routed to MCP).
+    seedMcpOutputLow(axis, drv.dir_pin);
+    seedMcpOutputLow(axis, drv.enable_pin);
+    seedMcpOutputLow(axis, drv.alarm_reset_pin);
+    // Inputs: ALARM_STATUS needs pull-up (active-low open-drain typical).
+    seedMcpInputPullup(axis, drv.alarm_pin);
+}
+
 } // namespace
+
+// ============================================================================
+// preparePinsForBoot (static)
+// ============================================================================
+
+void Gantry::preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
+                                const PulseMotor::DriverConfig& yDrv,
+                                const PulseMotor::DriverConfig& tDrv,
+                                int gripperPin) {
+    ESP_LOGI(TAG, "preparePinsForBoot: seeding MCP-routed pins to safe state");
+    seedOneDriver("X",     xDrv);
+    seedOneDriver("Y",     yDrv);
+    seedOneDriver("Theta", tDrv);
+    // Gripper: only seed when routed to the MCP; direct-GPIO gripper pins
+    // are configured later by GantryEndEffector::begin().
+    seedMcpOutputLow("GRIPPER", gripperPin);
+}
 
 // ============================================================================
 // CONSTRUCTOR
