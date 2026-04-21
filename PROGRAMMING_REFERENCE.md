@@ -99,18 +99,21 @@ Use `fullclean` after changing `sdkconfig.defaults` or after any ESP-IDF or Ardu
 
 ## 2. Application Entry Point & Task Layout
 
+> The layered architecture, signal routing, and ownership invariants live in [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md). The startup steps below follow the invariant that **the application layer commands `Gantry` only** — boot-time MCP pin seeding is funnelled through `Gantry::preparePinsForBoot()` rather than direct `gpio_expander_*` calls.
+
 ### 2.1 `app_main()`
 
 Defined in `src/main.cpp`. Startup order:
 
-1. **`initMcp23s17()`** — brings up SPI2 bus, creates the MCP23S17 handle (mutex included), sets every MCP pin's direction / pull-up / initial level. All control/limit/alarm pins flow through this.
-2. **`gpio_config` for `PIN_Y_PULSE`** — direct ESP32 GPIO (LEDC will take over later).
-3. **Build three `(PulseMotor::DriverConfig, PulseMotor::DrivetrainConfig)` pairs** via the per-axis `makeXDriverConfig()` / `makeXDrivetrainConfig()` etc. helpers. Each pair consumes the per-axis macros from `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`.
-4. **Construct `Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, PIN_GRIPPER)`** as a `static`.
-5. **`gantry.setLimitPins()`, `setJointLimits()`, `setYAxisLimits()`, `setThetaLimits()`, `setSafeYHeight()`** — lightweight configuration that the driver/drivetrain configs did not already cover.
-6. **`gantry.begin()`** — initialises X, Y, and Theta PulseMotor drivers plus the end-effector (MCP pin).
-7. **`gantry.enable()`** — sets SON on all three axis drivers.
-8. **Create FreeRTOS tasks.**
+1. **`initMcp23s17()`** — brings up the SPI2 bus and creates the MCP23S17 handle (mutex included) via `gpio_expander_init(&mcp_config)`. This is the one place the application layer still builds an `mcp23s17_config_t`: it is bus/clock/device-address configuration, not motion-control logic.
+2. **Build three `(PulseMotor::DriverConfig, PulseMotor::DrivetrainConfig)` pairs** via the per-axis `makeXDriverConfig()` / `makeXDrivetrainConfig()` etc. helpers. Each pair consumes the per-axis macros from `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`.
+3. **`initDirectOutputs()`** — direct ESP32 GPIO seeding for `PIN_Y_PULSE` (GPIO2 is a strapping pin and benefits from a clean low level before LEDC takes over). This stays in `main.cpp` because it operates on chip peripherals the Gantry library does not own.
+4. **`Gantry::Gantry::preparePinsForBoot(xDrv, yDrv, tDrv, PIN_GRIPPER)`** — idempotent power-on-safety seeder for MCP-routed pins only. For each `DriverConfig` it drives `DIR`, `ENABLE`/`SON`, and `ALARM_RESET` to output-low on the MCP23S17 and sets `ALARM_STATUS` to input with pull-up; it also seeds `PIN_GRIPPER` low if that pin is routed to the MCP. Pulse pins (encoded as `GPIO_EXPANDER_DIRECT_PIN(...)`) and plain direct GPIOs are skipped because they are owned by LEDC / `driver/gpio`. All downstream `PulseMotorDriver::initialize()`, `GantryEndEffector::begin()`, and `GantryLimitSwitch::begin()` calls will re-apply pin directions with the same values — this call is purely defensive.
+5. **Construct `Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, PIN_GRIPPER)`** as a `static`.
+6. **`gantry.setLimitPins()`, `setJointLimits()`, `setYAxisLimits()`, `setThetaLimits()`, `setSafeYHeight()`** — lightweight configuration that the driver/drivetrain configs did not already cover.
+7. **`gantry.begin()`** — initialises X, Y, and Theta PulseMotor drivers plus the end-effector (MCP pin).
+8. **`gantry.enable()`** — sets SON on all three axis drivers.
+9. **Create FreeRTOS tasks.**
 
 ### 2.2 FreeRTOS tasks
 
@@ -212,6 +215,8 @@ Consumers (e.g. `GantryEndEffector`) branch on `isMcpLogicalPin(pin)` vs `isEnco
 
 Namespace: `Gantry`. All types below live in it unless noted.
 
+> **Single entry point.** The application layer interacts exclusively with `Gantry::Gantry` for motion, gripping, homing, calibration, and status. Direct use of `PulseMotor::PulseMotorDriver`, `gpio_expander_*`, or `mcp23s17_*` is reserved for the diagnostic console (`gantry_test_console`) and for register-level bring-up; it is **not** a supported path for new application code. The one exception on the control path is `Gantry::preparePinsForBoot()` (see §2.1 and §4.2), which is itself a Gantry-namespace helper. See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §2 for the full invariant list.
+
 ### 4.1 Core types
 
 ```cpp
@@ -274,6 +279,17 @@ Gantry(const PulseMotor::DriverConfig&     xDrv,
 ```
 
 The constructor factories a concrete `GantryPulseMotorLinearAxis` for X and Y (the `xDt.type` / `yDt.type` must be a linear drivetrain — `DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, or `DRIVETRAIN_RACKPINION`) and a `GantryPulseMotorRotaryAxis` for Theta (`tDt.type` must be `DRIVETRAIN_ROTARY_DIRECT`). If a type/axis pair is mis-configured the corresponding `unique_ptr` is null and `begin()` returns `false` for X (the required axis) or logs a warning for Y/Theta.
+
+#### Boot-time pin seeding
+
+```cpp
+static void preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
+                               const PulseMotor::DriverConfig& yDrv,
+                               const PulseMotor::DriverConfig& tDrv,
+                               int gripperPin);
+```
+
+Idempotent power-on-safety helper. Call once in `app_main()` **after** `gpio_expander_init()` and **before** constructing `Gantry::Gantry`. For each of the three `DriverConfig`s and for the gripper pin, it sets the MCP-routed output lines (`DIR`, `ENABLE`/`SON`, `ALARM_RESET`, `GRIPPER`) to output direction and drives them to a safe-low initial level; for the MCP-routed input lines (`ALARM_STATUS`) it enables the input pull-up. Pulse pins are skipped because they are direct ESP32 GPIOs owned by LEDC and configured by `PulseMotorDriver::initialize()`. The same pin directions and levels will be re-applied by `PulseMotorDriver::initialize()`, `GantryEndEffector::begin()`, and `GantryLimitSwitch::begin()` — this helper is purely defensive, and its purpose is to keep the application layer from reaching into `gpio_expander_*` directly.
 
 #### Configuration (call before `begin()`)
 
