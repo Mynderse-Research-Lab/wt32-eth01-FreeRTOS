@@ -11,7 +11,7 @@ For exact function signatures, pin numbers, and build/flash steps, see `PROGRAMM
 ## 1. System Architecture at a Glance
 
 ```mermaid
-flowchart TD
+flowchart LR
   App["Application layer<br/>src/main.cpp<br/>src/gantry_test_console.cpp"]
   Gantry["Gantry::Gantry<br/>kinematics, state machine, sequencing, safety"]
   AxisX["GantryPulseMotorLinearAxis (X)"]
@@ -31,8 +31,8 @@ flowchart TD
 
   %% ----- downstream (control) -----
   App -- "motion API" --> Gantry
-  App -. "diagnostics only" .-> Exp
-  App -. "diagnostics only" .-> PMX
+  Exp -. "diagnostics only" .-> App
+  PMX -. "diagnostics only" .-> App
   Gantry --> AxisX
   Gantry --> AxisY
   Gantry --> AxisT
