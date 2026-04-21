@@ -108,44 +108,11 @@ static bool initMcp23s17(void) {
     }
     ESP_LOGI(TAG, "MCP23S17 initialized successfully");
 
-    // Outputs
-    gpio_expander_set_direction(PIN_X_DIR,          true);
-    gpio_expander_set_direction(PIN_X_ENABLE,       true);
-    initDirectOutputs();
-    gpio_expander_set_direction(PIN_Y_DIR,          true);
-    gpio_expander_set_direction(PIN_Y_ENABLE,       true);
-    gpio_expander_set_direction(PIN_GRIPPER,        true);
-    gpio_expander_set_direction(PIN_X_ALARM_RESET,  true);
-    gpio_expander_set_direction(PIN_Y_ALARM_RESET,  true);
-    gpio_expander_set_direction(PIN_THETA_DIR,      true);
-    gpio_expander_set_direction(PIN_THETA_ENABLE,   true);
-
-    // Inputs (with pull-ups)
-    gpio_expander_set_direction(PIN_X_LIMIT_MIN,    false);
-    gpio_expander_set_pullup(PIN_X_LIMIT_MIN,       true);
-    gpio_expander_set_direction(PIN_X_LIMIT_MAX,    false);
-    gpio_expander_set_pullup(PIN_X_LIMIT_MAX,       true);
-    gpio_expander_set_direction(PIN_Y_LIMIT_MIN,    false);
-    gpio_expander_set_pullup(PIN_Y_LIMIT_MIN,       true);
-    gpio_expander_set_direction(PIN_Y_LIMIT_MAX,    false);
-    gpio_expander_set_pullup(PIN_Y_LIMIT_MAX,       true);
-    gpio_expander_set_direction(PIN_X_ALARM_STATUS, false);
-    gpio_expander_set_pullup(PIN_X_ALARM_STATUS,    true);
-    gpio_expander_set_direction(PIN_Y_ALARM_STATUS, false);
-    gpio_expander_set_pullup(PIN_Y_ALARM_STATUS,    true);
-
-    // Safe initial output states
-    gpio_expander_write(PIN_X_DIR,         0);
-    gpio_expander_write(PIN_X_ENABLE,      0);
-    gpio_expander_write(PIN_Y_DIR,         0);
-    gpio_expander_write(PIN_Y_ENABLE,      0);
-    gpio_expander_write(PIN_GRIPPER,       0);
-    gpio_expander_write(PIN_X_ALARM_RESET, 0);
-    gpio_expander_write(PIN_Y_ALARM_RESET, 0);
-    gpio_expander_write(PIN_THETA_DIR,     0);
-    gpio_expander_write(PIN_THETA_ENABLE,  0);
-
-    ESP_LOGI(TAG, "MCP23S17 pins configured");
+    // Defensive per-pin seeding (DIR/EN/ALM/ARST/GRIPPER low, limit inputs
+    // with pull-up) is now owned by Gantry::Gantry::preparePinsForBoot(), so
+    // the application layer no longer reaches past the Gantry abstraction to
+    // poke individual MCP pins. See lib/Gantry/docs/ARCHITECTURE_FLOW.md
+    // invariant 6.
     return true;
 }
 
@@ -295,6 +262,22 @@ extern "C" void app_main(void) {
     PulseMotor::DrivetrainConfig yDt  = makeYDrivetrainConfig();
     PulseMotor::DriverConfig     tDrv = makeThetaDriverConfig();
     PulseMotor::DrivetrainConfig tDt  = makeThetaDrivetrainConfig();
+
+    // ------------------------------------------------------------------
+    // Boot-time pin seeding (defensive; idempotent).
+    //
+    //   initDirectOutputs()        - pre-seeds PIN_Y_PULSE (GPIO2, strap)
+    //                                low on direct ESP GPIO before LEDC
+    //                                takes over. Stays in main because it
+    //                                is chip-peripheral setup, not Gantry
+    //                                business.
+    //   Gantry::preparePinsForBoot - MCP-routed DIR/EN/ALM_RESET/GRIPPER
+    //                                seeding; replaces the old per-pin
+    //                                gpio_expander_* block. See
+    //                                ARCHITECTURE_FLOW.md invariant 6.
+    // ------------------------------------------------------------------
+    initDirectOutputs();
+    Gantry::Gantry::preparePinsForBoot(xDrv, yDrv, tDrv, PIN_GRIPPER);
 
     // ------------------------------------------------------------------
     // Create Gantry instance
