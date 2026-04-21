@@ -5,12 +5,14 @@
 
 Complete architecture documentation for the Gantry library.
 
-> **Refactor note (2026-04):** Every axis now runs on top of the generic `PulseMotor` library. The previous `GantryAxisStepper` (step/dir Y) and `GantryRotaryServo` (PWM-hobby-servo Theta) classes have been replaced by polymorphic interfaces:
+> **Canonical layered flow.** The control-and-feedback tree, signal routing table, and layered invariants are maintained in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md). That file is the single source of truth; read it first. The sections below describe the Gantry library's **internal** architecture — the module breakdown, state machine, kinematics, and memory layout — and assume the reader is already familiar with the layered flow.
+>
+> **Driver refactor (2026-04, still current).** Every axis runs on top of the generic `PulseMotor` library. The pre-2026 `GantryAxisStepper` (step/dir Y) and `GantryRotaryServo` (PWM-hobby-servo Theta) classes were replaced by polymorphic interfaces:
 >
 > - `GantryLinearAxis` (mm domain) — implemented by `GantryPulseMotorLinearAxis` for ballscrew / belt / rack-pinion drivetrains.
 > - `GantryRotaryAxis` (deg domain) — implemented by `GantryPulseMotorRotaryAxis` for rotary-direct drivetrains.
 >
-> Sections below that describe `GantryAxisStepper` / `GantryRotaryServo` reflect the pre-2026-04 architecture and will be rewritten in a follow-up pass. Until then, treat `Gantry.h` and the `GantryLinearAxis.h` / `GantryRotaryAxis.h` interface headers as the authoritative source.
+> If any section below still mentions `GantryAxisStepper` or `GantryRotaryServo` as concrete types, treat `Gantry.h` and the `GantryLinearAxis.h` / `GantryRotaryAxis.h` interface headers as authoritative.
 
 ---
 
@@ -29,38 +31,35 @@ Complete architecture documentation for the Gantry library.
 
 ## System Overview
 
-The Gantry library provides a modular, extensible architecture for controlling a 3-axis gantry robot system.
+The Gantry library provides a modular, extensible architecture for controlling a 3-axis gantry robot system. It exposes a single public class, `Gantry::Gantry`, which owns three sibling children — the axis wrappers, the end-effector, and the limit switches — and hides every hardware detail (pulse generation, encoder counting, MCP23S17 traffic) behind that one entry point.
 
 ### High-Level Architecture
 
+```mermaid
+flowchart TD
+  App["Application Layer<br/>moveTo(), home(), calibrate(), grip()"]
+  Gantry["Gantry::Gantry<br/>sequential motion, state machine,<br/>kinematics, safety"]
+  AxisX["GantryPulseMotorLinearAxis (X)"]
+  AxisY["GantryPulseMotorLinearAxis (Y)"]
+  AxisT["GantryPulseMotorRotaryAxis (Theta)"]
+  EE["GantryEndEffector<br/>(digital gripper)"]
+  LSX["GantryLimitSwitch × 2<br/>(X min, X max — debounced)"]
+  HW["Pulse + direction outputs (LEDC)<br/>Encoder inputs (PCNT)<br/>Gripper / DIR / EN / ALM via MCP23S17"]
+
+  App --> Gantry
+  Gantry --> AxisX
+  Gantry --> AxisY
+  Gantry --> AxisT
+  Gantry --> EE
+  Gantry --> LSX
+  AxisX --> HW
+  AxisY --> HW
+  AxisT --> HW
+  EE --> HW
+  LSX --> HW
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Application Layer                    │
-│  (User Code: moveTo(), home(), calibrate(), etc.)      │
-└────────────────────┬──────────────────────────────────┘
-                      │
-┌─────────────────────▼──────────────────────────────────┐
-│                  Gantry Class                          │
-│  • Sequential Motion Planning                         │
-│  • State Machine Management                           │
-│  • Coordinate Transformations                         │
-│  • Error Handling                                      │
-└──────┬──────────┬──────────┬──────────┬───────────────┘
-       │          │          │          │
-┌──────▼──┐ ┌────▼───┐ ┌───▼────┐ ┌───▼──────────┐
-│ X-Axis  │ │ Y-Axis  │ │ Theta  │ │ End-Effector │
-│ Driver  │ │ Stepper │ │ Servo   │ │ Control      │
-│(SDF08)  │ │         │ │         │ │              │
-└────┬────┘ └────┬────┘ └────┬───┘ └──────┬───────┘
-     │           │            │            │
-┌────▼───────────▼────────────▼────────────▼──────────┐
-│              Hardware Layer (GPIO)                   │
-│  • Step/Dir signals                                  │
-│  • PWM outputs                                       │
-│  • Limit switches                                    │
-│  • Encoder feedback                                  │
-└─────────────────────────────────────────────────────┘
-```
+
+The full hardware-layer tree (`PulseMotorDriver → LEDC / PCNT / gpio_expander → MCP23S17`) is shown in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md) §1; this diagram is deliberately abridged to focus on what the Gantry library itself owns.
 
 ---
 
