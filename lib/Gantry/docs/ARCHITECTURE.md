@@ -46,6 +46,7 @@ flowchart TD
   LSX["GantryLimitSwitch × 2<br/>(X min, X max — debounced)"]
   HW["Pulse + direction outputs (LEDC)<br/>Encoder inputs (PCNT)<br/>Gripper / DIR / EN / ALM via MCP23S17"]
 
+  %% ----- downstream (control) -----
   App --> Gantry
   Gantry --> AxisX
   Gantry --> AxisY
@@ -57,9 +58,20 @@ flowchart TD
   AxisT --> HW
   EE --> HW
   LSX --> HW
+
+  %% ----- upstream (feedback) -----
+  HW -- "fb: encoder / alarm / limit" --> AxisX
+  HW -- "fb" --> AxisY
+  HW -- "fb" --> AxisT
+  HW -- "fb: limit state" --> LSX
+  AxisX -- "fb: mm, state" --> Gantry
+  AxisY -- "fb: mm, state" --> Gantry
+  AxisT -- "fb: deg, state" --> Gantry
+  LSX   -- "fb: limit" --> Gantry
+  Gantry -- "fb: status" --> App
 ```
 
-The full hardware-layer tree (`PulseMotorDriver → LEDC / PCNT / gpio_expander → MCP23S17`) is shown in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md) §1; this diagram is deliberately abridged to focus on what the Gantry library itself owns.
+The `fb:`-prefixed edges are upstream feedback. They flow back through the same ownership tree they came down, giving `Gantry` a consistent read-only view of axis position, limit state, and alarm status without the application layer having to reach past it. `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. The full hardware-layer tree (`PulseMotorDriver → LEDC / PCNT / gpio_expander → MCP23S17`) is shown in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md) §1; this diagram is deliberately abridged to focus on what the Gantry library itself owns.
 
 ---
 
