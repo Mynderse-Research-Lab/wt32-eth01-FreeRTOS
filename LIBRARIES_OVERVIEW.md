@@ -4,54 +4,62 @@
 
 For exact function signatures, pin numbers, and build/flash steps, see `PROGRAMMING_REFERENCE.md`. This file is the "big picture" companion.
 
+> *The canonical control-and-feedback flow, signal routing table, and layered invariants live in [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md). This file's §1 diagram and §3 dependency graph are derived from that source; if they drift, treat ARCHITECTURE_FLOW.md as authoritative.*
+
 ---
 
 ## 1. System Architecture at a Glance
 
-```
-+------------------------------------------------------------+
-|                    Application layer                        |
-|                                                            |
-|   src/main.cpp            src/gantry_test_console.cpp      |
-|   (app_main, tasks)       (interactive serial CLI)         |
-|                                                            |
-|                 src/basic_tests.cpp                        |
-+---------+-------------------------+------------------------+
-          |                         |
-          v                         v
-+------------------------+  +-----------------------------+
-|   Gantry library       |  |  PulseMotor::PulseMotorDriver|
-|   (motion controller)  |  |   lib/PulseMotor            |
-|                        |  |                             |
-|  GantryLinearAxis ---|    |   LEDC pulse + PCNT encoder |
-|  GantryRotaryAxis ---|    |   trapezoidal profile @5ms  |
-|  GantryEndEffector  ---|  |   alarm / homing / travel   |
-|  GantryLimitSwitch  ---|  +-----------------------------+
-|  Kinematics            |                |
-|  TrajectoryPlanner     |                |
-|  Waypoint/Queue        |                |
-+----+-------------+-----+                |
-     |             |                      |
-     v             v                      v
-+---------------------+    +------------------------------+
-|  gpio_expander      |    |  ESP-IDF peripherals         |
-|  (MCP-only shim)    |    |  driver/gpio, driver/ledc,   |
-|  include/gpio_...   |    |  driver/pulse_cnt,           |
-+----------+----------+    |  driver/spi_master,          |
-           |               |  esp_timer, freertos/*       |
-           v               +------------------------------+
-+---------------------+
-|  MCP23S17 driver    |
-|  lib/MCP23S17       |
-|  (SPI, mutex, regs) |
-+---------------------+
-           |
-           v
-   [ MIKROE-951 MCP23S17 board over SPI2 @ 1 MHz ]
-   [ 16 expander pins → DIR/EN/ALM/ARST/LIMITS/GRIPPER ]
+```mermaid
+flowchart TD
+  App["Application layer<br/>src/main.cpp<br/>src/gantry_test_console.cpp"]
+  Gantry["Gantry::Gantry<br/>kinematics, state machine, sequencing, safety"]
+  AxisX["GantryPulseMotorLinearAxis (X)"]
+  AxisY["GantryPulseMotorLinearAxis (Y)"]
+  AxisT["GantryPulseMotorRotaryAxis (Theta)"]
+  EE["GantryEndEffector<br/>(gripper, on/off)"]
+  LSX["GantryLimitSwitch × 2<br/>(X min, X max)"]
+  PMX["PulseMotorDriver (X)"]
+  PMY["PulseMotorDriver (Y)"]
+  PMT["PulseMotorDriver (Theta)"]
+  LEDC["ESP32 LEDC<br/>(pulse out)"]
+  PCNT["ESP32 PCNT<br/>(encoder in)"]
+  Exp["gpio_expander<br/>(C shim)"]
+  MCP["MCP23S17<br/>(SPI2 @ 1 MHz)"]
+  DGPIO["driver/gpio<br/>(direct level)"]
+  HW["Motor drivers (Kinetix 5100 · custom ERD)<br/>SCHUNK KGG gripper valve"]
+
+  App -- "motion API" --> Gantry
+  App -. "diagnostics only" .-> Exp
+  App -. "diagnostics only" .-> PMX
+  Gantry --> AxisX
+  Gantry --> AxisY
+  Gantry --> AxisT
+  Gantry --> EE
+  Gantry --> LSX
+  AxisX --> PMX
+  AxisY --> PMY
+  AxisT --> PMT
+  PMX --> LEDC
+  PMY --> LEDC
+  PMT --> LEDC
+  PMX --> Exp
+  PMY --> Exp
+  PMT --> Exp
+  EE --> Exp
+  EE --> DGPIO
+  LSX --> Exp
+  Exp --> MCP
+  LEDC --> HW
+  MCP --> HW
+  DGPIO --> HW
 ```
 
-Reading the stack top-down: the serial console and `app_main` drive the **Gantry** library. Gantry composes three **PulseMotor** drivers — one per axis (X, Y, Theta) — behind the `GantryLinearAxis` and `GantryRotaryAxis` interfaces. Each axis picks its own drivetrain topology (ballscrew, belt, rack-pinion, or rotary-direct) via a `DrivetrainType` enum in `include/axis_drivetrain_params.h`, so mix-and-match is native. Everything that is **not** a direct ESP32 peripheral (pulse output, quadrature encoder) routes through **gpio_expander**, which is a thin C shim over the **MCP23S17** SPI driver. Only the MCP23S17 layer talks directly to the SPI bus.
+Reading the tree: the application commands `Gantry` **and only `Gantry`**. `Gantry` owns three downstream siblings — three axis wrappers (one per physical axis), one `GantryEndEffector` for the digital gripper, and the `GantryLimitSwitch` objects for homing and safety. Each axis wrapper owns exactly one `PulseMotorDriver`, which in turn owns LEDC (pulse output) and PCNT (encoder input) directly and uses `gpio_expander` for every other digital line (DIR, ENABLE/SON, ALARM, ALARM_RESET). `gpio_expander` is the single owner of the MCP23S17 handle and decides whether an integer pin is an MCP logical pin (`0..15`), a direct ESP32 GPIO (`>= 0x10` or flagged via `GPIO_EXPANDER_DIRECT_PIN`), or unwired (`-1`). Each axis independently picks its drivetrain topology (ballscrew, belt, rack-pinion, rotary-direct) via a `DrivetrainType` enum in `include/axis_drivetrain_params.h`, so mix-and-match is native.
+
+The **dotted** arrows from the application layer to `gpio_expander` and `PulseMotor` represent the `gantry_test_console` diagnostic commands (`mcp_reg`, `mcp_dump`, `mcp_pin_mode`, `gpio_drive`, `x_pulse_raw`, …). This is a deliberately-separate diagnostic channel used for bring-up and register-level debugging; it is **not** the motion control path and must not be imitated by new application code.
+
+Upstream feedback (not drawn to keep the diagram legible): quadrature encoders feed `PCNT` and surface through `PulseMotorDriver::getEncoderPulses()`; alarm lines and limit switches are read from the MCP23S17 through `gpio_expander_read` and consumed by `PulseMotorDriver::getAlarmStatus()` (alarms) and `GantryLimitSwitch::read()` (limits). See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §3 for the full signal routing table.
 
 ---
 
@@ -255,47 +263,111 @@ That's why an "X-only" looking move still gates on Y being at safe height first 
 
 ## 3. Dependency Graph
 
-```
-main.cpp
-  ├─> gantry_app_constants.h
-  ├─> axis_pulse_motor_params.h
-  ├─> axis_drivetrain_params.h
-  ├─> gpio_expander.h ───────> MCP23S17.h ─> driver/spi_master.h
-  ├─> Gantry.h
-  │     ├─> GantryConfig.h
-  │     ├─> GantryKinematics.h ─> GantryConfig.h
-  │     ├─> GantryTrajectory.h ─> GantryConfig.h
-  │     ├─> GantryLinearAxis.h
-  │     ├─> GantryRotaryAxis.h
-  │     ├─> GantryPulseMotorLinearAxis.h ─> PulseMotor.h
-  │     ├─> GantryPulseMotorRotaryAxis.h ─> PulseMotor.h
-  │     ├─> GantryEndEffector.h ─> gpio_expander.h
-  │     ├─> GantryLimitSwitch.h
-  │     ├─> GantryUtils.h
-  │     └─> PulseMotor.h ─> driver/pulse_cnt.h, esp_timer.h
-  └─> gantry_test_console.h
+The include graph mirrors the ownership tree in §1: `main.cpp` pulls in `Gantry.h` and the two parameter headers, and `Gantry.h` transitively pulls in every library module the motion core needs. The only header the application layer still includes directly outside the Gantry namespace is `MCP23S17.h` — to populate the one `mcp23s17_config_t` required to bring up the SPI bus before `Gantry::preparePinsForBoot()` is called.
 
-gantry_test_console.cpp
-  ├─> Gantry.h                    # motion commands
-  ├─> gantry_app_constants.h      # default speeds, unit handling
-  ├─> gpio_expander.h             # mcp_* diagnostic commands
-  └─> basic_tests.h               # selftest command
+```mermaid
+flowchart TD
+  main["src/main.cpp"]
+  app_constants["include/gantry_app_constants.h"]
+  pulse_params["include/axis_pulse_motor_params.h"]
+  dt_params["include/axis_drivetrain_params.h"]
+  mcp_h["MCP23S17.h<br/>(bus config only)"]
+  gantry_h["Gantry.h"]
+  console["gantry_test_console.cpp"]
+  g_config["GantryConfig.h"]
+  g_kin["GantryKinematics.h"]
+  g_traj["GantryTrajectory.h"]
+  g_lin["GantryLinearAxis.h"]
+  g_rot["GantryRotaryAxis.h"]
+  g_pm_lin["GantryPulseMotorLinearAxis.h"]
+  g_pm_rot["GantryPulseMotorRotaryAxis.h"]
+  g_ee["GantryEndEffector.h"]
+  g_ls["GantryLimitSwitch.h"]
+  g_utils["GantryUtils.h"]
+  pm_h["PulseMotor.h"]
+  exp_h["gpio_expander.h"]
+  mcp_full["MCP23S17.h<br/>(full driver)"]
+  idf_ledc["driver/ledc.h"]
+  idf_pcnt["driver/pulse_cnt.h"]
+  idf_spi["driver/spi_master.h"]
+  idf_gpio["driver/gpio.h"]
+
+  main --> app_constants
+  main --> pulse_params
+  main --> dt_params
+  main --> mcp_h
+  main --> gantry_h
+  main --> console
+
+  gantry_h --> g_config
+  gantry_h --> g_kin
+  gantry_h --> g_traj
+  gantry_h --> g_lin
+  gantry_h --> g_rot
+  gantry_h --> g_pm_lin
+  gantry_h --> g_pm_rot
+  gantry_h --> g_ee
+  gantry_h --> g_ls
+  gantry_h --> g_utils
+  gantry_h --> pm_h
+
+  g_kin --> g_config
+  g_traj --> g_config
+  g_pm_lin --> pm_h
+  g_pm_rot --> pm_h
+  g_ee --> exp_h
+  g_ls --> exp_h
+
+  pm_h --> idf_ledc
+  pm_h --> idf_pcnt
+  pm_h --> exp_h
+
+  exp_h --> mcp_full
+  mcp_full --> idf_spi
+  mcp_h --> idf_spi
+  g_ee --> idf_gpio
+
+  console --> gantry_h
+  console --> app_constants
+  console -. "diagnostics" .-> exp_h
+  console -. "diagnostics" .-> pm_h
 ```
 
-`gpio_expander` is deliberately a **single** C module with a global handle — there is exactly one MCP23S17 per controller board, and centralizing it here keeps the "which pin lives where" logic out of every consumer.
+`gpio_expander` is deliberately a **single** C module with a global handle — there is exactly one MCP23S17 per controller board, and centralising it here keeps the "which pin lives where" logic out of every consumer. Note that `main.cpp` does **not** include `gpio_expander.h` on the normal control path: boot-time pin seeding is funnelled through `Gantry::preparePinsForBoot()` (see `lib/Gantry/docs/ARCHITECTURE_FLOW.md` §2, invariant 6). The dotted `console ⇢ exp_h / pm_h` arrows are the diagnostic commands from §1.
 
 ---
 
 ## 4. Data Flow for a Typical `move 50 0 0` Command
 
+This walks top-down through the tree in §1, then back up through the feedback path.
+
+### 4.1 Downstream — command entry to motor pulses
+
 1. **`gantry_test_console.cpp`** parses `move 50 0 0`, confirms `home`+`calibrate` both ran this session, converts from the currently-selected unit to mm (`convertSelectedToMm`), builds a `Gantry::JointConfig`, and calls `gantry->moveTo(target, speedMmPerS, speedDegPerS, accel, decel)`.
-2. **`Gantry::Gantry::moveTo(JointConfig, ...)`** validates with `Kinematics::validate(joint, config_.limits)`, stores targets, calls `startSequentialMotion()`.
-3. **State machine** advances from `IDLE` through `Y_DESCENDING`/`GRIPPER_ACTUATING`/`Y_RETRACTING` as needed, finally reaching `X_MOVING` and invoking `startXAxisMotion()`.
-4. **`startXAxisMotion()`** reads the current X encoder position, computes `deltaX` in pulses, converts speed/accel from mm units to pulses, and calls `axisX_.moveRelative(deltaX, speed_pps, accel_pps, decel_pps)`.
-5. **`PulseMotor::PulseMotorDriver::moveRelative`** writes DIR (through `gpio_expander_write` → `mcp23s17_write_pin`, serialized by mutex), enables SON, arms the `esp_timer` ramp callback, and LEDC starts emitting the pulse train on `PIN_X_PULSE` (GPIO14).
-6. **`GantryUpdate` task @100 Hz** calls `gantry.update()`, which calls each axis's `update()`, debounces limit switches, and advances the motion state machine. In parallel, the `esp_timer` 5 ms callback inside each PulseMotor driver updates that axis's motion profile.
-7. **Encoder feedback** via `pulse_cnt` is polled on demand in `axisX_->getEncoderPulses()` and surfaced through `gantry.getXEncoder()` for the `LIVE POS` telemetry and `status` command.
-8. On completion, the driver's position-reached path flips `motionState_` back to `IDLE` and `gantry.isBusy()` returns `false`.
+2. **`Gantry::Gantry::moveTo(JointConfig, ...)`** validates with `Kinematics::validate(joint, config_.limits)`, stores targets, and calls `startSequentialMotion()`.
+3. **Sequential motion state machine** advances from `IDLE` through `Y_DESCENDING` / `GRIPPER_ACTUATING` / `Y_RETRACTING` as needed, finally reaching `X_MOVING` and invoking `startXAxisMotion()`. Theta motion, if any, runs in parallel once Y is at safe height.
+4. **`startXAxisMotion()`** reads the current X encoder position, computes `deltaX` in pulses using the X axis wrapper's `DrivetrainConfig`, converts speed/accel from mm-units to pulses, and calls `axisX_->moveRelative(deltaX, speed_pps, accel_pps, decel_pps)` — still entirely within the Gantry library.
+5. **`GantryPulseMotorLinearAxis::moveRelative`** forwards the call into its owned `PulseMotor::PulseMotorDriver`.
+6. **`PulseMotor::PulseMotorDriver::moveRelative`**:
+   - writes `DIR` via `gpio_expander_write` (→ `mcp23s17_write_pin`, serialised by the per-device SPI mutex) — this reaches the motor driver DIR input through the MCP23S17;
+   - ensures `ENABLE / SON` is asserted the same way;
+   - arms the `esp_timer` ramp callback at 5 ms that updates the trapezoidal velocity profile;
+   - programmes `LEDC` to emit the pulse train on `PIN_X_PULSE` (GPIO14) — this is a **direct ESP32 peripheral** and does not involve the MCP23S17.
+7. **`GantryEndEffector::setActive(...)`** is the sibling path taken when the sequence includes `GRIPPER_ACTUATING`. It writes the gripper level via `gpio_expander_write` (MCP pin 7) — it does **not** go through `PulseMotor`.
+
+### 4.2 Concurrent loops
+
+- **`GantryUpdate` task @100 Hz** calls `gantry.update()`, which calls each axis wrapper's `update()`, debounces the X limit switches through `GantryLimitSwitch`, and advances the motion state machine.
+- **Each PulseMotor's 5 ms `esp_timer` callback** updates that axis's motion profile and emits pulses — independent of the 100 Hz task.
+
+### 4.3 Upstream — feedback back into the application
+
+1. **Encoder A/B pulses** from the motor encoder are counted by `pulse_cnt` (ESP32 PCNT) into a 16-bit hardware counter, which `PulseMotorDriver` accumulates into a 64-bit software value.
+2. `GantryPulseMotorLinearAxis::getEncoderPulses()` converts pulses back to mm using its `DrivetrainConfig`.
+3. `Gantry::getXEncoder()` / `getXEncoderMm()` expose the result to the application (`LIVE POS` telemetry, the `status` console command, and — when the MQTT bridge lands — the outbound status topic).
+4. **Alarm status** is read from the MCP23S17 by `PulseMotorDriver` via `gpio_expander_read` and surfaced as `Gantry::isAlarmActive()` / `Gantry::clearAlarm()`.
+5. **Limit switch state** is read by `GantryLimitSwitch::read()` (owned by `Gantry`, **not** by `PulseMotor`) with N-sample debounce, and consumed by `home()` / `calibrate()` / the safety-abort path.
+6. On completion, the driver's position-reached path flips `motionState_` back to `IDLE` and `gantry.isBusy()` returns `false`.
 
 (See §11.1 of `PROGRAMMING_REFERENCE.md` for why this chain currently fails in practice for the `move` command.)
 
