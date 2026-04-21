@@ -59,13 +59,27 @@ flowchart TD
   MCP -- "DIR, ENABLE, ALARM_RESET, GRIPPER" --> HW
   DGPIO -- "GRIPPER (if direct-encoded)" --> HW
 
-  Sens -- "A/B quadrature" --> PCNT
-  Sens -- "alarm, limit levels" --> MCP
-  PCNT -- "encoder counts" --> PMX
-  PCNT --> PMY
-  PCNT --> PMT
-  MCP -- "alarm, limit reads" --> Exp
+  %% ----- upstream (feedback) -----
+  Sens -- "fb: A/B quadrature" --> PCNT
+  Sens -- "fb: alarm / limit levels" --> MCP
+  MCP  -- "fb: alarm / limit reads" --> Exp
+  PCNT -- "fb: encoder counts" --> PMX
+  PCNT -- "fb: encoder counts" --> PMY
+  PCNT -- "fb: encoder counts" --> PMT
+  Exp  -- "fb: alarm status" --> PMX
+  Exp  -- "fb: alarm status" --> PMY
+  Exp  -- "fb: debounced limits" --> LSX
+  PMX  -- "fb: position, state" --> AxisX
+  PMY  -- "fb: position, state" --> AxisY
+  PMT  -- "fb: position, state" --> AxisT
+  AxisX -- "fb: mm, state" --> Gantry
+  AxisY -- "fb: mm, state" --> Gantry
+  AxisT -- "fb: deg, state" --> Gantry
+  LSX   -- "fb: limit state" --> Gantry
+  Gantry -- "fb: status, telemetry" --> App
 ```
+
+Every `fb:`-prefixed edge is an **upstream feedback** edge. The feedback tree is the mirror image of the downstream control tree: sensors → peripherals (PCNT / MCP) → gpio_expander → PulseMotor + GantryLimitSwitch → axis wrappers → Gantry → Application. Note that there is no feedback edge from `GantryEndEffector`: the gripper is a digital output with no sensed state in this revision.
 
 ## 2. Invariants
 

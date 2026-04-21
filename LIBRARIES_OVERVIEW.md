@@ -29,6 +29,7 @@ flowchart TD
   DGPIO["driver/gpio<br/>(direct level)"]
   HW["Motor drivers (Kinetix 5100 · custom ERD)<br/>SCHUNK KGG gripper valve"]
 
+  %% ----- downstream (control) -----
   App -- "motion API" --> Gantry
   App -. "diagnostics only" .-> Exp
   App -. "diagnostics only" .-> PMX
@@ -53,13 +54,32 @@ flowchart TD
   LEDC --> HW
   MCP --> HW
   DGPIO --> HW
+
+  %% ----- upstream (feedback) -----
+  HW   -- "fb: encoder A/B" --> PCNT
+  HW   -- "fb: alarm / limit" --> MCP
+  MCP  -- "fb" --> Exp
+  PCNT -- "fb" --> PMX
+  PCNT -- "fb" --> PMY
+  PCNT -- "fb" --> PMT
+  Exp  -- "fb" --> PMX
+  Exp  -- "fb" --> PMY
+  Exp  -- "fb" --> LSX
+  PMX  -- "fb" --> AxisX
+  PMY  -- "fb" --> AxisY
+  PMT  -- "fb" --> AxisT
+  AxisX -- "fb" --> Gantry
+  AxisY -- "fb" --> Gantry
+  AxisT -- "fb" --> Gantry
+  LSX   -- "fb" --> Gantry
+  Gantry -- "fb: status" --> App
 ```
 
 Reading the tree: the application commands `Gantry` **and only `Gantry`**. `Gantry` owns three downstream siblings — three axis wrappers (one per physical axis), one `GantryEndEffector` for the digital gripper, and the `GantryLimitSwitch` objects for homing and safety. Each axis wrapper owns exactly one `PulseMotorDriver`, which in turn owns LEDC (pulse output) and PCNT (encoder input) directly and uses `gpio_expander` for every other digital line (DIR, ENABLE/SON, ALARM, ALARM_RESET). `gpio_expander` is the single owner of the MCP23S17 handle and decides whether an integer pin is an MCP logical pin (`0..15`), a direct ESP32 GPIO (`>= 0x10` or flagged via `GPIO_EXPANDER_DIRECT_PIN`), or unwired (`-1`). Each axis independently picks its drivetrain topology (ballscrew, belt, rack-pinion, rotary-direct) via a `DrivetrainType` enum in `include/axis_drivetrain_params.h`, so mix-and-match is native.
 
 The **dotted** arrows from the application layer to `gpio_expander` and `PulseMotor` represent the `gantry_test_console` diagnostic commands (`mcp_reg`, `mcp_dump`, `mcp_pin_mode`, `gpio_drive`, `x_pulse_raw`, …). This is a deliberately-separate diagnostic channel used for bring-up and register-level debugging; it is **not** the motion control path and must not be imitated by new application code.
 
-Upstream feedback (not drawn to keep the diagram legible): quadrature encoders feed `PCNT` and surface through `PulseMotorDriver::getEncoderPulses()`; alarm lines and limit switches are read from the MCP23S17 through `gpio_expander_read` and consumed by `PulseMotorDriver::getAlarmStatus()` (alarms) and `GantryLimitSwitch::read()` (limits). See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §3 for the full signal routing table.
+Every `fb:`-prefixed edge is an **upstream feedback** edge: encoders flow `HW → PCNT → PulseMotor`, alarms and limit states flow `HW → MCP → gpio_expander → PulseMotor / GantryLimitSwitch`, and from there the signal climbs the axis wrappers into `Gantry` and finally surfaces as status telemetry at the application layer (e.g. the `LIVE POS` output, the `status` console command, and — when the MQTT plan lands — the outbound `gantry/status` topic). `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §3 for the full signal routing table.
 
 ---
 
