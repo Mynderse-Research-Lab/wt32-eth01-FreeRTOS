@@ -102,6 +102,37 @@ public:
            const PulseMotor::DrivetrainConfig& tDt,
            int gripperPin);
 
+    // ---------- Boot-time helpers (static) ----------
+    /**
+     * @brief Seed MCP23S17 pin directions and safe-low levels before begin().
+     *
+     * Idempotent power-on-safety helper. Call once in app_main() AFTER
+     * gpio_expander_init() and BEFORE constructing Gantry::Gantry. For each
+     * of the three DriverConfigs and for the gripper pin, the helper sets
+     * the MCP-routed output lines (DIR, ENABLE/SON, ALARM_RESET, GRIPPER)
+     * to output direction and drives them to a safe-low initial level; for
+     * the MCP-routed input lines (ALARM_STATUS) it enables the input
+     * pull-up. Pulse pins are skipped because they are direct ESP32 GPIOs
+     * owned by LEDC and configured by PulseMotorDriver::initialize().
+     *
+     * The same pin directions and levels will be re-applied by
+     * PulseMotorDriver::initialize(), GantryEndEffector::begin(), and
+     * GantryLimitSwitch::begin() once gantry.begin() runs. This call is
+     * purely defensive - its purpose is to keep the application layer from
+     * reaching into gpio_expander_* directly, upholding the invariant that
+     * app code commands Gantry only.
+     *
+     * @param xDrv       X-axis PulseMotor::DriverConfig (DIR/EN/ALARM/ARST).
+     * @param yDrv       Y-axis PulseMotor::DriverConfig.
+     * @param tDrv       Theta-axis PulseMotor::DriverConfig.
+     * @param gripperPin End-effector pin (MCP or direct, same encoding as
+     *                   DriverConfig output pins).
+     */
+    static void preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
+                                   const PulseMotor::DriverConfig& yDrv,
+                                   const PulseMotor::DriverConfig& tDrv,
+                                   int gripperPin);
+
     // ---------- Lifecycle ----------
     bool begin();
     void enable();
