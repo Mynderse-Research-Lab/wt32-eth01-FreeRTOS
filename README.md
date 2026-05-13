@@ -38,7 +38,7 @@ Touch pin 1 (EN) with ground again to reset the module.
 ![alt text](<Screenshot from 2025-06-28 18-05-10-1.png>)
 
 ## ESP-IDF Usage
-This project includes an ESP-IDF build that reuses the existing Arduino-style `src/main.cpp`.
+This project includes an ESP-IDF build in `idf/` that compiles the native firmware in `src/main.cpp` (ESP-IDF `app_main`, not Arduino `setup`/`loop`).
 
 ### Prerequisites
 - ESP-IDF installed and `idf.py` available in your shell.
@@ -56,6 +56,5 @@ idf.py monitor -p COM3
 ```
 
 ### Notes
-- The ESP-IDF project lives in `idf/`.
-- `idf/main/app_main.cpp` bridges into your existing `setup()` / `loop()` in `src/main.cpp`.
-- Arduino core v3 is pulled via `idf/main/idf_component.yml`.
+- The ESP-IDF project lives in `idf/`; always `cd` there before `idf.py` (see `idf/CMakeLists.txt` and `idf/main/CMakeLists.txt`).
+- Application entry is `app_main()` in `src/main.cpp`, registered by `idf/main/CMakeLists.txt`.

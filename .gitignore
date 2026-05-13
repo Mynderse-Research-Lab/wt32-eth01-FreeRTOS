@@ -8,5 +8,10 @@
 .clangd
 compile_commands.json
 
-# Local ESP-IDF project mirror (never commit — regenerate from PROGRAMMING_REFERENCE.md §1.2 / §11.3)
-idf/build
+# ESP-IDF build and generated config (canonical project is idf/ — see PROGRAMMING_REFERENCE.md §1.2)
+idf/build/
+build/
+idf/sdkconfig
+
+# Local capture of idf.py output (optional)
+idf/build_output.log
