@@ -1,7 +1,7 @@
 # Programming Reference — WT32-ETH01 Gantry Controller
 
 **Target:** ESP32 (WT32-ETH01)
-**Framework:** ESP-IDF v5.x (Arduino-ESP32 v3 as a component)
+**Framework:** ESP-IDF v5.x (native `app_main`; no Arduino core in this firmware)
 
 This document is the single-source programming reference for the firmware. It covers the build and flash flow, the FreeRTOS entry point and task layout, the public C/C++ APIs of every library, the serial console command surface, and the current known bugs. For *conceptual* overviews ("what does this library do, why does it exist"), see `LIBRARIES_OVERVIEW.md`.
 
@@ -20,6 +20,7 @@ This document is the single-source programming reference for the firmware. It co
 9. [Application-Level Constants](#9-application-level-constants)
 10. [Diagnostic Compile-Time Toggles](#10-diagnostic-compile-time-toggles)
 11. [Known Bugs & Gotchas](#11-known-bugs--gotchas)
+12. [Y & Theta Axis Assembly & Bring-up](#12-y--theta-axis-assembly--bring-up)
 
 ---
 
@@ -32,20 +33,18 @@ This document is the single-source programming reference for the firmware. It co
 | ESP-IDF | 5.x (tested on v5.1.x and v6.0) |
 | Target chip | `esp32` |
 | Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see §11.2) |
-| `arduino-esp32` | `^3.0.0` (via `idf_component.yml`) |
-| `CONFIG_FREERTOS_HZ` | must be `1000` |
+| `CONFIG_FREERTOS_HZ` | must be `1000` (set in `sdkconfig.defaults`) |
 
 ### 1.2 Project layout that matters at build time
 
 ```
-idf/                          # ESP-IDF project root (gitignored)
-├── CMakeLists.txt            # minimal: project(wt32_eth01_base)
-├── sdkconfig                 # generated; committed as sdkconfig.old snapshot
-├── sdkconfig.defaults        # only CONFIG_FREERTOS_HZ=1000
-├── partitions.csv
-└── main/
-    ├── CMakeLists.txt        # compiles all sources from ../../src, ../../lib/*/src
-    └── idf_component.yml     # arduino-esp32 dependency
+CMakeLists.txt                # ESP-IDF project root
+sdkconfig.defaults            # e.g. CONFIG_FREERTOS_HZ=1000
+main/
+└── CMakeLists.txt            # app sources under src/
+
+components/
+└── gpio_expander/            # ESP-IDF component wrapping src/gpio_expander.c
 
 src/                          # application sources
 ├── main.cpp                  # app_main(), MCP init, task creation
@@ -57,28 +56,44 @@ include/                      # project-wide headers
 ├── gantry_app_constants.h    # pin map + motion defaults
 └── gpio_expander.h           # MCP/direct pin API
 
-lib/
-├── Gantry/                   # 3-axis gantry controller
-├── PulseMotor/               # Generic pulse+direction motor driver (X, Y, Theta)
-└── MCP23S17/                 # SPI GPIO expander driver
+lib/                          # each subfolder is an ESP-IDF component (CMakeLists.txt)
+├── Gantry/
+├── PulseMotor/
+└── MCP23S17/
 ```
 
-`idf/main/CMakeLists.txt` compiles application + library sources **directly** — there are no separate ESP-IDF custom components under `idf/components/`. If you see `Failed to resolve component 'PulseMotor'` (or similar), the `main/CMakeLists.txt` was regenerated with component dependencies and needs to be reverted to compile-from-lib-tree mode (see §11.3 below).
+Top-level `CMakeLists.txt` sets `EXTRA_COMPONENT_DIRS` so `idf.py` resolves `Gantry`, `PulseMotor`, `MCP23S17`, and `gpio_expander`. The `main` component lists only the `src/*.cpp` application files and `REQUIRES Gantry`.
 
-### 1.3 Build
+### 1.3 Environment (Windows)
+
+Use **ESP-IDF Command Prompt** from the Start Menu (it runs `export.bat` for your install), or in `cmd.exe`:
+
+```bat
+call C:\Espressif\frameworks\esp-idf-v5.x\export.bat
+```
+
+(Adjust the path to match your ESP-IDF version; the installer also documents `%IDF_PATH%\export.bat`.)
+
+PowerShell equivalent:
 
 ```powershell
-. "$env:USERPROFILE\esp-idf\export.ps1"
-cd E:\Projects\wt32-eth01-base\idf
-idf.py set-target esp32          # first time only
+& "$env:IDF_PATH\export.ps1"
+```
+
+### 1.4 Build
+
+```powershell
+cd E:\Projects\wt32-eth01-base
+idf.py set-target esp32          # first time only (or after fullclean)
 idf.py build
 ```
 
-Output firmware: `idf/build/wt32_eth01_base.bin`.
+Output firmware: `build/wt32_eth01_base.bin` (under the project root).
 
-### 1.4 Flash & monitor
+### 1.5 Flash & monitor
 
 ```powershell
+cd E:\Projects\wt32-eth01-base
 idf.py -p COM3 flash monitor     # replace COM3 with your port
 ```
 
@@ -86,14 +101,14 @@ Exit monitor: `Ctrl+]`.
 
 If upload fails: hold **BOOT**, tap **EN/RESET**, release **BOOT** as "Connecting…" appears. Retry at lower baud with `-b 115200`.
 
-### 1.5 Clean build
+### 1.6 Clean build
 
 ```powershell
 idf.py fullclean
 idf.py build
 ```
 
-Use `fullclean` after changing `sdkconfig.defaults` or after any ESP-IDF or Arduino-ESP32 version change.
+Use `fullclean` after changing `sdkconfig.defaults` or after a major ESP-IDF upgrade.
 
 ---
 
@@ -853,13 +868,13 @@ The attached build log shows:
 ```
 idf_component_tools.hash_tools.errors.ChecksumsInvalidJson:
   Invalid checksums file:
-  E:\Projects\wt32-eth01-base\idf\managed_components\espressif__libsodium\CHECKSUMS.json
+  E:\Projects\wt32-eth01-base\managed_components\espressif__libsodium\CHECKSUMS.json
 ```
 
 The file was written empty (JSON decoder sees `Expecting value: line 1 column 1`). Repair steps:
 
 ```powershell
-cd E:\Projects\wt32-eth01-base\idf
+cd E:\Projects\wt32-eth01-base
 Remove-Item -Recurse -Force .\managed_components
 Remove-Item -Force .\dependencies.lock -ErrorAction SilentlyContinue
 idf.py fullclean
@@ -869,23 +884,16 @@ idf.py build
 
 The IDF Component Manager will re-download every managed component. Ensure ESP-IDF's bundled Python (`C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe`) is the one in use — the traceback shows it fell through to `scoop\apps\python313` once, which can also corrupt the cache on Windows.
 
-### 11.3 `idf/` is gitignored — state lives only locally
+### 11.3 Resolving custom components
 
-If you wipe `idf/` or clone fresh, you must regenerate four files before `idf.py build`:
+The libraries under `lib/` and `components/gpio_expander` are real ESP-IDF components (`idf_component_register` in each `CMakeLists.txt`). Top-level `CMakeLists.txt` must set `EXTRA_COMPONENT_DIRS` **before** `project()` so names like `Gantry`, `PulseMotor`, and `MCP23S17` resolve.
 
-- `idf/CMakeLists.txt`:
+If CMake reports `Failed to resolve component 'PulseMotor'` (or similar), check that:
 
-```cmake
-cmake_minimum_required(VERSION 3.16)
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(wt32_eth01_base)
-```
+1. `EXTRA_COMPONENT_DIRS` in the root `CMakeLists.txt` still lists every component directory, and  
+2. `main/CMakeLists.txt` uses `REQUIRES Gantry` (transitive deps pull in the rest)—do not strip `REQUIRES` to empty.
 
-- `idf/main/CMakeLists.txt` — lists the application sources plus the `lib/` source trees directly (no separate ESP-IDF components). Base it on the existing checked-in copy from a working tree.
-- `idf/main/idf_component.yml` — must declare `espressif/arduino-esp32` and any other managed components.
-- `idf/sdkconfig.defaults` — board/feature defaults for the WT32-ETH01.
-
-Do not regenerate `main/CMakeLists.txt` with a `REQUIRES PulseMotor MCP23S17 Gantry` line; those aren't separate components. If that happens, `idf.py reconfigure` fails with `Failed to resolve component 'PulseMotor'`. Revert to the compile-from-lib-tree layout (sources listed directly via `SRC_DIRS` / `INCLUDE_DIRS`).
+Fresh clones need no manual regeneration beyond `idf.py set-target esp32` and `idf.py build`.
 
 ### 11.4 Strap pins and boot stability
 
@@ -900,3 +908,125 @@ Any rework that drives these pins externally during reset will brick the boot.
 ### 11.5 `home` + `calibrate` are required after every startup before `move` is allowed
 
 `gantry_test_console.cpp` gates `move` on `g_homeCompletedThisSession && g_calibratedThisSession`. This is by design, not a bug — report as `ERROR: Move blocked. Run 'home' then 'calibrate' after every startup.`
+
+---
+
+## 12. Y & Theta Axis Assembly & Bring-up
+
+When the Y ballscrew and Theta rotary stage are physically assembled, most of the pin map, drivetrain math, motion caps, and the `PulseMotor::DriverConfig` for each axis are already in place. What is **not** in place is the Gantry-layer plumbing that converts those defined pins into real homing/calibration behavior. Today `Gantry::homeY()`, `Gantry::calibrateY()`, `Gantry::homeTheta()`, and `Gantry::calibrateTheta()` are stubs that log a warning; the `home y|t|all` and `calibrate y|t|all` console commands accept the request but the Y/Theta paths do not command motion. This section is the roadmap from "stubbed" to "real".
+
+### 12.1 Y axis — hardware wiring
+
+All Y pins are already defined in [`pinout.csv`](pinout.csv) and [`include/gantry_app_constants.h`](include/gantry_app_constants.h). Wire them as follows.
+
+| Symbol | Where | Connects to | Convention |
+|---|---|---|---|
+| `PIN_Y_DIR` (MCP Port B bit 0, logical 8) | K5100 servo drive | SIGN/DIR input | Output, polarity set by `AXIS_Y_INVERT_DIR` in `axis_pulse_motor_params.h` |
+| `PIN_Y_ENABLE` (MCP B1, logical 9) | K5100 SON | Servo-on enable | Output, active per `AXIS_Y_INVERT_OUTPUT_LOGIC` |
+| `PIN_Y_LIMIT_MIN` (MCP B2, logical 10) | Home/MIN switch on the screw | Input | Active LOW, MCP internal pull-up |
+| `PIN_Y_LIMIT_MAX` (MCP B3, logical 11) | End/MAX switch on the screw | Input | Active LOW, MCP internal pull-up |
+| `PIN_Y_ALARM_STATUS` (MCP B4, logical 12) | K5100 ALM output | Input | Active LOW |
+| `PIN_Y_ALARM_RESET` (MCP B5, logical 13) | K5100 ARST input | Output | Pulse to clear alarm |
+| `PIN_Y_PULSE` (ESP32 **GPIO2**) | K5100 PULSE input | LEDC pulse train | **Strapping pin — must stay LOW/floating at reset.** Already pre-seeded by `initDirectOutputs()` in `src/main.cpp`. |
+| `PIN_Y_ENC_A` / `PIN_Y_ENC_B` (GPIO39 / GPIO32) | K5100 PAO / PBO encoder outputs | PCNT unit 1 | Optional. Leave `AXIS_Y_HAS_ENCODER = 0` in `axis_pulse_motor_params.h` until both lines are physically wired; firmware dead-reckons via commanded pulses until then. |
+
+Both Y limit switches must use the same active-low + pull-up convention as X. This is what `GantryLimitSwitch` assumes by default (`xMinSwitch_.configure(pin_, true, true, 6)` in `Gantry.cpp`).
+
+### 12.2 Theta axis — hardware wiring
+
+Theta is simpler than Y because the SCHUNK ERD 04-40-D-H-N has unlimited mechanical rotation — there are **no limit switches**. The pins are already finalized.
+
+| Symbol | Where | Connects to | Convention |
+|---|---|---|---|
+| `PIN_THETA_DIR` (MCP B6, logical 14) | Custom ERD driver | SIGN/DIR | Output |
+| `PIN_THETA_ENABLE` (MCP B7, logical 15) | Custom ERD driver | SON / enable | Output |
+| `PIN_THETA_PULSE` (ESP32 **GPIO0**) | Custom ERD driver | Pulse input | **Strapping pin — must stay HIGH at reset.** Hand-off to LEDC happens after boot. |
+| Alarm / encoder | — | not wired in this hardware revision | `alarm_pin`, `alarm_reset_pin`, `encoder_a_pin`, `encoder_b_pin` all `-1` in `makeThetaDriverConfig()` in `src/main.cpp` |
+
+The MCP bits that **used to** host theta limit switches (B6/B7) were repurposed to DIR/ENABLE — see the comment block in [`include/gantry_app_constants.h`](include/gantry_app_constants.h) around `PIN_THETA_DIR`. Do not put limit switches back on those pins. The firmware design treats `AXIS_THETA_HARD_LIMIT_MIN/MAX_DEG = ±180°` (in `axis_drivetrain_params.h`) as the **firmware-enforced effective hard limit** (cable management constraint), not a switch.
+
+### 12.3 Software changes — Y axis
+
+The Y `DriverConfig` in `src/main.cpp` (`makeYDriverConfig()`) is already wired with alarm/alarm-reset, pulse, dir, enable, and encoder pins. What is missing is the Y limit-switch plumbing on the Gantry side. Concretely:
+
+**`lib/Gantry/src/Gantry.h`** — add Y twins of the X members:
+
+```cpp
+int  yMinPin_, yMaxPin_;
+GantryLimitSwitch yMinSwitch_;
+GantryLimitSwitch yMaxSwitch_;
+uint32_t lastYPositionCounts_;
+float    yPulsesPerMmOverride_;
+```
+
+Plus a setter signature: `void setYLimitPins(int yMinPin, int yMaxPin);` (or extend `setLimitPins` to take all four pins).
+
+**`lib/Gantry/src/Gantry.cpp`** — five concrete changes:
+
+1. **`begin()`** — call `yMinSwitch_.begin()` and `yMaxSwitch_.begin()` alongside the existing X calls.
+2. **`setYLimitPins()`** — mirror of `setLimitPins()`. Configure both switches with `(pin, true /*activeLow*/, true /*pullup*/, 6 /*debounce*/)`.
+3. **Replace `homeY()` stub** with the same recipe as `homeX()`:
+   - Check switch configured, check alarm, debounce both switches.
+   - Snapshot MIN; if already active, set pulses to 0 and return.
+   - Seed `axisY_->setCurrentPulses(kHomingStartPosition)` **and** `lastYPositionCounts_ = kHomingStartPosition`. The seed step is essential — without it `updateAxisPositions()` will misclassify the first tick as "moving toward MAX" and abort, the same bug the X path had (see `homeX()` for the seeded comment block).
+   - `axisY_->moveToPulses(0, speed, speed, speed)`.
+4. **Replace `calibrateY()` stub** with the X recipe:
+   - Run `homeY()`, wait for MIN to be hit.
+   - Command `moveToPulses(huge_target)`, wait for MAX to assert.
+   - `commandedPulses = axisY_->getCurrentPulses()`; `hardSpanMm = AXIS_Y_HARD_LIMIT_MAX_MM - AXIS_Y_HARD_LIMIT_MIN_MM` (150 mm for the Beta 80-SRS).
+   - `yPulsesPerMmOverride_ = commandedPulses / hardSpanMm`. Re-anchor as `calibrateX()` already does for X.
+5. **`updateAxisPositions()`** — add Y's debounce + stop-on-active guards alongside the X block. Same pattern: `yMinSwitch_.update()` / `yMaxSwitch_.update()`, then if `axisY_->isMotionActive()` check direction vs. last counts and stop on the appropriate switch.
+
+**`src/main.cpp`** — one line near the existing X call:
+
+```cpp
+gantry.setYLimitPins(PIN_Y_LIMIT_MIN, PIN_Y_LIMIT_MAX);
+```
+
+**`src/gantry_test_console.cpp`** — only one change worth considering: today the move-gate (`g_homeCompletedThisSession && g_calibratedThisSession`) is X-only. Once Y homing is real, decide whether `move <x> <y> <theta>` should also require `home y` + `calibrate y` before allowing non-zero Y targets. The simplest path is to add two new session flags (`g_homeYCompletedThisSession`, `g_calibratedYThisSession`) and gate accordingly.
+
+### 12.4 Software changes — Theta axis
+
+Theta has no homing reference to find, so "home theta" really just means **adopt the current angle as 0**. Replace the `homeTheta()` stub with something like:
+
+```cpp
+void Gantry::homeTheta() {
+    if (!axisTheta_) return;
+    axisTheta_->stopMotion();
+    auto* impl = static_cast<GantryPulseMotorRotaryAxis*>(axisTheta_.get());
+    impl->driver().setCurrentPulses(0);
+}
+```
+
+`calibrateTheta()` has no physical sweep to run. Two reasonable options:
+
+- **Trivial path (recommended):** return `360` (full rotation soft envelope) and mark calibrated; do not command motion.
+- **Datasheet-trust path:** keep `AXIS_THETA_HARD_LIMIT_MIN_DEG`..`MAX_DEG` as the working envelope and treat `calibrateTheta()` as a no-op success.
+
+A Theta equivalent of `yPulsesPerMmOverride_` is **not** needed: theta's pulses-per-degree comes straight from encoder PPR and gear ratio, both of which are commissioning-fixed in the custom driver. There is no physical span to anchor against.
+
+### 12.5 Bring-up checklist (in this order)
+
+When the axes are actually assembled, work in this order — each step is independently testable, and each unlocks the next.
+
+1. **Power wiring + alarm.** Wire DIR/ENABLE/ALM/ARST through the MCP first. Verify with the existing `alarmreset` and `pins` console commands.
+2. **Pulse path.** Wire only PULSE. After manually enabling motors, issue `move 0 1 0` and confirm the Y motor turns the expected direction. If it goes the wrong way, flip `AXIS_Y_INVERT_DIR` in [`include/axis_pulse_motor_params.h`](include/axis_pulse_motor_params.h) — do **not** flip wires.
+3. **Y limit switches.** Wire MIN + MAX. Use the existing `limits` console command to read raw switch state before trusting `home y`.
+4. **Implement `homeY`.** Run `home y`, watch the new per-axis logs (`MOVE START`/`MOVE END` from `axislog`) and the `[HOME]` lines confirm the motion really starts, and stops on the MIN switch.
+5. **Implement `calibrateY`.** Run `calibrate y` and check the `[CAL]` log shows `commandedPulses / 150 mm = correctedPpm`. The derived ppm should be close to the compile-time `AXIS_Y_PULSES_PER_MM`; large divergence means a step-resolution mismatch on the K5100 commissioning.
+6. **Y encoder (optional).** When ready, wire `PIN_Y_ENC_A` / `PIN_Y_ENC_B` and flip `AXIS_Y_HAS_ENCODER` to `1` in `axis_pulse_motor_params.h`. No firmware changes beyond that — `GantryPulseMotorLinearAxis` already routes through PCNT when the flag is on.
+7. **Theta.** Wire DIR/ENABLE/PULSE. With unlimited rotation, just `home t` after power-on to zero the angle, then test `move 0 0 90` and `move 0 0 -90` against the ±180° firmware clamp.
+
+### 12.6 What stays the same
+
+- The `home all` / `calibrate all` token dispatcher in `gantry_test_console.cpp` requires no changes — once `homeY/Theta` and `calibrateY/Theta` stop being stubs, those commands will produce real motion automatically.
+- Per-axis MOVE logging (`MOVE START` / `MOVE END` / periodic `MOVE`) already covers Y and Theta as soon as their `update()` methods are called from `Gantry::updateAxisPositions()` (which they already are).
+- `axislog <hz>` and `livepos <hz>` need no updates.
+- `gantry.setJointLimits(...)` already loads `AXIS_Y_HARD_LIMIT_MIN/MAX_MM` and the theta envelope as soft caps at boot, so `moveTo` is already bounded. `calibrateY` only **refines** that envelope to whatever the physical sweep measured.
+
+### 12.7 Additional Y-axis consideration: critical-speed cap
+
+The Y ballscrew has a critical-speed cap of 3000 rpm from `AXIS_Y_CRITICAL_RPM` in [`include/axis_drivetrain_params.h`](include/axis_drivetrain_params.h). The macro `AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` computes the resulting linear-speed ceiling. Nothing currently enforces this in the move pipeline. When Y is wired up, either:
+
+- Clamp `speed_mm_per_s_` to the derived cap inside `Gantry::startSequentialMotion()` for the Y phase, or
+- Add a `setYSpeedCap()` API and clamp at the console layer before forwarding to `moveTo()`.
