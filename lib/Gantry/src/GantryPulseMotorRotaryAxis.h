@@ -40,6 +40,9 @@ public:
 
     void setAngleRange(float min_deg, float max_deg) override;
 
+    void setLogTag(const char* tag) override;
+    void setLogRateHz(uint32_t hz) override;
+
     PulseMotor::PulseMotorDriver&       driver()       { return driver_; }
     const PulseMotor::PulseMotorDriver& driver() const { return driver_; }
 
@@ -50,6 +53,12 @@ private:
     float  min_deg_;
     float  max_deg_;
     float  target_deg_;
+
+    // Motion logging state (driven from update()).
+    const char* log_tag_;
+    uint32_t    log_rate_hz_;
+    uint32_t    last_log_ms_;
+    bool        was_active_;
 };
 
 } // namespace Gantry

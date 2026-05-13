@@ -39,6 +39,14 @@ public:
     virtual void update() = 0;
 
     virtual void setAngleRange(float min_deg, float max_deg) = 0;
+
+    // ---------- Motion logging ----------
+    /// @brief Set the short human-readable axis tag used in MOVE log lines.
+    ///        Caller must keep the pointer valid for the axis lifetime.
+    virtual void setLogTag(const char* tag) = 0;
+    /// @brief Periodic MOVE log rate while motion is active.
+    ///        0 disables periodic output; START/END events always fire.
+    virtual void setLogRateHz(uint32_t hz) = 0;
 };
 
 } // namespace Gantry

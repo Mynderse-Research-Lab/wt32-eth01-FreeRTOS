@@ -5,10 +5,15 @@
 #include "GantryPulseMotorRotaryAxis.h"
 #include <cmath>
 #include <esp_log.h>
+#include <esp_timer.h>
 
 namespace Gantry {
 
 static const char* TAG = "GantryRotAxis";
+
+static inline uint32_t rot_axis_millis() {
+    return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
 
 GantryPulseMotorRotaryAxis::GantryPulseMotorRotaryAxis(
     const PulseMotor::DriverConfig& drv,
@@ -18,7 +23,11 @@ GantryPulseMotorRotaryAxis::GantryPulseMotorRotaryAxis(
     pulses_per_deg_(PulseMotor::pulsesPerDeg(dt)),
     min_deg_(-180.0f),
     max_deg_(180.0f),
-    target_deg_(0.0f) {
+    target_deg_(0.0f),
+    log_tag_(""),
+    log_rate_hz_(0),
+    last_log_ms_(0),
+    was_active_(false) {
     if (pulses_per_deg_ <= 0.0) {
         ESP_LOGW(TAG,
                  "Non-rotary drivetrain or zero-scale config: ppd=%.6f (type=%d)",
@@ -85,8 +94,46 @@ float GantryPulseMotorRotaryAxis::getCurrentDeg() const {
 
 bool GantryPulseMotorRotaryAxis::isBusy() const { return driver_.isMotionActive(); }
 
+void GantryPulseMotorRotaryAxis::setLogTag(const char* tag) {
+    log_tag_ = (tag != nullptr) ? tag : "";
+}
+
+void GantryPulseMotorRotaryAxis::setLogRateHz(uint32_t hz) {
+    log_rate_hz_ = hz;
+    last_log_ms_ = 0;
+}
+
 void GantryPulseMotorRotaryAxis::update() {
-    (void)TAG;
+    // The driver's motion profile runs on its own esp_timer; this hook is
+    // used purely to emit per-axis MOVE log lines. State transitions fire
+    // unconditionally; the periodic MOVE line is gated by log_rate_hz_.
+    const bool active = driver_.isMotionActive();
+    const float cur_deg    = getCurrentDeg();
+    const float target_deg = target_deg_;
+
+    if (active != was_active_) {
+        if (active) {
+            ESP_LOGI(TAG, "MOVE START: axis=%s pos=%.3f deg target=%.3f deg",
+                     log_tag_, cur_deg, target_deg);
+            last_log_ms_ = rot_axis_millis();
+        } else {
+            ESP_LOGI(TAG, "MOVE END: axis=%s pos=%.3f deg", log_tag_, cur_deg);
+        }
+        was_active_ = active;
+    }
+
+    if (active && log_rate_hz_ > 0) {
+        const uint32_t now_ms = rot_axis_millis();
+        uint32_t period_ms = 1000u / log_rate_hz_;
+        if (period_ms == 0) {
+            period_ms = 1;
+        }
+        if (last_log_ms_ == 0 || (now_ms - last_log_ms_) >= period_ms) {
+            ESP_LOGI(TAG, "MOVE: axis=%s pos=%.3f deg target=%.3f deg",
+                     log_tag_, cur_deg, target_deg);
+            last_log_ms_ = now_ms;
+        }
+    }
 }
 
 } // namespace Gantry
