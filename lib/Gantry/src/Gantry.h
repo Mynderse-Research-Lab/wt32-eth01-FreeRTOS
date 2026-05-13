@@ -149,8 +149,24 @@ public:
     void setSafeYHeight(float safeHeight_mm);
 
     // ---------- Motion ----------
+    /// @brief Home all supported axes (currently X only; Y/Theta are stubs).
     void home();
+    /// @brief Calibrate all supported axes (currently X only; Y/Theta are stubs).
     int  calibrate();
+
+    // Per-axis homing / calibration. X is real; Y and Theta are stubs that
+    // emit a warning until their limit switches are wired up.
+    void homeX();
+    void homeY();
+    void homeTheta();
+    int  calibrateX();
+    int  calibrateY();
+    int  calibrateTheta();
+
+    /// @brief Set the periodic-while-busy MOVE log rate (Hz) for all axes.
+    ///        0 disables periodic output; START/END events always fire.
+    void setAxisLogRateHz(uint32_t hz);
+
     void requestAbort();
     bool isAbortRequested() const;
 
@@ -257,6 +273,7 @@ private:
     uint32_t    gripperActuateStart_ms_;
     uint32_t    gripperActuateDurationMs_;
     uint32_t    lastXPositionCounts_;
+    float       xPulsesPerMmOverride_;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;
