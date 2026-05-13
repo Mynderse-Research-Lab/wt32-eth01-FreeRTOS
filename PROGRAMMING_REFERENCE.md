@@ -648,26 +648,34 @@ The console reads from stdin (USB serial via `idf.py monitor` or equivalent) wit
 
 ### 8.1 Always-available commands
 
+Commands are parsed from a single line; leading/trailing spaces are trimmed by tokenization. The built-in help (`help` / `?`) mirrors this list — see `gantryTestPrintHelp()` in `src/gantry_test_console.cpp`.
+
 | Command | Description |
 |---|---|
-| `help` / `?` | Print command list. |
-| `status` | Dump `Gantry Status` (positions, busy flag, enabled, alarm, calibrated length, workspace offset). |
-| `limits` | Read current X MIN / MAX limit switches. |
-| `pins` | Print active pin configuration (direct vs MCP, LEDC channels, PCNT units). |
-| `gpio_drive g v` | Drive a **direct** ESP32 GPIO (by GPIO number) to `0` or `1`. |
+| `help` / `?` | Print the command list (same content as this subsection, condensed). |
+| `status` | Dump gantry status: commanded X, encoder pulse count, Y, theta, enabled/busy/alarm, motion profile (speed/accel/decel, range-limit state), units, joint config, end-effector pose. |
+| `limits` | Read **X** MIN / MAX limit switches (via `gpio_expander_read` on the configured limit pins). |
+| `pins` | Print active pin configuration: MCP expander pins used for motion/alarm/limits (with live MCP register snapshot when available), direct ESP32 pins (pulse, encoders, limits if not on MCP), LEDC channel usage. |
+| `gpio_drive <gpio> <0\|1>` | Configure a direct ESP32 GPIO (`0..39`) as input/output and drive it low/high. **Not** for MCP pins — use `mcp_pin_mode` when `MCP_DEBUG_CMDS` is enabled. |
 | `enable` | `gantry.enable()`. |
 | `disable` | `gantry.disable()`. |
-| `home` | Run X-axis homing (blocks on hardware; run async via task internally). |
-| `calibrate` | Measure X-axis length and set X max. |
-| `units <mm\|in>` | Select unit of subsequent `speed`, `accel`, `move` inputs and printouts. |
-| `speed <v> [deg/s]` | Set move speed in selected linear units/s (optional Theta deg/s). |
-| `accel <a> [d]` | Set accel (and optional decel) in selected linear units/s². Zero is rejected. |
-| `rangelimit <0\|1>` | Enable/disable speed+accel range clamps. |
-| `move <x> <y> <t>` | Move to absolute `(x, y, theta)`. Requires `home` **and** `calibrate` to have run this session. See §11.1 — move now drives the X axis correctly; encoder feedback is a separate hardware concern. |
-| `grip <0\|1>` | `gantry.grip()`. 1 = closed, 0 = open. |
-| `stop` | `requestAbort()` + `disable()`. |
-| `alarmreset` / `arst` | `gantry.clearAlarm()` — pulses ARST on any configured drive. |
-| `selftest` | Run `runBasicTests()` — kinematics/trajectory math self-check. |
+| `home [x \| y \| t \| theta \| all] ...` | Homing dispatcher. With **no** axis tokens, defaults to **X** (same as `home x`). Otherwise runs each listed axis once, in order: tokens `x`, `y`, `t` or `theta`, and `all` (X then Y then Theta). **X** runs the real homing sequence; **Y** / **Theta** call `homeY()` / `homeTheta()` (currently stubs — see §12). |
+| `calibrate [x \| y \| t \| theta \| all] ...` | Same axis token rules as `home`. **X** starts the async calibration task (measures travel, updates X max); requires a successful **`home` / `home x`** earlier this session. **Y** / **Theta** call `calibrateY()` / `calibrateTheta()` (stubs). Only one X calibration task at a time. |
+| `units <mm \| in \| inch \| inches>` | Select linear unit for `speed`, `accel`, `move` numeric inputs and for linear fields in `status` / `LIVE POS`. |
+| `speed <v> [deg/s]` | Set traverse speed: linear axis speed `v` in the **currently selected** linear unit per second, clamped to internal mm/s limits (see `status` for range-limit state). Optional second argument sets theta speed in **deg/s** (independent of linear unit). |
+| `accel <a> [d]` | Set accel to `a` in selected linear units/s²; optional `d` sets decel (if omitted, decel tracks the new accel). Values are converted to mm/s² internally; zero is rejected. |
+| `rangelimit <0\|1>` | Enable or disable clamping of `speed` / `accel` inputs to the configured min/max bands. |
+| `livepos` | With **no** argument: print whether periodic `LIVE POS` logging is on and at what Hz. |
+| `livepos <hz>` | Set the `LIVE POS:` log cadence in Hz (`0` = off, **default**). When on, `src/gantry_test_console.cpp` emits `LIVE POS: x_cmd=… x_enc=… y=… theta=…` on motion/idle transitions and on the timer (~`1000/hz` ms); linear values follow `units`. |
+| `axislog` | With **no** argument: print whether periodic per-axis MOVE logging is on and at what Hz. |
+| `axislog <hz>` | Set `Gantry::setAxisLogRateHz` for periodic in-move logs (`0` = off; axis START/END logs still appear). |
+| `move <x> <y> <t>` | Absolute move: `x` / `y` in selected linear units, `t` in degrees. Requires **both** `home` (X homing satisfied for this session) **and** successful **`calibrate` / `calibrate x`** this session. See §11.1 for encoder vs commanded X. |
+| `grip <0\|1>` | `gantry.grip()`: `1` = closed, `0` = open. |
+| `stop` | `requestAbort()` then `disable()`; also requests calibration abort if X calibration is running. |
+| `alarmreset` / `arst` | `gantry.clearAlarm()` — pulse alarm-reset outputs on configured drives. |
+| `selftest` | Run `runBasicTests()` — kinematics / trajectory self-check (no motion). |
+
+**Parser note:** For `speed`, `accel`, `units`, `move`, `livepos`, and `axislog`, the numeric scanner matches the command verb in **lowercase** on the original input line. Use lowercase (`speed 50`, not `Speed 50`) so the values parse.
 
 ### 8.2 MCP diagnostic commands (compiled in when `MCP_DEBUG_CMDS=1`, on by default)
 
@@ -679,8 +687,11 @@ The console reads from stdin (USB serial via `idf.py monitor` or equivalent) wit
 
 ### 8.3 Passive output
 
-- `LIVE POS: x_cmd=... x_enc=... y=... theta=...` — logged every 100 ms while motion is active, every 1 s while idle.
-- `CTRL FLIP: <name> <old>-><new>` — printed when any monitored control pin (alarm, limit, enable) changes state.
+These lines are emitted by the console task without a matching user command (except where noted).
+
+- **`CTRL INIT:`** — once after startup: debounced snapshot of `motor_enabled`, `busy`, `alarm`, `min_limit`, `max_limit`, and raw X alarm pin level (if configured).
+- **`CTRL FLIP: <name> <old> -> <new>`** — when a debounced control signal changes (same `name` strings as above: `motor_enabled`, `busy`, `alarm`, `min_limit`, `max_limit`, `raw_alarm_pin_level`). Requires ~12 ms stable before logging.
+- **`LIVE POS: x_cmd=... x_enc=... y=... theta=...`** — only when `livepos <hz>` has been set with `hz > 0` (see §8.1). Default is **off**. Linear fields use the unit selected by `units`; theta is always degrees.
 
 ---
 
