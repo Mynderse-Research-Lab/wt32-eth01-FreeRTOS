@@ -187,7 +187,8 @@ Gantry::Gantry(const PulseMotor::DriverConfig&     xDrv,
     gripperTargetState_(false),
     gripperActuateStart_ms_(0),
     gripperActuateDurationMs_(GRIPPER_ACTUATE_TIME_MS),
-    lastXPositionCounts_(0) {
+    lastXPositionCounts_(0),
+    xPulsesPerMmOverride_(0.0f) {
 }
 
 // ============================================================================
@@ -251,6 +252,15 @@ bool Gantry::begin() {
     } else {
         ESP_LOGW(TAG, "[BEGIN] Theta-axis is null (misconfigured DrivetrainType)");
     }
+
+    // Wire per-axis MOVE log tags so the axis classes can emit START/END/MOVE
+    // lines tagged with the human-readable axis name. Default periodic rate
+    // stays at 0 (off) until the console (or other consumer) calls
+    // setAxisLogRateHz(). String literals have static storage duration so the
+    // pointers remain valid for the program lifetime.
+    if (axisX_)     axisX_->setLogTag("X");
+    if (axisY_)     axisY_->setLogTag("Y");
+    if (axisTheta_) axisTheta_->setLogTag("Theta");
 
     initialized_ = true;
     ESP_LOGI(TAG, "[BEGIN] Gantry::begin() complete");
@@ -366,9 +376,7 @@ void Gantry::moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed) {
     targetY_mm_       = (float)y;
     targetTheta_deg_  = (float)theta;
     // Convert X pulses/s to mm/s using X axis scaling.
-    const float xPpm = (axisX_ && axisX_->pulsesPerMm() > 0.0)
-        ? (float)axisX_->pulsesPerMm()
-        : DEFAULT_PULSES_PER_MM;
+    const float xPpm = getPulsesPerMm();
     speed_mm_per_s_        = (uint32_t)((float)speed / xPpm);
     acceleration_mm_per_s2_ = 0;
     deceleration_mm_per_s2_ = 0;
@@ -460,6 +468,13 @@ void Gantry::update() {
 // ============================================================================
 
 void Gantry::home() {
+    // Legacy entry point: only X is currently real, so behavior is unchanged.
+    // Y and Theta stubs are NOT invoked here so existing callers that depend
+    // on `home()` blocking only on the X sweep keep working.
+    homeX();
+}
+
+void Gantry::homeX() {
     GANTRY_CHECK_INITIALIZED();
     GANTRY_CHECK_ENABLED();
     abortRequested_ = false;
@@ -484,6 +499,17 @@ void Gantry::home() {
     constexpr uint32_t kHomingStartPosition = 100000000;
     const uint32_t     speed                = getHomingSpeed();
     axisX_->setCurrentPulses(kHomingStartPosition);
+    // Seed the position tracker to match the synthetic bump. Otherwise the
+    // very next updateAxisPositions() tick sees currentXCounts (~100M) >
+    // lastXPositionCounts_ (~0), mis-classifies it as "moving toward MAX",
+    // and if MAX is active it instantly stop-motions the home before any
+    // real pulses are emitted. (Confirmed by runtime evidence: setDirection
+    // fires with logical=0, then "Homing did not start" appears 20ms later
+    // with gate state max=1.)
+    lastXPositionCounts_ = kHomingStartPosition;
+    ESP_LOGI(TAG,
+             "[HOME] seeded position tracker to %lu before negative-direction sweep",
+             (unsigned long)kHomingStartPosition);
     if (!axisX_->moveToPulses(0, speed, speed, speed)) {
         stopAllMotion();
         return;
@@ -491,7 +517,35 @@ void Gantry::home() {
     homingInProgress_ = true;
 }
 
+void Gantry::homeY() {
+    // Y limit switches are defined in the pinout (PIN_Y_LIMIT_MIN/MAX) but the
+    // Gantry class does not yet wire them up. Surface this as a warning so
+    // operators know the command was received but did not act on hardware.
+    ESP_LOGW(TAG, "[HOME] Y axis home not yet wired (Y limit switches not integrated)");
+}
+
+void Gantry::homeTheta() {
+    // Theta currently has no limit switches; pins that used to host theta
+    // limits were reassigned to DIR/ENABLE. Log a placeholder until the
+    // switches are added to the hardware.
+    ESP_LOGW(TAG, "[HOME] Theta axis home not yet wired (no theta limit switches)");
+}
+
 int Gantry::calibrate() {
+    return calibrateX();
+}
+
+int Gantry::calibrateY() {
+    ESP_LOGW(TAG, "[CAL] Y axis calibrate not yet wired (Y limit switches not integrated)");
+    return 0;
+}
+
+int Gantry::calibrateTheta() {
+    ESP_LOGW(TAG, "[CAL] Theta axis calibrate not yet wired (no theta limit switches)");
+    return 0;
+}
+
+int Gantry::calibrateX() {
     GANTRY_CHECK_INITIALIZED_RET(0);
     GANTRY_CHECK_ENABLED_RET(0);
     abortRequested_ = false;
@@ -507,7 +561,7 @@ int Gantry::calibrate() {
         return 0;
     }
 
-    home();
+    homeX();
 
     unsigned long start_ms = gantry_millis();
     while (homingInProgress_ && (gantry_millis() - start_ms) < CALIBRATION_TIMEOUT_MS) {
@@ -569,14 +623,65 @@ int Gantry::calibrate() {
         }
     }
 
-    xMaxSwitch_.update(true);
+    // The inner loop exited because axisX_->isMotionActive() became false.
+    // The only place that stops motion mid-sweep is updateAxisPositions()'s
+    // movingTowardMax + xMaxSwitch_.isActive() guard, which is also what
+    // sets calibrationInProgress_=false. So a non-active stableState here
+    // genuinely means we exited for a different reason (timeout, abort,
+    // alarm) — those branches have already returned. Reaching this point
+    // with stableState=true is the success signal.
+    //
+    // DO NOT call xMaxSwitch_.update(true) here. Force-overwriting the
+    // debounced stableState with the raw level at this instant races
+    // against the carriage's residual deceleration overshooting the
+    // inductive sensor's detection zone. The debounce that already
+    // committed during the inner loop is the correct truth — the carriage
+    // really did pass over the MAX sensor for >=60ms of stable sampling.
+    // (Confirmed by runtime evidence: every "Calibration failed" event is
+    // preceded by max_limit transitioning 0->1 ~25ms earlier.)
     if (!xMaxSwitch_.isActive()) {
+        ESP_LOGW(TAG,
+                 "[CAL] inner loop exited but xMaxSwitch_ not active "
+                 "(unexpected; aborting)");
         stopAllMotion();
         calibrationInProgress_ = false;
         return 0;
     }
 
-    axisLength_ = (int32_t)(axisX_->getCurrentMm() + 0.5f);
+    // Use the commanded driver position (LEDC pulse count), NOT
+    // axisX_->getCurrentMm(). The latter routes through the encoder
+    // accumulator when enable_encoder_feedback=true, and the X-axis
+    // encoder is currently not returning pulses (see
+    // PROGRAMMING_REFERENCE.md §11.1 — wiring TODO). We measured the
+    // physical travel by commanding pulses from MIN to MAX, so the
+    // pulse count between those two events is the authoritative travel
+    // distance regardless of encoder availability.
+    const double commandedPulses = (double)axisX_->getCurrentPulses();
+    const double basePpm         = axisX_->pulsesPerMm();
+    if (basePpm <= 0.0) {
+        ESP_LOGE(TAG, "[CAL] pulses-per-mm not configured; cannot compute axis length");
+        calibrationInProgress_ = false;
+        return 0;
+    }
+
+    // Re-anchor X scaling to the known physical hard-travel envelope.
+    // This keeps dead-reckoning travel accurate even if commanded pulses/rev
+    // in the drive do not match the compile-time drivetrain constants yet.
+    const double hardSpanMm = (double)AXIS_X_HARD_LIMIT_MAX_MM - (double)AXIS_X_HARD_LIMIT_MIN_MM;
+    const double derivedLengthMm = commandedPulses / basePpm;
+    if (hardSpanMm > 1.0 && commandedPulses > 0.0) {
+        xPulsesPerMmOverride_ = (float)(commandedPulses / hardSpanMm);
+        axisLength_ = (int32_t)(hardSpanMm + 0.5);
+        ESP_LOGI(TAG,
+                 "[CAL] travel measured %.1f mm from base ppm=%.4f; applying corrected ppm=%.4f from hard span=%.1f mm",
+                 derivedLengthMm, basePpm, (double)xPulsesPerMmOverride_, hardSpanMm);
+    } else {
+        xPulsesPerMmOverride_ = 0.0f;
+        axisLength_ = (int32_t)(derivedLengthMm + 0.5);
+        ESP_LOGW(TAG,
+                 "[CAL] hard span unavailable; using base ppm only (axisLength=%ld mm, ppm=%.4f)",
+                 (long)axisLength_, basePpm);
+    }
     calibrationInProgress_ = false;
     return axisLength_;
 }
@@ -619,13 +724,15 @@ int32_t Gantry::getXCommandedPulses() const {
 }
 
 float Gantry::getXCommandedMm() const {
-    if (!axisX_ || axisX_->pulsesPerMm() <= 0.0) return 0.0f;
-    return (float)((double)getXCommandedPulses() / axisX_->pulsesPerMm());
+    const float ppm = getPulsesPerMm();
+    if (ppm <= 0.0f) return 0.0f;
+    return (float)((double)getXCommandedPulses() / (double)ppm);
 }
 
 float Gantry::getXEncoderMm() const {
-    if (!axisX_ || axisX_->pulsesPerMm() <= 0.0) return 0.0f;
-    return (float)((double)getXEncoderRaw() / axisX_->pulsesPerMm());
+    const float ppm = getPulsesPerMm();
+    if (ppm <= 0.0f) return 0.0f;
+    return (float)((double)getXEncoderRaw() / (double)ppm);
 }
 
 int Gantry::getCurrentY() const {
@@ -665,6 +772,12 @@ void Gantry::setHomingSpeed(uint32_t speed_pps) {
     PulseMotor::DriverConfig& cfg =
         const_cast<PulseMotor::DriverConfig&>(xImpl->driver().getConfig());
     cfg.homing_speed_pps = speed_pps;
+}
+
+void Gantry::setAxisLogRateHz(uint32_t hz) {
+    if (axisX_)     axisX_->setLogRateHz(hz);
+    if (axisY_)     axisY_->setLogRateHz(hz);
+    if (axisTheta_) axisTheta_->setLogRateHz(hz);
 }
 
 // ============================================================================
@@ -714,6 +827,9 @@ void Gantry::setStepsPerRevolution(float steps_per_rev) {
 }
 
 float Gantry::getPulsesPerMm() const {
+    if (xPulsesPerMmOverride_ > 0.0f) {
+        return xPulsesPerMmOverride_;
+    }
     if (axisX_ && axisX_->pulsesPerMm() > 0.0) {
         return (float)axisX_->pulsesPerMm();
     }
@@ -776,7 +892,12 @@ void Gantry::updateAxisPositions() {
     }
     lastXPositionCounts_ = currentXCounts;
 
-    currentX_mm_ = axisX_->getCurrentMm();
+    currentX_mm_ = pulsesToMm((int32_t)currentXCounts);
+
+    // Tick the X axis so it can run its MOVE-log state machine. The driver
+    // itself runs on its own esp_timer, so update() is a logging-only hook
+    // here (mirrors what's done for Y and Theta below).
+    axisX_->update();
 
     if (axisY_) {
         axisY_->update();
@@ -928,9 +1049,7 @@ void Gantry::startXAxisMotion() {
         return;
     }
 
-    const float xPpm = (axisX_->pulsesPerMm() > 0.0)
-        ? (float)axisX_->pulsesPerMm()
-        : DEFAULT_PULSES_PER_MM;
+    const float xPpm = getPulsesPerMm();
 
     const int32_t driverReportedPulses = (int32_t)axisX_->getCurrentPulses();
     const int32_t trackedPulses        = (int32_t)(currentX_mm_ * xPpm);
