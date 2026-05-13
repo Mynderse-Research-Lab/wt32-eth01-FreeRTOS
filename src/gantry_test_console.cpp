@@ -55,6 +55,12 @@ static uint32_t g_moveAccelMmPerS2 = 0;
 static uint32_t g_moveDecelMmPerS2 = 0;
 static bool g_motionProfileRangeLimitEnabled = true;
 static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
+// LIVE POS periodic logger frequency control.
+// 0 Hz disables periodic output (default).
+static uint32_t g_livePosFrequencyHz = 0;
+// Per-axis MOVE log periodic rate (Hz). 0 disables periodic output; the
+// start/end transition events from the axis classes always fire.
+static uint32_t g_axisLogFrequencyHz = 0;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
 
@@ -62,7 +68,7 @@ static constexpr float kMmPerInch = 25.4f;
 static constexpr uint32_t kMinSpeedMmPerS = 1;
 static constexpr uint32_t kMaxSpeedMmPerS = 500;
 static constexpr uint32_t kMinAccelMmPerS2 = 100;
-static constexpr uint32_t kMaxAccelMmPerS2 = 900;
+static constexpr uint32_t kMaxAccelMmPerS2 = 12000;
 
 uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
   if (!enabled) {
@@ -101,10 +107,15 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
   }
 
   const bool busy = cfg->gantry->isBusy();
+  if (g_livePosFrequencyHz == 0) {
+    g_liveMotionWasBusy = busy;
+    return;
+  }
   const uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-  constexpr uint32_t kLiveLogIntervalBusyMs = 100;
-  constexpr uint32_t kLiveLogIntervalIdleMs = 5000;
-  const uint32_t intervalMs = busy ? kLiveLogIntervalBusyMs : kLiveLogIntervalIdleMs;
+  uint32_t intervalMs = 1000u / g_livePosFrequencyHz;
+  if (intervalMs == 0) {
+    intervalMs = 1;
+  }
   const bool stateChanged = (busy != g_liveMotionWasBusy);
 
   // While motion is active, emit a periodic dual-source X report:
@@ -609,6 +620,171 @@ void runGpioDriveCommand(const char *cmd) {
   ESP_LOGI(TAG, "GPIO %d driven to %d, readback=%d", gpio, value, level);
 }
 
+// ---- Per-axis homing / calibration dispatchers ---------------------------
+// These wrap the existing X-axis-only paths and add Y / Theta stubs that
+// log a placeholder. The console command parser tokenizes the rest of the
+// line (after `home` / `calibrate`) into axis names and calls these in
+// order. `home` / `calibrate` with no arguments defaults to X (current
+// behavior).
+
+enum class AxisToken { X, Y, THETA };
+
+bool parseAxisToken(const char *tok, AxisToken &out) {
+  if (tok == nullptr) return false;
+  if (strcmp(tok, "x") == 0) {
+    out = AxisToken::X;
+    return true;
+  }
+  if (strcmp(tok, "y") == 0) {
+    out = AxisToken::Y;
+    return true;
+  }
+  if (strcmp(tok, "t") == 0 || strcmp(tok, "theta") == 0) {
+    out = AxisToken::THETA;
+    return true;
+  }
+  return false;
+}
+
+void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
+  if (!cfg->gantry->isEnabled()) {
+    ESP_LOGE(TAG, "ERROR: Motors not enabled");
+    return;
+  }
+  ESP_LOGI(TAG, "Starting homing sequence (X)...");
+
+  bool minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+  cfg->gantry->homeX();
+  vTaskDelay(pdMS_TO_TICKS(20));
+
+  if (!cfg->gantry->isBusy()) {
+    bool minIsActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+    bool maxIsActive = (gpio_expander_read(cfg->limit_max_pin) == 0);
+    bool alarmActive = cfg->gantry->isAlarmActive();
+    if (minWasActive || minIsActive) {
+      g_homeCompletedThisSession = true;
+      ESP_LOGI(TAG, "OK X homing skipped: already at MIN/home switch");
+      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
+               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
+    } else {
+      ESP_LOGE(TAG, "ERROR: X homing did not start");
+      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
+               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
+      ESP_LOGI(TAG, "Check motor enable, alarm status, and limit switch wiring");
+    }
+    return;
+  }
+  g_homeCompletedThisSession = true;
+  ESP_LOGI(TAG, "OK X homing started (use 'stop' to abort, 'status' to monitor)");
+}
+
+void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
+  switch (axis) {
+    case AxisToken::X:
+      runHomeXSequence(cfg);
+      break;
+    case AxisToken::Y:
+      cfg->gantry->homeY();
+      ESP_LOGI(TAG, "OK Y home accepted (stub - not yet wired)");
+      break;
+    case AxisToken::THETA:
+      cfg->gantry->homeTheta();
+      ESP_LOGI(TAG, "OK Theta home accepted (stub - not yet wired)");
+      break;
+  }
+}
+
+void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
+  switch (axis) {
+    case AxisToken::X: {
+      if (!g_homeCompletedThisSession) {
+        ESP_LOGE(TAG, "ERROR: Run 'home x' first after startup");
+        return;
+      }
+      if (g_calibrationInProgress) {
+        ESP_LOGI(TAG, "Calibration is already in progress");
+        return;
+      }
+      g_calibrationInProgress = true;
+      g_calibratedThisSession = false;
+      BaseType_t taskOk = xTaskCreatePinnedToCore(
+          calibrationTask, "CalibrateTask", 4096, (void *)cfg, 2, nullptr,
+          CONSOLE_TASK_CORE);
+      if (taskOk != pdPASS) {
+        g_calibrationInProgress = false;
+        ESP_LOGE(TAG, "ERROR: Failed to start X calibration task");
+      } else {
+        ESP_LOGI(TAG, "X calibration started (use 'stop' to abort)");
+      }
+      break;
+    }
+    case AxisToken::Y:
+      cfg->gantry->calibrateY();
+      ESP_LOGI(TAG, "OK Y calibrate accepted (stub - not yet wired)");
+      break;
+    case AxisToken::THETA:
+      cfg->gantry->calibrateTheta();
+      ESP_LOGI(TAG, "OK Theta calibrate accepted (stub - not yet wired)");
+      break;
+  }
+}
+
+// Parses tokens after the leading command word and dispatches per axis.
+// `cmd` is the lowercased full command line (e.g. "home x y" or "calibrate").
+// `leading` is the word to skip ("home" or "calibrate").
+// `runFn` is called for each parsed axis in the order they appear.
+void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
+                            const char *leading,
+                            void (*runFn)(const GantryTestConsoleConfig *,
+                                          AxisToken)) {
+  char buf[256];
+  strncpy(buf, cmd, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char *saveptr = nullptr;
+  char *first = strtok_r(buf, " \t", &saveptr);
+  if (first == nullptr) {
+    return;
+  }
+  (void)first;  // skip the leading command word ("home" / "calibrate")
+
+  bool sawAnyToken = false;
+  bool ranX = false;
+  bool ranY = false;
+  bool ranT = false;
+
+  for (char *tok = strtok_r(nullptr, " \t", &saveptr); tok != nullptr;
+       tok = strtok_r(nullptr, " \t", &saveptr)) {
+    sawAnyToken = true;
+    if (strcmp(tok, "all") == 0) {
+      if (!ranX) { runFn(cfg, AxisToken::X);     ranX = true; }
+      if (!ranY) { runFn(cfg, AxisToken::Y);     ranY = true; }
+      if (!ranT) { runFn(cfg, AxisToken::THETA); ranT = true; }
+      continue;
+    }
+    AxisToken axis;
+    if (!parseAxisToken(tok, axis)) {
+      ESP_LOGE(TAG, "ERROR: Unknown %s axis '%s'; use x|y|t|all", leading, tok);
+      continue;
+    }
+    if (axis == AxisToken::X && ranX) continue;
+    if (axis == AxisToken::Y && ranY) continue;
+    if (axis == AxisToken::THETA && ranT) continue;
+    runFn(cfg, axis);
+    if (axis == AxisToken::X) ranX = true;
+    if (axis == AxisToken::Y) ranY = true;
+    if (axis == AxisToken::THETA) ranT = true;
+  }
+
+  if (!sawAnyToken) {
+    // No tokens supplied -> default to X (back-compat with bare `home` /
+    // `calibrate`). When tokens were supplied but all were invalid, the
+    // per-token error message has already been logged and we deliberately
+    // do NOT fall through to running X by accident.
+    runFn(cfg, AxisToken::X);
+  }
+}
+
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (cfg == nullptr || cmd == nullptr || strlen(cmd) == 0) {
     return;
@@ -654,57 +830,12 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   } else if (strcmp(cmdLower, "disable") == 0) {
     cfg->gantry->disable();
     ESP_LOGI(TAG, "OK Motors disabled");
-  } else if (strcmp(cmdLower, "home") == 0) {
-    if (!cfg->gantry->isEnabled()) {
-      ESP_LOGE(TAG, "ERROR: Motors not enabled");
-      return;
-    }
-    ESP_LOGI(TAG, "Starting homing sequence...");
-
-    // Snapshot pre-home MIN state to detect "already home" no-motion case.
-    bool minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
-    cfg->gantry->home();
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    // If homing did not even start, do not report success.
-    if (!cfg->gantry->isBusy()) {
-      bool minIsActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
-      bool maxIsActive = (gpio_expander_read(cfg->limit_max_pin) == 0);
-      bool alarmActive = cfg->gantry->isAlarmActive();
-      if (minWasActive || minIsActive) {
-        g_homeCompletedThisSession = true;
-        ESP_LOGI(TAG, "OK Homing skipped: already at MIN/home switch");
-        ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
-                 alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
-      } else {
-        ESP_LOGE(TAG, "ERROR: Homing did not start");
-        ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
-                 alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
-        ESP_LOGI(TAG, "Check motor enable, alarm status, and limit switch wiring");
-      }
-      return;
-    }
-    g_homeCompletedThisSession = true;
-    ESP_LOGI(TAG, "OK Homing started (use 'stop' to abort, 'status' to monitor)");
-  } else if (strcmp(cmdLower, "calibrate") == 0) {
-    if (!g_homeCompletedThisSession) {
-      ESP_LOGE(TAG, "ERROR: Run 'home' first after startup");
-      return;
-    }
-    if (g_calibrationInProgress) {
-      ESP_LOGI(TAG, "Calibration is already in progress");
-      return;
-    }
-    g_calibrationInProgress = true;
-    g_calibratedThisSession = false;
-    BaseType_t taskOk = xTaskCreatePinnedToCore(
-        calibrationTask, "CalibrateTask", 4096, (void *)cfg, 2, nullptr, CONSOLE_TASK_CORE);
-    if (taskOk != pdPASS) {
-      g_calibrationInProgress = false;
-      ESP_LOGE(TAG, "ERROR: Failed to start calibration task");
-    } else {
-      ESP_LOGI(TAG, "Calibration started (use 'stop' to abort)");
-    }
+  } else if (strncmp(cmdLower, "home", 4) == 0 &&
+             (cmdLower[4] == '\0' || cmdLower[4] == ' ' || cmdLower[4] == '\t')) {
+    dispatchPerAxisCommand(cfg, cmdLower, "home", runHomeForAxis);
+  } else if (strncmp(cmdLower, "calibrate", 9) == 0 &&
+             (cmdLower[9] == '\0' || cmdLower[9] == ' ' || cmdLower[9] == '\t')) {
+    dispatchPerAxisCommand(cfg, cmdLower, "calibrate", runCalibrateForAxis);
   } else if (strncmp(cmdLower, "speed", 5) == 0) {
     int speedMm = -1;
     int speedDeg = -1;
@@ -800,6 +931,70 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     ESP_LOGI(TAG, "Configured ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
              (unsigned long)kMinSpeedMmPerS, (unsigned long)kMaxSpeedMmPerS,
              (unsigned long)kMinAccelMmPerS2, (unsigned long)kMaxAccelMmPerS2);
+  } else if (strncmp(cmdLower, "livepos", 7) == 0) {
+    int hz = -1;
+    int parsed = sscanf(cmd, "livepos %d", &hz);
+    if (parsed < 1) {
+      if (g_livePosFrequencyHz == 0) {
+        ESP_LOGI(TAG, "LIVE POS periodic logging: OFF");
+      } else {
+        uint32_t periodMs = 1000u / g_livePosFrequencyHz;
+        if (periodMs == 0) {
+          periodMs = 1;
+        }
+        ESP_LOGI(TAG, "LIVE POS periodic logging: %lu Hz (~%lu ms period)",
+                 (unsigned long)g_livePosFrequencyHz, (unsigned long)periodMs);
+      }
+      return;
+    }
+    if (hz < 0) {
+      ESP_LOGE(TAG, "Usage: livepos <hz> (0=off)");
+      return;
+    }
+    g_livePosFrequencyHz = (uint32_t)hz;
+    g_lastLiveMotionLogMs = 0;
+    if (g_livePosFrequencyHz == 0) {
+      ESP_LOGI(TAG, "OK LIVE POS periodic logging disabled");
+    } else {
+      uint32_t periodMs = 1000u / g_livePosFrequencyHz;
+      if (periodMs == 0) {
+        periodMs = 1;
+      }
+      ESP_LOGI(TAG, "OK LIVE POS frequency set to %lu Hz (~%lu ms period)",
+               (unsigned long)g_livePosFrequencyHz, (unsigned long)periodMs);
+    }
+  } else if (strncmp(cmdLower, "axislog", 7) == 0) {
+    int hz = -1;
+    int parsed = sscanf(cmd, "axislog %d", &hz);
+    if (parsed < 1) {
+      if (g_axisLogFrequencyHz == 0) {
+        ESP_LOGI(TAG, "Axis MOVE periodic logging: OFF (START/END events always fire)");
+      } else {
+        uint32_t periodMs = 1000u / g_axisLogFrequencyHz;
+        if (periodMs == 0) {
+          periodMs = 1;
+        }
+        ESP_LOGI(TAG, "Axis MOVE periodic logging: %lu Hz (~%lu ms period)",
+                 (unsigned long)g_axisLogFrequencyHz, (unsigned long)periodMs);
+      }
+      return;
+    }
+    if (hz < 0) {
+      ESP_LOGE(TAG, "Usage: axislog <hz> (0=off; START/END events always fire)");
+      return;
+    }
+    g_axisLogFrequencyHz = (uint32_t)hz;
+    cfg->gantry->setAxisLogRateHz(g_axisLogFrequencyHz);
+    if (g_axisLogFrequencyHz == 0) {
+      ESP_LOGI(TAG, "OK Axis MOVE periodic logging disabled (START/END still on)");
+    } else {
+      uint32_t periodMs = 1000u / g_axisLogFrequencyHz;
+      if (periodMs == 0) {
+        periodMs = 1;
+      }
+      ESP_LOGI(TAG, "OK Axis MOVE frequency set to %lu Hz (~%lu ms period)",
+               (unsigned long)g_axisLogFrequencyHz, (unsigned long)periodMs);
+    }
   } else if (strncmp(cmdLower, "move", 4) == 0) {
     if (!g_homeCompletedThisSession || !g_calibratedThisSession) {
       ESP_LOGE(TAG, "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup.");
@@ -883,12 +1078,14 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home                 - home X-axis");
-  ESP_LOGI(TAG, "  calibrate            - calibrate X-axis and set X max from result");
+  ESP_LOGI(TAG, "  home [x|y|t|all]     - home one or more axes (default x; Y/Theta stubbed)");
+  ESP_LOGI(TAG, "  calibrate [x|y|t|all] - calibrate one or more axes (default x; Y/Theta stubbed)");
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
   ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
   ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");
   ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable speed+accel/decel range clamps");
+  ESP_LOGI(TAG, "  livepos <hz>         - set LIVE POS periodic rate (0=off, default off)");
+  ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
   ESP_LOGI(TAG, "  move <x> <y> <t>     - move to position (requires home+calibrate this startup)");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
   ESP_LOGI(TAG, "  stop                 - stop all motion");
