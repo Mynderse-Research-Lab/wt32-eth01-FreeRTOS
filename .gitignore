@@ -9,4 +9,4 @@
 compile_commands.json
 
 # Local ESP-IDF project mirror (never commit — regenerate from PROGRAMMING_REFERENCE.md §1.2 / §11.3)
-idf/
+idf/build
