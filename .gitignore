@@ -15,3 +15,6 @@ idf/sdkconfig
 
 # Local capture of idf.py output (optional)
 idf/build_output.log
+
+# SRS Word export (regenerate: .\tools\srs_build\build.ps1)
+Pickup_algo_and_MQTTBridge_SRS.docx

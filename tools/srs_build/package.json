@@ -1,0 +1,11 @@
+{
+  "name": "wt32-srs-docx-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node render-diagrams.mjs"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.0"
+  }
+}
