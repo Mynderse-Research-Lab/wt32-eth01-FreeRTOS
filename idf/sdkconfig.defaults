@@ -1,0 +1,34 @@
+# WT32-ETH01 default ESP-IDF configuration.
+# Edit via `idf.py menuconfig` if needed; changes are written to sdkconfig.
+
+CONFIG_IDF_TARGET="esp32"
+
+# 4 MB flash (WT32-ETH01 standard module).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# 240 MHz CPU for responsive motion-profile timer.
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240
+
+# Default UART console at 115200 (matches old monitor_speed).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# Enable C++ exceptions / RTTI so std::unique_ptr and virtual destructors
+# behave as expected.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_EXCEPTIONS_EMG_POOL_SIZE=0
+CONFIG_COMPILER_CXX_RTTI=y
+
+# Keep log level at INFO by default (ESP_LOGD trace still compiled in, just
+# filtered at runtime; set to DEBUG here if you want verbose PulseMotor logs).
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# Main task stack - the app creates its own tasks via xTaskCreatePinnedToCore
+# so the main task can stay modest.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+
+# FreeRTOS tick at 1000 Hz so pdMS_TO_TICKS(1) is a real millisecond.
+CONFIG_FREERTOS_HZ=1000

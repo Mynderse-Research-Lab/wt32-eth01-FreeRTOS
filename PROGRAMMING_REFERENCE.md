@@ -33,18 +33,20 @@ This document is the single-source programming reference for the firmware. It co
 | ESP-IDF | 5.x (tested on v5.1.x and v6.0) |
 | Target chip | `esp32` |
 | Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see §11.2) |
-| `CONFIG_FREERTOS_HZ` | must be `1000` (set in `sdkconfig.defaults`) |
+| `CONFIG_FREERTOS_HZ` | must be `1000` (set in `idf/sdkconfig.defaults`) |
 
 ### 1.2 Project layout that matters at build time
 
-```
-CMakeLists.txt                # ESP-IDF project root
-sdkconfig.defaults            # e.g. CONFIG_FREERTOS_HZ=1000
-main/
-└── CMakeLists.txt            # app sources under src/
+The ESP-IDF project root is **`idf/`** (not the repo root). Build with `cd idf` then `idf.py build`.
 
-components/
-└── gpio_expander/            # ESP-IDF component wrapping src/gpio_expander.c
+```
+idf/
+├── CMakeLists.txt            # project(wt32_eth01_gantry); EXTRA_COMPONENT_DIRS → ../lib/…
+├── sdkconfig.defaults        # e.g. CONFIG_FREERTOS_HZ=1000
+├── main/
+│   └── CMakeLists.txt        # registers ../src/*.cpp, REQUIRES Gantry …
+└── components/
+    └── gpio_expander/        # ESP-IDF component wrapping ../src/gpio_expander.c
 
 src/                          # application sources
 ├── main.cpp                  # app_main(), MCP init, task creation
@@ -62,7 +64,7 @@ lib/                          # each subfolder is an ESP-IDF component (CMakeLis
 └── MCP23S17/
 ```
 
-Top-level `CMakeLists.txt` sets `EXTRA_COMPONENT_DIRS` so `idf.py` resolves `Gantry`, `PulseMotor`, `MCP23S17`, and `gpio_expander`. The `main` component lists only the `src/*.cpp` application files and `REQUIRES Gantry`.
+`idf/CMakeLists.txt` sets `EXTRA_COMPONENT_DIRS` so `idf.py` resolves `Gantry`, `PulseMotor`, `MCP23S17`, and `gpio_expander`. `idf/main/CMakeLists.txt` pulls in the top-level `src/*.cpp` files and `REQUIRES Gantry` (transitive deps pull in the rest).
 
 ### 1.3 Environment (Windows)
 
@@ -83,17 +85,17 @@ PowerShell equivalent:
 ### 1.4 Build
 
 ```powershell
-cd E:\Projects\wt32-eth01-base
+cd E:\Projects\wt32-eth01-base\idf
 idf.py set-target esp32          # first time only (or after fullclean)
 idf.py build
 ```
 
-Output firmware: `build/wt32_eth01_base.bin` (under the project root).
+Output firmware: `idf/build/wt32_eth01_gantry.bin`.
 
 ### 1.5 Flash & monitor
 
 ```powershell
-cd E:\Projects\wt32-eth01-base
+cd E:\Projects\wt32-eth01-base\idf
 idf.py -p COM3 flash monitor     # replace COM3 with your port
 ```
 
@@ -104,11 +106,12 @@ If upload fails: hold **BOOT**, tap **EN/RESET**, release **BOOT** as "Connectin
 ### 1.6 Clean build
 
 ```powershell
+cd E:\Projects\wt32-eth01-base\idf
 idf.py fullclean
 idf.py build
 ```
 
-Use `fullclean` after changing `sdkconfig.defaults` or after a major ESP-IDF upgrade.
+Use `fullclean` after changing `idf/sdkconfig.defaults` or after a major ESP-IDF upgrade.
 
 ---
 
@@ -868,14 +871,14 @@ The attached build log shows:
 ```
 idf_component_tools.hash_tools.errors.ChecksumsInvalidJson:
   Invalid checksums file:
-  E:\Projects\wt32-eth01-base\managed_components\espressif__libsodium\CHECKSUMS.json
+  E:\Projects\wt32-eth01-base\idf\managed_components\espressif__libsodium\CHECKSUMS.json
 ```
 
 The file was written empty (JSON decoder sees `Expecting value: line 1 column 1`). Repair steps:
 
 ```powershell
-cd E:\Projects\wt32-eth01-base
-Remove-Item -Recurse -Force .\managed_components
+cd E:\Projects\wt32-eth01-base\idf
+Remove-Item -Recurse -Force .\managed_components -ErrorAction SilentlyContinue
 Remove-Item -Force .\dependencies.lock -ErrorAction SilentlyContinue
 idf.py fullclean
 idf.py reconfigure
@@ -886,14 +889,14 @@ The IDF Component Manager will re-download every managed component. Ensure ESP-I
 
 ### 11.3 Resolving custom components
 
-The libraries under `lib/` and `components/gpio_expander` are real ESP-IDF components (`idf_component_register` in each `CMakeLists.txt`). Top-level `CMakeLists.txt` must set `EXTRA_COMPONENT_DIRS` **before** `project()` so names like `Gantry`, `PulseMotor`, and `MCP23S17` resolve.
+The libraries under `lib/` and `idf/components/gpio_expander` are real ESP-IDF components (`idf_component_register` in each `CMakeLists.txt`). `idf/CMakeLists.txt` must set `EXTRA_COMPONENT_DIRS` **before** `project()` so names like `Gantry`, `PulseMotor`, and `MCP23S17` resolve.
 
 If CMake reports `Failed to resolve component 'PulseMotor'` (or similar), check that:
 
-1. `EXTRA_COMPONENT_DIRS` in the root `CMakeLists.txt` still lists every component directory, and  
-2. `main/CMakeLists.txt` uses `REQUIRES Gantry` (transitive deps pull in the rest)—do not strip `REQUIRES` to empty.
+1. `EXTRA_COMPONENT_DIRS` in `idf/CMakeLists.txt` still lists every component directory under `lib/`, and  
+2. `idf/main/CMakeLists.txt` uses `REQUIRES Gantry` (transitive deps pull in the rest)—do not strip `REQUIRES` to empty.
 
-Fresh clones need no manual regeneration beyond `idf.py set-target esp32` and `idf.py build`.
+Fresh clones need no manual regeneration beyond `cd idf`, `idf.py set-target esp32`, and `idf.py build`.
 
 ### 11.4 Strap pins and boot stability
 
