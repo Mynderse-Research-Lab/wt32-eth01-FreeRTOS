@@ -31,7 +31,7 @@
 #define AXIS_X_GEAR_NUMERATOR                 1.0
 #define AXIS_X_GEAR_DENOMINATOR               1.0
 #define AXIS_X_MOTOR_REDUCER_RATIO            1.0f
-#define AXIS_X_INVERT_DIR                        0
+#define AXIS_X_INVERT_DIR                        1
 #define AXIS_X_INVERT_OUTPUT_LOGIC               1
 #define AXIS_X_LEDC_RESOLUTION_BITS              2u
 #define AXIS_X_HOMING_SPEED_PPS              8000u
