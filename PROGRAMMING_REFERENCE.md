@@ -655,7 +655,7 @@ Commands are parsed from a single line; leading/trailing spaces are trimmed by t
 | `help` / `?` | Print the command list (same content as this subsection, condensed). |
 | `status` | Dump gantry status: commanded X, encoder pulse count, Y, theta, enabled/busy/alarm, motion profile (speed/accel/decel, range-limit state), units, joint config, end-effector pose. |
 | `limits` | Read **X** MIN / MAX limit switches (via `gpio_expander_read` on the configured limit pins). |
-| `pins` | Print active pin configuration: MCP expander pins used for motion/alarm/limits (with live MCP register snapshot when available), direct ESP32 pins (pulse, encoders, limits if not on MCP), LEDC channel usage. |
+| `pins` | Print active pin configuration: MCP expander pins used for motion/alarm/limits (with live MCP register snapshot when available), direct ESP32 pins (pulse, encoders, limits if not on MCP), and a summary line `LEDC: X ch …, Y ch …, Theta ch …` for pulse channels. |
 | `gpio_drive <gpio> <0\|1>` | Configure a direct ESP32 GPIO (`0..39`) as input/output and drive it low/high. **Not** for MCP pins — use `mcp_pin_mode` when `MCP_DEBUG_CMDS` is enabled. |
 | `enable` | `gantry.enable()`. |
 | `disable` | `gantry.disable()`. |
