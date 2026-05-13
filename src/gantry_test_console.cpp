@@ -399,7 +399,7 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "--- ESP32 pins ---");
   printDirectPin("X Pulse", cfg->x_pulse_pin);
   printDirectPin("Y Pulse", cfg->y_pulse_pin);
-  printDirectPin("Theta PWM", cfg->theta_pwm_pin);
+  printDirectPin("Theta Pulse", cfg->theta_pwm_pin);
   printDirectPin("X Encoder A", cfg->x_encoder_a_pin);
   printDirectPin("X Encoder B", cfg->x_encoder_b_pin);
   printDirectPin("Y Encoder A", cfg->y_encoder_a_pin);
@@ -409,7 +409,8 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
     printDirectPin("X Max Limit", cfg->limit_max_pin);
   }
 
-  ESP_LOGI(TAG, "LEDC: X ch %d, Y ch %d", cfg->x_pulse_ledc_channel, cfg->y_pulse_ledc_channel);
+  ESP_LOGI(TAG, "LEDC: X ch %d, Y ch %d, Theta ch %d", cfg->x_pulse_ledc_channel,
+           cfg->y_pulse_ledc_channel, cfg->theta_pulse_ledc_channel);
   ESP_LOGI(TAG, "========================================");
 }
 

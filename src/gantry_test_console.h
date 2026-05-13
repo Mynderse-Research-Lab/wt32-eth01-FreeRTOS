@@ -24,7 +24,8 @@ struct GantryTestConsoleConfig {
   int y_encoder_b_pin = -1;
   int x_pulse_ledc_channel = -1;
   int y_pulse_ledc_channel = -1;
-  int theta_pwm_pin = -1;
+  int theta_pulse_ledc_channel = -1;
+  int theta_pwm_pin = -1;  // theta pulse STEP GPIO (legacy field name)
 };
 
 void gantryTestConsoleTask(void *param);

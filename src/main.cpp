@@ -342,9 +342,10 @@ extern "C" void app_main(void) {
     consoleCfg.y_pulse_pin            = PIN_Y_PULSE;
     consoleCfg.y_encoder_a_pin        = PIN_Y_ENC_A;
     consoleCfg.y_encoder_b_pin        = PIN_Y_ENC_B;
-    consoleCfg.x_pulse_ledc_channel   = X_PULSE_LEDC_CHANNEL;
-    consoleCfg.y_pulse_ledc_channel   = Y_PULSE_LEDC_CHANNEL;
-    consoleCfg.theta_pwm_pin          = PIN_THETA_PULSE;  // legacy field name; now a pulse pin
+    consoleCfg.x_pulse_ledc_channel    = X_PULSE_LEDC_CHANNEL;
+    consoleCfg.y_pulse_ledc_channel    = Y_PULSE_LEDC_CHANNEL;
+    consoleCfg.theta_pulse_ledc_channel = THETA_PULSE_LEDC_CHANNEL;
+    consoleCfg.theta_pwm_pin           = PIN_THETA_PULSE;  // legacy field name; pulse STEP GPIO
 
     result = xTaskCreatePinnedToCore(
         gantryTestConsoleTask, "SerialCmd",
