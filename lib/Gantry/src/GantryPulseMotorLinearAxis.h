@@ -51,6 +51,9 @@ public:
 
     uint32_t homingSpeedPps() const override;
 
+    void setLogTag(const char* tag) override;
+    void setLogRateHz(uint32_t hz) override;
+
     /// @brief Direct access to the underlying driver. Gantry-internal use only
     ///        (homing, travel measurement, alarm monitoring details).
     PulseMotor::PulseMotorDriver&       driver()       { return driver_; }
@@ -61,6 +64,12 @@ private:
     PulseMotor::DrivetrainConfig  drivetrain_;
     double pulses_per_mm_;
     float  target_mm_;
+
+    // Motion logging state (driven from update()).
+    const char* log_tag_;
+    uint32_t    log_rate_hz_;
+    uint32_t    last_log_ms_;
+    bool        was_active_;
 };
 
 } // namespace Gantry

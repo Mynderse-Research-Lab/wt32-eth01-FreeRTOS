@@ -5,10 +5,15 @@
 #include "GantryPulseMotorLinearAxis.h"
 #include <cmath>
 #include <esp_log.h>
+#include <esp_timer.h>
 
 namespace Gantry {
 
 static const char* TAG = "GantryLinAxis";
+
+static inline uint32_t lin_axis_millis() {
+    return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
 
 GantryPulseMotorLinearAxis::GantryPulseMotorLinearAxis(
     const PulseMotor::DriverConfig& drv,
@@ -16,7 +21,11 @@ GantryPulseMotorLinearAxis::GantryPulseMotorLinearAxis(
   : driver_(drv),
     drivetrain_(dt),
     pulses_per_mm_(PulseMotor::pulsesPerMm(dt)),
-    target_mm_(0.0f) {
+    target_mm_(0.0f),
+    log_tag_(""),
+    log_rate_hz_(0),
+    last_log_ms_(0),
+    was_active_(false) {
     if (pulses_per_mm_ <= 0.0) {
         ESP_LOGW(TAG,
                  "Non-linear drivetrain or zero-scale config: ppm=%.6f (type=%d)",
@@ -114,9 +123,46 @@ uint32_t GantryPulseMotorLinearAxis::getCurrentPulses() const { return driver_.g
 int32_t  GantryPulseMotorLinearAxis::getEncoderPulses() const { return driver_.getEncoderPosition(); }
 void     GantryPulseMotorLinearAxis::setCurrentPulses(uint32_t pos) { driver_.setPosition(pos); }
 
+void GantryPulseMotorLinearAxis::setLogTag(const char* tag) {
+    log_tag_ = (tag != nullptr) ? tag : "";
+}
+
+void GantryPulseMotorLinearAxis::setLogRateHz(uint32_t hz) {
+    log_rate_hz_ = hz;
+    last_log_ms_ = 0;
+}
+
 void GantryPulseMotorLinearAxis::update() {
-    // Driver runs on esp_timer; no periodic action needed at the axis level.
-    (void)TAG;
+    // The driver's motion profile runs on its own esp_timer; this hook is
+    // used purely to emit per-axis MOVE log lines. State transitions fire
+    // unconditionally; the periodic MOVE line is gated by log_rate_hz_.
+    const bool active = driver_.isMotionActive();
+    const float cur_mm    = getCurrentMm();
+    const float target_mm = target_mm_;
+
+    if (active != was_active_) {
+        if (active) {
+            ESP_LOGI(TAG, "MOVE START: axis=%s pos=%.3f mm target=%.3f mm",
+                     log_tag_, cur_mm, target_mm);
+            last_log_ms_ = lin_axis_millis();
+        } else {
+            ESP_LOGI(TAG, "MOVE END: axis=%s pos=%.3f mm", log_tag_, cur_mm);
+        }
+        was_active_ = active;
+    }
+
+    if (active && log_rate_hz_ > 0) {
+        const uint32_t now_ms = lin_axis_millis();
+        uint32_t period_ms = 1000u / log_rate_hz_;
+        if (period_ms == 0) {
+            period_ms = 1;
+        }
+        if (last_log_ms_ == 0 || (now_ms - last_log_ms_) >= period_ms) {
+            ESP_LOGI(TAG, "MOVE: axis=%s pos=%.3f mm target=%.3f mm",
+                     log_tag_, cur_mm, target_mm);
+            last_log_ms_ = now_ms;
+        }
+    }
 }
 
 } // namespace Gantry
