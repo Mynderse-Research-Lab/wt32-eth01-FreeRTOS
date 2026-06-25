@@ -22,7 +22,7 @@ idf_component_register(
     REQUIRES
         PulseMotor
         gpio_expander
-        driver
+        esp_driver_gpio
         esp_common
         esp_timer
         log

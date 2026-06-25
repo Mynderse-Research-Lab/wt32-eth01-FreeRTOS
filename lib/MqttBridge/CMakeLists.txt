@@ -8,7 +8,6 @@ idf_component_register(
         "src"
         "${APP_ROOT}/include"
     REQUIRES
-        driver
         esp_eth
         esp_event
         esp_netif
@@ -16,4 +15,6 @@ idf_component_register(
         freertos
         log
         mqtt
+    PRIV_REQUIRES
+        esp_driver_gpio
 )
