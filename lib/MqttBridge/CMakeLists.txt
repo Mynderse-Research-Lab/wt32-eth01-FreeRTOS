@@ -16,5 +16,4 @@ idf_component_register(
         freertos
         log
         mqtt
-        json
 )
