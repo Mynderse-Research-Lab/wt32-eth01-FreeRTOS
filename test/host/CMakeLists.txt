@@ -56,6 +56,8 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01ControlStatus.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01Assembly.cpp"
 )
 target_include_directories(ethernet_ip PUBLIC
     "${REPO_ROOT}/lib/EtherNetIP/src"
@@ -76,3 +78,7 @@ add_host_test(test_trajectory)
 add_executable(test_eip_encoding "test_eip_encoding.cpp")
 target_link_libraries(test_eip_encoding PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_encoding COMMAND test_eip_encoding)
+
+add_executable(test_hcs01_assembly "test_hcs01_assembly.cpp")
+target_link_libraries(test_hcs01_assembly PRIVATE ethernet_ip unity)
+add_test(NAME test_hcs01_assembly COMMAND test_hcs01_assembly)

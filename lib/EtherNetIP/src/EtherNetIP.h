@@ -16,6 +16,8 @@
 #include "EipConnectionManager.h"
 #include "EipCpf.h"
 #include "EipEncapsulation.h"
+#include "Hcs01Assembly.h"
+#include "Hcs01ControlStatus.h"
 #include "Kinetix5100Assembly.h"
 
 #endif  // ETHERNET_IP_ETHERNET_IP_H

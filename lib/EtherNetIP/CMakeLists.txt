@@ -18,6 +18,8 @@ idf_component_register(
         "src/CipMessageRouter.cpp"
         "src/EipConnectionManager.cpp"
         "src/Kinetix5100Assembly.cpp"
+        "src/Hcs01ControlStatus.cpp"
+        "src/Hcs01Assembly.cpp"
     INCLUDE_DIRS
         "src"
 )

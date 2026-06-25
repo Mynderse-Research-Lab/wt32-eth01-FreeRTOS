@@ -5,8 +5,17 @@ This document records what was confirmed from the drive manuals, the
 build-vs-port decision, the per-drive go/no-go, the byte maps the firmware
 encodes/decodes, and the phased roadmap for the rest of the migration.
 
-The ESP32 (WT32-ETH01) acts as the EtherNet/IP **originator / scanner**: it
-opens connections to the drives (the **targets / adapters**) and exchanges I/O.
+For the EtherNet/IP exchange, the ESP32 (WT32-ETH01) acts as the
+**originator / scanner**: it opens connections to the drives (the **targets /
+adapters**) and exchanges I/O.
+
+The WT32 is the **gantry controller**: it runs motion control (kinematics, trajectory, the per-axis
+drivers) and an **MQTT layer** ([lib/MqttBridge](../lib/MqttBridge)) on the same
+MCU, over the same single Ethernet PHY. The EtherNet/IP originator must coexist
+with those - it shares the CPU, the FreeRTOS scheduler, and the netif/socket
+stack. That coexistence (cyclic scanner task priority/period vs. MQTT and motion
+timing, and sharing `EthernetLink`) is a first-class concern of the deferred
+**transport phase**, not an afterthought.
 
 ---
 
@@ -16,7 +25,7 @@ opens connections to the drives (the **targets / adapters**) and exchanges I/O.
 |-------|------|------------------|---------|
 | Allen-Bradley Kinetix 5100 (`2198-E1020-ERS`) | X | Class 1 adapter, fixed assemblies | **GO** |
 | Allen-Bradley Kinetix 5100 (`2198-E1004-ERS`) | Z | Class 1 adapter, fixed assemblies | **GO** |
-| Bosch Rexroth HCS01 (`HCS01.1E-W0005-A-03-B-ET-EC`) | theta | Multi-Ethernet (ET), configurable assemblies | **CONDITIONAL** - deferred |
+| Bosch Rexroth HCS01 (`HCS01.1E-W0005-A-03-B-ET-EC`) | theta | Multi-Ethernet (ET), configurable assemblies | **GO** - deferred (config-gated) |
 
 ### Kinetix 5100 (X, Z) - GO
 
@@ -40,46 +49,49 @@ This is a standard ODVA Class 1 target. A minimal custom originator
 (ListIdentity -> RegisterSession -> ForwardOpen -> cyclic UDP I/O) is
 sufficient; no vendor stack is required.
 
-### HCS01 / IndraDrive Cs (theta) - CONDITIONAL, deferred
+### HCS01 / IndraDrive Cs (theta) - GO, deferred
 
-From [Rexroth HCS-01 Drive Project Planning Manual](../driver_datasheets_and_calculations/pdf_markdown/Rexroth%20HCS-01%20Drive%20Project%20Planning%20Manual%20R911322210_03.md):
+Type code (project planning manual line 1326): `HCS01.1E-W0005-A-03-**B-ET**-EC`
+= **BASIC** control section + **ET = Multi-Ethernet** module + **EC** encoder.
+The Multi-Ethernet module supports EtherNet/IP (project planning line 4865).
 
-- The unit `HCS01.1E-W0005-A-03-**B-ET**-EC` decodes (type-code table, line
-  1326) as **BASIC** control section with the **ET = Multi-Ethernet** module
-  and **EC** encoder option.
-- The Multi-Ethernet module explicitly supports EtherNet/IP: "drive controllers
-  can be integrated in different Ethernet field bus systems (e.g. sercos III,
-  EtherCAT, **EtherNet/IP** or PROFINET)" (line 4865; also listed line 341).
-- Physical interface: RJ-45, 100Base-TX, dual-port (X24 P2 / X25 P1 per the
-  communication table, line 4870; an earlier table also references X22/X23 for
-  the ET option - confirm against the actual unit). Topology Input/Output is
-  "arbitrary" for EtherNet/IP (lines 4884-4886).
+The spike originally rated theta CONDITIONAL pending the "Functional
+Description" + EDS. Two of those documents are now in-repo and confirm
+feasibility with a concrete data design:
 
-So theta-over-EtherNet/IP is **firmware-supported**. The blocker is *data
-definition*, not capability:
+- [MPx-18 Functions Application Manual](../driver_datasheets_and_calculations/pdf_markdown/R911338673_01_EN_Rexroth%20IndraDrive%20MPx-18%20Functions_Application%20Manual.md)
+  section **4.8** is the EtherNet/IP functional description.
+- [MPx-16..21 Parameters Reference Book](../driver_datasheets_and_calculations/pdf_markdown/R911328651_15_EN_IndraDrive%20MPx-16%20to%20MPx-21%20and%20PSB%20Parameters_Reference%20Book.md)
+  gives the exact control/status word bit maps.
 
-- Unlike the Kinetix's fixed assemblies, the Rexroth EtherNet/IP cyclic process
-  data is **freely configurable** (the "arbitrary" I/O above). The actual
-  assembly instance numbers and byte layout are defined by the configured
-  real-time process-data channel, not fixed in these manuals.
-- Defining and mapping that process data requires the **MPB Functional
-  Description** (already recorded as missing in
-  [docs/MOTION_IO_INTERFACE.md](MOTION_IO_INTERFACE.md)), the Rexroth
-  EtherNet/IP **EDS**, and IndraWorks configuration - none of which are on hand.
+Key confirmed facts (Functions manual 4.8):
 
-**Recommendation:** implement the Kinetix path first (fully documented), and
-keep theta deferred. Two theta options remain open and are *not* foreclosed by
-this foundation work:
+- "Generic Device" profile (ODVA 2.0), Level 2 server; Class 1 implicit I/O +
+  Class 3 explicit messaging (lines 5671-5677). Standard CIP objects only:
+  Identity 0x01, Message Router 0x02, Connection Manager 0x06, Assembly 0x04,
+  TCP/IP 0xF5, Ethernet Link 0xF6, Port 0xF4 (lines 5852-5864).
+- **Static assembly instances**: Output (master->drive, consumed) =
+  **class 0x04, instance 101**; Input (drive->master, produced) =
+  **class 0x04, instance 102** (line 5938).
+- Crucially, the assembly **contents are configurable**, not fixed: they are
+  defined by `P-0-4081` (cyclic command values) and `P-0-4080` (cyclic actual
+  values), up to 15 params / 24 words / 48 bytes per direction (lines 5681,
+  5830, 5936).
+- Connection: Exclusive Owner (Transport Class 1); unicast O->T, multicast T->O
+  over UDP (lines 5868-5890). Min API **2 ms**, set via `P-0-4076` (2-65 ms,
+  1 ms steps, line 5832). 32-bit Run/Idle header used (line 5896).
+- Field-bus scalar format is **Intel / little-endian** (`i32`/`u32` =
+  "Intel format", lines 4501-4507) - matches our `EipByteBuffer` codec.
 
-1. **theta over EtherNet/IP** (preferred goal) - unblock once the MPB
-   Functional Description + EtherNet/IP EDS are obtained and the process-data
-   map is fixed in IndraWorks.
-2. **theta on step/dir via X31** (fallback) - the hybrid already sketched in
-   [docs/MOTION_IO_INTERFACE.md](MOTION_IO_INTERFACE.md); also needs the MPB
-   Functional Description for the X31 pin assignment.
+So theta-over-EtherNet/IP is feasible. It stays **deferred** only because it is
+gated on bench config (EDS import + IndraWorks parameter setup), not on any
+capability or protocol gap. The concrete data design is in section 4 below.
 
-A **hybrid bus** (X/Z on EtherNet/IP, theta on either path) is therefore the
-working assumption.
+**Recommendation:** implement the Kinetix path first (fixed assemblies, zero
+drive-side config), then HCS01 once the process data is commissioned. The
+step/dir-on-X31 fallback in [docs/MOTION_IO_INTERFACE.md](MOTION_IO_INTERFACE.md)
+remains available if bench bring-up over EtherNet/IP stalls. A **hybrid bus**
+(X/Z on EtherNet/IP, theta on either path) is the working assumption.
 
 ---
 
@@ -168,15 +180,119 @@ cam/gear fields (40..83). The foundation models 104; 106 is a later extension.
 
 ---
 
-## 4. Protocol layering
+## 4. Process data design (HCS01 / IndraDrive)
+
+Unlike the Kinetix's fixed assemblies, the HCS01 builds assembly instances
+**101** (O->T, command) and **102** (T->O, actual) from a process-data list we
+choose and commission via IndraWorks. "The data required" is therefore a
+**configuration we design**, not a table to read off. All scalars are
+little-endian (Intel format).
+
+### 4.1 Profile and configuration parameters
+
+Use profile type **`P-0-4084 = 0xFFFE`** (freely configurable). The cyclic data
+is then defined by two list parameters (Functions manual 4.8, lines 4729-4755):
+
+| Parameter | Direction | Role |
+|-----------|-----------|------|
+| `P-0-4081` | master -> drive (instance 101) | config list of cyclic command values |
+| `P-0-4080` | drive -> master (instance 102) | config list of cyclic actual values |
+| `P-0-4077` | command word 1 | field-bus control word (state machine) |
+| `P-0-4078` | actual word 1 | field-bus status word |
+| `P-0-4076` | - | process-data update clock / API (min 2 ms) |
+| `P-0-4074` | - | data format (verify endianness/word order) |
+| `P-0-4089.0.13/.14/.15` | - | IP / netmask / gateway |
+| `S-0-1020` | - | separate engineering IP (IndraWorks) |
+
+`P-0-4077`/`P-0-4078` must always be the **first word** in their respective
+lists (Parameters ref. lines 81182, 81215).
+
+### 4.2 Recommended map - drive-controlled positioning (theta is rotary)
+
+From the exemplary config (Functions manual Tab. 4-21/4-22, lines 4940-4963):
+
+**Command - instance 101 (`P-0-4081`), 10 bytes:**
+
+| Offset | Param | Field | Type |
+|-------:|-------|-------|------|
+| 0 | `P-0-4077` | Field bus control word | u16 |
+| 2 | `S-0-0282` | Positioning command value | i32 |
+| 6 | `S-0-0259` | Positioning velocity | i32 |
+
+**Actual - instance 102 (`P-0-4080`), 14 bytes:**
+
+| Offset | Param | Field | Type |
+|-------:|-------|-------|------|
+| 0 | `P-0-4078` | Field bus status word | u16 |
+| 2 | `S-0-0051` | Position feedback value 1 | i32 |
+| 6 | `S-0-0040` | Velocity feedback value | i32 |
+| 10 | `S-0-0390` | Diagnostic message number | u32 |
+
+Using `S-0-0282` (positioning command value) rather than `S-0-0258` (target
+position) lets control-word bits 0/3/4 switch absolute/relative inline
+(Functions manual line 4934).
+
+### 4.3 Control word `P-0-4077` bit map (Parameters ref. Tab. 4-357)
+
+| Bit | Function |
+|----:|----------|
+| 0 | Command value acceptance (toggle -> activate positioning block / take over command) |
+| 1 | Operating mode setting (0->1 operating mode, 1->0 parameter mode) |
+| 2 | Homing - start/terminate command C6 |
+| 3 | Absolute (0) / relative (1) - only with `S-0-0282` |
+| 4 | Immediate block change - only with `S-0-0282` |
+| 5 | Clear errors - start command C5 |
+| 7/6 | Positioning(00) / jog+(01) / jog-(10) / positioning halt(11) |
+| 9/8 | Command operation mode (00 primary, 01/10/11 secondary 1..3) |
+| 12 | IPOSYNC (toggles on new cyclic command values) |
+| 13 | Drive Halt (0->1 start, 1->0 halt / immediate shutdown) |
+| 14 | Drive enable (auto-set internally once field-bus comm is active) |
+| 15 | Drive ON (0->1 controller enable, 1->0 best-possible decel) |
+
+Enable sequence for motion: assert **bit 15 (Drive ON)**, then **bit 13 (Drive
+Halt = Drive Start)**; bit 14 follows automatically. On bus failure (`F4009` /
+`E4005`) the originator must clear bits 13/14/15 to prevent auto-restart
+(Functions manual line 4805).
+
+### 4.4 Status word `P-0-4078` bit map (Parameters ref. Tab. 4-358)
+
+| Bit | Function |
+|----:|----------|
+| 1/0 | Operating mode acknowledgment (10 operating, 00 parameter) |
+| 2 | In reference (1 = homed) |
+| 3 | In standstill (actual velocity < standstill window) |
+| 4 | Command value reached / in position (mode-dependent) |
+| 5 | Command change bit |
+| 6 | Operating mode error |
+| 7 | Status of command value processing (1 = drive not following, e.g. Drive Halt) |
+| 9/8 | Actual operation mode (00 primary, 01/10/11 secondary 1..3) |
+| 10 | Command value acknowledgment (toggles to ack `S-0-0282` acceptance) |
+| 11 | Class 3 diagnostics message present |
+| 12 | Class 2 diagnostics warning present |
+| 13 | Class 1 diagnostics drive error (drive interlock) |
+| 15/14 | Ready for operation (00 not ready, 01 bb, 10 Ab, 11 AF / in operation) |
+
+Motion handshake: toggle command word bit 0 to issue a move; wait for status
+word **bit 10** to toggle (command accepted), then **bit 4** (in position).
+
+### 4.5 How this maps onto `lib/EtherNetIP/`
+
+Implemented in `Hcs01ControlStatus` + `Hcs01Assembly` (host-tested in
+`test/host/test_hcs01_assembly.cpp`): control/status word encode/decode and the
+recommended drive-controlled-positioning map (10 B command / 14 B actual).
+
+---
+
+## 5. Protocol layering
 
 ```mermaid
 flowchart TB
-  subgraph pure [Pure host-testable - this phase]
+  subgraph pure [Pure host-testable]
     enc["EncapsulationCodec - header, CPF, status"]
     cip["CipMessageRouter - service, EPATH, status"]
     cm["ConnectionManager - ListIdentity, RegisterSession, ForwardOpen"]
     k5100["Kinetix5100Assembly - 104 out, 154 in"]
+    hcs01["Hcs01Assembly - 101 out, 102 in"]
   end
   subgraph transport [Transport - deferred]
     udp["UDP 2222 implicit I/O"]
@@ -188,6 +304,7 @@ flowchart TB
   end
   cm --> enc
   k5100 --> cip
+  hcs01 --> cip
   cip --> enc
   pure -. later .-> transport
   transport -. later .-> motion
@@ -199,17 +316,18 @@ over **UDP 44818** (broadcast).
 
 ---
 
-## 5. Roadmap
+## 6. Roadmap
 
 ### Phase 0 - Feasibility spike (DONE)
 Confirmed Kinetix 5100 Class 1 assemblies and HCS01 Multi-Ethernet capability;
-chose build-over-port; documented byte maps above.
+chose build-over-port; documented byte maps above. HCS01 process-data design
+now resolved from the MPx-18 Functions manual + Parameters Reference Book
+(section 4).
 
-### Phase 1 - Host-testable encoding foundation (THIS SESSION)
+### Phase 1 - Host-testable encoding foundation (DONE)
 Pure `lib/EtherNetIP/` component: encapsulation + CPF + CIP MR + ListIdentity /
 RegisterSession / ForwardOpen builders+parsers + Kinetix 5100 104/154 structs,
-with byte-exact host unit tests in the existing CTest/CI lane. No ESP-IDF
-dependency; firmware behavior unchanged (`PulseMotor` remains the live path).
+with byte-exact host unit tests in the existing CTest/CI lane.
 
 ### Phase 2 - Transport (deferred)
 ESP-IDF UDP/TCP sockets and a cyclic scanner task at RPI; reuse/generalize
@@ -220,18 +338,24 @@ ForwardOpen connection path and config-assembly instance against the drive EDS.
 `EipAxis` adapter feeding `Gantry`, console commands, and a Kconfig switch to
 select the EtherNet/IP path vs. the pulse/dir path per axis. Start with X.
 
-### Phase 4 - theta decision (deferred, doc-gated)
-Resolve theta path once the MPB Functional Description + Rexroth EtherNet/IP
-EDS are available: either theta-over-EtherNet/IP (preferred) or step/dir on X31
-(fallback).
+### Phase 4 - HCS01 / theta assembly layer (DONE for positioning map)
+`Hcs01ControlStatus` + `Hcs01Assembly` implement the section-4 positioning map
+(host-tested). Remaining: IndraWorks commissioning (EDS import, `P-0-408x`
+setup) and bench validation. Fallback to step/dir on X31 if bring-up stalls.
 
 ---
 
-## 6. Open items / documents still needed
+## 7. Open items / documents still needed
 
-| Item | Needed for |
-|------|------------|
-| Kinetix 5100 **EDS** | Exact ForwardOpen config-assembly instance + connection parameters at bench bring-up |
-| Rexroth **MPB Functional Description** | theta X31 pin assignment (step/dir fallback) AND EtherNet/IP process-data map |
-| Rexroth EtherNet/IP **EDS** | theta assembly instances + byte layout if going EtherNet/IP |
-| Safe Torque Off (STO) wiring | Remains hardwired regardless of bus (out of scope here) |
+| Item | Status | Needed for |
+|------|--------|------------|
+| Rexroth EtherNet/IP **EDS** (`IndraDrive_EIP_MPx18.EDS`) | MISSING | Exact connection points + config-assembly instance for ForwardOpen (Functions manual line 5816) |
+| Verify `P-0-4074` data format / 32-bit word order | TO CONFIRM | Tab. 4-20/4-22 list `(H)` before `(L)` per i32, in tension with "Intel format" - pin against EDS + bench capture before trusting the codec for HCS01 |
+| HCS01 scaling setup (`S-0-0282`, `S-0-0259` units) | TO CONFIG | Map theta degrees/PUU + velocity units in IndraWorks |
+| Kinetix 5100 **EDS** | MISSING | Exact ForwardOpen config-assembly instance + connection parameters at bench bring-up |
+| Rexroth **MPB Functional Description** | NICE TO HAVE | X31 step/dir pin assignment (only needed if taking the fallback path) |
+| Safe Torque Off (STO) wiring | OUT OF SCOPE | Remains hardwired regardless of bus |
+
+> Resolved since the spike: the MPx-18 Functions Application Manual (EtherNet/IP
+> section 4.8) and the MPx-16..21 Parameters Reference Book (control/status word
+> bit maps) are now in-repo and fully cover the HCS01 process-data design.
