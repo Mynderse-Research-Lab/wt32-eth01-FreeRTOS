@@ -70,4 +70,47 @@ bool decodeSendRRDataPayload(const Bytes& payload, Bytes& out_cip_response) {
   return false;
 }
 
+Bytes encodeSendUnitDataPayload(const Bytes& cpf_items) {
+  Bytes out;
+  ByteWriter w(out);
+  w.u32(0);
+  w.u16(0);
+  w.bytes(cpf_items);
+  return out;
+}
+
+bool decodeSendUnitDataAssembly(const Bytes& connected_data, bool skip_run_idle,
+                                Bytes& out_assembly) {
+  ByteReader r(connected_data);
+  uint16_t cip_seq = 0;
+  if (!r.u16(cip_seq)) return false;
+  if (skip_run_idle) {
+    if (!r.skip(4)) return false;
+  }
+  return r.bytes(out_assembly, r.remaining());
+}
+
+Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
+                           uint16_t cip_sequence, const Bytes& assembly,
+                           bool include_run_idle_header) {
+  Bytes addr;
+  ByteWriter aw(addr);
+  aw.u32(connection_id);
+  aw.u32(encap_sequence);
+
+  Bytes data;
+  ByteWriter dw(data);
+  dw.u16(cip_sequence);
+  if (include_run_idle_header) {
+    // PROVISIONAL: Run state (0x00000001). Confirm against drive EDS at bench.
+    dw.u32(0x00000001);
+  }
+  dw.bytes(assembly);
+
+  std::vector<CpfItem> items;
+  items.emplace_back(CpfItemType::kSequencedAddress, std::move(addr));
+  items.emplace_back(CpfItemType::kConnectedData, std::move(data));
+  return encodeCpf(items);
+}
+
 }  // namespace eip

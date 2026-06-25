@@ -27,6 +27,7 @@ idf_component_register(
     REQUIRES
         Gantry
         MqttBridge
+        EtherNetIP
         PulseMotor
         MCP23S17
         gpio_expander

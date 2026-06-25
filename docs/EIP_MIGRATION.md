@@ -293,11 +293,12 @@ flowchart TB
     cm["ConnectionManager - ListIdentity, RegisterSession, ForwardOpen"]
     k5100["Kinetix5100Assembly - 104 out, 154 in"]
     hcs01["Hcs01Assembly - 101 out, 102 in"]
+    sess["EipSession - TCP explicit"]
+    io["EipIoConnection - Class1 UDP framing"]
   end
-  subgraph transport [Transport - deferred]
-    udp["UDP 2222 implicit I/O"]
-    tcp["TCP 44818 explicit + session"]
-    link["EthernetLink reuse"]
+  subgraph fw [Firmware scaffold - Kconfig gated]
+    sock["EipSocketEspIdf - lwIP"]
+    task["EipScannerTask - RegisterSession loop"]
   end
   subgraph motion [Motion - deferred]
     axis["EipAxis adapter -> Gantry"]
@@ -305,9 +306,10 @@ flowchart TB
   cm --> enc
   k5100 --> cip
   hcs01 --> cip
-  cip --> enc
-  pure -. later .-> transport
-  transport -. later .-> motion
+  sess --> enc
+  io --> enc
+  pure --> fw
+  fw -. later .-> motion
 ```
 
 Standard ports (for the deferred transport phase): explicit + session over
@@ -329,10 +331,14 @@ Pure `lib/EtherNetIP/` component: encapsulation + CPF + CIP MR + ListIdentity /
 RegisterSession / ForwardOpen builders+parsers + Kinetix 5100 104/154 structs,
 with byte-exact host unit tests in the existing CTest/CI lane.
 
-### Phase 2 - Transport (deferred)
-ESP-IDF UDP/TCP sockets and a cyclic scanner task at RPI; reuse/generalize
-`MqttBridge::EthernetLink` for shared PHY/netif bring-up. Bench-validate the
-ForwardOpen connection path and config-assembly instance against the drive EDS.
+### Phase 2 - Transport scaffolding (DONE for scaffold)
+`EipSession` (TCP explicit), `EipIoConnection` (Class 1 UDP framing),
+`EipSocketEspIdf`, and a Kconfig-gated `EipScannerTask` (default off) that
+retries RegisterSession with backoff. Host tests in `test_eip_transport.cpp`.
+Firmware links the component; scanner is off by default so PulseMotor + MQTT
+behavior is unchanged. ForwardOpen + cyclic RPI loop and bench validation
+still deferred. Run/Idle header and connection path are **PROVISIONAL** until
+EDS + hardware confirm.
 
 ### Phase 3 - Motion integration (deferred)
 `EipAxis` adapter feeding `Gantry`, console commands, and a Kconfig switch to

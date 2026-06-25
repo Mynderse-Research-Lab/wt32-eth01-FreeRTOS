@@ -1,0 +1,21 @@
+menu "EtherNet/IP originator"
+
+    config EIP_SCANNER_ENABLED
+        bool "Enable EtherNet/IP scanner task (scaffold)"
+        default n
+        help
+            When enabled, starts a background FreeRTOS task that attempts
+            TCP RegisterSession to a configured drive IP. This is transport
+            scaffolding only; ForwardOpen and cyclic I/O are not yet wired
+            to Gantry motion. Default off so live PulseMotor + MQTT behavior
+            is unchanged.
+
+    config EIP_TARGET_IP
+        string "Target drive IP address (scanner scaffold)"
+        default "192.168.1.100"
+        depends on EIP_SCANNER_ENABLED
+        help
+            IP address of the first EtherNet/IP target for the scanner task
+            to connect to (TCP 44818). Bench validation required.
+
+endmenu

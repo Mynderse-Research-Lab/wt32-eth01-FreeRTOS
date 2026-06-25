@@ -33,6 +33,7 @@
 #include "PulseMotor.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "driver/gpio.h"
 #include "gpio_expander.h"
 #include "MCP23S17.h"
@@ -43,6 +44,10 @@
 #include "mqtt_topics.h"
 #include "MqttBridge.h"
 #include "pick_scheduler.h"
+
+#if CONFIG_EIP_SCANNER_ENABLED
+#include "EipScannerTask.h"
+#endif
 
 static const char* TAG = "GantryApp";
 
@@ -335,6 +340,10 @@ extern "C" void app_main(void) {
         return;
     }
     (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
+
+#if CONFIG_EIP_SCANNER_ENABLED
+    eip::startScannerTask();
+#endif
 
     static PickSchedulerTaskConfig pickCfg = { &gantry, &mqttBridge };
     result = xTaskCreatePinnedToCore(

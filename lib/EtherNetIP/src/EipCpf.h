@@ -50,6 +50,20 @@ Bytes encodeSendRRDataPayload(const Bytes& cip_message, uint16_t timeout = 0);
 // interface handle + timeout, then returns the unconnected data item).
 bool decodeSendRRDataPayload(const Bytes& payload, Bytes& out_cip_response);
 
+// SendUnitData (connected/implicit) envelope: interface handle (uint32, 0=CIP)
+// + timeout (uint16) + CPF items (sequenced address + connected data).
+Bytes encodeSendUnitDataPayload(const Bytes& cpf_items);
+
+// Extract assembly bytes from a SendUnitData reply CPF connected-data item.
+// Skips the 16-bit CIP sequence count and optional 32-bit Run/Idle header.
+bool decodeSendUnitDataAssembly(const Bytes& connected_data, bool skip_run_idle,
+                                Bytes& out_assembly);
+
+// Build Class 1 O->T CPF: sequenced address (0x8002) + connected data (0x00B1).
+Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
+                           uint16_t cip_sequence, const Bytes& assembly,
+                           bool include_run_idle_header);
+
 }  // namespace eip
 
 #endif  // ETHERNET_IP_EIP_CPF_H

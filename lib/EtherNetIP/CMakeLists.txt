@@ -1,15 +1,7 @@
-# EtherNetIP component - pure EtherNet/IP + CIP originator encoding layer.
+# EtherNetIP component - EtherNet/IP + CIP originator encoding and transport.
 #
-# This is hardware-independent, freestanding C++17 (no ESP-IDF / FreeRTOS
-# includes). Today it is exercised only by the host unit tests in test/host/;
-# the firmware does NOT yet link it (see docs/EIP_MIGRATION.md, Phase 2/3).
-#
-# To wire it into the firmware later:
-#   1. Add this dir to EXTRA_COMPONENT_DIRS in idf/CMakeLists.txt.
-#   2. Add `EtherNetIP` to the REQUIRES of the component that uses it.
-#
-# Public headers live in src/. Consumers should REQUIRES EtherNetIP and
-# #include "EtherNetIP.h".
+# Pure C++17 encoding (host-testable) plus ESP-IDF socket/scanner scaffolding.
+# Scanner is Kconfig-gated (default off); see docs/EIP_MIGRATION.md.
 
 idf_component_register(
     SRCS
@@ -20,6 +12,15 @@ idf_component_register(
         "src/Kinetix5100Assembly.cpp"
         "src/Hcs01ControlStatus.cpp"
         "src/Hcs01Assembly.cpp"
+        "src/EipSession.cpp"
+        "src/EipIoConnection.cpp"
+        "src/EipSocketEspIdf.cpp"
+        "src/EipScannerTask.cpp"
     INCLUDE_DIRS
         "src"
+    REQUIRES
+        lwip
+        esp_netif
+        freertos
+        log
 )
