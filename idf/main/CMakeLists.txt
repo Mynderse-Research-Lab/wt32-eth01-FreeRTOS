@@ -30,7 +30,7 @@ idf_component_register(
         PulseMotor
         MCP23S17
         gpio_expander
-        driver
+        esp_driver_gpio
         esp_timer
         log
         freertos
