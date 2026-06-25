@@ -16,10 +16,13 @@ Standalone index for everything under `docs/`. This file is independent of [`dri
 
 | Document | Summary | Audience |
 |----------|---------|----------|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, PR expectations | All contributors |
+| [../AGENTS.md](../AGENTS.md) | AI agent entry point and repo map | Cursor / coding agents |
 | [../PROGRAMMING_REFERENCE.md](../PROGRAMMING_REFERENCE.md) | Pin map, Gantry API, console, bring-up | Firmware developers |
 | [../lib/Gantry/docs/ARCHITECTURE_FLOW.md](../lib/Gantry/docs/ARCHITECTURE_FLOW.md) | Control/feedback signal routing | Architecture review |
 | [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design | Networking / scheduler |
 | [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements | Integration |
+| [EIP_MIGRATION.md](EIP_MIGRATION.md) | EtherNet/IP wire format and migration status | Firmware / networking |
 
 ---
 

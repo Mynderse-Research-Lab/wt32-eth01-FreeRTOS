@@ -60,6 +60,12 @@ idf.py monitor -p COM3
 - Application entry is `app_main()` in `src/main.cpp`, registered by `idf/main/CMakeLists.txt`.
 - This is an ESP-IDF-only project; PlatformIO has been removed. Do not reintroduce `platformio.ini`, `library.json`, or Arduino `lib_deps`.
 
+## Contributing
+
+Engineering rules, naming conventions, testing policy, and PR expectations are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md). AI agents should start with [`AGENTS.md`](AGENTS.md);
+Cursor-specific rules live in [`.cursor/rules/`](.cursor/rules/).
+
 ## CI and Testing
 The firmware is exercised by two independent lanes, both run in GitHub Actions
 (`.github/workflows/firmware-ci.yml`) on every push and pull request:
