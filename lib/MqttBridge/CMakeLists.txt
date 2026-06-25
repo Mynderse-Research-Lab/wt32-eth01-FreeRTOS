@@ -13,6 +13,7 @@ idf_component_register(
         esp_netif
         esp_timer
         freertos
+        lan87xx
         log
         mqtt
     PRIV_REQUIRES

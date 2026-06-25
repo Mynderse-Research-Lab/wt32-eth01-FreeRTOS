@@ -35,3 +35,10 @@ idf_component_register(
         log
         freertos
 )
+
+# ESP-IDF v6 treats #warning as -Werror=cpp. Suppress the intentional dev-rig
+# geometry reminder in CI only (see axis_drivetrain_params.h); local builds
+# still emit it once from main.cpp via AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS.
+if(DEFINED ENV{GITHUB_ACTIONS})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE GANTRY_SUPPRESS_GEOMETRY_WARNING)
+endif()
