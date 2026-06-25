@@ -42,3 +42,7 @@ idf_component_register(
 if(CONFIG_GANTRY_SUPPRESS_GEOMETRY_WARNING)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE GANTRY_SUPPRESS_GEOMETRY_WARNING)
 endif()
+
+# ESP-IDF v6 enables -Werror by default; keep geometry placeholder reminders as
+# warnings instead of hard errors so CI can compile while still surfacing them.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=cpp)
