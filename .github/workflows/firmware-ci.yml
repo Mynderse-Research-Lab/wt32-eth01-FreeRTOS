@@ -24,7 +24,7 @@ jobs:
           esp_idf_version: v6.0
           target: esp32
           path: 'idf'
-          command: 'idf.py build'
+          command: 'idf.py -DCONFIG_GANTRY_SUPPRESS_GEOMETRY_WARNING=y build'
 
   host-tests:
     name: Host unit tests
