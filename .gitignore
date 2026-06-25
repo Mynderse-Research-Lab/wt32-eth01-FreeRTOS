@@ -11,6 +11,8 @@ compile_commands.json
 idf/build/
 build/
 idf/sdkconfig
+idf/managed_components/
+managed_components/
 
 # Local capture of idf.py output (optional)
 idf/build_output.log
