@@ -1,0 +1,16 @@
+menu "Gantry application"
+
+    config GANTRY_SELFTEST
+        bool "Enable on-target selftest console command"
+        default y
+        help
+            When enabled, the interactive serial console exposes the
+            "selftest" command, which runs runBasicTests() (kinematics,
+            joint-limit, and trajectory sanity checks) directly on the target.
+
+            The same assertions also run host-side in CI (test/host/), so a
+            production build can set this to "n" to drop both the "selftest"
+            command and the basic_tests.cpp source from the firmware without
+            losing test coverage.
+
+endmenu

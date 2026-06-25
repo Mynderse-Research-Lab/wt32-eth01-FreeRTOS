@@ -1,16 +1,18 @@
 # Gantry Library Configuration Guide
 
-**Version:** 2.0.0
-**Last Updated:** Apr 2026
+**Version:** 2.1.0
+**Last Updated:** May 2026
 
 Complete configuration guide for the Gantry library.
 
-> **Refactor note (2026-04):** Configuration has moved into two dedicated per-axis parameter headers:
+> **Deprecation banner — read first:** Most snippets in this document predate two refactors and remain only for historical context:
+> 1. **PulseMotor refactor (2026-04):** Configuration moved into two dedicated per-axis parameter headers:
+>    - `include/axis_pulse_motor_params.h` — electrical tuning (encoder PPR, pulse bandwidth, electronic gear, inversion, homing, debounce).
+>    - `include/axis_drivetrain_params.h` — mechanical tuning (drivetrain type + type-specific fields, travel envelope, motion caps, position tolerance, kinematic offsets, gripper timing).
+>    Pin assignments and FreeRTOS task parameters remain in `include/gantry_app_constants.h`. `BergerdaServo::DriverConfig`, `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, and `setThetaPulseRange` no longer exist in the source tree.
+> 2. **Axis-frame refactor (2026-05):** the vertical axis is `Z` (`+Z = up`, `Z = 0` at the belt). The world frame is `X` across-belt, `Y` along-belt with `-Y` downstream, `Z` vertical. Joint space is `(x, z, theta)`. Kinematic offset macros were renamed: `GANTRY_Y_AXIS_Z_OFFSET_MM → GANTRY_Z_AXIS_Y_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM → GANTRY_GRIPPER_X_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM → GANTRY_SAFE_Z_HEIGHT_MM`.
 >
-> - `include/axis_pulse_motor_params.h` — electrical tuning (encoder PPR, pulse bandwidth, electronic gear, inversion, homing, debounce).
-> - `include/axis_drivetrain_params.h` — mechanical tuning (drivetrain type + type-specific fields, travel envelope, motion caps, position tolerance, kinematic offsets, gripper timing).
->
-> Pin assignments and FreeRTOS task parameters remain in `include/gantry_app_constants.h`. Older snippets below referencing `BergerdaServo::DriverConfig`, `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, or `setThetaPulseRange` predate the refactor and do not reflect the current API. See `../../PROGRAMMING_REFERENCE.md` §9 for the new layout and `src/main.cpp` for helper functions that translate the parameter headers into `PulseMotor::DriverConfig` + `PulseMotor::DrivetrainConfig`.
+> See `../../PROGRAMMING_REFERENCE.md` section 9 for the new layout, `src/main.cpp` for helper functions that translate the parameter headers into `PulseMotor::DriverConfig` + `PulseMotor::DrivetrainConfig`, and [`API_REFERENCE.md`](API_REFERENCE.md) for the current API.
 
 ---
 
@@ -18,7 +20,7 @@ Complete configuration guide for the Gantry library.
 
 - [Quick Configuration](#quick-configuration)
 - [X-Axis Configuration](#x-axis-configuration)
-- [Y-Axis Configuration](#y-axis-configuration)
+- [Z-Axis Configuration](#z-axis-configuration)
 - [Theta-Axis Configuration](#theta-axis-configuration)
 - [End-Effector Configuration](#end-effector-configuration)
 - [Kinematic Parameters](#kinematic-parameters)
@@ -149,9 +151,16 @@ params.x_axis_ball_screw_pitch_mm = 40.0f;
 
 ---
 
-## Y-Axis Configuration
+## Z-Axis Configuration
 
-### Pin Configuration
+> **The snippets in this section reference the deprecated `setYAxisPins` / `setYAxisStepsPerMm` / `setYAxisMotionLimits` / `axisY_` API. They are kept for historical context only and will not compile against the current source tree. The live equivalent is:**
+>
+> - The Z-axis `PulseMotor::DriverConfig` + `DrivetrainConfig` are built in `src/main.cpp` via `makeZDriverConfig()` / `makeZDrivetrainConfig()` from the macros in `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`.
+> - Soft limits are applied via `gantry.setZAxisLimits(min, max)` (e.g. `(0, AXIS_Z_HARD_LIMIT_MAX_MM)`) and pin wiring via `gantry.setZLimitPins(PIN_Z_LIMIT_MIN, PIN_Z_LIMIT_MAX)` (per `PROGRAMMING_REFERENCE.md` section 12).
+> - Pulses/mm comes from `AXIS_Z_PULSES_PER_MM` (computed at compile time from `AXIS_Z_LEAD_MM_PER_REV`, encoder PPR, microsteps, and reducer ratio).
+> - Pulse-bandwidth caps come from `AXIS_Z_MAX_PULSE_FREQ_HZ` and `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`.
+
+### Pin Configuration (legacy)
 
 ```cpp
 gantry.setYAxisPins(
@@ -296,10 +305,10 @@ Adjust if needed (modify `GRIPPER_ACTUATE_TIME_MS` constant).
 
 ```cpp
 struct KinematicParameters {
-    float y_axis_z_offset_mm = 80.0f;           // Y-axis Z offset
-    float theta_x_offset_mm = -55.0f;           // Theta X offset
-    float gripper_y_offset_mm = 385.0f;         // Gripper Y offset
-    float gripper_z_offset_mm = 80.0f;          // Gripper Z offset
+    float z_axis_y_offset_mm = 80.0f;           // Z-axis carriage offset along belt (Y)
+    float theta_x_offset_mm = -55.0f;           // Theta X offset (across belt)
+    float gripper_x_offset_mm = 385.0f;         // Gripper offset across belt (X)
+    float gripper_z_offset_mm = 80.0f;          // Gripper Z offset (vertical)
     float x_axis_ball_screw_pitch_mm = 40.0f;   // Ball screw pitch
 };
 ```
@@ -314,14 +323,14 @@ If your gantry has different mechanical dimensions:
 ```
 
 **Measurement Guide:**
-1. Measure Y-axis Z offset from X-axis rail
-2. Measure theta rotation center X offset
-3. Measure gripper offsets from theta center
-4. Measure ball screw pitch
+1. Measure the Z-axis carriage offset along the belt (Y direction; `-Y` is downstream).
+2. Measure theta rotation-center across-belt offset (X).
+3. Measure gripper offsets from theta center (across-belt and vertical).
+4. Measure ball-screw pitch on the X-axis drivetrain.
 
 ### Geometry Freeze Attestation
 
-The defaults above (`GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM` in `include/axis_drivetrain_params.h`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder until the application engineer:
+The defaults above (`GANTRY_Z_AXIS_Y_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_X_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Z_HEIGHT_MM` in `include/axis_drivetrain_params.h`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder until the application engineer:
 
 1. Re-measures the offsets against the frozen production design (CAD dimension or CMM / calibration fixture on the as-built assembly).
 2. Overwrites the five macros in `axis_drivetrain_params.h` with the measured values.
@@ -345,32 +354,32 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC GANTRY_GEOMETRY_FROZEN)
 
 ## Motion Parameters
 
-### Safe Y Height
+### Safe Z Height
 
-Height at which Y-axis retracts before X-axis movement:
+Height at which Z-axis retracts before X-axis movement (`+Z = up`):
 
 ```cpp
-// Set safe height (mm)
-// Default: 150mm
-gantry.setSafeYHeight(150.0f);
+// Set safe Z height (mm above belt)
+// Default: 150 mm
+gantry.setSafeZHeight(150.0f);
 ```
 
 **Recommendation:**
 - Set to highest expected object height + clearance
-- Typical: 100-200mm depending on application
+- Typical: 100-200 mm depending on application
 
 ### Default Speeds
 
 ```cpp
 // Default motion speeds (if not specified)
-uint32_t speed_mm_per_s = 50;   // X/Y axes (mm/s)
+uint32_t speed_mm_per_s = 50;   // X/Z axes (mm/s)
 uint32_t speed_deg_per_s = 30;  // Theta axis (deg/s)
 ```
 
 **Recommended Values:**
-- **X-axis**: 50-200 mm/s (depends on ball screw)
-- **Y-axis**: 50-100 mm/s (depends on stepper)
-- **Theta**: 30-90 deg/s (depends on servo)
+- **X-axis**: 50-200 mm/s (depends on belt drive)
+- **Z-axis**: 50-100 mm/s (depends on ballscrew; clamp to `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` once Z is wired)
+- **Theta**: 30-90 deg/s (depends on rotary stage)
 
 ### Acceleration/Deceleration
 
@@ -404,10 +413,11 @@ xConfig.limit_min_pin = 35;  // Home position
 xConfig.limit_max_pin = 36;  // End position
 ```
 
-**Y-axis:**
+**Z-axis:**
 ```cpp
-// Limits enforced via setYAxisLimits()
-// No hardware limit switches required (software limits)
+// Soft limits enforced via setZAxisLimits()
+// Hardware MIN/MAX limit switches present (PIN_Z_LIMIT_MIN/MAX) — wiring + debouncing
+// described in PROGRAMMING_REFERENCE.md section 12.
 ```
 
 ### Alarm Monitoring
@@ -439,7 +449,7 @@ gantry.disable();  // Stops all motion and disables motors
 ### Step 1: Basic Configuration
 
 1. Configure all pins
-2. Set steps-per-mm for Y-axis
+2. Set `AXIS_Z_PULSES_PER_MM` (from the K5100 commissioning) in `axis_pulse_motor_params.h`
 3. Set basic limits
 4. Initialize and enable
 
@@ -455,12 +465,12 @@ while (gantry.isBusy()) {
 }
 ```
 
-**Y-axis:**
+**Z-axis:**
 ```cpp
-// Test Y-axis movement
+// Test Z-axis movement (+Z = up)
 Gantry::JointConfig test;
 test.x = 0.0f;
-test.y = 50.0f;  // Move Y to 50mm
+test.z = 50.0f;  // 50 mm above belt
 test.theta = 0.0f;
 gantry.moveTo(test, 50, 30);
 ```
@@ -498,7 +508,7 @@ gantry.moveTo(target, 70, 40, 600, 600);
 **Adjust Safe Height:**
 ```cpp
 // Set based on your application
-gantry.setSafeYHeight(150.0f);  // Adjust as needed
+gantry.setSafeZHeight(150.0f);  // Adjust as needed
 ```
 
 **Test Pick-and-Place:**
@@ -525,7 +535,7 @@ gantry.moveTo(placePos, 50, 30);
 - Prevent missed steps
 
 **Optimize Safe Height:**
-- Minimize unnecessary Y movement
+- Minimize unnecessary Z movement
 - Ensure collision-free X travel
 - Balance speed vs. safety
 
@@ -536,27 +546,27 @@ gantry.moveTo(placePos, 50, 30);
 ### Initial Setup
 
 - [ ] X-axis pins configured
-- [ ] Y-axis pins configured
+- [ ] Z-axis pins configured
 - [ ] Theta-axis pin configured
 - [ ] Gripper pin configured
-- [ ] Limit switches configured (X-axis)
-- [ ] Steps-per-mm calculated (Y-axis)
+- [ ] Limit switches configured (X-axis; Z planned per `PROGRAMMING_REFERENCE.md` section 12)
+- [ ] `AXIS_Z_PULSES_PER_MM` set from K5100 commissioning
 - [ ] Limits set (all axes)
-- [ ] Motion limits set (Y-axis)
-- [ ] Safe height configured
+- [ ] Motion caps set (Z-axis critical-speed cap)
+- [ ] Safe Z height configured
 
 ### Calibration
 
 - [ ] X-axis homed
 - [ ] X-axis calibrated (axis length measured)
-- [ ] Y-axis zero position verified
+- [ ] Z-axis zero position (`Z = 0` at belt) verified
 - [ ] Theta zero position verified
 - [ ] Gripper open/close verified
 
 ### Testing
 
 - [ ] Individual axis movement tested
-- [ ] Sequential motion tested
+- [ ] Sequential motion tested (Z↓ → grip → Z↑ → X traverse)
 - [ ] Pick-and-place sequence tested
 - [ ] Limits verified
 - [ ] Alarm handling tested
@@ -565,13 +575,13 @@ gantry.moveTo(placePos, 50, 30);
 
 ## Troubleshooting
 
-### Y-axis Not Moving
+### Z-axis Not Moving
 
-1. Check pin configuration
-2. Verify steps-per-mm setting
-3. Check limits (may be at limit)
-4. Verify enable pin (if used)
-5. Check motion limits (speed/accel)
+1. Check `DriverConfig` (helper `makeZDriverConfig()` in `src/main.cpp`).
+2. Verify `AXIS_Z_PULSES_PER_MM` matches the K5100 commissioning value.
+3. Check limits (may be at limit; read with `limits` console command).
+4. Verify enable / SON wiring on `PIN_Z_ENABLE`.
+5. Check motion caps (`AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`).
 
 ### Sequential Motion Issues
 

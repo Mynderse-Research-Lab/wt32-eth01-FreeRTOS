@@ -65,10 +65,10 @@ Additions:
      - `5` halt after `gantry.enable()`
 12. Direct pulse GPIO setup isolation toggle (compile-time):
    - `DIAG_SKIP_DIRECT_PULSE_GPIO_CONFIG`
-   - When enabled (`1`), skips `gpio_config` + initial `gpio_set_level` on `PIN_X_PULSE`/`PIN_Y_PULSE`.
+   - When enabled (`1`), skips `gpio_config` + initial `gpio_set_level` on `PIN_X_PULSE`/`PIN_Z_PULSE`.
 13. Gantry begin sub-step isolation toggles (compile-time):
    - `GANTRY_DIAG_SKIP_AXIS_X_INIT`
-   - `GANTRY_DIAG_SKIP_AXIS_Y_INIT`
+   - `GANTRY_DIAG_SKIP_AXIS_Z_INIT`
    - `GANTRY_DIAG_SKIP_THETA_INIT`
    - Added in `lib/Gantry/src/Gantry.cpp` with `[BEGIN] ...` logs around each initialize path.
 
@@ -86,9 +86,9 @@ Optional isolation build flag:
 - Add `-DDIAG_MCP_SPI_CLOCK_HZ_OVERRIDE=1000000` (or lower) to reduce SPI transaction stress.
 - Add `-DDIAG_HALT_AFTER_MCP_INIT=1` to stop immediately after MCP setup and observe reset behavior.
 - Add `-DDIAG_STARTUP_HALT_PHASE=<0..5>` to move the halt boundary through startup phases.
-- Add `-DDIAG_SKIP_DIRECT_PULSE_GPIO_CONFIG=1` to isolate reset behavior from X/Y pulse pin setup.
+- Add `-DDIAG_SKIP_DIRECT_PULSE_GPIO_CONFIG=1` to isolate reset behavior from X/Z pulse pin setup.
 - Add `-DGANTRY_DIAG_SKIP_AXIS_X_INIT=1` to skip X-axis init inside `Gantry::begin()`.
-- Add `-DGANTRY_DIAG_SKIP_AXIS_Y_INIT=1` to skip Y-axis init inside `Gantry::begin()`.
+- Add `-DGANTRY_DIAG_SKIP_AXIS_Z_INIT=1` to skip Z-axis init inside `Gantry::begin()`.
 - Add `-DGANTRY_DIAG_SKIP_THETA_INIT=1` to skip theta init inside `Gantry::begin()`.
 
 Interpretation:

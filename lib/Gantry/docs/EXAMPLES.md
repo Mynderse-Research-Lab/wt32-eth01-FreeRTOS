@@ -1,17 +1,21 @@
 # Gantry Library Examples
 
-**Version:** 2.0.0
-**Last Updated:** Apr 2026
+**Version:** 2.1.0
+**Last Updated:** May 2026
 
 Complete code examples for using the Gantry library.
 
-> **Refactor note (2026-04):** Examples in this document reference `BergerdaServo::DriverConfig` and the legacy single-X-driver constructor. They will not compile unmodified against the current source tree. The working reference implementations for the new PulseMotor-based API are:
+> **Deprecation banner — read first:** Most examples in this document predate two refactors:
+> 1. **PulseMotor refactor (2026-04):** the legacy `BergerdaServo::DriverConfig`, single-X-driver constructor, and the `setYAxisPins` / `setYAxisStepsPerMm` / `setYAxisMotionLimits` / `setThetaServo` / `setThetaPulseRange` setters were removed. The constructor now takes per-axis `PulseMotor::DriverConfig` + `DrivetrainConfig` pairs for X, Z, and Theta.
+> 2. **Axis-frame refactor (2026-05):** the vertical axis was renamed from `Y` to `Z` (`+Z` = up; **joint** `z` = homing datum; **`pose.z`** above bed uses `GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`). Joint space is now `(x, z, theta)`; `JointConfig::y` no longer exists. The world frame uses `-Y` for conveyor downstream, but the gantry has no Y joint to actuate.
 >
-> - `src/main.cpp` — the firmware application entry point, including `makeXDriverConfig()` / `makeXDrivetrainConfig()` helpers.
+> Working reference implementations on the current API:
+>
+> - `src/main.cpp` — the firmware application entry point, including `makeXDriverConfig()` / `makeZDriverConfig()` / `makeThetaDriverConfig()` helpers.
 > - `examples/BasicDriverTest/BasicDriverTest.ino` — standalone PulseMotor bring-up sketch.
-> - `examples/Move100Steps/Move100Steps.ino` — minimal +/-100-pulse move.
+> - `examples/Move100Steps/Move100Steps.ino` — minimal ±100-pulse move.
 >
-> Use those as templates while the snippets below are being rewritten.
+> Until the legacy snippets below are rewritten, treat any `setYAxis*`, `BergerdaServo`, or `joint.y = …` you see as **historical context only**. The accurate API surface is in [`API_REFERENCE.md`](API_REFERENCE.md) and the canonical wiring is in `src/main.cpp`.
 
 ---
 

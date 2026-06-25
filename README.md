@@ -41,7 +41,7 @@ Touch pin 1 (EN) with ground again to reset the module.
 This project includes an ESP-IDF build in `idf/` that compiles the native firmware in `src/main.cpp` (ESP-IDF `app_main`, not Arduino `setup`/`loop`).
 
 ### Prerequisites
-- ESP-IDF installed and `idf.py` available in your shell.
+- ESP-IDF v6.0 installed and `idf.py` available in your shell.
 - ESP-IDF component manager enabled (default).
 
 ### Build and Flash
@@ -58,3 +58,34 @@ idf.py monitor -p COM3
 ### Notes
 - The ESP-IDF project lives in `idf/`; always `cd` there before `idf.py` (see `idf/CMakeLists.txt` and `idf/main/CMakeLists.txt`).
 - Application entry is `app_main()` in `src/main.cpp`, registered by `idf/main/CMakeLists.txt`.
+- This is an ESP-IDF-only project; PlatformIO has been removed. Do not reintroduce `platformio.ini`, `library.json`, or Arduino `lib_deps`.
+
+## CI and Testing
+The firmware is exercised by two independent lanes, both run in GitHub Actions
+(`.github/workflows/firmware-ci.yml`) on every push and pull request:
+
+1. ESP-IDF build - `idf.py -C idf build` via `espressif/esp-idf-ci-action`,
+   proving the full firmware compiles for the ESP32.
+2. Host unit tests - the hardware-independent motion logic (kinematics,
+   trajectory) is compiled natively and checked with the Unity framework. These
+   are the regression source of truth for the math.
+
+Run the host tests locally (needs only CMake + a C/C++ compiler, no ESP-IDF):
+
+```
+cmake -S test/host -B build/host
+cmake --build build/host
+ctest --test-dir build/host --output-on-failure
+```
+
+The on-target `selftest` serial command runs the same assertions on hardware but
+is prototype-only: it is gated by the `CONFIG_GANTRY_SELFTEST` Kconfig option
+(default `y`). Set it to `n` (via `idf.py menuconfig`) for production builds to
+drop the command and `src/basic_tests.cpp` from the firmware; coverage is
+retained by the host tests above.
+
+A project Cursor hook (`.cursor/hooks.json`) runs the host tests before any
+`git commit`/`git push` and blocks the action if they fail. It invokes the gate
+with the Windows `py` launcher; on macOS/Linux change `py` to `python3` in
+`.cursor/hooks.json`. If a local CMake build generator is missing, the hook asks
+for confirmation rather than hard-blocking (CI still enforces the tests).

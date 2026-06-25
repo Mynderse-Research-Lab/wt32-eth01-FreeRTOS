@@ -4,7 +4,7 @@
 
 For exact function signatures, pin numbers, and build/flash steps, see `PROGRAMMING_REFERENCE.md`. This file is the "big picture" companion.
 
-> *The canonical control-and-feedback flow, signal routing table, and layered invariants live in [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md). This file's §1 diagram and §3 dependency graph are derived from that source; if they drift, treat ARCHITECTURE_FLOW.md as authoritative.*
+> *The canonical control-and-feedback flow, signal routing table, and layered invariants live in `[lib/Gantry/docs/ARCHITECTURE_FLOW.md](lib/Gantry/docs/ARCHITECTURE_FLOW.md)`. This file's section 1 diagram and section 3 dependency graph are derived from that source; if they drift, treat ARCHITECTURE_FLOW.md as authoritative.*
 
 ---
 
@@ -75,11 +75,13 @@ flowchart LR
   Gantry -- "fb: status" --> App
 ```
 
+
+
 Reading the tree: the application commands `Gantry` **and only `Gantry`**. `Gantry` owns three downstream siblings — three axis wrappers (one per physical axis), one `GantryEndEffector` for the digital gripper, and the `GantryLimitSwitch` objects for homing and safety. Each axis wrapper owns exactly one `PulseMotorDriver`, which in turn owns LEDC (pulse output) and PCNT (encoder input) directly and uses `gpio_expander` for every other digital line (DIR, ENABLE/SON, ALARM, ALARM_RESET). `gpio_expander` is the single owner of the MCP23S17 handle and decides whether an integer pin is an MCP logical pin (`0..15`), a direct ESP32 GPIO (`>= 0x10` or flagged via `GPIO_EXPANDER_DIRECT_PIN`), or unwired (`-1`). Each axis independently picks its drivetrain topology (ballscrew, belt, rack-pinion, rotary-direct) via a `DrivetrainType` enum in `include/axis_drivetrain_params.h`, so mix-and-match is native.
 
 The **dotted** arrows from the application layer to `gpio_expander` and `PulseMotor` represent the `gantry_test_console` diagnostic commands (`mcp_reg`, `mcp_dump`, `mcp_pin_mode`, `gpio_drive`, and related bring-up hooks). This is a deliberately-separate diagnostic channel used for bring-up and register-level debugging; it is **not** the motion control path and must not be imitated by new application code.
 
-Every `fb:`-prefixed edge is an **upstream feedback** edge: encoders flow `HW → PCNT → PulseMotor`, alarms and limit states flow `HW → MCP → gpio_expander → PulseMotor / GantryLimitSwitch`, and from there the signal climbs the axis wrappers into `Gantry` and finally surfaces as status telemetry at the application layer (e.g. the `LIVE POS` output, the `status` console command, and — when the MQTT plan lands — the outbound `gantry/status` topic). `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §3 for the full signal routing table.
+Every `fb:`-prefixed edge is an **upstream feedback** edge: encoders flow `HW → PCNT → PulseMotor`, alarms and limit states flow `HW → MCP → gpio_expander → PulseMotor / GantryLimitSwitch`, and from there the signal climbs the axis wrappers into `Gantry` and finally surfaces as status telemetry at the application layer (e.g. the `LIVE POS` output, the `status` console command, and — when the MQTT plan lands — the outbound `gantry/status` topic). `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. See `[lib/Gantry/docs/ARCHITECTURE_FLOW.md](lib/Gantry/docs/ARCHITECTURE_FLOW.md)` section 3 for the full signal routing table.
 
 ---
 
@@ -165,12 +167,14 @@ Plus two helper macros:
 
 **Verified target hardware**
 
-| Driver | Actuator / motor | Role in this project |
-|---|---|---|
-| Bergerda SDF08NK8X | Bergerda F-series motor | Legacy X-axis driver; kept as a verified pulse-train reference. |
-| Allen-Bradley Kinetix 5100 | Allen-Bradley Kinetix motor + SCHUNK Beta 100-ZRS belt actuator | Shipping X-axis drive. |
-| Allen-Bradley Kinetix 5100 | Allen-Bradley Kinetix motor + SCHUNK Beta 80-SRS ballscrew actuator | Shipping Y-axis drive. |
-| Custom pulse-train driver | SCHUNK ERD 04-40-D-H-N miniature rotary module | Shipping Theta-axis drive. |
+
+| Driver                     | Actuator / motor                                                    | Role in this project                                            |
+| -------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Bergerda SDF08NK8X         | Bergerda F-series motor                                             | Legacy X-axis driver; kept as a verified pulse-train reference. |
+| Allen-Bradley Kinetix 5100 | Allen-Bradley Kinetix motor + SCHUNK Beta 100-ZRS belt actuator     | Shipping X-axis drive.                                          |
+| Allen-Bradley Kinetix 5100 | Allen-Bradley Kinetix motor + SCHUNK Beta 80-SRS ballscrew actuator | Shipping Z-axis drive (vertical descent, +Z = up).              |
+| Custom pulse-train driver  | SCHUNK ERD 04-40-D-H-N miniature rotary module                      | Shipping Theta-axis drive.                                      |
+
 
 **Language:** C++ (`namespace PulseMotor`), Arduino-compatible but lives comfortably under ESP-IDF when the Arduino component is present.
 
@@ -178,7 +182,7 @@ Plus two helper macros:
 
 - `PulseMotor::PulseMotorDriver` — one instance per physical drive.
 - `DriverConfig` struct with **named pin fields**: `pulse_pin`, `dir_pin`, `enable_pin`, `alarm_pin`, `alarm_reset_pin`, `encoder_a_pin`, `encoder_b_pin`, etc.
-- `DrivetrainConfig` (tagged by `DrivetrainType`) for mm/deg conversion at the consumer side. Drivetrain types: `DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, `DRIVETRAIN_RACKPINION`, `DRIVETRAIN_ROTARY_DIRECT`.
+- `DrivetrainConfig` (tagged by `DrivetrainType`) for mm/deg conversion at the consumer side. Drivetrain types: `DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, `DRIVETRAIN_RACKPINION`, `con`.
 - Inline helpers `PulseMotor::pulsesPerMm` / `PulseMotor::pulsesPerDeg` for consumer-side scaling.
 - **Pulse generation via LEDC** (hardware PWM, 2-bit resolution, high frequency).
 - **Encoder counting via `pulse_cnt`** (ESP-IDF v5+ API) with a 64-bit accumulator on top of the 16-bit hardware counter.
@@ -214,7 +218,7 @@ Plus two helper macros:
 
 #### 2.4.1 Core class: `Gantry::Gantry`
 
-Holds three polymorphic axis pointers — `std::unique_ptr<GantryLinearAxis> axisX_`, `std::unique_ptr<GantryLinearAxis> axisY_`, `std::unique_ptr<GantryRotaryAxis> axisTheta_` — plus a `GantryEndEffector` and two `GantryLimitSwitch`es for X. Concrete implementations (`GantryPulseMotorLinearAxis`, `GantryPulseMotorRotaryAxis`) are selected at construction time based on each axis's `DrivetrainType`.
+Holds three polymorphic axis pointers — `std::unique_ptr<GantryLinearAxis> axisX_`, `std::unique_ptr<GantryLinearAxis> axisZ_`, `std::unique_ptr<GantryRotaryAxis> axisTheta_` — plus a `GantryEndEffector` and two `GantryLimitSwitch`es for X. Concrete implementations (`GantryPulseMotorLinearAxis`, `GantryPulseMotorRotaryAxis`) are selected at construction time based on each axis's `DrivetrainType`.
 
 The interesting piece is the **sequential motion state machine**:
 
@@ -238,18 +242,20 @@ That's why an "X-only" looking move still gates on Y being at safe height first 
 
 #### 2.4.2 Sub-modules (each a single-responsibility class)
 
-| Class | Purpose | Backing hardware |
-|---|---|---|
-| `GantryLinearAxis` | Abstract interface for any linear (mm-domain) axis. | — |
-| `GantryRotaryAxis` | Abstract interface for any rotary (deg-domain) axis. | — |
+
+| Class                        | Purpose                                                                                                                                                               | Backing hardware                              |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `GantryLinearAxis`           | Abstract interface for any linear (mm-domain) axis.                                                                                                                   | —                                             |
+| `GantryRotaryAxis`           | Abstract interface for any rotary (deg-domain) axis.                                                                                                                  | —                                             |
 | `GantryPulseMotorLinearAxis` | Implementation of `GantryLinearAxis` backed by `PulseMotor::PulseMotorDriver` + a `DrivetrainConfig`. Handles mm↔pulse conversion for ballscrew / belt / rack-pinion. | Pulse + direction via LEDC, encoder via PCNT. |
-| `GantryPulseMotorRotaryAxis` | Implementation of `GantryRotaryAxis` backed by `PulseMotor::PulseMotorDriver` + a `DrivetrainConfig` (rotary-direct). Handles deg↔pulse conversion. | Pulse + direction via LEDC, encoder via PCNT. |
-| `GantryEndEffector` | On/off digital output, active-high or active-low. Correctly branches to MCP expander for pins `<16` and to direct GPIO for pins `≥16` (or flagged direct). | MCP pin or direct GPIO. |
-| `GantryLimitSwitch` | Active-low input with pull-up and N-sample debounce. Centralizes limit ownership so X, Y, and Theta can share one implementation. | MCP input pin. |
+| `GantryPulseMotorRotaryAxis` | Implementation of `GantryRotaryAxis` backed by `PulseMotor::PulseMotorDriver` + a `DrivetrainConfig` (rotary-direct). Handles deg↔pulse conversion.                   | Pulse + direction via LEDC, encoder via PCNT. |
+| `GantryEndEffector`          | On/off digital output, active-high or active-low. Correctly branches to MCP expander for pins `<16` and to direct GPIO for pins `≥16` (or flagged direct).            | MCP pin or direct GPIO.                       |
+| `GantryLimitSwitch`          | Active-low input with pull-up and N-sample debounce. Centralizes limit ownership so X, Y, and Theta can share one implementation.                                     | MCP input pin.                                |
+
 
 #### 2.4.3 Math helpers
 
-- `Gantry::Kinematics::forward` / `::inverse` — map between joint space `(x_mm, y_mm, theta_deg)` and workspace `(x, y, z, theta)` using `KinematicParameters` (Y-axis Z offset, theta-X offset, gripper offsets, ball-screw pitch).
+- `Gantry::Kinematics::forward` / `::inverse` — map between joint space `(x_mm, z_mm, theta_deg)` and workspace `(x, y, z, theta)` using `KinematicParameters` (Z-axis Y offset along belt, theta-X offset, gripper offsets, ball-screw pitch). The gantry has no Y joint; the workspace `y` coordinate captures only the carriage's fixed offset along the belt.
 - `Gantry::Kinematics::validate` — bounds-check a `JointConfig` against `JointLimits`.
 - `Gantry::TrajectoryPlanner::calculateProfile` / `::interpolate` — trapezoidal profile math (returns a `TrapezoidalProfile` struct usable for time-based interpolation of a single axis).
 
@@ -283,7 +289,7 @@ That's why an "X-only" looking move still gates on Y being at safe height first 
 
 ## 3. Dependency Graph
 
-The include graph mirrors the ownership tree in §1: `main.cpp` pulls in `Gantry.h` and the two parameter headers, and `Gantry.h` transitively pulls in every library module the motion core needs. The only header the application layer still includes directly outside the Gantry namespace is `MCP23S17.h` — to populate the one `mcp23s17_config_t` required to bring up the SPI bus before `Gantry::preparePinsForBoot()` is called.
+The include graph mirrors the ownership tree in section 1: `main.cpp` pulls in `Gantry.h` and the two parameter headers, and `Gantry.h` transitively pulls in every library module the motion core needs. The only header the application layer still includes directly outside the Gantry namespace is `MCP23S17.h` — to populate the one `mcp23s17_config_t` required to bring up the SPI bus before `Gantry::preparePinsForBoot()` is called.
 
 ```mermaid
 flowchart TD
@@ -353,31 +359,33 @@ flowchart TD
   console -. "diagnostics" .-> pm_h
 ```
 
-`gpio_expander` is deliberately a **single** C module with a global handle — there is exactly one MCP23S17 per controller board, and centralising it here keeps the "which pin lives where" logic out of every consumer. Note that `main.cpp` does **not** include `gpio_expander.h` on the normal control path: boot-time pin seeding is funnelled through `Gantry::preparePinsForBoot()` (see `lib/Gantry/docs/ARCHITECTURE_FLOW.md` §2, invariant 6). The dotted `console ⇢ exp_h / pm_h` arrows are the diagnostic commands from §1.
+
+
+`gpio_expander` is deliberately a **single** C module with a global handle — there is exactly one MCP23S17 per controller board, and centralising it here keeps the "which pin lives where" logic out of every consumer. Note that `main.cpp` does **not** include `gpio_expander.h` on the normal control path: boot-time pin seeding is funnelled through `Gantry::preparePinsForBoot()` (see `lib/Gantry/docs/ARCHITECTURE_FLOW.md` section 2, invariant 6). The dotted `console ⇢ exp_h / pm_h` arrows are the diagnostic commands from section 1.
 
 ---
 
 ## 4. Data Flow for a Typical `move 50 0 0` Command
 
-This walks top-down through the tree in §1, then back up through the feedback path.
+This walks top-down through the tree in section 1, then back up through the feedback path.
 
 ### 4.1 Downstream — command entry to motor pulses
 
-1. **`gantry_test_console.cpp`** parses `move 50 0 0`, confirms `home`+`calibrate` both ran this session, converts from the currently-selected unit to mm (`convertSelectedToMm`), builds a `Gantry::JointConfig`, and calls `gantry->moveTo(target, speedMmPerS, speedDegPerS, accel, decel)`.
-2. **`Gantry::Gantry::moveTo(JointConfig, ...)`** validates with `Kinematics::validate(joint, config_.limits)`, stores targets, and calls `startSequentialMotion()`.
+1. `**gantry_test_console.cpp`** parses `move 50 0 0`, confirms `home`+`calibrate` both ran this session, converts from the currently-selected unit to mm (`convertSelectedToMm`), builds a `Gantry::JointConfig`, and calls `gantry->moveTo(target, speedMmPerS, speedDegPerS, accel, decel)`.
+2. `**Gantry::Gantry::moveTo(JointConfig, ...)**` validates with `Kinematics::validate(joint, config_.limits)`, stores targets, and calls `startSequentialMotion()`.
 3. **Sequential motion state machine** advances from `IDLE` through `Y_DESCENDING` / `GRIPPER_ACTUATING` / `Y_RETRACTING` as needed, finally reaching `X_MOVING` and invoking `startXAxisMotion()`. Theta motion, if any, runs in parallel once Y is at safe height.
-4. **`startXAxisMotion()`** reads the current X encoder position, computes `deltaX` in pulses using the X axis wrapper's `DrivetrainConfig`, converts speed/accel from mm-units to pulses, and calls `axisX_->moveRelative(deltaX, speed_pps, accel_pps, decel_pps)` — still entirely within the Gantry library.
-5. **`GantryPulseMotorLinearAxis::moveRelative`** forwards the call into its owned `PulseMotor::PulseMotorDriver`.
-6. **`PulseMotor::PulseMotorDriver::moveRelative`**:
-   - writes `DIR` via `gpio_expander_write` (→ `mcp23s17_write_pin`, serialised by the per-device SPI mutex) — this reaches the motor driver DIR input through the MCP23S17;
-   - ensures `ENABLE / SON` is asserted the same way;
-   - arms the `esp_timer` ramp callback at 5 ms that updates the trapezoidal velocity profile;
-   - programmes `LEDC` to emit the pulse train on `PIN_X_PULSE` (GPIO14) — this is a **direct ESP32 peripheral** and does not involve the MCP23S17.
-7. **`GantryEndEffector::setActive(...)`** is the sibling path taken when the sequence includes `GRIPPER_ACTUATING`. It writes the gripper level via `gpio_expander_write` (MCP pin 7) — it does **not** go through `PulseMotor`.
+4. `**startXAxisMotion()`** reads the current X encoder position, computes `deltaX` in pulses using the X axis wrapper's `DrivetrainConfig`, converts speed/accel from mm-units to pulses, and calls `axisX_->moveRelative(deltaX, speed_pps, accel_pps, decel_pps)` — still entirely within the Gantry library.
+5. `**GantryPulseMotorLinearAxis::moveRelative**` forwards the call into its owned `PulseMotor::PulseMotorDriver`.
+6. `**PulseMotor::PulseMotorDriver::moveRelative**`:
+  - writes `DIR` via `gpio_expander_write` (→ `mcp23s17_write_pin`, serialised by the per-device SPI mutex) — this reaches the motor driver DIR input through the MCP23S17;
+  - ensures `ENABLE / SON` is asserted the same way;
+  - arms the `esp_timer` ramp callback at 5 ms that updates the trapezoidal velocity profile;
+  - programmes `LEDC` to emit the pulse train on `PIN_X_PULSE` (GPIO14) — this is a **direct ESP32 peripheral** and does not involve the MCP23S17.
+7. `**GantryEndEffector::setActive(...)`** is the sibling path taken when the sequence includes `GRIPPER_ACTUATING`. It writes the gripper level via `gpio_expander_write` (MCP pin 7) — it does **not** go through `PulseMotor`.
 
 ### 4.2 Concurrent loops
 
-- **`GantryUpdate` task @100 Hz** calls `gantry.update()`, which calls each axis wrapper's `update()`, debounces the X limit switches through `GantryLimitSwitch`, and advances the motion state machine.
+- `**GantryUpdate` task @100 Hz** calls `gantry.update()`, which calls each axis wrapper's `update()`, debounces the X limit switches through `GantryLimitSwitch`, and advances the motion state machine.
 - **Each PulseMotor's 5 ms `esp_timer` callback** updates that axis's motion profile and emits pulses — independent of the 100 Hz task.
 
 ### 4.3 Upstream — feedback back into the application
@@ -389,25 +397,27 @@ This walks top-down through the tree in §1, then back up through the feedback p
 5. **Limit switch state** is read by `GantryLimitSwitch::read()` (owned by `Gantry`, **not** by `PulseMotor`) with N-sample debounce, and consumed by `home()` / `calibrate()` / the safety-abort path.
 6. On completion, the driver's position-reached path flips `motionState_` back to `IDLE` and `gantry.isBusy()` returns `false`.
 
-(See §11.1 of `PROGRAMMING_REFERENCE.md` for why this chain currently fails in practice for the `move` command.)
+(See section 11.1 of `PROGRAMMING_REFERENCE.md` for why this chain currently fails in practice for the `move` command.)
 
 ---
 
 ## 5. Use-Case Matrix
 
-| What you want to do | Library / entry point | Example |
-|---|---|---|
-| Drive one MCP pin for bring-up | `gpio_expander_*` from any C/C++ file, or the `mcp_pin_mode` / `gpio_drive` console commands | `mcp_pin_mode 7 out1` turns the gripper on. |
-| Inspect MCP internal state | `mcp23s17_debug_read_register` via `mcp_reg r 0x00` or `mcp_dump a` | Read IOCON/IODIR/GPPU/OLAT/GPIO per port. |
-| Move a single axis without the full gantry stack | Instantiate `PulseMotor::PulseMotorDriver` directly with a `DriverConfig` | Useful for verifying a freshly-wired drive before involving Gantry. See `examples/BasicDriverTest/` and `examples/Move100Steps/`. |
-| Pick-and-place move in workspace coordinates | `Gantry::Gantry::moveTo(EndEffectorPose{...})` | Calls inverse kinematics; the state machine handles safe-Y. |
-| Pick-and-place move in joint space | `Gantry::Gantry::moveTo(JointConfig{...})` | Skips inverse kinematics. |
-| Test kinematics / trajectory math with no hardware | `runBasicTests()` or console `selftest` | Exercises `Kinematics::forward` and `TrajectoryPlanner::calculateProfile`. |
-| Measure the physical X travel for setup | `gantry.calibrate()` or console `calibrate` | Drives MIN→MAX between limit switches, stores the result as the new X max. |
-| Home the X axis | `gantry.home()` or console `home` | Drives to MIN limit at `GANTRY_HOMING_SPEED_PPS`. |
-| Grip/release | `gantry.grip(bool)` or console `grip 1`/`grip 0` | Digital write to `PIN_GRIPPER` through `GantryEndEffector`. |
-| Clear a servo alarm | `gantry.clearAlarm()` or console `arst` | Pulses ARST on MCP pin 5 via the driver. |
-| Abort any in-flight motion safely | `gantry.requestAbort()` + `gantry.disable()` (console `stop`) | Also cancels active calibration. |
+
+| What you want to do                                | Library / entry point                                                                        | Example                                                                                                                           |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Drive one MCP pin for bring-up                     | `gpio_expander_`* from any C/C++ file, or the `mcp_pin_mode` / `gpio_drive` console commands | `mcp_pin_mode 7 out1` turns the gripper on.                                                                                       |
+| Inspect MCP internal state                         | `mcp23s17_debug_read_register` via `mcp_reg r 0x00` or `mcp_dump a`                          | Read IOCON/IODIR/GPPU/OLAT/GPIO per port.                                                                                         |
+| Move a single axis without the full gantry stack   | Instantiate `PulseMotor::PulseMotorDriver` directly with a `DriverConfig`                    | Useful for verifying a freshly-wired drive before involving Gantry. See `examples/BasicDriverTest/` and `examples/Move100Steps/`. |
+| Pick-and-place move in workspace coordinates       | `Gantry::Gantry::moveTo(EndEffectorPose{...})`                                               | Calls inverse kinematics; the state machine handles safe-Y.                                                                       |
+| Pick-and-place move in joint space                 | `Gantry::Gantry::moveTo(JointConfig{...})`                                                   | Skips inverse kinematics.                                                                                                         |
+| Test kinematics / trajectory math with no hardware | `runBasicTests()` or console `selftest`                                                      | Exercises `Kinematics::forward` and `TrajectoryPlanner::calculateProfile`.                                                        |
+| Measure the physical X travel for setup            | `gantry.calibrate()` or console `calibrate`                                                  | Drives MIN→MAX between limit switches, stores the result as the new X max.                                                        |
+| Home the X axis                                    | `gantry.home()` or console `home`                                                            | Drives to MIN limit at `GANTRY_HOMING_SPEED_PPS`.                                                                                 |
+| Grip/release                                       | `gantry.grip(bool)` or console `grip 1`/`grip 0`                                             | Digital write to `PIN_GRIPPER` through `GantryEndEffector`.                                                                       |
+| Clear a servo alarm                                | `gantry.clearAlarm()` or console `arst`                                                      | Pulses ARST on MCP pin 5 via the driver.                                                                                          |
+| Abort any in-flight motion safely                  | `gantry.requestAbort()` + `gantry.disable()` (console `stop`)                                | Also cancels active calibration.                                                                                                  |
+
 
 ---
 
@@ -423,24 +433,26 @@ This walks top-down through the tree in §1, then back up through the feedback p
 
 ## 7. Where the Documentation Lives
 
-| Document | What it covers |
-|---|---|
-| `PROGRAMMING_REFERENCE.md` | Build/flash, pin map, exact API signatures, console commands, known bugs, diagnostic toggles. |
-| `LIBRARIES_OVERVIEW.md` (this file) | Purpose of each library, how they fit together, data flow, use cases. |
-| `RESET_LOOP_DIAGNOSTICS.md` | The MCP23S17 boot-reset investigation and the GPIO-7 + SPI-mutex fixes. |
-| `WT32_ETH01_PINOUT.md` | Full pinout of the WT32-ETH01 carrier. |
-| `pinout.csv` | Machine-readable copy of the application pin assignments. |
-| `lib/Gantry/README.md` | Gantry-library-local README. |
-| `lib/Gantry/CHANGELOG.md` | Gantry library version history. |
-| `lib/Gantry/docs/ARCHITECTURE.md` | Internal architecture of the Gantry library. |
-| `lib/Gantry/docs/API_REFERENCE.md` | Deeper API walk-through with examples. |
-| `lib/Gantry/docs/CONFIGURATION_GUIDE.md` | How to tune motion/kinematic parameters. |
-| `lib/Gantry/docs/EXAMPLES.md` | Code snippets for common tasks. |
-| `lib/Gantry/docs/DEVELOPMENT_JOURNAL.md` | Chronological engineering journal. |
-| `lib/PulseMotor/README.md` | Generic pulse+direction driver library notes (target drivers: SDF08NK8X, Kinetix 5100, custom ERD driver). |
-| `lib/MCP23S17/README.md` | MCP23S17 library usage. |
-| `driver_datasheets_and_calculations/INDEX.md` | Index of hardware datasheets (present + pending) and the commissioning values they supply. |
-| `include/axis_pulse_motor_params.h` | Per-axis electrical tuning (encoder PPR, pulse bandwidth, gear, inversion, homing, debounce). |
-| `include/axis_drivetrain_params.h` | Per-axis mechanical tuning (drivetrain type, ballscrew lead / belt lead / rotary ratio, travel envelope, motion caps, gripper timing, kinematic offsets). |
+
+| Document                                      | What it covers                                                                                                                                            |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PROGRAMMING_REFERENCE.md`                    | Build/flash, pin map, exact API signatures, console commands, known bugs, diagnostic toggles.                                                             |
+| `LIBRARIES_OVERVIEW.md` (this file)           | Purpose of each library, how they fit together, data flow, use cases.                                                                                     |
+| `RESET_LOOP_DIAGNOSTICS.md`                   | The MCP23S17 boot-reset investigation and the GPIO-7 + SPI-mutex fixes.                                                                                   |
+| `WT32_ETH01_PINOUT.md`                        | Full pinout of the WT32-ETH01 carrier.                                                                                                                    |
+| `pinout.csv`                                  | Machine-readable copy of the application pin assignments.                                                                                                 |
+| `lib/Gantry/README.md`                        | Gantry-library-local README.                                                                                                                              |
+| `lib/Gantry/CHANGELOG.md`                     | Gantry library version history.                                                                                                                           |
+| `lib/Gantry/docs/ARCHITECTURE.md`             | Internal architecture of the Gantry library.                                                                                                              |
+| `lib/Gantry/docs/API_REFERENCE.md`            | Deeper API walk-through with examples.                                                                                                                    |
+| `lib/Gantry/docs/CONFIGURATION_GUIDE.md`      | How to tune motion/kinematic parameters.                                                                                                                  |
+| `lib/Gantry/docs/EXAMPLES.md`                 | Code snippets for common tasks.                                                                                                                           |
+| `lib/Gantry/docs/DEVELOPMENT_JOURNAL.md`      | Chronological engineering journal.                                                                                                                        |
+| `lib/PulseMotor/README.md`                    | Generic pulse+direction driver library notes (target drivers: SDF08NK8X, Kinetix 5100, custom ERD driver).                                                |
+| `lib/MCP23S17/README.md`                      | MCP23S17 library usage.                                                                                                                                   |
+| `driver_datasheets_and_calculations/INDEX.md` | Index of hardware datasheets (present + pending) and the commissioning values they supply.                                                                |
+| `include/axis_pulse_motor_params.h`           | Per-axis electrical tuning (encoder PPR, pulse bandwidth, gear, inversion, homing, debounce).                                                             |
+| `include/axis_drivetrain_params.h`            | Per-axis mechanical tuning (drivetrain type, ballscrew lead / belt lead / rotary ratio, travel envelope, motion caps, gripper timing, kinematic offsets). |
+
 
 When in doubt: start at `PROGRAMMING_REFERENCE.md` for "what's the exact name / pin / command?" and at this file for "why does this thing exist?"

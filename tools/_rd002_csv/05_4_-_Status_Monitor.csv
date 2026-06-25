@@ -1,0 +1,90 @@
+"Kinetix 5100 Servo Drive Parameters
+For more information see:"
+"Kinetix 5100 Servo Drive User Manual,publication 2198-UM004"
+
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+55,ParameterMonitor1Value,All,0,0xFFFFFFFF,0,,,UDINT,"Parameter Monitor 1 Value
+ID60 (P0.035) can be used to specify the mapping parameter instance ID number. The content of the parameter that is specified by P0.035 will be shown in ID55 (P0.025).
+",4-Status Monitor,x,,,x,P0.025
+56,ParameterMonitor2Value,All,0,0xFFFFFFFF,0,,,UDINT,"Parameter Monitor 2 Value
+ID61 (P0.036) can be used to specify the mapping parameter instance ID number. The content of the parameter that is specified by P0.036 will be shown in ID56 (P0.026).",4-Status Monitor,x,,,x,P0.026
+57,ParameterMonitor3Value,All,0,0xFFFFFFFF,0,,,UDINT,"Parameter Monitor 3 Value
+ID62 (P0.037) can be used to specify the mapping parameter instance ID number. The content of the parameter that is specified by P0.037 will be shown in ID57 (P0.027).",4-Status Monitor,x,,,x,P0.027
+58,ParameterMonitor4Value,All,0,0xFFFFFFFF,0,,,UDINT,"Parameter Monitor 4 Value
+ID63 (P0.038) can be used to specify the mapping parameter instance ID number. The content of the parameter that is specified by P0.038 will be shown in ID58 (P0.028).",4-Status Monitor,x,,,x,P0.028
+59,ParameterMonitor5Value,All,0,0xFFFFFFFF,0,,,UDINT,"Parameter Monitor 5 Value
+ID64 (P0.039) can be used to specify the mapping parameter instance ID number. The content of the parameter that is specified by P0.039 will be shown in ID59 (P0.029).",4-Status Monitor,x,,,x,P0.029
+60,ParameterMonitor1Selection,All,1,687,1,,,UINT,"Parameter Monitor 1 Selection
+Select mapping parameter instance ID number corresponding to Parameter Monitor 1 Value.
+See Description of Parameter Monitoring in the user manual.",4-Status Monitor,,,,,P0.035
+61,ParameterMonitor2Selection,All,1,687,1,,,UINT,"Parameter Monitor 2 Selection
+Select mapping parameter instance ID number corresponding to Parameter Monitor 2 Value.
+See Description of Parameter Monitoring in the user manual.",4-Status Monitor,,,,,P0.036
+62,ParameterMonitor3Selection,All,1,687,1,,,UINT,"Parameter Monitor 3 Selection
+Select mapping parameter instance ID number corresponding to Parameter Monitor 3 Value.
+See Description of Parameter Monitoring in the user manual.",4-Status Monitor,,,,,P0.037
+63,ParameterMonitor4Selection,All,1,687,1,,,UINT,"Parameter Monitor 4 Selection
+Select mapping parameter instance ID number corresponding to Parameter Monitor 4 Value.
+See Description of Parameter Monitoring in the user manual.",4-Status Monitor,,,,,P0.038
+64,ParameterMonitor5Selection,All,1,687,1,,,UINT,"Parameter Monitor 5 Selection
+Select mapping parameter instance ID number corresponding to Parameter Monitor 5 Value.
+See Description of Parameter Monitoring in the user manual.",4-Status Monitor,,,,,P0.039
+102,LEDMonitorSelection,All,-300,127,1,,,INT,"LED Monitor Selection
+Reserved for future release",4-Status Monitor,,,,,P0.002
+107,ServoOutputStatus,All,0x0000,0x0FFF,0x0000,,,UINT,"Servo Output Status
+
+Bit 0=SRDY (servo ready)
+Bit 1=SON (servo on)
+Bit 2=ZSPD (zero speed)
+Bit 3=TSPD (target speed reached)
+Bit 4=TPOS (target position reached)
+Bit 5=TQL (torque limit activated)
+Bit 6=ALRM (servo alarm)
+Bit 7=BRKR (magnetic brake control output)
+Bit 8=HOME (homing completed)
+Bit 9=OLW (overload warning)
+Bit 10=WARN (servo warning)
+Bit 11=At Home
+Bits12…15=Reserved",4-Status Monitor,x,,,x,P0.046
+110,MultiTurnAbsPosition,All,-32768,32767,0,,Rev,DINT,"Absolute Position (Multi-turn)
+
+When ID243 (P2.070) [Bit 1] is 1 (read the pulse number), this parameter displays the number of turns of the encoder (absolute position). When ID243 (P2.070) [Bit 1] is 0 (read the PUU number), this parameter becomes invalid and displays 0.",4-Status Monitor,x,,,x,P0.051
+111,SingleTurnAbsPosition,All,-2147483648,2147483647,0,,Counts,DINT,"Absolute Position (Single-turn)
+
+When ID243 (P2.070) [Bit 1] is 1 (read the pulse number), this parameter displays the pulse number of the encoder’s absolute position within a single turn. When ID243 (P2.070) [Bit 1] is 0 (read the PUU number), this parameter displays the motor’s absolute position in PUU.",4-Status Monitor,x,,,x,P0.052
+658,EncoderTemperature,All,0,0xFFFFFFFF,0,,oC,UDINT,Encoder Temperature,4-Status Monitor,x,,,x,PN.043
+663,SystemVariableMonitor1Value,All,-2147483648,2147483647,0,,,DINT,"System Variable Monitor 1 Value
+The value to be monitored can be set by ID668 (P0.017).
+Set ID102 (P0.002) to 23 to display the value of this parameter on the panel display.
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,x,,,x,P0.009
+664,SystemVariableMonitor2Value,All,-2147483648,2147483647,0,,,DINT,"System Variable Monitor 2 Value
+The value to be monitored can be set by ID669 (P0.018).
+Set ID102 (P0.002) to 24 to display the value of this parameter on the panel display.
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,x,,,x,P0.010
+665,SystemVariableMonitor3Value,All,-2147483648,2147483647,0,,,DINT,"System Variable Monitor 3 Value
+The value to be monitored can be set by ID670 (P0.019).
+Set ID102 (P0.002) to 25 to display the value of this parameter on the panel display.
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,x,,,x,P0.011
+666,SystemVariableMonitor4Value,All,-2147483648,2147483647,0,,,DINT,"System Variable Monitor 4 Value
+The value to be monitored can be set by ID671 (P0.020).
+Set ID102 (P0.002) to 26 to display the value of this parameter on the panel display.
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,x,,,x,P0.012
+667,SystemVariableMonitor5Value,All,-2147483648,2147483647,0,,,DINT,"System Variable Monitor 5 Value
+The value to be monitored can be set by ID672 (P0.021).
+Set ID102 (P0.002) to 27 to display the value of this parameter on the panel display.
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,x,,,x,P0.013
+668,SystemVariableMonitor1Selection,All,-300,127,0,,,INT,"System Variable Monitor 1 Selection
+Selects the content displayed by the System Variable Monitor 1 Value
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,,,,,P0.017
+669,SystemVariableMonitor2Selection,All,-300,127,0,,,INT,"System Variable Monitor 2 Selection
+Selects the content displayed by the System Variable Monitor 2 Value
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,,,,,P0.018
+670,SystemVariableMonitor3Selection,All,-300,127,0,,,INT,"System Variable Monitor 3 Selection
+Selects the content displayed by the System Variable Monitor 3 Value
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,,,,,P0.019
+671,SystemVariableMonitor4Selection,All,-300,127,0,,,INT,"System Variable Monitor 4 Selection
+Selects the content displayed by the System Variable Monitor 4 Value
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,,,,,P0.020
+672,SystemVariableMonitor5Selection,All,-300,127,0,,,INT,"System Variable Monitor 5 Selection
+Selects the content displayed by the System Variable Monitor 5 Value
+See Description of System Variable Monitoring in the user manual.",4-Status Monitor,,,,,P0.021

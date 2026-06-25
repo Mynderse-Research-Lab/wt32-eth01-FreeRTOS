@@ -71,7 +71,7 @@ flowchart TD
   Gantry -- "fb: status" --> App
 ```
 
-The `fb:`-prefixed edges are upstream feedback. They flow back through the same ownership tree they came down, giving `Gantry` a consistent read-only view of axis position, limit state, and alarm status without the application layer having to reach past it. `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. The full hardware-layer tree (`PulseMotorDriver → LEDC / PCNT / gpio_expander → MCP23S17`) is shown in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md) §1; this diagram is deliberately abridged to focus on what the Gantry library itself owns.
+The `fb:`-prefixed edges are upstream feedback. They flow back through the same ownership tree they came down, giving `Gantry` a consistent read-only view of axis position, limit state, and alarm status without the application layer having to reach past it. `GantryEndEffector` has no feedback edge because the gripper is a digital output with no sensed state in this revision. The full hardware-layer tree (`PulseMotorDriver → LEDC / PCNT / gpio_expander → MCP23S17`) is shown in [`ARCHITECTURE_FLOW.md`](ARCHITECTURE_FLOW.md) section 1; this diagram is deliberately abridged to focus on what the Gantry library itself owns.
 
 ---
 
@@ -134,32 +134,32 @@ The `fb:`-prefixed edges are upstream feedback. They flow back through the same 
 - `TrapezoidalProfile`: Motion profile parameters
 - `TrajectoryPlanner`: Profile calculation
 
-#### 5. `GantryAxisStepper`
-**File:** `GantryAxisStepper.h/cpp`
+#### 5. `GantryPulseMotorLinearAxis` (X and Z)
+**File:** `GantryPulseMotorLinearAxis.h/cpp`
 
 **Responsibilities:**
-- Y-axis stepper motor control
-- Step/dir signal generation
+- Linear axis control for both X (across-belt) and Z (vertical, `+Z = up`)
+- Pulse/dir signal generation via `PulseMotorDriver` (LEDC)
 - Trapezoidal motion profiles
-- Limit checking
+- Limit checking (when limit pins configured)
 
 **Key Features:**
 - Cooperative update loop
 - Acceleration/deceleration control
-- Position tracking
+- Position tracking in pulses → mm via the axis `DrivetrainConfig`
 
-#### 6. `GantryRotaryServo`
-**File:** `GantryRotaryServo.h/cpp`
+#### 6. `GantryPulseMotorRotaryAxis` (Theta)
+**File:** `GantryPulseMotorRotaryAxis.h/cpp`
 
 **Responsibilities:**
-- Theta-axis PWM servo control
-- Angle-to-pulse conversion
-- Limit enforcement
+- Theta axis control via `PulseMotorDriver` (pulse + direction, not PWM servo)
+- Angle ↔ pulse conversion through `DrivetrainConfig` (steps/deg)
+- Soft-limit enforcement against `AXIS_THETA_HARD_LIMIT_MIN/MAX_DEG`
 
 **Key Features:**
-- ESP32 LEDC support
-- Standard Servo library fallback
-- Configurable pulse ranges
+- ESP32 LEDC pulse generation
+- Custom rotary driver support (SCHUNK ERD)
+- Configurable pulses/deg
 
 #### 7. `GantryEndEffector`
 **File:** `GantryEndEffector.h/cpp`
@@ -208,14 +208,14 @@ User Code
         │
         ├─► processSequentialMotion()
         │     │
-        │     ├─► Y_DESCENDING: Move Y down
+        │     ├─► Z_DESCENDING: Move Z down (toward belt)
         │     ├─► GRIPPER_ACTUATING: Wait for gripper
-        │     ├─► Y_RETRACTING: Move Y up
+        │     ├─► Z_RETRACTING: Move Z up to safe height
         │     └─► X_MOVING: Move X to target
         │
         └─► updateAxisPositions()
               │
-              ├─► axisY_.update()  (stepper)
+              ├─► axisZ_.update()  (ballscrew via PulseMotor)
               └─► Update current positions
 ```
 
@@ -228,27 +228,27 @@ User Code
 
 START
   │
-  ├─► Check current Y position
+  ├─► Check current Z position (+Z = up)
   │
-  ├─► [Current Y < Safe Height]
+  ├─► [Current Z < Safe Height]
   │     │
-  │     └─► Y_RETRACTING → Move Y to safe height
+  │     └─► Z_RETRACTING → Move Z up to safe height
   │           │
   │           └─► [Complete] → Check if need to descend
   │
-  ├─► [Target Y < Current Y]
+  ├─► [Target Z < Current Z]
   │     │
-  │     └─► Y_DESCENDING → Move Y to target
+  │     └─► Z_DESCENDING → Move Z down to target
   │           │
   │           └─► [Complete] → GRIPPER_ACTUATING
   │                 │
   │                 └─► Close/Open gripper (100ms)
   │                       │
-  │                       └─► Y_RETRACTING → Move Y to safe height
+  │                       └─► Z_RETRACTING → Move Z up to safe height
   │                             │
   │                             └─► [Complete] → X_MOVING
   │
-  └─► [Y at safe height]
+  └─► [Z at safe height]
         │
         └─► X_MOVING → Move X to target
               │
@@ -263,34 +263,34 @@ Theta moves independently throughout sequence
 
 ### Joint Space
 
-**Definition:** Internal representation using joint positions
+**Definition:** Internal representation using joint positions. There are three joints (X, Z, Theta) — **no Y joint**.
 
-- **X**: Horizontal position (mm) - 0 = home, positive = right-to-left
-- **Y**: Vertical position (mm) - 0 = fully retracted, positive = down-to-up
-- **Theta**: Rotation angle (degrees) - 0 = neutral, ±90° = limits
+- **X**: Across-belt horizontal (mm). Compile-time sign via `AXIS_X_INVERT_DIR`.
+- **Z**: Vertical position (mm). `+Z = up`; `Z = 0` is the belt surface.
+- **Theta**: Rotation about Z (degrees). Soft limits at `±AXIS_THETA_HARD_LIMIT_*_DEG` (cable management).
 
 **Example:**
 ```cpp
 JointConfig joint;
-joint.x = 200.0f;    // 200mm from home
-joint.y = 50.0f;     // 50mm extended
-joint.theta = 45.0f; // 45° rotation
+joint.x = 200.0f;    // 200 mm across belt
+joint.z = 50.0f;     // 50 mm above belt
+joint.theta = 45.0f; // 45° rotation about Z
 ```
 
 ### Workspace Space (End-Effector)
 
-**Definition:** Cartesian coordinates of end-effector tip
+**Definition:** Cartesian coordinates of end-effector tip in the world frame.
 
-- **X**: Horizontal position (mm) - includes theta offset
-- **Y**: Vertical position (mm) - direct from Y joint
-- **Z**: Height position (mm) - constant offset (80mm default)
-- **Theta**: Orientation (degrees) - direct from joint
+- **X**: Across-belt (mm) — includes theta and gripper offsets.
+- **Y**: Along-belt (mm). `-Y` is the conveyor downstream direction. Constant for a given carriage geometry (no Y joint).
+- **Z**: Vertical (mm). `+Z = up`. Driven by the Z joint plus fixed gripper Z offset.
+- **Theta**: Orientation (degrees).
 
 **Transformation:**
 ```
-X_workspace = X_joint + theta_x_offset (-55mm)
-Y_workspace = Y_joint
-Z_workspace = y_axis_z_offset (80mm)
+X_workspace = X_joint + theta_x_offset (e.g. -55 mm)
+Y_workspace = z_axis_y_offset_mm           (constant; e.g. -80 mm along belt)
+Z_workspace = Z_joint + gripper_z_offset_mm
 Theta_workspace = Theta_joint
 ```
 
@@ -298,21 +298,21 @@ Theta_workspace = Theta_joint
 ```cpp
 EndEffectorPose pose;
 pose.x = 145.0f;     // 200 - 55
-pose.y = 50.0f;      // Direct
-pose.z = 80.0f;      // Constant
-pose.theta = 45.0f;  // Direct
+pose.y = -80.0f;     // Constant along-belt offset of the carriage
+pose.z = 130.0f;     // 50 (joint) + 80 (gripper Z offset)
+pose.theta = 45.0f;
 ```
 
 ### Coordinate Transformations
 
 #### Forward Kinematics
 ```cpp
-EndEffectorPose forward(const JointConfig& joints, 
-                       const KinematicParameters& params) {
+EndEffectorPose forward(const JointConfig& joints,
+                        const KinematicParameters& params) {
     EndEffectorPose pose;
     pose.x = joints.x + params.theta_x_offset_mm;
-    pose.y = joints.y;
-    pose.z = params.y_axis_z_offset_mm;
+    pose.y = params.z_axis_y_offset_mm;          // gantry has no Y joint
+    pose.z = joints.z + params.gripper_z_offset_mm;
     pose.theta = joints.theta;
     return pose;
 }
@@ -324,8 +324,9 @@ JointConfig inverse(const EndEffectorPose& pose,
                     const KinematicParameters& params) {
     JointConfig joints;
     joints.x = pose.x - params.theta_x_offset_mm;
-    joints.y = pose.y;
+    joints.z = pose.z - params.gripper_z_offset_mm;
     joints.theta = pose.theta;
+    // pose.y is constrained: caller must pass params.z_axis_y_offset_mm
     return joints;
 }
 ```
@@ -338,23 +339,23 @@ JointConfig inverse(const EndEffectorPose& pose,
 
 The library implements a sequential motion planner that ensures safe operation:
 
-1. **Y-axis Descent** (if target Y < current Y)
-   - Descends to target Y position
+1. **Z-axis Descent** (if target Z < current Z; `+Z = up`)
+   - Descends (toward the belt) to target Z position
    - Uses configured speed/accel/decel
 
 2. **Gripper Actuation**
    - Automatically determines action:
      - Descending → Close gripper (picking)
      - Ascending → Open gripper (placing)
-   - Waits for actuation time (100ms default)
+   - Waits for actuation time (100 ms default)
 
-3. **Y-axis Retraction**
-   - Retracts to safe height
+3. **Z-axis Retraction**
+   - Retracts upward to safe Z height
    - Prevents collision during X movement
 
 4. **X-axis Movement**
    - Moves to target X position
-   - Only occurs when Y is at safe height
+   - Only occurs when Z is at safe height
 
 5. **Theta Movement**
    - Moves independently
@@ -362,7 +363,7 @@ The library implements a sequential motion planner that ensures safe operation:
 
 ### Motion Profiles
 
-#### Trapezoidal Profile (Y-axis)
+#### Trapezoidal Profile (Z-axis)
 
 ```
 Velocity
@@ -397,9 +398,9 @@ X-axis uses the SDF08NK8X driver's built-in motion profiles:
 ```cpp
 enum class MotionState {
     IDLE,              // No motion in progress
-    Y_DESCENDING,      // Y-axis moving down to target
+    Z_DESCENDING,      // Z-axis moving down toward belt
     GRIPPER_ACTUATING, // Gripper opening/closing
-    Y_RETRACTING,      // Y-axis retracting to safe height
+    Z_RETRACTING,      // Z-axis retracting up to safe height
     X_MOVING,          // X-axis moving to target
     THETA_MOVING       // Theta axis moving (independent)
 };
@@ -410,21 +411,21 @@ enum class MotionState {
 ```
 IDLE
   │
-  ├─► [Start motion] → Y_DESCENDING or Y_RETRACTING or X_MOVING
+  ├─► [Start motion] → Z_DESCENDING or Z_RETRACTING or X_MOVING
   │
-Y_DESCENDING
+Z_DESCENDING
   │
-  └─► [Y reached target] → GRIPPER_ACTUATING
+  └─► [Z reached target] → GRIPPER_ACTUATING
         │
-        └─► [Gripper complete] → Y_RETRACTING
+        └─► [Gripper complete] → Z_RETRACTING
               │
-              └─► [Y at safe height] → X_MOVING
+              └─► [Z at safe height] → X_MOVING
                     │
                     └─► [X reached target] → IDLE
 
-Y_RETRACTING
+Z_RETRACTING
   │
-  ├─► [Need to descend] → Y_DESCENDING
+  ├─► [Need to descend] → Z_DESCENDING
   └─► [At safe height] → X_MOVING
 ```
 
@@ -458,8 +459,8 @@ void Gantry::update() {
 
 **Architecture:** Limit switches are handled by actuator libraries, not the Gantry class.
 
-- **X-axis**: SDF08NK8X driver handles limit switch debouncing and safety
-- **Y-axis**: GantryAxisStepper validates limits before movement
+- **X-axis**: `GantryPulseMotorLinearAxis` (X) + `GantryLimitSwitch` debouncing for MIN/MAX
+- **Z-axis**: `GantryPulseMotorLinearAxis` (Z) with optional limit-switch debouncing (see section 12 of `PROGRAMMING_REFERENCE.md` for the wiring/software bring-up plan)
 - **Gantry class**: Only calls actuator library methods
 
 **Benefits:**
@@ -540,15 +541,15 @@ Well within ESP32's 320KB RAM limit.
 
 ### 1. Strategy Pattern
 
-Each axis type uses a different driver strategy:
-- X-axis: SDF08NK8X driver
-- Y-axis: GantryAxisStepper
-- Theta: GantryRotaryServo
+Each axis selects an implementation at construction time based on the `DrivetrainConfig.type`:
+- X-axis: `GantryPulseMotorLinearAxis` (belt drivetrain)
+- Z-axis: `GantryPulseMotorLinearAxis` (ballscrew drivetrain)
+- Theta: `GantryPulseMotorRotaryAxis` (rotary-direct drivetrain)
 
 ### 2. State Pattern
 
 Sequential motion uses a state machine pattern:
-- States: IDLE, Y_DESCENDING, GRIPPER_ACTUATING, etc.
+- States: IDLE, Z_DESCENDING, GRIPPER_ACTUATING, Z_RETRACTING, X_MOVING, THETA_MOVING
 - Transitions: Based on motion completion
 
 ### 3. Template Method Pattern

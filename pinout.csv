@@ -1,28 +1,28 @@
-Symbol,Domain,Pin,MCP_Port_Bit,Direction,Function,Notes
-PIN_SPI_MISO,ESP32 GPIO,35,,Input,SPI MISO for MCP23S17,Connected to MCP23S17 SO
-PIN_SPI_MOSI,ESP32 GPIO,12,,Output,SPI MOSI for MCP23S17,Connected to MCP23S17 SI (strapping pin, must stay LOW at reset)
-PIN_SPI_SCLK,ESP32 GPIO,5,,Output,SPI clock for MCP23S17,Connected to MCP23S17 SCK
-PIN_SPI_CS,ESP32 GPIO,15,,Output,SPI chip-select for MCP23S17,Connected to MCP23S17 CS
-PIN_X_DIR,MCP23S17,0,Port A bit 0,Output,X-axis direction signal,Servo SIGN/DIR
-PIN_X_ENABLE,MCP23S17,1,Port A bit 1,Output,X-axis servo enable,Servo SON
-PIN_X_LIMIT_MIN,MCP23S17,2,Port A bit 2,Input (pull-up),X-axis home limit switch,Active low
-PIN_X_LIMIT_MAX,MCP23S17,3,Port A bit 3,Input (pull-up),X-axis end limit switch,Active low
-PIN_X_ALARM_STATUS,MCP23S17,4,Port A bit 4,Input (pull-up),X-axis alarm status,Drive OUT3 active low
-PIN_X_ALARM_RESET,MCP23S17,5,Port A bit 5,Output,X-axis alarm reset command,Drive IN1/ARST
-PA6_AVAILABLE,MCP23S17,6,Port A bit 6,Unused,Available,Free for future assignment
-PIN_GRIPPER,MCP23S17,7,Port A bit 7,Output,End-effector gripper control,Digital on/off
-PIN_Y_DIR,MCP23S17,8,Port B bit 0,Output,Y-axis direction signal,Stepper direction
-PIN_Y_ENABLE,MCP23S17,9,Port B bit 1,Output,Y-axis enable signal,Stepper enable
-PIN_Y_LIMIT_MIN,MCP23S17,10,Port B bit 2,Input (pull-up),Y-axis home limit switch,Active low
-PIN_Y_LIMIT_MAX,MCP23S17,11,Port B bit 3,Input (pull-up),Y-axis end limit switch,Active low
-PIN_Y_ALARM_STATUS,MCP23S17,12,Port B bit 4,Input (pull-up),Y-axis alarm status,Active low alarm input
-PIN_Y_ALARM_RESET,MCP23S17,13,Port B bit 5,Output,Y-axis alarm reset command,Alarm reset pulse output
-PIN_THETA_DIR,MCP23S17,14,Port B bit 6,Output,Theta direction signal,Pulse-train SIGN/DIR
-PIN_THETA_ENABLE,MCP23S17,15,Port B bit 7,Output,Theta enable signal,Pulse-train SON/enable
-PIN_X_PULSE,ESP32 GPIO,14,,Output,X-axis pulse output,LEDC hardware pulse generation (channel 0)
-PIN_Y_PULSE,ESP32 GPIO,2,,Output,Y-axis pulse output,LEDC-capable direct GPIO on WT32 (strapping pin; keep LOW/floating at reset)
-PIN_X_ENC_A,ESP32 GPIO,4,,Input,X-axis encoder A,PCNT input (unit 0); general-purpose WT32-ETH01 header pin (no strap/Ethernet conflict)
-PIN_X_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,PCNT input (unit 0)
-PIN_Y_ENC_A,ESP32 GPIO,39,,Input,Y-axis encoder A,PCNT input (unit 1)
-PIN_Y_ENC_B,ESP32 GPIO,32,,Input,Y-axis encoder B,PCNT input (unit 1)
-PIN_THETA_PULSE,ESP32 GPIO,0,,Output,Theta pulse output,LEDC hardware pulse generation (channel 2; strapping pin keep HIGH at reset)
+Symbol,Domain,Pin,MCP_Port_Bit,Direction,Function,Interface_Channel,Field_Terminal,Opto_Part,Notes
+PIN_SPI_MISO,ESP32 GPIO,35,,Input,SPI MISO for MCP23S17,,,,"Connected to MCP23S17 SO"
+PIN_SPI_MOSI,ESP32 GPIO,12,,Output,SPI MOSI for MCP23S17,,,,"Connected to MCP23S17 SI (strapping pin, must stay LOW at reset)"
+PIN_SPI_SCLK,ESP32 GPIO,5,,Output,SPI clock for MCP23S17,,,,"Connected to MCP23S17 SCK"
+PIN_SPI_CS,ESP32 GPIO,15,,Output,SPI chip-select for MCP23S17,,,,"Connected to MCP23S17 CS"
+PIN_X_DIR,MCP23S17,0,Port A bit 0,Output,X-axis direction signal,IF-U1-B,TBIO_X_BX+/- BPWR,HCPL-2530 ch B,"Via motion I/O board; see docs/MOTION_IO_INTERFACE.md"
+PIN_X_ENABLE,MCP23S17,1,Port A bit 1,Output,X-axis servo enable,IF-U4,TBIO_X_SON+DCOM,VO14642AT,"SON via opto"
+PIN_X_LIMIT_MIN,MCP23S17,2,Port A bit 2,Input (pull-up),X-axis home limit switch,,,,"Direct MCP; active low"
+PIN_X_LIMIT_MAX,MCP23S17,3,Port A bit 3,Input (pull-up),X-axis end limit switch,,,,"Direct MCP; active low"
+PIN_X_ALARM_STATUS,MCP23S17,4,Port A bit 4,Input (pull-up),X-axis alarm status,IF-U9,TBIO_X_ALM_OUT,HCPL-3700,"Drive ALM → opto → MCP"
+PIN_X_ALARM_RESET,MCP23S17,5,Port A bit 5,Output,X-axis alarm reset command,IF-U5,TBIO_X_ARST+DCOM,VO14642AT,"ARST via opto"
+PA6_AVAILABLE,MCP23S17,6,Port A bit 6,Unused,Available,,,,"Free for future assignment"
+PIN_GRIPPER,MCP23S17,7,Port A bit 7,Output,End-effector gripper control,,,,"24 V valve driver; not via motion optos"
+PIN_Z_DIR,MCP23S17,8,Port B bit 0,Output,Z-axis direction signal,IF-U2-B,TBIO_Z_BX+/- BPWR,HCPL-2530 ch B,"Vertical; +Z = up"
+PIN_Z_ENABLE,MCP23S17,9,Port B bit 1,Output,Z-axis enable signal,IF-U6,TBIO_Z_SON+DCOM,VO14642AT,"SON via opto"
+PIN_Z_LIMIT_MIN,MCP23S17,10,Port B bit 2,Input (pull-up),Z-axis bottom limit switch,,,,"Direct MCP; active low"
+PIN_Z_LIMIT_MAX,MCP23S17,11,Port B bit 3,Input (pull-up),Z-axis top limit switch,,,,"Direct MCP; active low"
+PIN_Z_ALARM_STATUS,MCP23S17,12,Port B bit 4,Input (pull-up),Z-axis alarm status,IF-U10,TBIO_Z_ALM_OUT,HCPL-3700,"Drive ALM → opto → MCP"
+PIN_Z_ALARM_RESET,MCP23S17,13,Port B bit 5,Output,Z-axis alarm reset command,IF-U7,TBIO_Z_ARST+DCOM,VO14642AT,"ARST via opto"
+PIN_THETA_DIR,MCP23S17,14,Port B bit 6,Output,Theta direction signal,IF-U3-B,HCS01_X31_DIR_TBD,HCPL-2530 ch B,"X31 pin TBD (MPB doc)"
+PIN_THETA_ENABLE,MCP23S17,15,Port B bit 7,Output,Theta enable signal,IF-U8,HCS01_X31_EN_TBD,VO14642AT,"X31 pin TBD (MPB doc)"
+PIN_X_PULSE,ESP32 GPIO,14,,Output,X-axis pulse output,IF-U1-A,TBIO_X_APWR/AX+/-,HCPL-2530 ch A,"LEDC ch0; 200 kHz max at drive"
+PIN_Z_PULSE,ESP32 GPIO,2,,Output,Z-axis pulse output,IF-U2-A,TBIO_Z_APWR/AX+/-,HCPL-2530 ch A,"LEDC ch1; strap LOW at reset"
+PIN_X_ENC_A,ESP32 GPIO,4,,Input,X-axis encoder A,,,,"Phase B — AM26LV32; feedback disabled in firmware"
+PIN_X_ENC_B,ESP32 GPIO,36,,Input,X-axis encoder B,,,,"Phase B — AM26LV32"
+PIN_Z_ENC_A,ESP32 GPIO,39,,Input,Z-axis encoder A,,,,"Phase B — AM26LV32"
+PIN_Z_ENC_B,ESP32 GPIO,32,,Input,Z-axis encoder B,,,,"Phase B — AM26LV32"
+PIN_THETA_PULSE,ESP32 GPIO,0,,Output,Theta pulse output,IF-U3-A,HCS01_X31_STEP_TBD,HCPL-2530 ch A,"LEDC ch2; strap HIGH at reset"

@@ -1,23 +1,21 @@
 # Gantry Library API Reference
 
-**Version:** 2.0.0
-**Last Updated:** Apr 2026
+**Version:** 2.1.0
+**Last Updated:** May 2026
 
 Complete API documentation for the Gantry library.
 
-> **Refactor note (2026-04):** The library was generalised to drive all three axes (X / Y / Theta) with the generic `PulseMotor` library. Older code snippets in this document that reference `BergerdaServo::DriverConfig`, `GantryAxisStepper`, or `GantryRotaryServo` predate the refactor and will not compile against the current source tree. Authoritative references are the header files themselves (`Gantry.h`, `GantryLinearAxis.h`, `GantryRotaryAxis.h`, `GantryPulseMotorLinearAxis.h`, `GantryPulseMotorRotaryAxis.h`) and the overview in `../../PROGRAMMING_REFERENCE.md` §5. The constructor, as shown below, replaces the legacy single-X-driver form:
+> **Axis convention (2026-05):** `X` is the horizontal across-belt axis, `Z` is the vertical descent axis (ballscrew; `+Z` = up; **joint** `z` = homing datum; **`pose.z`** above bed uses `GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`), `Theta` rotates the end-effector about `Z`. The conveyor downstream direction is `-Y` in the world frame; the gantry has no Y joint. Joint space is `(x, z, theta)`; workspace pose is `(x, y, z, theta)` where `y` is the fixed along-belt offset of the carriage. Earlier revisions of this document spoke of a "Y joint" being the vertical axis — those names have been renamed throughout. Legacy stubs `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, `setThetaPulseRange`, and any reference to `BergerdaServo::DriverConfig` predate the 2026 refactor and no longer exist in the source tree.
 >
 > ```cpp
 > Gantry(const PulseMotor::DriverConfig&     xDrv,
 >        const PulseMotor::DrivetrainConfig& xDt,
->        const PulseMotor::DriverConfig&     yDrv,
->        const PulseMotor::DrivetrainConfig& yDt,
+>        const PulseMotor::DriverConfig&     zDrv,
+>        const PulseMotor::DrivetrainConfig& zDt,
 >        const PulseMotor::DriverConfig&     tDrv,
 >        const PulseMotor::DrivetrainConfig& tDt,
 >        int gripperPin);
 > ```
->
-> Setter methods that are no longer part of the API (and will be removed from this document in a follow-up pass): `setYAxisPins`, `setYAxisStepsPerMm`, `setYAxisMotionLimits`, `setThetaServo`, `setThetaPulseRange`.
 
 ---
 
@@ -48,19 +46,17 @@ Main gantry control class providing unified interface for multi-axis motion cont
 
 ### `JointConfig`
 
-Joint space configuration (internal representation).
+Joint space configuration (internal representation). The gantry has three joints — across-belt linear, vertical linear, and rotational. **There is no `y` field.**
 
 ```cpp
 struct JointConfig {
-    float x;      // X-axis position (mm) - horizontal (right-to-left)
-    float y;      // Y-axis position (mm) - vertical (down-to-up)
-    float theta;  // Theta angle (degrees) - rotation around Y-axis
-    
-    // Constructors
+    float x;      // Across-belt position (mm); horizontal
+    float z;      // Vertical position (mm); +Z = up; joint z = homing datum
+    float theta;  // End-effector rotation (degrees) about Z
+
     JointConfig();
-    JointConfig(float x_val, float y_val, float theta_val);
-    
-    // Operators
+    JointConfig(float x_val, float z_val, float theta_val);
+
     JointConfig operator+(const JointConfig& other) const;
     JointConfig operator-(const JointConfig& other) const;
     JointConfig operator*(float scale) const;
@@ -71,19 +67,19 @@ struct JointConfig {
 ```cpp
 Gantry::JointConfig joint;
 joint.x = 100.0f;
-joint.y = 50.0f;
+joint.z = 50.0f;
 joint.theta = 45.0f;
 ```
 
 ### `EndEffectorPose`
 
-End-effector pose in workspace/cartesian coordinates.
+End-effector pose in workspace coordinates. `x` is across-belt, `y` is along-belt (`-Y` is conveyor downstream), `z` is vertical (`+Z` up; **`pose.z`** = TCP height above physical bed via `GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`). The `y` field of the pose comes from the fixed `GANTRY_Z_AXIS_Y_OFFSET_MM` — there is no Y joint to actuate it.
 
 ```cpp
 struct EndEffectorPose {
-    float x, y, z;    // Position (mm)
+    float x, y, z;    // Position (mm) — (across-belt, along-belt, vertical)
     float theta;      // Orientation (degrees)
-    
+
     EndEffectorPose();
     EndEffectorPose(float x_val, float y_val, float z_val, float theta_val);
 };
@@ -93,8 +89,8 @@ struct EndEffectorPose {
 ```cpp
 Gantry::EndEffectorPose pose;
 pose.x = 200.0f;
-pose.y = 100.0f;
-pose.z = 80.0f;  // Constant Z offset
+pose.y = -80.0f;   // Along-belt (negative downstream of the gantry origin)
+pose.z = 80.0f;
 pose.theta = 90.0f;
 ```
 
@@ -106,18 +102,18 @@ Complete status snapshot of gantry system.
 struct GantryStatus {
     // Position (current)
     int32_t currentX_mm;
-    int32_t currentY_mm;
+    int32_t currentZ_mm;
     int32_t currentTheta_deg;
-    
+
     // Target positions
     int32_t targetX_mm;
-    int32_t targetY_mm;
+    int32_t targetZ_mm;
     int32_t targetTheta_deg;
-    
+
     // Motion state
     bool isBusy;
     bool xMoving;
-    bool yMoving;
+    bool zMoving;
     bool thetaMoving;
     
     // System state
@@ -142,9 +138,9 @@ Joint limits for validation.
 ```cpp
 struct JointLimits {
     float x_min, x_max;
-    float y_min, y_max;
+    float z_min, z_max;
     float theta_min, theta_max;
-    
+
     bool isValid(const JointConfig& config) const;
 };
 ```
@@ -155,11 +151,11 @@ Mechanical parameters for kinematics calculations.
 
 ```cpp
 struct KinematicParameters {
-    float y_axis_z_offset_mm;           // Default: 80mm
-    float theta_x_offset_mm;            // Default: -55mm
-    float gripper_y_offset_mm;          // Default: 385mm
-    float gripper_z_offset_mm;          // Default: 80mm
-    float x_axis_ball_screw_pitch_mm;   // Default: 40mm
+    float z_axis_y_offset_mm;           // Z-axis carriage offset along belt (Y), default 80
+    float theta_x_offset_mm;            // Default: -55 mm
+    float gripper_x_offset_mm;          // Gripper offset across belt (X), default 385
+    float gripper_z_offset_mm;          // Gripper offset vertical (Z), default 80
+    float x_axis_ball_screw_pitch_mm;   // Default: 40 mm
 };
 ```
 
@@ -209,7 +205,7 @@ Defined in `GantryUtils.h`:
 namespace Gantry::Constants {
     constexpr float DEFAULT_STEPS_PER_REV = 6000.0f;
     constexpr float DEFAULT_PULSES_PER_MM = 150.0f;
-    constexpr float DEFAULT_SAFE_Y_HEIGHT_MM = 150.0f;
+    constexpr float DEFAULT_SAFE_Z_HEIGHT_MM = 150.0f;
     constexpr uint32_t DEFAULT_HOMING_SPEED_PPS = 6000;
     constexpr uint32_t DEFAULT_SPEED_MM_PER_S = 50;
     constexpr uint32_t DEFAULT_SPEED_DEG_PER_S = 30;
@@ -225,20 +221,17 @@ namespace Gantry::Constants {
 
 ### Construction & Initialization
 
-#### `Gantry(const BergerdaServo::DriverConfig &xConfig, int gripperPin)`
+#### `Gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, gripperPin)`
 
-Constructs a new Gantry object.
+Constructs a new Gantry object from three `PulseMotor::DriverConfig` + `DrivetrainConfig` pairs (one per axis) plus a digital gripper pin.
 
 **Parameters:**
-- `xConfig`: Configuration for X-axis servo driver (SDF08NK8X)
-- `gripperPin`: GPIO pin for gripper control (-1 to disable)
+- `xDrv` / `xDt`: Electrical + mechanical config for the across-belt X axis (typical: belt drivetrain).
+- `zDrv` / `zDt`: Electrical + mechanical config for the vertical Z axis (typical: ballscrew).
+- `tDrv` / `tDt`: Electrical + mechanical config for the Theta axis (rotary-direct).
+- `gripperPin`: Pin for digital gripper control (`-1` to disable).
 
-**Example:**
-```cpp
-BergerdaServo::DriverConfig xConfig;
-// ... configure xConfig ...
-Gantry::Gantry gantry(xConfig, 26);
-```
+See `src/main.cpp` (`makeXDriverConfig` / `makeZDriverConfig` / `makeThetaDriverConfig` and their drivetrain counterparts) for the canonical population from `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`.
 
 #### `bool begin()`
 
@@ -278,48 +271,13 @@ Sets limit switch pins for X-axis.
 
 **Note:** Call before `begin()`.
 
-#### `void setYAxisPins(int stepPin, int dirPin, int enablePin = -1, bool invertDir = false, bool enableActiveLow = true)`
+#### `void setZAxisLimits(float minMm, float maxMm)`
 
-Configures Y-axis stepper motor pins.
-
-**Parameters:**
-- `stepPin`: Step pulse pin
-- `dirPin`: Direction pin
-- `enablePin`: Enable pin (-1 to disable)
-- `invertDir`: Invert direction signal
-- `enableActiveLow`: Enable pin active low (true) or high (false)
-
-#### `void setYAxisStepsPerMm(float stepsPerMm)`
-
-Sets Y-axis steps-per-millimeter conversion.
+Sets Z-axis travel limits (`+Z = up`; limits apply to **joint** `z` / homing datum).
 
 **Parameters:**
-- `stepsPerMm`: Steps per millimeter (e.g., 200 for 200 steps/mm)
-
-#### `void setYAxisLimits(float minMm, float maxMm)`
-
-Sets Y-axis travel limits.
-
-**Parameters:**
-- `minMm`: Minimum Y position (mm)
-- `maxMm`: Maximum Y position (mm)
-
-#### `void setYAxisMotionLimits(float maxSpeedMmPerS, float accelMmPerS2, float decelMmPerS2)`
-
-Sets Y-axis motion limits.
-
-**Parameters:**
-- `maxSpeedMmPerS`: Maximum speed (mm/s)
-- `accelMmPerS2`: Acceleration (mm/s²)
-- `decelMmPerS2`: Deceleration (mm/s²)
-
-#### `void setThetaServo(int pwmPin, int pwmChannel = 0)`
-
-Configures theta-axis servo PWM pin.
-
-**Parameters:**
-- `pwmPin`: PWM output pin
-- `pwmChannel`: PWM channel (ESP32 LEDC channel, 0-15)
+- `minMm`: Minimum Z position (mm). Typical: `0` (at belt).
+- `maxMm`: Maximum Z position (mm). Typical: `AXIS_Z_HARD_LIMIT_MAX_MM` (e.g. 150 for the Beta 80-SRS).
 
 #### `void setThetaLimits(float minDeg, float maxDeg)`
 
@@ -329,13 +287,9 @@ Sets theta-axis angular limits.
 - `minDeg`: Minimum angle (degrees)
 - `maxDeg`: Maximum angle (degrees)
 
-#### `void setThetaPulseRange(uint16_t minPulseUs, uint16_t maxPulseUs)`
+#### `void setJointLimits(float xMin, float xMax, float zMin, float zMax, float thetaMin, float thetaMax)`
 
-Sets theta servo pulse width range.
-
-**Parameters:**
-- `minPulseUs`: Minimum pulse width (microseconds)
-- `maxPulseUs`: Maximum pulse width (microseconds)
+Sets joint-space soft limits used by `moveTo(JointConfig)`.
 
 #### `void setEndEffectorPin(int pin, bool activeHigh = true)`
 
@@ -345,12 +299,12 @@ Configures end-effector (gripper) pin.
 - `pin`: GPIO pin for gripper control
 - `activeHigh`: Active high (true) or low (false)
 
-#### `void setSafeYHeight(float safeHeight_mm)`
+#### `void setSafeZHeight(float safeHeight_mm)`
 
-Sets safe Y height for X-axis travel.
+Sets safe Z height for X-axis travel (the carriage retracts to this Z before any X traverse).
 
 **Parameters:**
-- `safeHeight_mm`: Safe height in millimeters (default: 150mm)
+- `safeHeight_mm`: Safe height in millimeters above the belt (default: 150 mm).
 
 ---
 
@@ -361,8 +315,8 @@ Sets safe Y height for X-axis travel.
 Moves to target joint configuration.
 
 **Parameters:**
-- `joint`: Target joint configuration
-- `speed_mm_per_s`: Motion speed for X/Y axes (mm/s)
+- `joint`: Target joint configuration (`x`, `z`, `theta`)
+- `speed_mm_per_s`: Motion speed for X/Z axes (mm/s)
 - `speed_deg_per_s`: Motion speed for theta (deg/s)
 - `acceleration_mm_per_s2`: Acceleration (0 = use default)
 - `deceleration_mm_per_s2`: Deceleration (0 = use default)
@@ -370,17 +324,17 @@ Moves to target joint configuration.
 **Returns:** `GantryError` code
 
 **Motion Sequence:**
-1. Y-axis descends to target Y (if needed)
+1. Z-axis descends to target Z (toward belt, since `+Z = up`)
 2. Gripper actuates (close for picking, open for placing)
-3. Y-axis retracts to safe height
-4. X-axis moves to target X
+3. Z-axis retracts to safe height
+4. X-axis traverses to target X
 5. Theta moves independently
 
 **Example:**
 ```cpp
 Gantry::JointConfig target;
 target.x = 200.0f;
-target.y = 50.0f;
+target.z = 50.0f;     // 50 mm above the belt
 target.theta = 45.0f;
 
 GantryError result = gantry.moveTo(target, 50, 30);
@@ -394,8 +348,8 @@ if (result != GantryError::OK) {
 Moves to target end-effector pose (uses inverse kinematics).
 
 **Parameters:**
-- `pose`: Target end-effector pose
-- `speed_mm_per_s`: Motion speed for X/Y axes (mm/s)
+- `pose`: Target end-effector pose. The pose `y` field must match `params.z_axis_y_offset_mm` (there is no Y joint to satisfy other values).
+- `speed_mm_per_s`: Motion speed for X/Z axes (mm/s)
 - `speed_deg_per_s`: Motion speed for theta (deg/s)
 - `acceleration_mm_per_s2`: Acceleration (0 = use default)
 - `deceleration_mm_per_s2`: Deceleration (0 = use default)
@@ -406,20 +360,20 @@ Moves to target end-effector pose (uses inverse kinematics).
 ```cpp
 Gantry::EndEffectorPose target;
 target.x = 200.0f;
-target.y = 100.0f;
+target.y = -80.0f;     // Must equal the fixed Z-axis along-belt offset
 target.z = 80.0f;
 target.theta = 90.0f;
 
 gantry.moveTo(target, 50, 30);
 ```
 
-#### `void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed)`
+#### `void moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed)`
 
-Legacy moveTo method (deprecated, use JointConfig version).
+Legacy integer-mm `moveTo`. Prefer the `JointConfig` form for new code.
 
 **Parameters:**
 - `x`: Target X position (mm)
-- `y`: Target Y position (mm)
+- `z`: Target Z position (mm; `+Z = up`)
 - `theta`: Target theta angle (degrees)
 - `speed`: Speed in pulses per second (for X axis)
 
@@ -516,11 +470,11 @@ Gets X-axis encoder position.
 
 **Returns:** Encoder position in pulses
 
-#### `int getCurrentY() const`
+#### `int getCurrentZ() const`
 
-Gets current Y position.
+Gets current Z position.
 
-**Returns:** Current Y position in mm
+**Returns:** Current **joint** Z position in mm (`+Z` = up; homing datum at `0`).
 
 #### `int getCurrentTheta() const`
 
@@ -558,7 +512,7 @@ Forward kinematics: Joint space → Workspace.
 ```cpp
 Gantry::JointConfig joint;
 joint.x = 100.0f;
-joint.y = 50.0f;
+joint.z = 50.0f;
 joint.theta = 45.0f;
 
 Gantry::EndEffectorPose pose = gantry.forwardKinematics(joint);
@@ -579,13 +533,13 @@ Inverse kinematics: Workspace → Joint space.
 ```cpp
 Gantry::EndEffectorPose pose;
 pose.x = 200.0f;
-pose.y = 100.0f;
+pose.y = -80.0f;   // along-belt; must match params.z_axis_y_offset_mm
 pose.z = 80.0f;
 pose.theta = 90.0f;
 
 Gantry::JointConfig joint = gantry.inverseKinematics(pose);
-Serial.printf("Joint: x=%.1f y=%.1f theta=%.1f\n",
-              joint.x, joint.y, joint.theta);
+Serial.printf("Joint: x=%.1f z=%.1f theta=%.1f\n",
+              joint.x, joint.z, joint.theta);
 ```
 
 #### `JointConfig getCurrentJointConfig() const`
@@ -641,108 +595,65 @@ Gets pulses per millimeter for X-axis.
 
 ### Complete Setup Example
 
+See `src/main.cpp` for the canonical production setup. The skeleton below shows the three-axis construction path under the current API:
+
 ```cpp
 #include "Gantry.h"
+#include "PulseMotor.h"
 
-// Pin definitions
-#define X_STEP_PIN 32
-#define X_DIR_PIN 33
-#define X_ENABLE_PIN 25
-#define X_MIN_LIMIT 35
-#define X_MAX_LIMIT 36
-#define Y_STEP_PIN 26
-#define Y_DIR_PIN 27
-#define Y_ENABLE_PIN 14
-#define THETA_PWM_PIN 13
-#define GRIPPER_PIN 12
+// Build per-axis configs from include/axis_pulse_motor_params.h
+// and include/axis_drivetrain_params.h (helpers in src/main.cpp):
+PulseMotor::DriverConfig     xDrv = makeXDriverConfig();
+PulseMotor::DrivetrainConfig xDt  = makeXDrivetrainConfig();
+PulseMotor::DriverConfig     zDrv = makeZDriverConfig();
+PulseMotor::DrivetrainConfig zDt  = makeZDrivetrainConfig();
+PulseMotor::DriverConfig     tDrv = makeThetaDriverConfig();
+PulseMotor::DrivetrainConfig tDt  = makeThetaDrivetrainConfig();
 
-Gantry::Gantry gantry(BergerdaServo::DriverConfig(), GRIPPER_PIN);
+Gantry::Gantry::preparePinsForBoot(xDrv, zDrv, tDrv, PIN_GRIPPER);
+static Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, PIN_GRIPPER);
 
-void setup() {
-    Serial.begin(115200);
-    
-    // Configure X-axis (via driver config)
-    BergerdaServo::DriverConfig xConfig;
-    xConfig.step_pin = X_STEP_PIN;
-    xConfig.dir_pin = X_DIR_PIN;
-    xConfig.enable_pin = X_ENABLE_PIN;
-    xConfig.encoder_ppr = 6000;
-    // ... more X-axis config ...
-    
-    // Create gantry with X config
-    gantry = Gantry::Gantry(xConfig, GRIPPER_PIN);
-    
-    // Configure limit switches
-    gantry.setLimitPins(X_MIN_LIMIT, X_MAX_LIMIT);
-    
-    // Configure Y-axis
-    gantry.setYAxisPins(Y_STEP_PIN, Y_DIR_PIN, Y_ENABLE_PIN);
-    gantry.setYAxisStepsPerMm(200.0f);
-    gantry.setYAxisLimits(0.0f, 200.0f);
-    gantry.setYAxisMotionLimits(100.0f, 500.0f, 500.0f);
-    
-    // Configure theta-axis
-    gantry.setThetaServo(THETA_PWM_PIN, 0);
-    gantry.setThetaLimits(-90.0f, 90.0f);
-    
-    // Set safe height
-    gantry.setSafeYHeight(150.0f);
-    
-    // Initialize
-    if (!gantry.begin()) {
-        Serial.println("Initialization failed!");
-        return;
-    }
-    
-    gantry.enable();
-    
-    // Home X-axis
-    gantry.home();
-    while (gantry.isBusy()) {
-        gantry.update();
-        delay(10);
-    }
-    
-    Serial.println("Gantry ready!");
-}
+gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
+gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, AXIS_X_HARD_LIMIT_MAX_MM,
+                      AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
+                      AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+gantry.setZAxisLimits(AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM);
+gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+gantry.setSafeZHeight(GANTRY_SAFE_Z_HEIGHT_MM);
 
-void loop() {
-    gantry.update();
-    delay(10);
-}
+if (!gantry.begin()) { /* report and abort */ }
+gantry.enable();
+gantry.home();  // X homing
 ```
 
 ### Pick-and-Place Sequence
 
 ```cpp
-void pickAndPlace(float pickX, float pickY, float placeX, float placeY) {
-    // Move to pick position
+void pickAndPlace(float pickX, float pickZ, float placeX, float placeZ) {
+    // Move to pick position (descend toward belt)
     Gantry::JointConfig pickPos;
     pickPos.x = pickX;
-    pickPos.y = pickY;  // Low position
+    pickPos.z = pickZ;       // low Z = close to the belt
     pickPos.theta = 0.0f;
-    
+
     gantry.moveTo(pickPos, 50, 30);
     while (gantry.isBusy()) {
         gantry.update();
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    
-    // Gripper closes automatically during sequential motion
-    
-    // Move to place position
+
+    // Gripper closes automatically during the Z↓→grip→Z↑ phase of sequential motion.
+
     Gantry::JointConfig placePos;
     placePos.x = placeX;
-    placePos.y = placeY;  // Low position
+    placePos.z = placeZ;
     placePos.theta = 90.0f;
-    
+
     gantry.moveTo(placePos, 50, 30);
     while (gantry.isBusy()) {
         gantry.update();
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    
-    // Gripper opens automatically during sequential motion
 }
 ```
 

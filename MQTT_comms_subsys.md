@@ -2,6 +2,15 @@
 
 This document describes how the planned communications stack works from first power-on through a completed pick, assuming the architecture in the MQTT plan: **Ethernet + MQTT in `lib/MqttBridge`**, **typed hand-off to a pick scheduler in `src/pick_scheduler.cpp`**, **embedded intercept math (`planPick`) in the same module**, and **motion only through the existing `Gantry` public API**.
 
+## Coordinate convention (firmware-wide, as of 2026-05)
+
+- **X** — horizontal traverse along the gantry beam, across the conveyor belt.
+- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **−Y direction**.
+- **Z** — vertical (gantry descent axis). **+Z = up**; belt surface is `Z = 0`; safe-retracted top-home is `Z = Z_max`.
+- **Theta** — rotation about the vertical (Z) axis.
+
+This document follows that convention throughout. Earlier revisions used `s` (positive downstream) for along-belt and `y_across_mm` for across-belt; those names are retired.
+
 ## Actors and topics
 
 | Actor | Role |
@@ -15,8 +24,8 @@ Topics:
 
 | Topic | Direction (gantry) | Payload role |
 |-------|----------------------|----------------|
-| `/BatID` | Subscribe | One JSON object per detection: dimensions, **`s_bat_mm`** (global along-belt), `y_across_mm`, `theta_deg`, `t_epoch_us` — see [Along-belt frame and BatID](#along-belt-frame-and-batid) |
-| `/conveyorA/speed` | Subscribe | Belt speed + `t_epoch_us` |
+| `/BatID` | Subscribe | One JSON object per detection: dimensions, **`y_bat_mm`** (along-belt; negative downstream), **`x_across_mm`** (across-belt), `theta_deg`, `t_epoch_us` — see [Along-belt frame and BatID](#along-belt-frame-and-batid) |
+| `/conveyorA/speed` | Subscribe | Belt speed magnitude + `t_epoch_us` (sign of belt direction is fixed by the −Y convention, not by the payload) |
 | `/conveyorA/config` | Subscribe + publish | Gantry publishes **request**; conveyor publishes **response** (same topic; correlate with `request_id`) |
 | `/gantry/status` | Publish | State machine + skip reasons + timestamps for operators and upstream automation |
 
@@ -26,48 +35,58 @@ All external timestamps are **epoch microseconds** (`uint64_t`). Inside the gant
 
 These conventions are agreed for integration; mirror them in `include/conveyor_intercept_params.h` (or Kconfig) as compile-time / calibration constants.
 
-### Global axis `s` (mm)
+### Along-belt axis `y` (mm)
 
 - **Origin:** belt **roller axis** datum projected into the belt plane (single agreed mechanical reference).
-- **`+s`:** **downstream** along the belt — the direction of motion that carries the battery **toward the pickup plane**.
-- **Pickup is downstream of the camera** (so `s_pick > s_cam` in this frame).
+- **`−Y`:** **downstream** along the belt — the direction of motion that carries the battery **toward the pickup plane**.
+- **Pickup is downstream of the camera** (so `y_pick_mm < y_cam_mm < 0` in this frame; both planes are downstream of the roller datum).
+
+### Across-belt axis `x` (mm)
+
+- **`x_across_mm`:** lateral position across the belt, measured from the agreed conveyor-side datum at `x_across_mm = 0`, increasing toward the opposite belt edge at `x_across_mm = width_mm`.
+- Used by `planPick` to derive the gantry **X-joint target** through a single calibration offset (`CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM`) plus an optional sign flag.
+
+### Vertical axis `z` (mm)
+
+- **`+Z = up`**, `Z = 0` at the belt surface. `z_pick_mm` is just above the belt; `z_safe_mm` is the safe-retracted top height (typically `AXIS_Z_HARD_LIMIT_MAX_MM`). The Z actuator joint maps directly to workspace Z (no sign flip).
 
 ### Measured along-belt distances from the roller datum (as-built)
 
 | Symbol | Approx. value (mm) | Meaning |
 |--------|-------------------|---------|
-| `s_cam_mm` | **336.55** | Along-belt position of the **camera optical center** projected onto the belt (confirmed along-belt component, not a diagonal 3D mix). |
-| `s_pick_mm` | **1016** | Along-belt position of the **gantry pickup plane** (same datum, same axis). |
+| `y_cam_mm`  | **−336.55** | Along-belt position of the **camera optical center** projected onto the belt. Negative because the camera is downstream of the roller datum. |
+| `y_pick_mm` | **−1016**   | Along-belt position of the **gantry pickup plane** (same datum, same axis). Further downstream than the camera. |
 
 Fixed span camera → pickup (for sanity checks and docs):
 
 \[
-L_{\mathrm{cam}\rightarrow\mathrm{pick}} = s_{\mathrm{pick}} - s_{\mathrm{cam}} \approx 679.45\ \mathrm{mm}
+L_{\mathrm{cam}\rightarrow\mathrm{pick}} = y_{\mathrm{cam}} - y_{\mathrm{pick}} \approx 679.45\ \mathrm{mm}
 \]
 
-### Authoritative field: `s_bat_mm`
+### Authoritative field: `y_bat_mm`
 
-The identification system publishes **`s_bat_mm`**: the battery **reference point** along **`s`** at **`t_epoch_us`**, in the **same global frame** as `s_cam_mm` / `s_pick_mm`.
+The identification system publishes **`y_bat_mm`**: the battery **reference point** along the along-belt axis at **`t_epoch_us`**, in the **same frame** as `y_cam_mm` / `y_pick_mm` (negative downstream).
 
-- The battery may appear **anywhere in the camera FOV**. The vision stack shall **fold the within-FOV along-belt offset into `s_bat_mm` before publish** (e.g. \(s_{\mathrm{bat}} = s_{\mathrm{cam}} + \Delta s_{\mathrm{fov}}\) plus any other calibrated biases). The gantry **does not** apply a separate FOV delta.
-- **Production `/BatID`:** treat **`s_bat_mm` as the single authoritative along-belt coordinate** — avoid also publishing a second along-belt delta that could conflict (optional non-authoritative `debug` fields on another topic are fine).
+- The battery may appear **anywhere in the camera FOV**. The vision stack shall **fold the within-FOV along-belt offset into `y_bat_mm` before publish** (e.g. \(y_{\mathrm{bat}} = y_{\mathrm{cam}} + \Delta y_{\mathrm{fov}}\), where \(\Delta y_{\mathrm{fov}} > 0\) places the battery upstream of camera center and \(\Delta y_{\mathrm{fov}} < 0\) places it downstream). The gantry **does not** apply a separate FOV delta.
+- **Production `/BatID`:** treat **`y_bat_mm` as the single authoritative along-belt coordinate** — avoid also publishing a second along-belt delta that could conflict (optional non-authoritative `debug` fields on another topic are fine).
 
 ### Intercept distance for timing
 
 \[
-D_{\mathrm{mm}} = s_{\mathrm{pick,mm}} - s_{\mathrm{bat,mm}}
+D_{\mathrm{mm}} = y_{\mathrm{bat,mm}} - y_{\mathrm{pick,mm}}
 \]
 
-Then \(\tau \approx D / v\) with belt speed \(v\) from `/conveyorA/speed` (same `t_epoch_us` / staleness rules as elsewhere). Example: at **5 ft/s** \(\approx\) **1524 mm/s**, if \(\Delta s_{\mathrm{fov}} = 0\) (battery reference on the camera centerline at detection), \(\tau \approx 679.45 / 1524 \approx 0.45\) s before the reference reaches the pickup plane — before gantry motion and grip margins.
+`D_mm > 0` means the battery is still upstream of the pick line and feasible to catch; `D_mm ≤ 0` means it has already passed (`SKIP:past_pickup_plane`).
+
+Then \(\tau \approx D / v_{\mathrm{belt}}\), with \(v_{\mathrm{belt}} = |{\rm speed\_mm\_per\_s}|\) from `/conveyorA/speed` (same `t_epoch_us` / staleness rules as elsewhere). The sign of belt motion is fixed by the `−Y` convention; `/conveyorA/speed` carries the unsigned magnitude. Example: at **5 ft/s** \(\approx\) **1524 mm/s**, if \(\Delta y_{\mathrm{fov}} = 0\) (battery reference on the camera centerline at detection, so \(y_{\mathrm{bat}} = y_{\mathrm{cam}} = -336.55\)), \(D = -336.55 - (-1016) = 679.45\) mm, hence \(\tau \approx 679.45 / 1524 \approx 0.45\) s before the reference reaches the pickup plane — before gantry motion and grip margins.
 
 ### One-line spec (vision / identification)
 
-> **`s_bat_mm` shall be the global along-belt coordinate (mm, `+s` downstream from the roller datum) of the battery reference point at `t_epoch_us`, already including the within-camera-FOV along-belt offset relative to the camera optical centerline projection; the gantry computes \(D = s_{\mathrm{pick}} - s_{\mathrm{bat}}\) with no further FOV correction.**
+> **`y_bat_mm` shall be the along-belt coordinate (mm, `−Y` downstream from the roller datum) of the battery reference point at `t_epoch_us`, already including the within-camera-FOV along-belt offset relative to the camera optical centerline projection; the gantry computes \(D = y_{\mathrm{bat}} - y_{\mathrm{pick}}\) with no further FOV correction.**
 
-### Across-belt and size (unchanged intent)
+### Size (unchanged intent)
 
-- **`y_across_mm`:** lateral across the belt for gantry **X** mapping (0 at agreed belt edge; validate against `width_mm` from `/conveyorA/config`).
-- **Dimensions + `theta_deg`:** as in the MQTT plan; define battery reference point for `s_bat_mm` (e.g. downstream lead edge vs center) in the same spec and keep it stable.
+- **Dimensions + `theta_deg`:** as in the MQTT plan; define battery reference point for `y_bat_mm` (e.g. downstream lead edge vs center) in the same spec and keep it stable.
 
 ## High-level data flow
 
@@ -156,9 +175,9 @@ If width is unknown after a timeout, the scheduler refuses new picks and publish
 
 ### `/BatID`
 
-- MQTT callback parses JSON into **`BatteryDetection`** (dimensions, **`s_bat_mm`**, `y_across_mm`, `theta_deg`, `t_epoch_us`, optional `bat_id` / `seq`).
-- Validation rejects NaNs, negative sizes, impossible geometry, out-of-range **`y_across_mm`** once **`width_mm`** is known, and **`s_bat_mm`** outside a plausible along-belt window around the camera FOV (for example not between `s_cam_mm - X_conv/2` and `s_cam_mm + X_conv/2`, plus margin once **`X_conv`** is calibrated; tune in firmware).
-- Valid detection is **`xQueueSend`** to the **detection queue** (the “typedQueues” node: a FreeRTOS queue of structs, not raw MQTT bytes).
+- MQTT callback parses JSON into **`BatteryDetection`** (dimensions, **`y_bat_mm`**, **`x_across_mm`**, `theta_deg`, `t_epoch_us`, optional `bat_id` / `seq`).
+- Validation rejects NaNs, negative sizes, impossible geometry, out-of-range **`x_across_mm`** once **`width_mm`** is known, and **`y_bat_mm`** outside a plausible along-belt window around the camera FOV (for example not between `y_cam_mm - CAM_FOV_HALF_MM` and `y_cam_mm + CAM_FOV_HALF_MM` once **`CAM_FOV_HALF_MM`** is calibrated; tune in firmware).
+- Valid detection is **`xQueueSend`** to the **detection queue** (the "typedQueues" node: a FreeRTOS queue of structs, not raw MQTT bytes).
 
 Queue policy (from plan):
 
@@ -198,12 +217,12 @@ loop forever:
 
 After `planPick` returns **feasible** and gantry readiness passes, the scheduler drives **only** the existing `Gantry` API (`moveTo`, `grip`, `isBusy`, `requestAbort`, etc.). Typical sequence:
 
-1. **`APPROACH`** — `moveTo(x_target, safeY, theta_target)` with configured approach speeds. Publish `/gantry/status` `state: APPROACH`. Wait until `!gantry.isBusy()` (and handle alarm/timeout).
+1. **`APPROACH`** — `moveTo(JointConfig{x_target, z_safe_mm, theta_target}, ...)` with configured approach speeds. Publish `/gantry/status` `state: APPROACH`. Wait until `!gantry.isBusy()` (and handle alarm/timeout).
 2. **`WAIT_DEADLINE`** — Block or poll until `esp_timer_get_time() >= t_pick_local_us - margin` (margin accounts for grip latency and controller jitter). Publish `state: WAIT_DEADLINE` if useful for debugging.
-3. **`DESCEND`** — `moveTo(x_target, y_pick, theta_target)`. Publish `state: DESCEND`.
+3. **`DESCEND`** — `moveTo(JointConfig{x_target, z_pick_mm, theta_target}, ...)`. Publish `state: DESCEND`.
 4. **`GRIP`** — `grip(true)`; wait grip actuation time (pneumatic timing from drivetrain constants). Publish `state: GRIP`.
-5. **`RETRACT`** — `moveTo(x_target, safeY, theta_target)`. Publish `state: RETRACT`.
-6. **`TRANSFER`** — `moveTo(bin_x, safeY, bin_theta)` (bin pose from `conveyor_intercept_params.h` or future config). Publish `state: TRANSFER`.
+5. **`RETRACT`** — `moveTo(JointConfig{x_target, z_safe_mm, theta_target}, ...)`. Publish `state: RETRACT`.
+6. **`TRANSFER`** — `moveTo(JointConfig{bin_x, z_safe_mm, bin_theta}, ...)` (bin pose from `conveyor_intercept_params.h` or future config). Publish `state: TRANSFER`.
 7. **`RELEASE`** — `grip(false)`; wait open time; publish `state: IDLE` or `COMPLETE`.
 
 If any step fails (alarm, timeout, `moveTo` error), publish `/gantry/status` with `state: ABORT` and a reason, call `requestAbort()` / `stop` path as appropriate, and return to **IDLE** without leaving the gripper in an undefined state.
@@ -217,7 +236,7 @@ T0  Identification system sees battery; publishes /BatID JSON (t_epoch_us = dete
 T1  Conveyor publishes /conveyorA/speed (may arrive before or after BatID).
 T2  MqttBridge receives BatID, validates, xQueueSend(detectionQueue).
 T3  PickScheduler wakes on xQueueReceive; snapshots speed, config width, time sync.
-T4  planPick computes tau from D = s_pick_mm - s_bat_mm and speed v; maps y_across_mm to gantry X, etc.
+T4  planPick computes tau from D = y_bat_mm - y_pick_mm and |speed| v; maps x_across_mm to gantry X, picks z=z_pick_mm for descent, etc.
 T5  Scheduler issues APPROACH move; gantryUpdateTask keeps calling gantry.update() at 100 Hz.
 T6  At local deadline: DESCEND, GRIP, RETRACT, TRANSFER, RELEASE.
 T7  /gantry/status publishes COMPLETE (or IDLE) with correlation ids and timestamps for traceability.
@@ -245,7 +264,7 @@ T7  /gantry/status publishes COMPLETE (or IDLE) with correlation ids and timesta
 | Stale `/conveyorA/speed` | Skip new picks; `SKIP:stale_conveyor_speed` |
 | Unknown conveyor width | Skip; `SKIP:no_conveyor_config` |
 | Invalid time sync | Skip; `SKIP:time_not_synced` |
-| `planPick` infeasible | Skip; reason from planner (e.g. outside pick zone, speed ~ 0, **`s_bat_mm`** implausible vs FOV) |
+| `planPick` infeasible | Skip; reason from planner (e.g. outside pick zone, speed ~ 0, **`y_bat_mm`** implausible vs FOV) |
 | Gantry not homed/calibrated | Skip; `SKIP:gantry_not_ready` |
 | Detection queue overload | Drop oldest or overwrite with newest (policy from plan) |
 | Operator `pickenable 0` (if implemented) | Scheduler idle; still logs or publishes disabled state |

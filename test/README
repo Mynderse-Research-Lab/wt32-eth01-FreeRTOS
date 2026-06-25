@@ -1,15 +1,40 @@
+Testing overview
+================
 
-Basic testing for this project is integrated into the ESP-IDF app as a serial command.
+The motion logic is tested in two complementary ways.
+
+1) Host unit tests (primary regression suite)
+---------------------------------------------
+Hardware-independent logic (kinematics, trajectory) is compiled natively and
+checked with the Unity framework under test/host/. These run on any machine
+with CMake + a C/C++ compiler - no ESP-IDF, no hardware - and are the source of
+truth for the core math. They also run in CI on every push / pull request.
+
+Run locally:
+
+    cmake -S test/host -B build/host
+    cmake --build build/host
+    ctest --test-dir build/host --output-on-failure
+
+Add a new test:
+- Put it in test/host/test_<name>.cpp with its own main() (UNITY_BEGIN /
+  RUN_TEST / UNITY_END), then register it in test/host/CMakeLists.txt with
+  add_host_test(test_<name>). Only include hardware-independent code; keep
+  ESP-IDF / FreeRTOS dependencies behind interfaces so the logic stays
+  host-compilable.
+
+2) On-target selftest (prototype convenience)
+---------------------------------------------
+The interactive serial console exposes a "selftest" command that runs the same
+kinematics / joint-limit / trajectory assertions on the target (see
+src/basic_tests.cpp). It is gated by the CONFIG_GANTRY_SELFTEST Kconfig option
+(default y).
 
 How to run:
-1. Build and flash with ESP-IDF.
-2. Open serial monitor.
-3. Send command: selftest
+1. Build and flash with ESP-IDF (idf.py -C idf build flash monitor).
+2. In the serial monitor, send: selftest
+3. Expect a log line similar to: "Selftest complete: passed=<N> failed=0"
 
-What it validates:
-- Gantry forward/inverse kinematics sanity
-- Joint-limit validation behavior
-- Trajectory profile and interpolation sanity
-
-Expected result:
-- Log line similar to: "Selftest complete: passed=<N> failed=0"
+For production builds, set CONFIG_GANTRY_SELFTEST=n (idf.py menuconfig) to drop
+the command and basic_tests.cpp from the firmware. The assertions still run in
+the host unit tests above, so no coverage is lost.

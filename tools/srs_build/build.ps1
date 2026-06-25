@@ -1,4 +1,7 @@
 #Requires -Version 5.1
+param(
+  [switch]$Flat
+)
 <#
 .SYNOPSIS
   Reproducible build: Mermaid -> PNG (@mermaid-js/mermaid-cli) -> DOCX (pandoc).
@@ -6,14 +9,18 @@
 .DESCRIPTION
   Run from repository root:
     .\tools\srs_build\build.ps1
+    .\tools\srs_build\build.ps1 -Flat
+
+  -Flat builds from Pickup_algo_and_MQTTBridge_SRS_flat.md to Pickup_algo_and_MQTTBridge_SRS_flat.docx
+  (preprocessed markdown: docs/srs/_build/SRS_flat_preprocessed.md).
 
   Prerequisites:
     - Node.js 18+ and npm on PATH (or Scoop node at ~/scoop/apps/nodejs/current)
     - pandoc on PATH (e.g. scoop install pandoc)
 
   Outputs:
-    - docs/srs/_build/diagram_*.mmd, diagram_*.png, SRS_preprocessed.md
-    - Pickup_algo_and_MQTTBridge_SRS.docx (repo root)
+    - docs/srs/_build/diagram_*.mmd, diagram_*.png, SRS_preprocessed.md (or SRS_flat_preprocessed.md)
+    - Pickup_algo_and_MQTTBridge_SRS.docx (or Pickup_algo_and_MQTTBridge_SRS_flat.docx) at repo root
 #>
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -33,19 +40,32 @@ try {
   Write-Host "npm ci in $ScriptDir"
   npm ci
 
-  Write-Host "node render-diagrams.mjs"
+  if ($Flat) {
+    Write-Host "node render-diagrams.mjs (flat SRS)"
+  } else {
+    Write-Host "node render-diagrams.mjs"
+  }
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     throw "node not found on PATH after Scoop prepend."
   }
-  node .\render-diagrams.mjs
+  if ($Flat) {
+    node .\render-diagrams.mjs Pickup_algo_and_MQTTBridge_SRS_flat.md SRS_flat_preprocessed.md
+  } else {
+    node .\render-diagrams.mjs
+  }
 
   $pandoc = Get-Command pandoc -ErrorAction SilentlyContinue
   if (-not $pandoc) {
     throw "pandoc not found. Install: scoop install pandoc"
   }
 
-  $pre = Join-Path $RepoRoot 'docs\srs\_build\SRS_preprocessed.md'
-  $out = Join-Path $RepoRoot 'Pickup_algo_and_MQTTBridge_SRS.docx'
+  if ($Flat) {
+    $pre = Join-Path $RepoRoot 'docs\srs\_build\SRS_flat_preprocessed.md'
+    $out = Join-Path $RepoRoot 'Pickup_algo_and_MQTTBridge_SRS_flat.docx'
+  } else {
+    $pre = Join-Path $RepoRoot 'docs\srs\_build\SRS_preprocessed.md'
+    $out = Join-Path $RepoRoot 'Pickup_algo_and_MQTTBridge_SRS.docx'
+  }
   $resPath = Join-Path $RepoRoot 'docs\srs\_build'
 
   if (-not (Test-Path $pre)) {

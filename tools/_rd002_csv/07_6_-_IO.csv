@@ -1,0 +1,231 @@
+"Kinetix 5100 Servo Drive Parameters
+For more information see:"
+"Kinetix 5100 Servo Drive User Manual,publication 2198-UM004"
+
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+194,DIDebounceTime,All,0,20,2,,ms,INT,"Digital Input Debouncing Time
+When the environmental interference is big, increasing the setting value can enhance the control stability. However, if the value is set too high, it will impact the response time.",6-IO,,,,,P2.009
+195,DI1Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 1 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.010
+196,DI2Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 2 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.011
+197,DI3Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 3 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. User can configure P3.006 to change the source for the digital signal, either through an external terminal block or communication parameter P4.007.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.012
+198,DI4Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 4 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.013
+199,DI5Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 5 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.014
+200,DI6Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 6 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.015
+201,DI7Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 7 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.016
+202,DI8Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 8 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. You can configure ID268 (P3.006) to change the source for the digital signal, either through an external terminal block or communication parameter ID281 (P4.007).
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.017
+203,DO1Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 1 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.018
+204,DO2Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 2 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.019
+205,DO3Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 3 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.020
+206,DO4Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 4 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.021
+207,DO5Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 5 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.022
+220,DI9Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 9 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. User can configure P3.006 to change the source for the digital signal, either through an external terminal block or communication parameter P4.007.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.036
+221,DI10Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Digital Input 10 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally. User can configure P3.006 to change the source for the digital signal, either through an external terminal block or communication parameter P4.007.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.037
+222,VirtualDI11Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Virtual Digital Input 11 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). A virtual digital input is suitable for applications of communication triggering or when DI points are insufficient. User can set the DI that will be in immediate use at powerup as a normally closed contact for a virtual digital input, such as servo on.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NO contact)
+1=normally open (NC contact)
+U: reserved",6-IO,,,,,P2.038
+223,VirtualDI12Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Virtual Digital Input 12 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). A virtual digital input is suitable for applications of communication triggering or when DI points are insufficient. User can set the DI that will be in immediate use at powerup as a normally closed contact for a virtual digital input, such as servo on.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NO contact)
+1=normally open (NC contact)
+U: reserved",6-IO,,,,,P2.039
+224,VirtualDI13Configuration,All,0x0000,0x014F,0x0100,,,UINT,"Virtual Digital Input 13 Configuration
+Selects the DI function (YX) and function of the NO or NC contact (Z). A virtual digital input is suitable for applications of communication triggering or when DI points are insufficient. User can set the DI that will be in immediate use at powerup as a normally closed contact for a virtual digital input, such as servo on.
+See Description of Digital Input Functions in the user manual.
+
+YX: Input function
+See Description of Digital Input Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NO contact)
+1=normally open (NC contact)
+U: reserved",6-IO,,,,,P2.040
+225,DO6Configuration,All,0x0000,0x013F,0x0100,,,UINT,"Digital Output 6 Configuration
+Selects the DO function (YX) and function of the NO or NC contact (Z). When parameters are modified, re-start the servo drive so that it can function normally.
+See Description of Digital Output Function in the user manual.
+
+YX: Output function
+See Description of Digital Output Functions in the user manual.
+Z: Input contact NO or NC
+0=normally closed (NC contact)
+1=normally open (NO contact)
+U: reserved",6-IO,,,,,P2.041
+268,DIControlSource,All,0x0000,0x1FFF,0x0000,,,UINT,"Digital Input Control Source
+Each bit of this parameter determines one input source of DI signal.
+
+Bit0…Bit9 correspond to DI1 …DI10
+Bit10…Bit12 correspond to VDI11 …VDI13
+0=DI status is controlled by the external hardware
+1=DI status is controlled by ID281 (P4.007) DIOverride",6-IO,,,,x,P3.006
+280,DOOverride,All,0x0000,0x00FF,0x0000,,,UINT,"Digital Output Override
+If ID203 (P2.018) is set to 0x0130, then the output of DO#1 is the bit 0 status of ID280 (P4.006), and so forth. The DO Code (0x30…0x3F) can be set via communication DO, and then written into ID280 (P4.006).
+
+Bit 00: Corresponds to DO code = 0x30
+Bit 01: Corresponds to DO code = 0x31
+Bit 02: Corresponds to DO code = 0x32
+Bit 03: Corresponds to DO code = 0x33
+Bit 04: Corresponds to DO code = 0x34
+Bit 05: Corresponds to DO code = 0x35
+Bit 06: Corresponds to DO code = 0x36
+Bit 07: Corresponds to DO code = 0x37
+Bit 08: Corresponds to DO code = 0x38
+Bit 09: Corresponds to DO code = 0x39
+Bit 10: Corresponds to DO code = 0x3A
+Bit 11: Corresponds to DO code = 0x3B
+Bit 12: Corresponds to DO code = 0x3C
+Bit 13: Corresponds to DO code = 0x3D
+Bit 14: Corresponds to DO code = 0x3E
+Bit 15: Corresponds to DO code = 0x3F",6-IO,,,,x,P4.006
+281,DIOverride,All,0x0000,0x1FFF,0x0000,,,UINT,"Digital Input Override
+The source of DI input signal can be external terminal (DI1…DI5) or software SDI1 …SDI5 (corresponding to Bit 0…4 of this parameter, which is determined by ID268 (P3.006). If the corresponding bit of P3.006
+is 1, the source is software SDI [ID281 (P4.007)]; if the corresponding bit is 0, then the source is hardware DI.
+Read parameters: Shows the DI status after combining external DI and software DI.
+Write parameters: Writes the software SDI status.",6-IO,,,,x,P4.007
+282,KeypadInputStatus,All,0x0000,0x00FF,0x0000,,,UINT,"Drive Keypad Input Status
+Use this communication parameter to read and check if the five keys, MODE, UP, DOWN, SHIFT, and SET can function normally.",6-IO,x,,,x,P4.008
+283,DOStatus,All,0x0000,0x003F,0x0000,,,UINT,Digital Output Status,6-IO,x,,,x,P4.009

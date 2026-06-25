@@ -4,7 +4,9 @@
 **Platform:** ESP32 (WT32-ETH01)  
 **Framework:** ESP-IDF (FreeRTOS)  
 
-A comprehensive multi-axis gantry control library for ESP32 with 3-DoF support (X, Y, Theta) designed for pick-and-place applications with conveyor synchronization.
+A comprehensive multi-axis gantry control library for ESP32 with 3-DoF support (X, Z, Theta) designed for pick-and-place applications with conveyor synchronization.
+
+> **Axis convention:** `X` is the horizontal across-belt axis (belt-drive linear), `Z` is the vertical descent axis (ballscrew; `+Z` = up; `Z = 0` at the belt surface), `Theta` is the end-effector rotation. The conveyor downstream direction is `-Y` in the world frame; the gantry has no Y joint. Joint space is `(x, z, theta)` and the workspace pose is `(x, y, z, theta)` — the workspace `y` captures the fixed along-belt position of the gantry carriage.
 
 ---
 
@@ -29,9 +31,9 @@ A comprehensive multi-axis gantry control library for ESP32 with 3-DoF support (
 
 The Gantry library provides a complete motion control system for a 3-axis gantry robot. All three motion axes are driven by the generic `PulseMotor` library (see `lib/PulseMotor/`), so any mix of pulse-train driver hardware can be used. Per-axis drivetrain topology is configured independently via a `DrivetrainType` enum:
 
-- **X-axis**: Horizontal linear joint. Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt actuator (200 mm/rev).
-- **Y-axis**: Vertical linear joint. Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator (20 mm pitch).
-- **Theta-axis**: Rotational joint. Default deployment: custom pulse-train driver + SCHUNK ERD 04-40-D-H-N miniature rotary module.
+- **X-axis**: Horizontal across-belt linear joint. Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt actuator (200 mm/rev).
+- **Z-axis**: Vertical linear joint (descent; `+Z = up`). Default deployment: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator (20 mm pitch).
+- **Theta-axis**: Rotational joint about Z. Default deployment: custom pulse-train driver + SCHUNK ERD 04-40-D-H-N miniature rotary module.
 - **End-effector**: Digital output; default deployment is a SCHUNK KGG 100-80 pneumatic gripper.
 
 The library implements sequential motion planning, forward/inverse kinematics, trajectory planning, and safety features suitable for industrial automation applications.
@@ -43,13 +45,13 @@ The library implements sequential motion planning, forward/inverse kinematics, t
 ### ✅ Implemented Features
 
 - **Multi-axis Control**
-  - X / Y / Theta: PulseMotor driver (pulse+direction), each with independent `DrivetrainConfig` (ballscrew, belt, rack-pinion, or rotary-direct).
+  - X / Z / Theta: PulseMotor driver (pulse+direction), each with independent `DrivetrainConfig` (ballscrew, belt, rack-pinion, or rotary-direct).
   - Encoder feedback per axis via PCNT (when wired).
   - Trapezoidal velocity profiles in the driver, 5 ms ramp callback.
   - End-effector: digital output gripper control (e.g. SCHUNK KGG 100-80).
 
 - **Sequential Motion Planning**
-  - Automatic Y-axis descent → gripper actuation → Y-axis retraction → X-axis movement
+  - Automatic Z-axis descent (toward belt) → gripper actuation → Z-axis retraction to safe height → X-axis traverse
   - Safe height management for collision avoidance
   - Non-blocking state machine execution
 
@@ -125,11 +127,11 @@ xDt.belt_lead_mm_per_rev = 200.0f;
 xDt.encoder_ppr          = xDrv.encoder_ppr;
 xDt.motor_reducer_ratio  = 1.0f;
 
-// Repeat for yDrv/yDt (ballscrew) and tDrv/tDt (rotary-direct).
+// Repeat for zDrv/zDt (ballscrew) and tDrv/tDt (rotary-direct).
 
-Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, GRIPPER_PIN);
+Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, GRIPPER_PIN);
 gantry.setLimitPins(MIN_LIMIT_PIN, MAX_LIMIT_PIN);
-gantry.setYAxisLimits(0.0f, 200.0f);  // 0-200mm travel
+gantry.setZAxisLimits(0.0f, 200.0f);  // 0-200mm travel (Z = 0 at belt, +Z up)
 gantry.setThetaLimits(-180.0f, 180.0f);  // soft angular limits
 
 // Initialize
@@ -141,8 +143,8 @@ gantry.home();
 
 // Move to position (joint space)
 Gantry::JointConfig target;
-target.x = 100.0f;    // 100mm
-target.y = 50.0f;     // 50mm
+target.x = 100.0f;    // 100 mm across-belt
+target.z = 50.0f;     // 50 mm above belt
 target.theta = 45.0f; // 45 degrees
 
 gantry.moveTo(target, 50, 30);  // 50 mm/s, 30 deg/s
@@ -167,15 +169,15 @@ void app_main(void) {
 
 ```cpp
 // The library automatically sequences:
-// 1. Y-axis descends to target Y
+// 1. Z-axis descends to target Z (toward belt, +Z = up so descent is decreasing Z)
 // 2. Gripper actuates (close for picking, open for placing)
-// 3. Y-axis retracts to safe height
+// 3. Z-axis retracts to safe height
 // 4. X-axis moves to target X
 // 5. Theta moves independently
 
 Gantry::JointConfig pickPos;
 pickPos.x = 200.0f;
-pickPos.y = 30.0f;   // Low position for picking
+pickPos.z = 30.0f;   // Low (close to belt) for picking
 pickPos.theta = 0.0f;
 
 gantry.moveTo(pickPos, 50, 30);
@@ -187,7 +189,7 @@ while (gantry.isBusy()) {
 // Now move to place position
 Gantry::JointConfig placePos;
 placePos.x = 400.0f;
-placePos.y = 30.0f;
+placePos.z = 30.0f;
 placePos.theta = 90.0f;
 
 gantry.moveTo(placePos, 50, 30);
@@ -244,10 +246,10 @@ Gantry Library
 | Component | Status | Notes |
 |-----------|--------|-------|
 | X-axis (PulseMotor + belt) | ✅ Complete | Kinetix 5100 + SCHUNK Beta 100-ZRS |
-| Y-axis (PulseMotor + ballscrew) | ✅ Complete | Kinetix 5100 + SCHUNK Beta 80-SRS |
+| Z-axis (PulseMotor + ballscrew) | ✅ Complete | Kinetix 5100 + SCHUNK Beta 80-SRS (vertical; +Z = up) |
 | Theta-axis (PulseMotor + rotary-direct) | ✅ Complete | Custom driver + SCHUNK ERD 04-40-D-H-N |
 | End-effector | ✅ Complete | Digital output control |
-| Sequential Motion | ✅ Complete | Y→Gripper→Y→X sequence |
+| Sequential Motion | ✅ Complete | Z↓→Gripper→Z↑→X sequence |
 | Kinematics | ✅ Complete | Forward/inverse kinematics |
 | Homing | ✅ Complete | X-axis homing sequence |
 | Calibration | ✅ Complete | Axis length measurement |
@@ -339,8 +341,8 @@ See the [Examples Guide](docs/EXAMPLES.md) for complete examples:
 // Construction
 Gantry(const PulseMotor::DriverConfig&     xDrv,
        const PulseMotor::DrivetrainConfig& xDt,
-       const PulseMotor::DriverConfig&     yDrv,
-       const PulseMotor::DrivetrainConfig& yDt,
+       const PulseMotor::DriverConfig&     zDrv,
+       const PulseMotor::DrivetrainConfig& zDt,
        const PulseMotor::DriverConfig&     tDrv,
        const PulseMotor::DrivetrainConfig& tDt,
        int gripperPin);
@@ -352,12 +354,12 @@ void disable();
 
 // Configuration
 void setLimitPins(int xMinPin, int xMaxPin);
-void setYAxisLimits(float minMm, float maxMm);
+void setZAxisLimits(float minMm, float maxMm);
 void setThetaLimits(float minDeg, float maxDeg);
 void setJointLimits(float xMin, float xMax,
-                    float yMin, float yMax,
+                    float zMin, float zMax,
                     float thetaMin, float thetaMax);
-void setSafeYHeight(float safeHeight_mm);
+void setSafeZHeight(float safeHeight_mm);
 
 // Motion Control
 GantryError moveTo(const JointConfig& joint, ...);
@@ -373,7 +375,7 @@ int calibrate();
 void grip(bool active);
 
 // Status & Information
-int getCurrentY() const;
+int getCurrentZ() const;
 int getCurrentTheta() const;
 bool isAlarmActive() const;
 ```
@@ -411,17 +413,17 @@ xDt.encoder_ppr          = xDrv.encoder_ppr;
 xDt.motor_reducer_ratio  = AXIS_X_MOTOR_REDUCER_RATIO;
 ```
 
-Runtime-tunable knobs on the Gantry instance are limited to soft limits (`setYAxisLimits`, `setThetaLimits`, `setJointLimits`), limit-switch wiring (`setLimitPins`), safe-Y (`setSafeYHeight`), and homing speed (`setHomingSpeed`).
+Runtime-tunable knobs on the Gantry instance are limited to soft limits (`setZAxisLimits`, `setThetaLimits`, `setJointLimits`), limit-switch wiring (`setLimitPins`), safe-Z (`setSafeZHeight`), and homing speed (`setHomingSpeed`).
 
 ### Safe Height Configuration
 
 ```cpp
-gantry.setSafeYHeight(150.0f);  // Safe height for X-axis travel (mm)
+gantry.setSafeZHeight(150.0f);  // Safe Z (+Z = up) for X-axis travel (mm)
 ```
 
 ### Geometry Freeze Gate
 
-The kinematic offsets and safe-Y height in `include/axis_drivetrain_params.h` (`GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` until you:
+The kinematic offsets and safe-Z height in `include/axis_drivetrain_params.h` (`GANTRY_Z_AXIS_Y_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_X_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Z_HEIGHT_MM`) are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` until you:
 
 1. Re-measure against the frozen production design.
 2. Overwrite the five macros.
@@ -470,12 +472,12 @@ void gantryTask(void *pvParameters) {
 // In app_main():
 void app_main(void) {
     // Configure and create gantry instance
-    PulseMotor::DriverConfig     xDrv, yDrv, tDrv;
-    PulseMotor::DrivetrainConfig xDt,  yDt,  tDt;
+    PulseMotor::DriverConfig     xDrv, zDrv, tDrv;
+    PulseMotor::DrivetrainConfig xDt,  zDt,  tDt;
     // ... populate each from include/axis_pulse_motor_params.h
     //     and include/axis_drivetrain_params.h ...
 
-    static Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, GRIPPER_PIN);
+    static Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, GRIPPER_PIN);
     // ... configure axes ...
     
     // Create gantry task
@@ -489,16 +491,20 @@ void app_main(void) {
 
 ## Coordinate Systems
 
-### Joint Space
+### Joint Space `(x, z, theta)`
 
-- **X**: Horizontal position (mm) - right-to-left
-- **Y**: Vertical position (mm) - down-to-up  
-- **Theta**: Rotation angle (degrees) - around Y-axis
+- **X**: Across-belt horizontal position (mm). `AXIS_X_INVERT_DIR` selects the sign at compile time.
+- **Z**: Vertical position (mm). `+Z = up`; `Z = 0` is the belt surface.
+- **Theta**: Rotation angle (degrees) around the Z axis.
 
-### Workspace Space (End-Effector)
+There is no `JointConfig::y` — the gantry has no Y joint.
 
-- **X, Y, Z**: Position (mm) in workspace coordinates
-- **Theta**: Orientation (degrees)
+### Workspace Space `(x, y, z, theta)` (End-Effector)
+
+- **X**: Across-belt position (mm).
+- **Y**: Along-belt position (mm). The conveyor downstream direction is `-Y`; the gantry's `y` is the fixed carriage offset along the belt set by `GANTRY_Z_AXIS_Y_OFFSET_MM`.
+- **Z**: Vertical position (mm), `+Z = up`.
+- **Theta**: Orientation (degrees).
 
 ### Transformations
 
@@ -573,13 +579,13 @@ Well within ESP32's 320KB RAM limit.
    - Verify motors are enabled (`enable()`)
    - Check alarm status (`isAlarmActive()`)
 
-2. **Y-axis not moving**
-   - Verify Y-axis pins configured (`setYAxisPins()`)
-   - Check steps-per-mm setting
-   - Verify limits are set correctly
+2. **Z-axis not moving**
+   - Verify Z-axis `DriverConfig` is populated (see `makeZDriverConfig()` in `src/main.cpp`)
+   - Check `AXIS_Z_PULSES_PER_MM` against the K5100 commissioning value
+   - Verify limits are set correctly (`setZAxisLimits`)
 
 3. **Sequential motion stuck**
-   - Check safe Y height configuration
+   - Check safe Z height configuration (`setSafeZHeight`)
    - Verify gripper actuation time
    - Monitor motion state in debugger
 
@@ -592,7 +598,7 @@ Well within ESP32's 320KB RAM limit.
 
 ## Contributing
 
-This library is currently in active development. Known bugs and in-progress items are tracked in the root-level `PROGRAMMING_REFERENCE.md` (§12 "Known Bugs & Gotchas") and in `lib/Gantry/CHANGELOG.md`.
+This library is currently in active development. Known bugs and in-progress items are tracked in the root-level `PROGRAMMING_REFERENCE.md` (section 12 "Known Bugs & Gotchas") and in `lib/Gantry/CHANGELOG.md`.
 
 ---
 
@@ -605,7 +611,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Support
 
 For issues, questions, or contributions:
-- Check the root-level `PROGRAMMING_REFERENCE.md` (§12) for known issues
+- Check the root-level `PROGRAMMING_REFERENCE.md` (section 12) for known issues
 - Review [API_REFERENCE.md](docs/API_REFERENCE.md) for API details
 - See [EXAMPLES.md](docs/EXAMPLES.md) for usage examples
 

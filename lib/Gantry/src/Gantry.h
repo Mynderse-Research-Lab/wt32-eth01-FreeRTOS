@@ -1,16 +1,27 @@
 /**
  * @file Gantry.h
- * @brief Multi-axis gantry control system for ESP32
- * @version 2.0.0
+ * @brief Multi-axis gantry control system for ESP32.
+ * @version 2.1.0
  *
- * All three motion axes (X, Y, Theta) are driven by the generic PulseMotor
+ * All three motion axes (X, Z, Theta) are driven by the generic PulseMotor
  * library. Drivetrain topology is chosen PER AXIS via a DrivetrainType enum,
  * so any axis can independently be a ballscrew, a belt, a rack-and-pinion, or
  * a direct-drive rotary.
  *
+ * Coordinate convention (firmware-wide, as of 2026-05):
+ *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
+ *   - Y: along-belt direction; NO gantry actuator. Conveyor downstream is
+ *        the -Y direction. Battery positions on the belt carry y values;
+ *        the motion layer does not consume them.
+ *   - Z: vertical (gantry descent). +Z = up; joint Z=0 is homing datum; physical
+ *        belt/bed vs datum: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM. Safe-retracted /
+ *        top-home = Z_max. The vertical actuator was called "Y" in
+ *        pre-2026-05 firmware - it is the same hardware, just renamed.
+ *   - Theta: rotation about Z.
+ *
  * Verified hardware layout:
  *   - X: Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt actuator.
- *   - Y: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator.
+ *   - Z: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator.
  *   - Theta: Custom pulse-train driver + SCHUNK ERD 04-40-D-H-N rotary module.
  *   - End effector: SCHUNK KGG 100-80 pneumatic parallel gripper (digital).
  */
@@ -59,14 +70,14 @@ enum class HomingStatus {
 
 struct GantryStatus {
     int32_t currentX_mm;
-    int32_t currentY_mm;
+    int32_t currentZ_mm;
     int32_t currentTheta_deg;
     int32_t targetX_mm;
-    int32_t targetY_mm;
+    int32_t targetZ_mm;
     int32_t targetTheta_deg;
     bool isBusy;
     bool xMoving;
-    bool yMoving;
+    bool zMoving;
     bool thetaMoving;
     bool initialized;
     bool enabled;
@@ -90,14 +101,14 @@ public:
     /**
      * @brief Construct with three per-axis driver/drivetrain pairs.
      *
-     * X and Y axes must be configured with a linear drivetrain
+     * X and Z axes must be configured with a linear drivetrain
      * (BALLSCREW / BELT / RACKPINION). Theta must be configured with
      * DRIVETRAIN_ROTARY_DIRECT.
      */
     Gantry(const PulseMotor::DriverConfig&     xDrv,
            const PulseMotor::DrivetrainConfig& xDt,
-           const PulseMotor::DriverConfig&     yDrv,
-           const PulseMotor::DrivetrainConfig& yDt,
+           const PulseMotor::DriverConfig&     zDrv,
+           const PulseMotor::DrivetrainConfig& zDt,
            const PulseMotor::DriverConfig&     tDrv,
            const PulseMotor::DrivetrainConfig& tDt,
            int gripperPin);
@@ -123,13 +134,13 @@ public:
      * app code commands Gantry only.
      *
      * @param xDrv       X-axis PulseMotor::DriverConfig (DIR/EN/ALARM/ARST).
-     * @param yDrv       Y-axis PulseMotor::DriverConfig.
+     * @param zDrv       Z-axis PulseMotor::DriverConfig.
      * @param tDrv       Theta-axis PulseMotor::DriverConfig.
      * @param gripperPin End-effector pin (MCP or direct, same encoding as
      *                   DriverConfig output pins).
      */
     static void preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
-                                   const PulseMotor::DriverConfig& yDrv,
+                                   const PulseMotor::DriverConfig& zDrv,
                                    const PulseMotor::DriverConfig& tDrv,
                                    int gripperPin);
 
@@ -140,27 +151,27 @@ public:
 
     // ---------- Configuration ----------
     void setLimitPins(int xMinPin, int xMaxPin);
-    void setYAxisLimits(float minMm, float maxMm);
+    void setZAxisLimits(float minMm, float maxMm);
     void setThetaLimits(float minDeg, float maxDeg);
     void setJointLimits(float xMin, float xMax,
-                        float yMin, float yMax,
+                        float zMin, float zMax,
                         float thetaMin, float thetaMax);
     void setEndEffectorPin(int pin, bool activeHigh = true);
-    void setSafeYHeight(float safeHeight_mm);
+    void setSafeZHeight(float safeHeight_mm);
 
     // ---------- Motion ----------
-    /// @brief Home all supported axes (currently X only; Y/Theta are stubs).
+    /// @brief Home all supported axes (currently X only; Z/Theta are stubs).
     void home();
-    /// @brief Calibrate all supported axes (currently X only; Y/Theta are stubs).
+    /// @brief Calibrate all supported axes (currently X only; Z/Theta are stubs).
     int  calibrate();
 
-    // Per-axis homing / calibration. X is real; Y and Theta are stubs that
+    // Per-axis homing / calibration. X is real; Z and Theta are stubs that
     // emit a warning until their limit switches are wired up.
     void homeX();
-    void homeY();
+    void homeZ();
     void homeTheta();
     int  calibrateX();
-    int  calibrateY();
+    int  calibrateZ();
     int  calibrateTheta();
 
     /// @brief Set the periodic-while-busy MOVE log rate (Hz) for all axes.
@@ -170,7 +181,7 @@ public:
     void requestAbort();
     bool isAbortRequested() const;
 
-    void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed);
+    void moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed);
 
     GantryError moveTo(const JointConfig& joint,
                        uint32_t speed_mm_per_s        = 50,
@@ -197,7 +208,7 @@ public:
     int32_t getXCommandedPulses() const;
     float   getXCommandedMm() const;
     float   getXEncoderMm() const;
-    int     getCurrentY() const;
+    int     getCurrentZ() const;
     int     getCurrentTheta() const;
 
     // ---------- Diagnostics ----------
@@ -222,7 +233,7 @@ public:
 
 private:
     std::unique_ptr<GantryLinearAxis> axisX_;
-    std::unique_ptr<GantryLinearAxis> axisY_;
+    std::unique_ptr<GantryLinearAxis> axisZ_;
     std::unique_ptr<GantryRotaryAxis> axisTheta_;
     GantryEndEffector endEffector_;
 
@@ -241,9 +252,9 @@ private:
 
     // Position tracking (mirrored from axis wrappers for cheap access)
     float   currentX_mm_;
-    int32_t currentY_;
+    int32_t currentZ_;
     int32_t currentTheta_;
-    int32_t targetY_;
+    int32_t targetZ_;
     int32_t targetTheta_;
     int32_t axisLength_;
 
@@ -251,20 +262,22 @@ private:
     KinematicParameters  kinematicParams_;
     float                stepsPerRev_;
 
-    // Sequential motion state machine
+    // Sequential motion state machine. Naming follows +Z = up:
+    //   Z_DESCENDING  - lowering toward the belt (Z decreasing).
+    //   Z_RETRACTING  - rising toward the safe top height (Z increasing).
     enum class MotionState {
         IDLE,
-        Y_DESCENDING,
+        Z_DESCENDING,
         GRIPPER_ACTUATING,
-        Y_RETRACTING,
+        Z_RETRACTING,
         X_MOVING,
         THETA_MOVING
     };
     MotionState motionState_;
     float       targetX_mm_;
-    float       targetY_mm_;
+    float       targetZ_mm_;
     float       targetTheta_deg_;
-    float       safeYHeight_mm_;
+    float       safeZHeight_mm_;
     uint32_t    speed_mm_per_s_;
     uint32_t    speed_deg_per_s_;
     uint32_t    acceleration_mm_per_s2_;
@@ -284,7 +297,7 @@ private:
     void startXAxisMotion();
 
     uint32_t getHomingSpeed() const;
-    bool     moveYAxisTo(float targetY, float speed, float accel, float decel);
+    bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
     void     updateAxisPositions();
     void     stopAllMotion();
 };

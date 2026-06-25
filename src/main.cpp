@@ -2,10 +2,15 @@
  * @file main.cpp
  * @brief Gantry control application for WT32-ETH01 with MCP23S17 IO expansion.
  *
+ * Coordinate convention (firmware-wide, as of 2026-05):
+ *   X = horizontal traverse (across belt), Y = along-belt (no gantry actuator;
+ *   conveyor downstream = -Y), Z = vertical (+Z = up). Joint Z=0 is homing datum;
+ *   physical bed offset: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (axis_drivetrain_params.h).
+ *
  * FreeRTOS application with:
  * - MCP23S17 SPI GPIO expander initialization
  * - X-axis pulse-train servo control (Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt)
- * - Y-axis pulse-train servo control (Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew)
+ * - Z-axis pulse-train servo control (Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew)
  * - Theta-axis pulse-train rotary control (custom driver + SCHUNK ERD 04-40-D-H-N)
  * - End-effector: SCHUNK KGG 100-80 pneumatic gripper
  * - Interactive serial console (gantry_test_console)
@@ -35,24 +40,30 @@
 #include "gantry_app_constants.h"
 #include "axis_pulse_motor_params.h"
 #include "axis_drivetrain_params.h"
+#include "mqtt_topics.h"
+#include "MqttBridge.h"
+#include "pick_scheduler.h"
 
 static const char* TAG = "GantryApp";
 
 // Pulse pins must run on direct ESP32 GPIOs (LEDC). Encode them so the
 // gpio_expander-aware pin path treats them as direct GPIOs.
 static const int PIN_X_PULSE_EXP     = GPIO_EXPANDER_DIRECT_PIN(PIN_X_PULSE);
-static const int PIN_Y_PULSE_EXP     = GPIO_EXPANDER_DIRECT_PIN(PIN_Y_PULSE);
+static const int PIN_Z_PULSE_EXP     = GPIO_EXPANDER_DIRECT_PIN(PIN_Z_PULSE);
 static const int PIN_THETA_PULSE_EXP = GPIO_EXPANDER_DIRECT_PIN(PIN_THETA_PULSE);
 
 static void initDirectOutputs(void) {
+    // PIN_Z_PULSE (GPIO2) is a strapping pin; pre-seed it LOW on the raw ESP32
+    // GPIO before LEDC binds the channel, so the line is in a known state
+    // through reset.
     gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << PIN_Y_PULSE);
+    io_conf.pin_bit_mask = (1ULL << PIN_Z_PULSE);
     io_conf.mode         = GPIO_MODE_OUTPUT;
     io_conf.pull_up_en   = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type    = GPIO_INTR_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)PIN_Y_PULSE, 0));
+    ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)PIN_Z_PULSE, 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +155,7 @@ static PulseMotor::DriverConfig makeXDriverConfig() {
     cfg.ledc_channel     = X_PULSE_LEDC_CHANNEL;
     cfg.ledc_resolution  = AXIS_X_LEDC_RESOLUTION_BITS;
     cfg.pcnt_unit        = X_ENCODER_PCNT_UNIT;
-    cfg.enable_encoder_feedback = true;
+    cfg.enable_encoder_feedback = (AXIS_X_ENCODER_FEEDBACK_ENABLED != 0);
     cfg.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
     cfg.limit_debounce_cycles    = AXIS_X_LIMIT_DEBOUNCE_CYCLES;
     cfg.limit_sample_interval_ms = AXIS_X_LIMIT_SAMPLE_INTERVAL_MS;
@@ -160,43 +171,43 @@ static PulseMotor::DrivetrainConfig makeXDrivetrainConfig() {
     return dt;
 }
 
-static PulseMotor::DriverConfig makeYDriverConfig() {
+static PulseMotor::DriverConfig makeZDriverConfig() {
     PulseMotor::DriverConfig cfg;
-    cfg.pulse_pin        = PIN_Y_PULSE_EXP;
-    cfg.dir_pin          = PIN_Y_DIR;
-    cfg.enable_pin       = PIN_Y_ENABLE;
-    cfg.alarm_reset_pin  = PIN_Y_ALARM_RESET;
-    cfg.alarm_pin        = PIN_Y_ALARM_STATUS;
-    cfg.encoder_a_pin    = PIN_Y_ENC_A;
-    cfg.encoder_b_pin    = PIN_Y_ENC_B;
+    cfg.pulse_pin        = PIN_Z_PULSE_EXP;
+    cfg.dir_pin          = PIN_Z_DIR;
+    cfg.enable_pin       = PIN_Z_ENABLE;
+    cfg.alarm_reset_pin  = PIN_Z_ALARM_RESET;
+    cfg.alarm_pin        = PIN_Z_ALARM_STATUS;
+    cfg.encoder_a_pin    = PIN_Z_ENC_A;
+    cfg.encoder_b_pin    = PIN_Z_ENC_B;
 
     cfg.limit_min_pin    = -1;
     cfg.limit_max_pin    = -1;
 
     cfg.pulse_mode       = PulseMotor::PulseMode::PULSE_DIRECTION;
-    cfg.encoder_ppr      = AXIS_Y_ENCODER_PPR;
-    cfg.max_pulse_freq   = AXIS_Y_MAX_PULSE_FREQ_HZ;
-    cfg.gear_numerator   = AXIS_Y_GEAR_NUMERATOR;
-    cfg.gear_denominator = AXIS_Y_GEAR_DENOMINATOR;
-    cfg.invert_dir_pin   = AXIS_Y_INVERT_DIR != 0;
-    cfg.invert_output_logic = AXIS_Y_INVERT_OUTPUT_LOGIC != 0;
-    cfg.ledc_channel     = Y_PULSE_LEDC_CHANNEL;
-    cfg.ledc_resolution  = AXIS_Y_LEDC_RESOLUTION_BITS;
-    cfg.pcnt_unit        = Y_ENCODER_PCNT_UNIT;
-    cfg.enable_encoder_feedback = true;
-    cfg.homing_speed_pps = AXIS_Y_HOMING_SPEED_PPS;
-    cfg.limit_debounce_cycles    = AXIS_Y_LIMIT_DEBOUNCE_CYCLES;
-    cfg.limit_sample_interval_ms = AXIS_Y_LIMIT_SAMPLE_INTERVAL_MS;
+    cfg.encoder_ppr      = AXIS_Z_ENCODER_PPR;
+    cfg.max_pulse_freq   = AXIS_Z_MAX_PULSE_FREQ_HZ;
+    cfg.gear_numerator   = AXIS_Z_GEAR_NUMERATOR;
+    cfg.gear_denominator = AXIS_Z_GEAR_DENOMINATOR;
+    cfg.invert_dir_pin   = AXIS_Z_INVERT_DIR != 0;
+    cfg.invert_output_logic = AXIS_Z_INVERT_OUTPUT_LOGIC != 0;
+    cfg.ledc_channel     = Z_PULSE_LEDC_CHANNEL;
+    cfg.ledc_resolution  = AXIS_Z_LEDC_RESOLUTION_BITS;
+    cfg.pcnt_unit        = Z_ENCODER_PCNT_UNIT;
+    cfg.enable_encoder_feedback = (AXIS_Z_ENCODER_FEEDBACK_ENABLED != 0);
+    cfg.homing_speed_pps = AXIS_Z_HOMING_SPEED_PPS;
+    cfg.limit_debounce_cycles    = AXIS_Z_LIMIT_DEBOUNCE_CYCLES;
+    cfg.limit_sample_interval_ms = AXIS_Z_LIMIT_SAMPLE_INTERVAL_MS;
     return cfg;
 }
 
-static PulseMotor::DrivetrainConfig makeYDrivetrainConfig() {
+static PulseMotor::DrivetrainConfig makeZDrivetrainConfig() {
     PulseMotor::DrivetrainConfig dt;
-    dt.type                    = (PulseMotor::DrivetrainType)AXIS_Y_DRIVETRAIN;
-    dt.ballscrew_lead_mm       = AXIS_Y_LEAD_MM_PER_REV;
-    dt.ballscrew_critical_rpm  = AXIS_Y_CRITICAL_RPM;
-    dt.encoder_ppr             = AXIS_Y_ENCODER_PPR;
-    dt.motor_reducer_ratio     = AXIS_Y_MOTOR_REDUCER_RATIO;
+    dt.type                    = (PulseMotor::DrivetrainType)AXIS_Z_DRIVETRAIN;
+    dt.ballscrew_lead_mm       = AXIS_Z_LEAD_MM_PER_REV;
+    dt.ballscrew_critical_rpm  = AXIS_Z_CRITICAL_RPM;
+    dt.encoder_ppr             = AXIS_Z_ENCODER_PPR;
+    dt.motor_reducer_ratio     = AXIS_Z_MOTOR_REDUCER_RATIO;
     return dt;
 }
 
@@ -258,15 +269,15 @@ extern "C" void app_main(void) {
     // ------------------------------------------------------------------
     PulseMotor::DriverConfig     xDrv = makeXDriverConfig();
     PulseMotor::DrivetrainConfig xDt  = makeXDrivetrainConfig();
-    PulseMotor::DriverConfig     yDrv = makeYDriverConfig();
-    PulseMotor::DrivetrainConfig yDt  = makeYDrivetrainConfig();
+    PulseMotor::DriverConfig     zDrv = makeZDriverConfig();
+    PulseMotor::DrivetrainConfig zDt  = makeZDrivetrainConfig();
     PulseMotor::DriverConfig     tDrv = makeThetaDriverConfig();
     PulseMotor::DrivetrainConfig tDt  = makeThetaDrivetrainConfig();
 
     // ------------------------------------------------------------------
     // Boot-time pin seeding (defensive; idempotent).
     //
-    //   initDirectOutputs()        - pre-seeds PIN_Y_PULSE (GPIO2, strap)
+    //   initDirectOutputs()        - pre-seeds PIN_Z_PULSE (GPIO2, strap)
     //                                low on direct ESP GPIO before LEDC
     //                                takes over. Stays in main because it
     //                                is chip-peripheral setup, not Gantry
@@ -277,12 +288,12 @@ extern "C" void app_main(void) {
     //                                ARCHITECTURE_FLOW.md invariant 6.
     // ------------------------------------------------------------------
     initDirectOutputs();
-    Gantry::Gantry::preparePinsForBoot(xDrv, yDrv, tDrv, PIN_GRIPPER);
+    Gantry::Gantry::preparePinsForBoot(xDrv, zDrv, tDrv, PIN_GRIPPER);
 
     // ------------------------------------------------------------------
     // Create Gantry instance
     // ------------------------------------------------------------------
-    static Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, PIN_GRIPPER);
+    static Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, PIN_GRIPPER);
 
     // X-axis limit switches (via MCP23S17)
     gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
@@ -292,11 +303,11 @@ extern "C" void app_main(void) {
     // calibration sweep will override these on boot-reset via
     // Gantry::calibrate() and the homing task.
     gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM,     AXIS_X_HARD_LIMIT_MAX_MM,
-                          AXIS_Y_HARD_LIMIT_MIN_MM,     AXIS_Y_HARD_LIMIT_MAX_MM,
+                          AXIS_Z_HARD_LIMIT_MIN_MM,     AXIS_Z_HARD_LIMIT_MAX_MM,
                           AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
-    gantry.setYAxisLimits(AXIS_Y_HARD_LIMIT_MIN_MM, AXIS_Y_HARD_LIMIT_MAX_MM);
+    gantry.setZAxisLimits(AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM);
     gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
-    gantry.setSafeYHeight(GANTRY_SAFE_Y_HEIGHT_MM);
+    gantry.setSafeZHeight(GANTRY_SAFE_Z_HEIGHT_MM);
 
     // ------------------------------------------------------------------
     // Initialize and enable
@@ -315,8 +326,28 @@ extern "C" void app_main(void) {
     // ------------------------------------------------------------------
     // FreeRTOS tasks
     // ------------------------------------------------------------------
+    BaseType_t result;
+    static MqttBridge::EthernetLink ethernetLink;
+    static MqttBridge::Bridge mqttBridge(&ethernetLink);
+    if (!mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
+        ESP_LOGE(TAG, "FATAL: MQTT bridge failed to start; halting application startup.");
+        gantry.disable();
+        return;
+    }
+    (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
+
+    static PickSchedulerTaskConfig pickCfg = { &gantry, &mqttBridge };
+    result = xTaskCreatePinnedToCore(
+        pickSchedulerTask, "PickScheduler",
+        PICK_SCHEDULER_TASK_STACK, &pickCfg,
+        PICK_SCHEDULER_TASK_PRIORITY, nullptr, PICK_SCHEDULER_TASK_CORE);
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "FATAL: Failed to create PickScheduler task");
+        gantry.disable();
+        return;
+    }
     static UpdateTaskConfig updateCfg = { &gantry };
-    BaseType_t result = xTaskCreatePinnedToCore(
+    result = xTaskCreatePinnedToCore(
         gantryUpdateTask, "GantryUpdate",
         GANTRY_UPDATE_TASK_STACK, &updateCfg,
         GANTRY_UPDATE_TASK_PRIORITY, nullptr, GANTRY_UPDATE_TASK_CORE);
@@ -335,17 +366,17 @@ extern "C" void app_main(void) {
     consoleCfg.x_enable_pin           = PIN_X_ENABLE;
     consoleCfg.x_alarm_pin            = PIN_X_ALARM_STATUS;
     consoleCfg.x_alarm_reset_pin      = PIN_X_ALARM_RESET;
-    consoleCfg.y_alarm_pin            = PIN_Y_ALARM_STATUS;
-    consoleCfg.y_alarm_reset_pin      = PIN_Y_ALARM_RESET;
+    consoleCfg.z_alarm_pin            = PIN_Z_ALARM_STATUS;
+    consoleCfg.z_alarm_reset_pin      = PIN_Z_ALARM_RESET;
     consoleCfg.x_encoder_a_pin        = PIN_X_ENC_A;
     consoleCfg.x_encoder_b_pin        = PIN_X_ENC_B;
-    consoleCfg.y_pulse_pin            = PIN_Y_PULSE;
-    consoleCfg.y_encoder_a_pin        = PIN_Y_ENC_A;
-    consoleCfg.y_encoder_b_pin        = PIN_Y_ENC_B;
+    consoleCfg.z_pulse_pin            = PIN_Z_PULSE;
+    consoleCfg.z_encoder_a_pin        = PIN_Z_ENC_A;
+    consoleCfg.z_encoder_b_pin        = PIN_Z_ENC_B;
     consoleCfg.x_pulse_ledc_channel    = X_PULSE_LEDC_CHANNEL;
-    consoleCfg.y_pulse_ledc_channel    = Y_PULSE_LEDC_CHANNEL;
+    consoleCfg.z_pulse_ledc_channel    = Z_PULSE_LEDC_CHANNEL;
     consoleCfg.theta_pulse_ledc_channel = THETA_PULSE_LEDC_CHANNEL;
-    consoleCfg.theta_pwm_pin           = PIN_THETA_PULSE;  // legacy field name; pulse STEP GPIO
+    consoleCfg.theta_pulse_pin         = PIN_THETA_PULSE;
 
     result = xTaskCreatePinnedToCore(
         gantryTestConsoleTask, "SerialCmd",

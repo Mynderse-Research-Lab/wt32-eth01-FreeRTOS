@@ -1,0 +1,270 @@
+"Kinetix 5100 Servo Drive Parameters
+For more information see:"
+"Kinetix 5100 Servo Drive User Manual,publication 2198-UM004"
+
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+122,VelocityCmdLowPassFilterTime,S/Sz/IO,0,1000,0,,ms,INT,r,"5-Control
+15-Filter",,,,,P1.006
+123,TorqueCmdLowPassFilterTime,T/Tz/IO,0,1000,0,,ms,INT,"Torque Command Low Pass Filter Time Constant
+Setting this parameter to 0 disables this function.","5-Control
+15-Filter",,,,,P1.007
+124,PositionCmdLowPassFilterTime,PT/PR/IO,0,1000,0,,10ms,INT,"Position Command Low Pass Filter Time Constant
+Setting this parameter to 0 disables this function.","5-Control
+15-Filter
+20-Tuning",,,,,P1.008
+135,LowFreqVibrationSuppression1Frequency,PT/PR/IO,10,1000,1000,0.1,Hz,INT,"Low-frequency Vibration Suppression 1 Frequency
+Sets the value of the first low-frequency vibration suppression frequency. When ID136 (P1.026) is set to 0, this function is disabled.",5-Control,,,,,P1.025
+136,LowFreqVibrationSuppression1Gain,PT/PR/IO,0,9,0,,,INT,"Low-frequency Vibration Suppression 1 Gain
+Setting this parameter to 0 disables the first low-frequency vibration suppression filter.
+When setting the gain of the first low-frequency vibration suppression, increasing the setting value can improve the position response,
+but if the value is set too high, the motor may not operate smoothly. The recommended value is 1.",5-Control,,,,,P1.026
+137,LowFreqVibrationSuppression2Frequency,PT/PR/IO,10,1000,1000,0.1,Hz,INT,"Low-frequency Vibration Suppression 2 Frequency
+Sets the value of the second low-frequency vibration suppression frequency. When ID138 (P1.028) is set to 0, this function is disabled.",5-Control,,,,,P1.027
+138,LowFreqVibrationSuppression2Gain,PT/PR/IO,0,9,0,,,INT,"Low-frequency Vibration Suppression 2 Gain
+Setting this parameter to 0 disables the second low-frequency vibration suppression filter.
+When setting the gain of the second low-frequency vibration suppression, increasing the setting value can improve the position response, but if the value is set too high, the motor may not operate smoothly. The recommended value is 1.",5-Control,,,,,P1.028
+141,SCurveAccelTime,S/Sz/IO,1,65500,200,,ms,UINT,"Acceleration Time Constant of S-Curve Velocity Profile
+See S-curve Filter (Speed Mode) in the user manual.","5-Control
+15-Filter
+20-Tuning",,,,,P1.034
+142,SCurveDecelTime,S/Sz/IO,1,65500,200,,ms,UINT,"Deceleration Time Constant of S-curve Velocity Profile
+See S-curve Filter (Speed Mode) in the user manual.","5-Control
+15-Filter
+20-Tuning",,,,,P1.035
+143,SCurveSmoothTime,PR/S/Sz/IO,0,65500,0,,ms,UINT,"Smoothing Time of S-curve
+See S-curve Filter (Position Mode) and S-curve Filter (Speed Mode) in the user manual.","5-Control
+15-Filter
+20-Tuning",,,,,P1.036
+144,LoadInertiaRatio,All,0,2000,60,,Load Inertia/Motor Inertia,UINT,"Load Inertia Ratio
+Ratio of the external mechanical load / rotor inertia of the servo motor","5-Control
+18-Velocity Loop
+20-Tuning",,,,,P1.037
+164,VelocityCmdMovingFilterTime,S/IO,0,40,0,,ms,INT,"Velocity Command Moving Filter Time Constant
+Setting this parameter to 0 disables this filter. The moving filter can smooth the command at the beginning and end of the step command.
+See Low Pass Filter for Speed Command in the user manual.","5-Control
+15-Filter",,,,,P1.059
+168,AnalogToPositionSmoothTime,PT/IO,0,1000,1,,10ms,INT,"Analog Position Command Smooth Time Constant
+Special smooth time constant for analog position command. Only valid for analog position command.",5-Control,,,,,P1.065
+170,PositionCmdMovingFilterTime,PT/PR/IO,0,100,4,,ms,INT,"Position Command Moving Filter Time Constant
+Setting this parameter to 0 disables this filter. The moving filter can smooth the command at the beginning and end of the step command, but it will delay the command.","5-Control
+15-Filter
+20-Tuning",,,,,P1.068
+174,FullHalfClosedLoopLowPassFilterTime,PT/IO,0,1000,100,,ms,INT,"Full/Half-closed Loop Control Low Pass Filter Time Constant
+Set the value to 0 to disable the low-pass filter (bypass) function.
+When the stiffness of mechanical system between full- and half-closed loops is insufficient, users can set up the proper time constant to enhance the stability of the system. That is, temporarily creating the half-closed loop effect, and after stabilizing, full-closed loop effect is created. When the stiffness is sufficient, set to bypass.
+Increasing the value of this parameter increases the stiffness.",5-Control,,,,,P1.075
+185,PositionProportionalGain,PT/PR/IO,0,2047,36,,rad/s,INT,"Position Proportional Gain
+When the value of position control gain is increased, the position response can be enhanced and the position error can be reduced. However, if the value is set too big, it may easily cause vibration and noise.","5-Control
+17-Position Loop
+20-Tuning",,,,,P2.000
+186,PositionProportionalGainRate,PT/PR/IO,10,500,100,,%,INT,"Position Proportional Gain Changing Rate
+Switch the changing rate of position control gain according to the gain switching condition.",5-Control,,,,,P2.001
+187,VelocityFeedforwardGain,PT/PR/IO,0,100,50,,%,INT,"Velocity Feedforward Gain
+If the position control command is changed smoothly, increasing the gain value can reduce the position following error. If it is not changed smoothly, decreasing the gain value can reduce mechanical vibration.
+This parameter is disabled when the two dimensional control function is on [ID253 (P2.094) Bit 12 = 1]","5-Control
+17-Position Loop",,,,,P2.002
+188,VelocityFeedforwardLowPassFilterTime,PT/PR/IO,2,100,5,,ms,INT,"Velocity Feedforward Low Pass Filter Time Constant
+If the position control command is changed smoothly, decreasing the smooth constant value can reduce the position following error. If not changed smoothly, increasing the smooth constant value can reduce mechanical vibration.","5-Control
+17-Position Loop",,,,,P2.003
+189,VelocityProportionalGain,All,0,8191,144,,rad/s,INT,"Speed Proportional Gain
+Increase the value of speed control gain can enhance the speed response. However, if the value is set too big, it may cause vibration and noise.","5-Control
+18-Velocity Loop
+20-Tuning",,,,,P2.004
+190,VelocityProportionalGainRate,All,10,500,100,,%,INT,"Speed Proportional Gain Changing Rate
+Switch the changing rate of speed control gain according to the gain switching condition.",5-Control,,,,,P2.005
+191,VelocityIntegralGain,All,0,1023,23,,rad/s,INT,"Speed Integral Gain
+Increasing the value of integral speed control can enhance speed response and reduce the deviation of speed control. However, if the value is set too big, it may cause vibration and noise.","5-Control
+18-Velocity Loop
+20-Tuning",,,,,P2.006
+192,AccelFeedforwardGain,All,0,100,0,,%,INT,"Acceleration Feedforward Gain
+If the speed control command is changed smoothly, increasing the gain value can reduce the speed following error. If not changed smoothly, decreasing the gain value can reduce mechanical vibration.","5-Control
+18-Velocity Loop",,,,,P2.007
+208,NotchFilter1Frequency,All,50,5000,1000,,Hz,INT,"Notch Filter 1 Frequency
+The first setting value of resonance frequency. If ID209 (P2.024) is set to 0, this function is disabled.
+","5-Control
+15-Filter
+20-Tuning",,,,,P2.023
+209,NotchFilter1Depth,All,0,40,0,,-dB,INT,"Notch Filter 1 Depth
+This is the first resonance suppression (Notch filter) attenuation rate. For example, if the value of attenuation rate is set to 5, the attenuation rate is -5 dB.
+
+0=Notch filter function disabled","5-Control
+15-Filter
+20-Tuning",,,,,P2.024
+210,ResonanceSuppressionLowPassFilterTime,All,0,1000,8,0.1,ms,INT,"Resonance Suppression Low Pass Filter Time Constant
+Set the time constant for the low-pass filter for resonance suppression. Set this parameter to 0 to disable the low-pass filter.","5-Control
+19-Current Loop
+20-Tuning",,,,,P2.025
+211,AntiInterferenceGain,All,0,1023,0,,rad/s,INT,"Anti-interference Gain
+Increasing this parameter can increase the damping of the speed loop. Setting the value of ID211 (P2.026) to equal ID191 (P2.006) is recommended. See the following for setting ID211 (P2.026):
+1. In Speed mode, increase the value of this parameter to reduce speed overshoot.
+2. In Position mode, decrease the value of this parameter to reduce position overshoot.",5-Control,,,,,P2.026
+212,GainSwitchingSelection,All,0x0000,0x0018,0x0000,,,UINT,"Gain Switching Selection
+See Gain Adjustment of the Position Loop and Gain Adjustment of Speed Loop in the user manual.
+
+X:Gain switching condition
+0=Disable gain switching function
+1=Signal of gain switching (GAINUP) is ON
+2=In position control mode, position error is greater than the value of ID214 (P2.029)
+3=Frequency of position command is greater than the value of ID214 (P2.029)
+4=Rotation speed of servo motor is faster than the value of ID214 (P2.029)
+5=Signal of gain switching (GAINUP) is OFF
+6=In position control mode, position error is smaller than the value of ID214 (P2.029)
+7=Frequency of position command is smaller than the value of ID214 (P2.029)
+8=Rotation speed of servo motor is slower than the value of ID214 (P2.029)
+Y: Gain switching
+Before switching
+0= ID185 (P2.000) x 100% and ID189 (P2.004) x 100% (Position mode)
+0=ID189 (P2.004) x 100% (Speed mode)
+1=ID191 (P2.006) x 0% and ID211 (P2.026) x 0% (Position mode and Speed mode)
+After switching
+0=ID185 (P2.000) x ID186 (P2.001) and ID189 (P2.004) x ID190 (P2.005) (Position mode)
+0=ID189 (P2.004) x P2 - 005 (Speed mode)
+1=ID191 (P2.006) x 100% and ID211 (P2.026) x 100% (Position mode and Speed mode)
+UZ: Reserved",5-Control,,,,,P2.027
+213,GainSwitchingTime,All,0,1000,10,,ms,INT,"Gain Switching Time Constant
+For switching the smooth gain. Set this parameter to 0 to disable this function.",5-Control,,,,,P2.028
+214,GainSwitchingThreshold,All,0,50331648,16777216,,,DINT,"Gain Switching Value Threshold
+The setting of gain switching (pulse error, kpps, rpm) is determined by the selection of gain switching condition ID212 (P2.027).",5-Control,,,,,P2.029
+216,SysGainResponseLevel,All,1,50,19,,,INT,"System Gain Response Level
+In gain adjustment mode ID217 (P2.032), you can adjust the servo frequency via this parameter. When this parameter value is increased, the servo frequency is increased.
+See the chapter on Tuning in the user manual.","5-Control
+20-Tuning",,,,,P2.031
+217,GainAdjustMode,All,0x0000,0x0004,0x0001,,,UINT,"Gain Adjustment Mode
+The servo drive provides three gain adjustment modes for fine tuning. You only need to increase or decrease the system gain response level ID216 (P2.031) to tune the machine.
+See the chapter on Tuning in the user manual.
+
+0=Manual
+1=Tuning mode 1
+2=Tuning mode 2
+3=Tuning mode 3
+4=Tuning mode 4 (reset to default gain value)","5-Control
+20-Tuning",,,,,P2.032
+226,NotchFilter2Frequency,All,50,5000,1000,,Hz,INT,"Notch Filter 2 Frequency
+The second setting value of resonance frequency. If ID227 (P2.044) is set to 0, this function is disabled.","5-Control
+15-Filter
+20-Tuning",,,,,P2.043
+227,NotchFilter2Depth,All,0,40,0,,-dB,INT,"Notch Filter 2 Depth
+The second resonance suppression (notch filter) attenuation rate. When this parameter is set to 0, the notch filter function is disabled. If the value of attenuation rate is set to 5, the attenuation rate is -5 dB.","5-Control
+15-Filter
+20-Tuning",,,,,P2.044
+228,NotchFilter3Frequency,All,50,5000,1000,,Hz,INT,"Notch Filter 3 Frequency
+The third setting value of resonance frequency. If ID229 (P2.046) is set to 0, this function is disabled.","5-Control
+15-Filter
+20-Tuning",,,,,P2.045
+229,NotchFilter3Depth,All,0,40,0,,-dB,INT,"Notch Filter 3 Depth
+The third resonance suppression (notch filter) attenuation rate. When this parameter is set to 0, the notch filter function is disabled. If the value of attenuation rate is set to 5, the attenuation rate is -5 dB.","5-Control
+15-Filter
+20-Tuning",,,,,P2.046
+232,VelocityFeedbackLowPassFilterTime,All,0,1000,8,0.1,ms,INT,"Speed Feedback Low Pass Filter Time Constant
+Increasing the value of this parameter can reduce the jitter of the speed, but if the value is set too high, it may cause the phase margin of the speed loop to be too small, resulting in system instability.","5-Control
+18-Velocity Loop
+20-Tuning",,,,,P2.049
+235,PositionIntegralGain,All,0,1023,0,,rad/s,INT,"Position Integral Gain
+Increasing the value of position control integral can reduce the position steady-state error, but if the value is set too big, it may easily cause position overshoot and noise.","5-Control
+17-Position Loop",,,,,P2.053
+254,NotchFilter1QValue,All,1,10,5,,,INT,"Notch Filter 1 Width
+The first setting value of resonance width. If ID209 (P2.024) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter",,,,,P2.095
+255,NotchFilter2QValue,All,1,10,5,,,INT,"Notch Filter 2 Width
+The second setting value of resonance width. If ID227 (P2.044) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter",,,,,P2.096
+256,NotchFilter3QValue,All,1,10,5,,,INT,"Notch Filter 3 Width
+The third setting value of resonance width. If ID211 (P2.026) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter",,,,,P2.097
+257,NotchFilter4Frequency,All,50,5000,1000,,Hz,INT,"Notch Filter 4 Frequency
+The fourth setting value of resonance frequency. If ID258 (P2.099) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter
+20-Tuning",,,,,P2.098
+258,NotchFilter4Depth,All,0,40,0,,-dB,INT,"Notch Filter 4 Depth
+The fourth resonance suppression (Notch filter) attenuation rate. When this parameter is set to 0, the notch filter function is disabled. For example, If the value of attenuation rate is set to 5, then it would be -5 dB.","5-Control
+15-Filter
+20-Tuning",,,,,P2.099
+259,NotchFilter4QValue,All,1,10,5,,,INT,"Notch Filter 4 Width
+The fourth setting value of resonance width. If ID258 (P2.099) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter",,,,,P2.100
+260,NotchFilter5Frequency,All,50,5000,1000,,Hz,INT,"Notch Filter 5 Frequency
+The fifth setting value of resonance frequency. If ID261 (P2.102) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter
+20-Tuning",,,,,P2.101
+261,NotchFilter5Depth,All,0,40,0,,-dB,INT,"Notch Filter 5 Depth
+The fifth resonance suppression (Notch filter) attenuation rate. When this parameter is set to 0, the notch filter function is disabled. For example, If the value of attenuation rate is set to 5, then it would be -5 dB.","5-Control
+15-Filter
+20-Tuning",,,,,P2.102
+262,NotchFilter5QValue,All,1,10,5,,,INT,"Notch Filter 5 Width
+The fifth setting value of resonance width. If ID261 (P2.102) is set to 0, this function is disabled.
+See Resonance Suppression (Notch Filter) in the user manual.","5-Control
+15-Filter",,,,,P2.103
+264,AutoTuningBandwidth,PT/PR/IO,1,21,11,,,INT,"Auto Tuning Bandwidth Configuration
+This parameter is used to adjust the bandwidth when auto-tuning.
+The larger the value is, the higher the bandwidth is after auto-tuning. However, the bandwidth margin may be lower, which may cause machine jitter. The smaller the value is, the lower the bandwidth is after auto-tuning, but the response is slower.
+See Autotuning in the user manual.",5-Control,,,,,P2.105
+265,AutoTuningOvershoot,PT/PR/IO,1,50331648,2000,,,DINT,"Auto Tuning Overshoot Configuration
+This parameter is used to adjust the maximum allowable overshoot when auto-tuning.
+The larger the value is, the greater the maximum overshoot allowed by
+auto-tuning is, and the response is faster. The smaller the value is, the smaller the maximum overshoot allowed by auto-tuning is, and the response is slower.
+See Autotuning in the user manual.",5-Control,,,,,P2.106
+605,CurrentLoopProportionalGain,All,0,"1023000
+16383000",0,0.001,,DINT,"Current Loop Proportional Gain
+Increase the value to improve current responsiveness and reduce current control error. However, if the setting is too large, vibration and noise are likely to occur.
+We recommend that you do not adjust this parameter.",5-Control,,,,,PM.015
+606,CurrentLoopIntegralGain,All,0,32767,0,,,INT,"Current Loop Integral Gain
+Increase the value to improve current responsiveness and reduce current control error. However, if the setting is too large, vibration and noise are likely to occur.
+We recommend that you do not adjust this parameter.",5-Control,,,,,PM.016
+607,OverloadRisingGain,All,0,600,100,,%,INT,"Overload Rising Gain
+The overload protect counter increases when overload occurs (torque over 100%), and decreases when there is no overload.
+Below is the overload(torque) and the responding running time to trigger E 006.
+0%=-12s * ID608 (PM.020)
+20%=-12.3s * ID608 (PM.020)
+40%=-13.6s * ID608 (PM.020)
+60%=-16.3s * ID608 (PM.020)
+80%=-22.6s * ID608 (PM.020)
+100%=N/A
+120%=26.38s * ID607 (PM.019)
+140%=35.2s * ID607 (PM.019)
+160%=17.6s * ID607 (PM.019)
+180%=11.2s * ID607 (PM.019)
+200%=8.0s * ID607 (PM.019)
+220%=6.1s * ID607 (PM.019)
+240%=4.8s * ID607 (PM.019)
+260%=3.9s * ID607 (PM.019)
+280%=3.3s * ID607 (PM.019)
+300%=2.8s * ID607 (PM.019)
+320%=2.5s * ID607 (PM.019)
+340%=2.2s * ID607 (PM.019)
+360%=2.0s * ID607 (PM.019)
+380%=1.8s * ID607 (PM.019)
+400%=1.6s * ID607 (PM.019)
+420%=1.4s * ID607 (PM.019)
+440%=1.3s * ID607 (PM.019)
+460%=1.2s * ID607 (PM.019)
+480%=1.1s * ID607 (PM.019)
+500%=1.0s * ID607 (PM.019)",5-Control,,x,,,PM.019
+608,OverloadFallingGain,All,15,600,100,,%,INT,"Overload Falling Gain
+See ID607 (PM.019)",5-Control,,x,,,PM.020
+622,InductionMotorFluxProportionalGain,All,0,32767,0,,,INT,"Comment:
+Remove ""Reserved for future release""?
+Induction Motor Flux Proportional Gain
+",5-Control,,,,,PM.079
+623,InductionMotorFluxIntegralGain,All,0,5119,0,0.1,,INT,"Comment:
+Remove ""Reserved for future release""?
+Induction Motor Flux Integral Gain
+",5-Control,,,,,PM.080
+654,PositionLoopIzone,PT/PR/IO,0,2147483647,0,,,DINT,"Position Loop Izone
+The region, in counts, around the commanded position where integral gain is active. If the position error is greater than Ki Zone, the integrator is reset.",5-Control,,,,,P2.123
+677,FullClosedLoopPositionErrorAutoResetThreshold,PT,0,0x7FFF,0,,Rev,UINT,"Full Closed Loop Position Error Auto Reset Threshold
+The full closed loop position error is reset automatically when the number of turns reaches this value.
+This function is disabled when ID676 (P1.084) is set to 0.",5-Control,,,,,P1.085
+683,AnalogInputDeadbandToTorque,T/Tz/IO,0,100,0,,mV,INT,Analog input dead-band for analog to torque,5-Control,,,,,P1.107
+684,AnalogInputDeadbandToVelocityAndPosition,PT/S/Sz//IO,0,100,0,,mV,INT,Analog input dead-band for analog to velocity/position,5-Control,,,,,P1.110
+689,PositionSpeedSwitchFunction,PT/PR,0x0000,0x0001,0x0000,,,INT,Induction motor position/speed mode switch function,"
+5-Control",,x,x,,P2.085
+690,PositionSpeedSwitchLowLevel,PT/PR,10,7000,275,,RPM,DINT,Induction motor position/speed mode switch fvelocity (low level),"
+5-Control",,x,,,P2.086
+691,PositionSpeedSwitchHighLevel,PT/PR,300,27500,1575,,RPM,DINT,Induction motor position/speed mode switch function (high level),"
+5-Control",,x,,,P2.087

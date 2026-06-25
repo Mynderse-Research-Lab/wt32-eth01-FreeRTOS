@@ -1,0 +1,220 @@
+"Kinetix 5100 Servo Drive Parameters
+For more information see:"
+"Kinetix 5100 Servo Drive User Manual,publication 2198-UM004"
+
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+14,DataType,All,0,1,0,,,USINT,"Data Type
+Determines the data type of position, speed, acceleration reference, feedback and all related values.
+0 = DINT",2-Drive,x
+15,PositionDataUnit,All,0,0,0,,,USINT,"Position Data Unit
+Determines the data unit of position reference and feedback and all related attributes.
+0 = PUU",2-Drive,x
+16,SpeedDataUnit,All,0,6,1,,,USINT,"Speed Data Unit
+Determines the data unit of speed reference and feedback and all related attributes.
+1 = 0.1RPM",2-Drive,x
+17,AccelDataUnit,All,0,6,1,,,USINT,"Acceleration Data Unit
+Determines the data unit of acceleration (deceleration) reference and feedback and all related attributes.
+1 = 0.1RPM/s",2-Drive,x
+18,TorqueDataUnit,All,0,1,1,,,USINT,"Torque Data Unit
+Determines the data unit of torque reference and feedback and all related attributes.
+1 = 0.1%",2-Drive,x
+19,TorqueRampTimeUnit,All,0,1,0,,,USINT,"Torque Ramp Time Unit
+Determines the data unit of torque slope.
+0 = millisecond",2-Drive,x
+20,OperatingMode,IO,0,6,0,,,SINT,"Operating Mode
+Determines the drive operating mode when ID25 (Start Motion) has a zero-to-one transition.
+0 = Mode not specified
+1 = Position mode
+2 = Speed mode
+3 = Home mode
+4 = Torque mode
+5 = Gear mode
+6 = Index mode",2-Drive
+21,ServoOn,IO,0,1,0,,,BOOL,"Servo On
+A zero-to-one transition will activate the drive.",2-Drive
+22,ServoOff,IO,0,1,0,,,BOOL,"Servo Off
+A zero-to-one transition will de-activate the drive.",2-Drive
+23,StopMotion,IO,0,1,0,,,BOOL,"Stop Motion
+A zero-to-one transition will stop the drive.",2-Drive
+24,FaultReset,IO,0,1,0,,,BOOL,"Fault Reset
+A zero-to-one transition will try to clear a fault on the drive.",2-Drive
+25,StartMotion,IO,0,1,0,,,BOOL,"Start Motion
+A zero-to-one transition means the motion command has been issued from the external controller.",2-Drive
+26,SpeedReference,IO,-80000,80000,0,,0.1RPM,DINT,Speed Reference,2-Drive
+27,AccelReference,IO,458,30000000,150000,,0.1RPM/s,DINT,"Acceleration Reference
+Determines the command speed, and its range is based on Speed Data Unit.",2-Drive
+28,DecelReference,IO,458,30000000,150000,,0.1RPM/s,DINT,"Deceleration Reference
+Determines the command acceleration, and its range is based on Acceleration Data Unit.",2-Drive
+29,HomingMethod,IO,0,38,0,,,SINT,Homing MethodDefines the homing method.See ID 29 (Homing Method) on Detailed Definitions tab,2-Drive
+30,PositionReference,IO,-2147483648,2147483647,0,,PUU,DINT,"Position Reference
+Determines the command position, and its range is based on Position Data Unit.",2-Drive
+31,HomeReturnSpeed,IO,1,5000,200,,0.1RPM,DINT,"Home Return Speed
+Determines the command creep speed, and its range is based on Speed Data Unit.",2-Drive
+32,NonCyclicMoveType,IO,0,3,0,,,SINT,"Non-Cyclic Move Type
+Defines the position command selection.
+0 = absolute positioning
+1 = relative positioning
+2 = incremental positioning
+3 = high-speed position capturing",2-Drive
+33,TorqueReference,IO,-4000,4000,0,,%,DINT,"Torque Reference
+Determines the command torque, and its range is based on Torque Data Unit.",2-Drive
+34,TorqueRampTime,IO,1,65500,1000,,ms,DINT,"Torque RampTime
+Determines the command torque slope, and its range is based on Torque Slope Unit.",2-Drive
+35,PositionCommandOverlap,IO,0,1,0,,,BOOL,"Position Command Overlap
+Determines whether overlapping of the next movement is allowed.
+0 = Overlap of next movement is not allowed
+1 = Overlap of next movement is allowed",2-Drive
+36,PositionCommandOverride,IO,0,1,0,,,BOOL,"Position Command Override
+Determines whether this movement can interrupt previous movement.
+0 = Interrupt is not allowed
+1 = Interrupt is allowed",2-Drive
+37,TravelMode,IO,0,10,2,,,SINT,"Travel Mode
+Selects the move type.
+2 = Non-Cyclic Move Type
+10 = Cyclic Move Type",2-Drive
+38,CyclicMoveType,IO,0,2,0,,,SINT,"Cyclic MoveType
+Determines the direction of movement.
+0 = Rotary Positive
+1 = Rotary Negative
+2 = Rotary shortest path",2-Drive
+39,CapturedPositionSelect,IO,0,1,0,,,BOOL,"Captured Position Select
+Selects the first capture or the second capture.
+0 = First capture (trigger by DI9)
+1 = Second capture (trigger by DI10)",2-Drive
+40,StartingIndex,IO,0,99,0,,,SINT,"Starting Index
+Defines the first index that the drive should execute.",2-Drive
+41,NetworkMode,IO,0,1,0,,,SINT,"Network mode
+0 = local input
+1 = network",2-Drive,x
+42,OperatingModeState,IO,0,6,0,,,SINT,"Operating Mode State
+Indicates which operating mode the drive remains in.
+0 = mode not specified
+1 = Position mode
+2 = Speed mode
+3 = Home mode
+4 = Torque mode
+5 = Gear mode
+6 = Index mode",2-Drive,x
+43,AtReference,IO,0,1,0,,,BOOL,"At Reference
+Drive whether the drive is at actual reference (position, speed, torque) based on mode.
+0=Drive not actual at reference (position, speed, torque) based on mode
+1=Drive actual at reference (position, speed, torque) based on mode",2-Drive,x
+44,Ready,IO,0,1,0,,,BOOL,"Ready
+0=Drive is not ready
+1=Drive is ready",2-Drive,x
+45,Active,IO,0,1,0,,,BOOL,"Active
+Indicates whether the drive is ready for a servo on action.
+0 – Drive has not has successfully received the Servo On command
+1 – Drive has successfully received the Servo On command",2-Drive,x
+46,WarningPresent,IO,0,1,0,,,BOOL,"Warning Present
+Indicates whether the drive is in a warning state.
+0=Drive is not in warning state
+1=Drive is in warning state",2-Drive,x
+47,Fault,IO,0,1,0,,,BOOL,"Fault
+Indicates whether the drive is in a faulted state.
+0=Drive is not in faulted state
+1=Drive is in faulted state",2-Drive,x
+48,Stopped,IO,0,1,0,,,BOOL,"Stopped
+Indicates whether the drive is stopped.
+0=Drive is not stopped
+1=Drive is stopped",2-Drive,x
+49,FaultCode,IO,0,32767,0,,,INT,"Fault Code
+Displays the fault code.
+See View Status and Faults in the user manual.
+
+0=Reserved
+1=Over current
+2=Over voltage
+3=Under voltage",2-Drive,x
+50,WarningCode,IO,0,32767,0,,,INT,"Warning Code
+Displays warning code.
+See View Status and Faults in the user manual.
+
+0…12 Reserved
+13=Emergency Stop
+14=Reverse Limit Error
+15=Forward Limit Error",2-Drive,x
+51,ActualPosition,IO,-2147483648,2147483647,0,,PUU,DINT,"Actual Position
+Indicates the actual position of the drive.",2-Drive,x
+52,ActualSpeed,IO,-80000,80000,0,,0.1RPM,DINT,"Actual Speed
+Indicates the actual speed of the drive.",2-Drive,x
+53,ActualTorque,IO,-4000,4000,0,,%,DINT,"Actual Torque
+Indicates the actual torque of the drive.",2-Drive,x
+54,ActiveIndex,IO,0,99,0,,,SINT,"Active Index
+Indicates the currently executing index.",2-Drive,x
+65,HomedStatus,IO,0,1,0,,,BOOL,"Homed Status
+Indicates whether the home action is completed.
+0=Home is not completed
+1=Home is completed
+",2-Drive,x
+66,CommandInProgress,IO,0,1,0,,,BOOL,"Command In Progress
+Indicates whether the motion command is in progress.
+0=No motion command is in progress
+1=Motion command is in progress",2-Drive,x
+67,MotorCategory,IO,0,2,0,,,SINT,"Motor Category
+Defines the type of motor connected to the drive.
+0=No motor connected
+1=Rotary motor connected
+2=Linear motor connected",2-Drive,x
+68,Uncertain,IO,0,1,0,,,BOOL,"Uncertain
+indicates whether the data may be inaccurate
+0=no question about data validity
+1=data validity is questionable
+",2-Drive,x
+69,CamMasterReference,IO,0,4,0,,,SINT,"Sets the master position reference
+0 - Reserved
+1 – Auxiliary encoder
+2 – Pulse Command (I/O terminal)
+3 – Reserved
+4 – Virtual Pulse from Timeline (1K Hz)",2-Drive
+70,CamStopMode,IO,0,1,0,,,BOOL,"Sets CAM stop mode
+0 – stop immediately
+1 – decelerate and stop",2-Drive
+71,CamExecutionSchedule,IO,0,4,0,,,SINT,"Selects the method used to execute the cam profile.
+0 = Immediate – The slave axis is immediately locked to the master axis and the position camming process begins.
+1 = Reserved
+2 = Forward only – the cam profile starts when the master position crosses the Master Lock Position in the forward direction.
+3 = Reverse only – the cam profile starts when the master position crosses the Master Lock Position in the reverse direction.
+4 = Shorteset Path – the cam profile starts when the master position crosses the Master Lock Position in the shortest path.",2-Drive
+72,CamExecutionMode,IO,0,1,0,,,SINT,"Determines if the cam profile is executed only one time or repeatedly:
+0 = Once – cam motion of slave axis is executed one time according to the value of CamMasterUnlockCounts, and then the Process Complete bit is set.
+1 = Continuous – Once started the cam profile is executed indefinitely. This feature is useful in rotary applications where it is necessary that the cam position run continuously in a rotary or reciprocating fashion.",2-Drive
+73,CamSlaveScaling,IO,-2147000000,2147000000,1000000,,0.000001 times,DINT,Scales the total distance covered by the slave axis through the cam profile.,2-Drive
+74,CamLockPosition,IO,10,1073741823,3600,,,DINT,This determines the starting location in the cam profile.,2-Drive
+75,CamMasterLeadingCounts,IO,-1073741824,1073741823,0,,,DINT,This determines the leading counts (master axis) before the cam profile is executed.,2-Drive
+76,CamMasterUnlockCounts,IO,-1073741824,1073741823,0,,,DINT,"This determines the unlock counts (master axis) when the cam profile is executed.
+Valid only when CamExecutionMode = 0 (Once)",2-Drive
+77,CamMasterCyclicLeadingCounts,IO,-2147483648,2147483647,0,,,DINT,"This determines the cyclic leading counts (master axis) during the cam profile is executed.
+Valid only when CamExecutionMode = 1 (Continous)",2-Drive
+78,SlaveCounts,IO,1,536870911,16777216,,,DINT,Integer value representing slave counts used in specifying a Fractional gear ratio.,2-Drive
+79,MasterCounts,IO,1,2147483647,100000,,,DINT,Integer value representing master counts used in specifying a Fractional gear ratio.,2-Drive
+81,CamMasterLockPosition,IO,-1073741824,1073741823,0,,,DINT,"This determines the master location where the slave axis locks to the mater axis.
+Valid only when CamExecutionSchedule = 2, 3, 4",2-Drive
+98,DriveConnectionStatus,,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,Drive Connection Status,,x
+99,DriveConfigurationSignature,,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,Drive Configuration Signature,,x
+651,HardwareRevision,All,0,0xFFFF,0,,,UINT,"Hardware Revision
+high byte = Major version
+low byte = Minor version",2-Drive,x,,,x,PN.027
+652,DriveName,All,,,,,,SHORT_STRING,Drive Name [0]-[31],2-Drive,,x,,,PN.028
+653,DriveSerialNumber,All,0,0xFFFFFFFF,0,,,UDINT,Drive Serial Number,2-Drive,x,,,x,PN.036
+657,InverterTemperature,All,0,0xFFFFFFFF,0,,oC,UDINT,Inverter Temperature,2-Drive,x,,,x,PN.039
+662,ProductCode,All,1,65535,1,,,UINT,"Product Code
+
+1 = 2198-E1004-ERS
+2 = 2198-E1007-ERS
+3 = 2198-E1015-ERS
+4 = 2198-E1020-ERS
+5 = 2198-E2030-ERS
+6 = 2198-E2055-ERS
+7 = 2198-E2075-ERS
+9 = 2198-E2150-ERS
+10 = 2198-E4004-ERS
+11 = 2198-E4007-ERS
+12 = 2198-E4015-ERS
+13 = 2198-E4020-ERS
+14 = 2198-E4030-ERS
+15 = 2198-E4055-ERS
+16 = 2198-E4075-ERS
+17 = 2198-E4150-ERS",2-Drive,x,,,x,PN.047
+673,FwRevision,All,0,32767,0,,,INT,Firmware Revision,2-Drive,x,,,x,PN.048
+674,FwSubminorRevision,All,0,2147483647,0,,,DINT,Firmware Sub-minor Revision,2-Drive,x,,,x,PN.049

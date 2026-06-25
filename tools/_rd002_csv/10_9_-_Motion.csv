@@ -1,0 +1,1094 @@
+"Kinetix 5100 Servo Drive Parameters
+For more information see:"
+"Kinetix 5100 Servo Drive User Manual,publication 2198-UM004"
+
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+131,DI9CaptureAndCompareConfiguration,All,0x00000000,0x6F000101,0x2D000000,,,UDINT,"DI9 Capture and Compare Configuration
+
+X: Additional function of Capture
+- Bit 0: ID330 (P5.038) will reset to the configured value when the DI9CaptureRemainedCount decreases to 0 in cycle mode.
+-- 0=Disable cycle mode
+-- 1=Enable cycle mode
+- Bits 1…3: Reserved
+Y:Reserved
+Z: Additional function of Compare
+- Bit 0:
+-- 0=ID134 (P1 .024) takes effect always.
+-- 1=ID134 (P1 .024 only takes effect once, than reset to 0 automatically
+- Bits 1…3: Reserved
+U:Reserved","9-Motion_1
+25-Capture",,,,,P1.019
+132,DI9CaptureMaskRange,All,0,100000000,0,,,DINT,"DI9 Capture Masking Range
+When Capture function is enabled and set to capture multiple points [ID330 (P5.038) > 1], it will stop receiving the DI captured signal within this range once the data is captured. The DI captured signal received within this range will not be recognized. This function can be used to avoid noise being regarded as effective signals within the non-capture range. Masking range is defined as follows: [CAP_DATA- ID132 (P1 .020), CAP_DATA+ID132 (P1.020)].","9-Motion_1
+25-Capture",,,,,P1.020
+133,NonVolatileCompareDataOffset,All,-10000000,10000000,0,,,DINT,"Non-Volatile Compare Data Offset
+When using the Compare function, you can add the offset value to the data array value for comparison to the actual comparison data.
+See High Speed Compare Function (CMP) in the user manual.",9-Motion_1,,,,,P1.023
+134,VolatileCompareDataOffset,All,-32768,32767,0,,,INT,"Volatile Compare Data Offset
+When using the Compare function, you can add the offset value to the data array value for comparison to the actual comparison data.
+See High Speed Compare Function (CMP) in the user manual.",9-Motion_1,,,,x,P1.024
+177,HomingCollisionTorqueLimit,PR/IO,1,300,1,,%,INT,"Homing Collision Torque Limit
+This torque limit setting is only for torque limit homing mode ID297 (P5.004.X=9 or 10). When the homing command is triggered, the motor runs in one direction until it reaches the collision protector. After reaching the collision protector, the servo drive outputs a larger motor current/torque to counter the external force from the collision protector. The servo drive uses the motor current/torque and the Torque limit time to determine homing.
+See Referencing the Torque Limit in the user manual.",9-Motion_1,,,,,P1.087
+178,"HomingCollisionTorqueLimitTime
+",PR/IO,2,2000,2000,,ms,INT,"Homing Collision Torque Limit Time
+Torque limit time setting in torque limit homing mode ID297 (P5.004.X=9 or 10). See ID 177 (P1.087).
+See Referencing the Torque Limit in the user manual.",9-Motion_1,,,,,P1.088
+183,DI10CaptureConfiguration,All,0x00000000,0x00000101,0x00000000,,,UDINT,"DI10 Capture Configuration
+
+X: Additional function of Capture
+- Bit 0: ID394 (P5.109) will reset to the configured value when the DI10CaptureRemainedCount decreases to 0 in cycle mode.
+-- 0=Disable cycle mode
+-- 1=Enable cycle mode
+- Bits 1…3: Reserved
+Y:Reserved
+Z: Reserved
+U:Reserved","9-Motion_1
+25-Capture",,,,,P1.103
+184,DI10CaptureMaskRange,All,0,100000000,0,,,DINT,"DI10 Capture Masking Range
+When Capture function is enabled and set to capture multiple points [ID394 (P5.109) > 1], it will stop receiving the DI captured signal within this range once the data is captured. The DI captured signal received within this range will not be recognized. This function can be used to avoid noise being regarded as effective signals within non-capture range. Masking range is defined as follows: [CAP_DATA-ID184 (P1 .104), CAP_DATA+ID184 (P1 .104)].","9-Motion_1
+25-Capture",,,,,P1.104
+234,IndexingCoordinatesScale,All,32,1073741824,1073741824,,PUU,DINT,"Indexing Coordinates Scale
+This parameter is used to set the scale of the indexing coordinates, indexing command position, and indexing feedback position. If the setting value is too small, it may cause the error of indexing coordinates.
+See Index Position Command in the user manual for the valid range equation for ID234 (P2.052).",9-Motion_1,,x,,,P2.052
+241,FollowingErrorCompensation,All,0x0000,0x0101,0x0000,,,UINT,"Follow Error Compensation Configuration
+This function is active when ID143 (P1.036) S-curveSmoothTime is set to a value greater than 1.
+
+High Bit (DCBA): Reserved
+X: Following error compensation switch
+0=Disable function
+1=Enable function
+Y: Reserved
+Z: Digital input DI.STP triggering method
+0=DI.STP is rising-edge triggered
+1=DI.STP is level-triggered
+U: Reserved",9-Motion_1,,,,,P2.068
+244,ResetAbsolutePosition,All,0x0000,0x0001,0x0000,,,UINT,"Reset Absolute Position
+Set to 1 to reset the absolute position to 0. The Reset function is enabled when ID193 (P2.008) SpecialParameterWriteIn is set to 271 and ID242 (P2.069.X) is 1 (absolute system).",9-Motion_1,,,,x,P2.071
+245,ECamConfiguration,PR/IO,0x00000000,0x5F3F6F5F,0x00000000,,,UDINT,"E-CAM Configuration
+See E-Cam Alignment Operation Setting in the user manual.
+
+YX: Range of the filter (0…95%)
+00=Filter is disabled
+01…5F=Filter is enabled when |Error| <= (1…YX)%
+UZ: Maximum allowable correction rate (0…100%)
+Maximum allowable correction <= [ID340 (P5.048)] / [ID371 (P5.083)]*UZ%
+BA: PR number to store pulse error (PR#0...PR#99)
+0=Pulse error will not stores
+1…99=PR number to store pulse error
+DC: Masking range setting (0…95%)
+Masking range >= [ID340 (P5.048)]/[ID371 (P5.083)]* DC%",9-Motion_1,,,,,P2.073
+246,ECamDIDelayTimeCompensation,PR/IO,-25000,25000,0,0.001,ms,INT,"E-CAM DI Delay Time Compensation
+This parameter can offset the alignment target to resolve DI delay and sensor delay.
+ID246 (P2.074) = ID194 (P2.009) DIDebounceTime + sensor’s delay time
+See E-Cam Alignment Settings in the user manual.",9-Motion_1,,,,,P2.074
+247,ECamAlignementTargetPosition,PR/IO,-1000000000,1000000000,0,,,DINT,"E-CAM Alignment Target Position
+Set the alignment target position for E-Cam alignment (master axis pulse).
+See E-Cam Alignment in the user manual.
+
+0…[ID372 (P5.084)] / [ID371 (P5.083)]-1",9-Motion_1,,,,x,P2.075
+248,ECamControlConfiguration,PR/IO,0x0000,0x6FF7,0x0000,,,UINT,"E-CAM Control Configuration
+See E-Cam Alignment Control Switch in the user manual.
+
+X: E-cam alignment control
+Bit0:Enable/Disable alignment
+0=Enable
+1=Disable
+Bit1: Trigger PR immediately
+0=Disable
+1=Enable
+Bit2: Position of the mark
+0=If the mark is on the master axis, the position of the mark is not affected when aligning.
+1=If the mark is on the slave axis, the position of the mark is affected when aligning.
+Bit3: Reserved
+Y:Filter intensity
+0=Disable
+1…F=2˄(setting value)
+UZ: Alignment forward direction allowable rate (0…100%)
+0=Backward alignment
+30=Forward 30%; backward 70%
+50=Alignment with the shortest distance
+80=Forward 80%; backward 20%
+100=Forward alignment",9-Motion_1,,,,x,P2.076
+249,ECamDOCamArea2RisingEdgeAngle,PR/IO,0,360,270,,Degrees,INT,"E-Cam DO.CAM_Area2 Rising Edge Angle
+See Digital Output CAM_Area Settings in the user manual.
+
+1. ID249 (P2.078)>=ID250 (P2.079): DO.CAM_AREA2 (0x1A) is on when the master axis position angle is bigger than ID250 (P2.079) but not bigger than ID249 (P2.078).
+2.ID249 (P2.078)<ID250 (P2.079): DO.CAM_AREA2 (0x1A) is on when the master axis position angle is bigger than ID249 (P2.078) but not bigger than ID250 (P2.079.",9-Motion_1,,,,,P2.078
+250,ECamDOCamArea2FallingEdgeAngle,PR/IO,0,360,360,,Degrees,INT,"E-Cam DO.CAM_Area2 Falling Edge Angle
+See Digital Output CAM_Area Settings in the user manual.
+
+1. ID249 (P2.078)>=ID250 (P2.079): DO.CAM_AREA2 (0x1A) is on when the master axis position angle is bigger than P2.079 but not bigger than ID249 (P2.078).
+2.ID249 (P2.078)<ID250 (P2.079): DO.CAM_AREA2 (0x1A) is on when the master axis position angle is bigger than ID249 (P2.078) but not bigger than ID250 (P2.079).",9-Motion_1,,,,,P2.079
+296,AutoProtectionDecelTime,All,0x00000000,0xFFFFFFFF,0xEEEFEEFF,,,UDINT,"Auto Protection Decel Time
+The parameter setting is divided into D, C, B, A, U, Z, Y, X (hexadecimal), including:
+1. Deceleration time when activating auto-protection function: OVF, SPL, SNL, PL, NL
+2. Deceleration time of stop command: STP, PFQS
+0…F is used for indexing the deceleration time of ID312 (P5.020)…ID327 (P5.035). For example: If X is set to A, then the deceleration time of PL is determined by ID322 (P5.030).
+
+Range: 0…F
+D: Function DI.STP (0x46)
+C: Function DI.PFQS (0x47)
+B: Reserved
+A: Function DO.OVF (0x12)
+U: Function DO.SNL (0x13)
+Z: Function DO.SPL (0x14)
+Y: Function DI.NL (0x22)
+X: Function DI.PL (0x23)",9-Motion_1,,,,,P5.003
+297,HomingMode,PR/IO,0x0000,0x012A,0x0000,,,UINT,"Homing Mode
+Together, the X (homing mode), Y (Z pulse setting), and Z (limit setting) values determine how the homing function operates.
+See Setting Homing Mode ID297 (P5.004) in the user manual.
+
+X: Homing mode
+0=Homing in forward direction and PL is homing origin
+1=Homing in reverse direction and NL is homing origin
+2=Homing in forward direction, ORG: Off→On is homing origin
+3=Homing in reverse direction, ORG: On→Off is homing origin
+4=Look for Z pulse in forward direction and use it as homing origin
+5=Look for Z pulse in reverse direction and use it as homing origin
+6=Homing in forward direction, ORG: On→Off is homing origin
+7=Homing in reverse direction, ORG: Off→On is homing origin
+8=Define current position as the origin
+9=Look for the collision point in forward direction and use it as homing origin
+A=Look for the collision point in reverse direction and use it as homing origin
+Y: Z pulse setting
+0=Return to Z pulse
+1=Go forward to Z pulse
+2=Do not look for Z pulse
+Z: Limit setting
+0=Show error when encounter limit
+1=Reverse direction when encounter limit
+W: Reserved","9-Motion_1
+23-Homing Setting",,,,,P5.004
+298,HomingSpeed,PR/IO,"1
+1","20000
+15999999","1000
+1000","0.1
+1","RPM
+um/s",DINT,"Homing Velocity
+The first speed setting of high speed homing.
+See Origin and Speed Settings for Homing in the user manual.","9-Motion_1
+23-Homing Setting",,,,,P5.005
+299,HomingCreepSpeed,PR/IO,"1
+1","5000
+15999999","200
+200","0.1
+1","RPM
+um/s",DINT,"Homing Creep Velocity
+The second speed setting of low speed homing.
+See Origin and Speed Settings for Homing in the user manual.","9-Motion_1
+23-Homing Setting",,,,,P5.006
+300,PRCmdTrigger,PR/IO,0,20099,0,,,INT,"PR Command Trigger
+For example, set this value to 2 to start executing PR#2.
+When reading ID300 (P5.007), if the command is incomplete, the drive reads the current command (1 … 99). If the command is completed, the drive reads the current command +10000. If the command is completed, DO.TPOS is on, and motor position reached, the drive reads the current command +20000.
+Commands triggered by DI are also applicable.
+
+0=Start homing
+1…99=Execute the specified PR procedure (same as using DI:CRTG+POSn)
+100…999=Reserved
+1000=Execute stop command (same as DI.STOP)",9-Motion_1,,,,x,P5.007
+301,SoftTravelLimitPositive,PR/IO,-2147483648,2147483647,2147483647,,PUU,DINT,"Soft Travel Limit Positive
+If the motor rotates in the forward direction and its feedback position exceeds this value, A 283 [Software positive limit] fault occurs.","9-Motion_1
+16-Limit",,,,,P5.008
+302,SoftTravelLimitNegative,PR/IO,-2147483648,2147483647,-2147483648,,PUU,DINT,"Soft Travel Limit Negative
+If the motor rotates in the reverse direction and its feedback position exceeds this value, A 285 [Software negative limit] fault occurs.","9-Motion_1
+16-Limit",,,,,P5.009
+303,DataArraySize,All,0,32767,800,,,UINT,"Data Array Size
+Data size (N x 32 bits) means size N of data array.",9-Motion_1,x,,,x,P5.010
+304,DataArrayRWAddress,All,0,32767,0,,,INT,"Data Array Read/Write Address
+Specify the address in the data array when reading / writing data.
+See Data Array in the user manual.",9-Motion_1,,,,x,P5.011
+305,DataArrayRWValue1,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value1
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.012
+306,DataArrayRWValue2,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value2
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.013
+307,PRCmd1_2_PowerLossConfiguration,All,0x0000,0x0011,0x0000,,,UINT,"PR CMD#1#2 Power Loss Retention Configuration
+This parameter allows users to write data to target continuously via communication.
+
+X: PR CMD#1 setting
+0=Non-volatile
+1=Volatile
+Y: PR CMD#2 setting
+0=Non-volatile
+1=Volatile
+UZ: Reserved",9-Motion_1,,,,x,P5.015
+308,FeedbackPosition,All,-2147483648,2147483647,0,,PUU,DINT,"Feedback Position
+Read: Feedback position of the motor encoder, which is the monitoring variable 000 (00h) + offset value.
+Write: Any value can be written into the parameter and will neither change monitoring variable 000 (00h) nor affect the positioning coordinate system. It is only for observation when adjusting the offset value.",9-Motion_1,,,,x,P5.016
+309,AuxEncoderPosition,All,-2147483648,2147483647,0,,Counts,DINT,"Auxiliary Encoder Position
+Pulse counts of the auxiliary encoder.",9-Motion_1,,,,,P5.017
+310,PulseCmdPosition,All,-2147483648,2147483647,0,,Counts,DINT,"Pulse Command Position
+Pulse counts of the pulse command.",9-Motion_1,,,,,P5.018
+311,ECamCurveScale,PR/IO,-2147000000,2147000000,1000000,0.000001,,DINT,"E-Cam Curve Scale
+This parameter is used to magnify / demagnify the E-Cam table without changing its setting value.
+Example: The data in the table is 0, 10, 20, 30, 40, 20, magnification x 2.000000 equals the data: 0, 20, 40, 60, 80, 40, magnification x 1.000000.
+Enable the operation of E-Cam with the same pulse frequency of the master axis. Magnify the magnification will enlarge the route of E-Cam operation and the speed will be magnified as well.
+This parameter can be set at any time, but the time at which it becomes effective is determined by ID376 (P5.088.X) [Bit2].","9-Motion_1
+24-E-CAM",,,,,P5.019
+312,AccelDecelTime0,PR/IO,1,65500,200,,ms,UINT,"Accel / Decel Time 0
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.
+","9-Motion_1
+21-Speed Setting",,,,,P5.020
+313,AccelDecelTime1,PR/IO,1,65500,300,,ms,UINT,"Accel / Decel Time 1
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.021
+314,AccelDecelTime2,PR/IO,1,65500,500,,ms,UINT,"Accel / Decel Time 2
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.022
+315,AccelDecelTime3,PR/IO,1,65500,600,,ms,UINT,"Accel / Decel Time 3
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.023
+316,AccelDecelTime4,PR/IO,1,65500,800,,ms,UINT,"Accel / Decel Time 4
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.024
+317,AccelDecelTime5,PR/IO,1,65500,900,,ms,UINT,"Accel / Decel Time 5
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.025
+318,AccelDecelTime6,PR/IO,1,65500,1000,,ms,UINT,"Accel / Decel Time 6
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.026
+319,AccelDecelTime7,PR/IO,1,65500,1200,,ms,UINT,"Accel / Decel Time 7
+Sets the duration to accelerate or decelerate for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.027
+320,AccelDecelTime8,PR/IO,1,65500,1500,,ms,UINT,"Accel / Decel Time 8
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.028
+321,AccelDecelTime9,PR/IO,1,65500,2000,,ms,UINT,"Accel / Decel Time 9
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.029
+322,AccelDecelTime10,PR/IO,1,65500,2500,,ms,UINT,"Accel / Decel Time 10
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.030
+323,AccelDecelTime11,PR/IO,1,65500,3000,,ms,UINT,"Accel / Decel Time 11
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.031
+324,AccelDecelTime12,PR/IO,1,65500,5000,,ms,UINT,"Accel / Decel Time 12
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.032
+325,AccelDecelTime13,PR/IO,1,65500,8000,,ms,UINT,"Accel / Decel Time 13
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.","9-Motion_1
+21-Speed Setting",,,,,P5.033
+326,AccelDecelTime14,PR/IO,1,1500,50,,ms,UINT,"Accel / Decel Time 14
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.
+The default value of this parameter is smaller (short deceleration time), and it is used for deceleration time setting of auto protection.","9-Motion_1
+21-Speed Setting",,,,,P5.034
+327,AccelDecelTime15,PR/IO,1,1200,30,,ms,UINT,"Accel / Decel Time 15
+The duration of acceleration and deceleration in PR mode, which is the length of time to accelerate from 0 to 3000 rpm or decelerate from 3000 to 0 rpm.
+The default value of this parameter is smaller (short deceleration time), and it is used for deceleration time setting of auto protection.","9-Motion_1
+21-Speed Setting",,,,,P5.035
+328,DI9CaptureStartAddress,All,0,799,0,,,INT,"DI9 CAPTURE Start Address
+The start address of the data array to store CAPTURE data. Only writable when CAPTURE stops. See ID331 (P5.039).","9-Motion_1
+25-Capture",,,,,P5.036
+329,DI9CaptureAxisPosition,All,-2147483648,2147483647,0,,,DINT,"DI9 CAPTURE Axis Position
+Displays the axis position of CAPTURE pulse source.Only writable when CAPTURE stops. See ID331 (P5.039). If the source is the main encoder, this parameter is write-protected and the CAPTURE axis position is the feedback position of the motor (monitoring variable 00h).","9-Motion_1
+25-Capture",,,,x,P5.037
+330,DI9CaptureRemainedCount,All,0,800,1,,,INT,"DI9 CAPTURE Remained Count
+When CAPTURE stops, it indicates the number of data expected to be captured (readable and writable).
+When CAPTURE activates, it indicates the remaining number of data that has not been captured (read-only). Each time it captures one data, this value decreases by 1 until the value is 0, indicating that capturing is completed.","9-Motion_1
+25-Capture",,,,x,P5.038
+331,DI9CaptureControl,All,0x00000000,0x6F00F13F,0x32002010,,,UDINT,"DI9 CAPTURE Control
+See High Speed Capture Function (CAP) in the user manual.
+
+X: Capture Setting (set 1 to enable for each bit function)
+Bit0=Activate capture. Bit is cleared when capture completes.
+Bit1=After capturing first data, reset first data to ID368 (P5.076).
+Bit2=After capturing first data, activate Compare function. Not valid when Compare is already activated.
+Bit3=Execute PR#50 when finishing Capture.
+Y: Axis source of Capture
+0=Capture is not working
+1=Source is auxiliary feedback (AUX)
+2=Source is pulse command (Terminal Block Input)
+3=Source is main encoder (MFB)
+When ID351 (P5.059).Y is 0 (the axis source of Compare is the Capture axis), the ID331 (P5.039).Y (the axis source of Capture) cannot be changed.
+Z: Triggering logic
+0=Normally open (NO)
+1=Normally closed (NC)
+U: Trigger minimum interval in ms","9-Motion_1
+25-Capture",,,,x,P5.039
+332,PositionCompletedDelay0,PR/IO,0,32767,0,,ms,UINT,"Position Completed Delay 0
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.040
+333,PositionCompletedDelay1,PR/IO,0,32767,100,,ms,UINT,"Position Completed Delay 1
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.041
+334,PositionCompletedDelay2,PR/IO,0,32767,200,,ms,UINT,"Position Completed Delay 2
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.042
+335,PositionCompletedDelay3,PR/IO,0,32767,400,,ms,UINT,"Position Completed Delay 3
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.043
+336,PositionCompletedDelay4,PR/IO,0,32767,500,,ms,UINT,"Position Completed Delay 4
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.044
+337,PositionCompletedDelay5,PR/IO,0,32767,800,,ms,UINT,"Position Completed Delay 5
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.045
+338,PositionCompletedDelay6,PR/IO,0,32767,1000,,ms,UINT,"Position Completed Delay 6
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.046
+339,PositionCompletedDelay7,PR/IO,0,32767,1500,,ms,UINT,"Position Completed Delay 7
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.047
+340,PositionCompletedDelay8,PR/IO,0,32767,2000,,ms,UINT,"Position Completed Delay 8
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.048
+341,PositionCompletedDelay9,PR/IO,0,32767,2500,,ms,UINT,"Position Completed Delay 9
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.049
+342,PositionCompletedDelay10,PR/IO,0,32767,3000,,ms,UINT,"Position Completed Delay 10
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.050
+343,PositionCompletedDelay11,PR/IO,0,32767,3500,,ms,UINT,"Position Completed Delay 11
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.051
+344,PositionCompletedDelay12,PR/IO,0,32767,4000,,ms,UINT,"Position Completed Delay 12
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.052
+345,PositionCompletedDelay13,PR/IO,0,32767,4500,,ms,UINT,"Position Completed Delay 13
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.053
+346,PositionCompletedDelay14,PR/IO,0,32767,5000,,ms,UINT,"Position Completed Delay 14
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.054
+347,PositionCompletedDelay15,PR/IO,0,32767,5500,,ms,UINT,"Position Completed Delay 15
+Set the delay time after position is completed for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.055
+348,CompareStartAddress,All,0,799,50,,,INT,"COMPARE Start Address
+The start address of data array to store COMPARE data. Only writable when COMPARE stops. See ID351 (P5.059).","9-Motion_1
+26-Compare",,,,,P5.056
+349,CompareAxisPosition,All,-2147483648,2147483647,0,,,DINT,"COMPARE Axis Position
+Displays the axis position of the COMPARE pulse source. Writable only when COMPARE stops, but write-protected when ID351(P5.059).Y is 0 or 3 (the source of Compare axis is the Capture axis or the main encoder).
+When ID351(P5.059).Y is 3, the pulse resolution is determined by ID153 (P1.046),and this parameter is set to the feedback position of the motor (monitoring variable 00h).
+When the motor feedback position is redefined due to homing or Capture, it will be different from the parameter. In this case, set ID351(P5 - 059).Y to 0, and then set it to 3, to reset the parameter to the motor feedback position.","9-Motion_1
+26-Compare",,,,x,P5.057
+350,CompareRemainedCount,All,0,800,1,,,INT,"COMPARE Remained Count
+When COMPARE is not in operation, the parameter indicates the number of data expected to be
+compared (readable and writable). When COMPARE is in operation, the parameter indicates the remaining number of data to be compared. Each time it compares one data, the value decreases by one until the value is 0, indicating that comparing is completed (read-only).","9-Motion_1
+26-Compare",,,,x,P5.058
+351,CompareControl,All,0x00010000,0x0FFF313F,0x00640010,,,UDINT,"COMPARE Control
+See High Speed Compare Function (CMP) in the user manual.
+
+X: Compare Setting (Set 1 to enable each bit function)
+Bit0=Activate compare. Bit is cleared when compare completes.
+Bit1=Cycle mode. Does not stop.
+Bit2=After comparing finishes, activate Capture. Not valid when Capture is already activated.
+Bit3=Set Compare axis position ID349 (P5.057) to 0 once the last data is compared.
+Y: Axis source of Compare
+0=Source is the Capture axis
+1=Source is the auxiliary encoder (AUX)
+2=Source is the pulse command (terminal block input)
+3=Source is the main encoder (MFB)
+When ID351 (P5.059).Y is 0 (the axis source of Compare is the Capture axis), the ID331 (P5.039).Y (the axis source of Capture) cannot be changed.
+Z: Triggering logic
+0=Normally open (NO)
+1=Normally closed (NC)
+U: Trigger PR
+PR#45 is triggered when the last compare is completed (Set 1)
+CBA: Duration of pulse output in ms","9-Motion_1
+26-Compare",,,,x,P5.059
+352,PresetVelocity0,PR/IO,"0
+0","80000
+15999999","200
+200","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 0
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.060
+353,PresetVelocity1,PR/IO,"0
+0","80000
+15999999","500
+500","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 1
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.061
+354,PresetVelocity2,PR/IO,"0
+0","80000
+15999999","1000
+1000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 2
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.062
+355,PresetVelocity3,PR/IO,"0
+0","80000
+15999999","2000
+2000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 3
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.063
+356,PresetVelocity4,PR/IO,"0
+0","80000
+15999999","3000
+3000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 4
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.064
+357,PresetVelocity5,PR/IO,"0
+0","80000
+15999999","5000
+5000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 5
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.065
+358,PresetVelocity6,PR/IO,"0
+0","80000
+15999999","6000
+6000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 6
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.066
+359,PresetVelocity7,PR/IO,"0
+0","80000
+15999999","8000
+8000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 7
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.067
+360,PresetVelocity8,PR/IO,"0
+0","80000
+15999999","10000
+10000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 8
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.068
+361,PresetVelocity9,PR/IO,"0
+0","80000
+15999999","13000
+13000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 9
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.069
+362,PresetVelocity10,PR/IO,"0
+0","80000
+15999999","15000
+15000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 10
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.070
+363,PresetVelocity11,PR/IO,"0
+0","80000
+15999999","18000
+18000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 11
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.071
+364,PresetVelocity12,PR/IO,"0
+0","80000
+15999999","20000
+20000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 12
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.072
+365,PresetVelocity13,PR/IO,"0
+0","80000
+15999999","23000
+23000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 13
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.073
+366,PresetVelocity14,PR/IO,"0
+0","80000
+15999999","25000
+25000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 14
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.074
+367,PresetVelocity15,PR/IO,"0
+0","80000
+15999999","30000
+30000","0.1
+1","RPM
+um/s",DINT,"Preset Velocity 15
+Preset velocity for PR mode.","9-Motion_1
+21-Speed Setting",,,,,P5.075
+368,DI9FirstCaptureResetPosition,All,-1073741824,1073741823,0,,,DINT,"DI9 First Capture Reset Position
+If position reset function is enabled [ID331 (P5.039.X) Bit1 = 1], after the first position data is captured, the servo will reset the coordiates of the first point, which is defined by this parameter.","9-Motion_1
+25-Capture",,,,,P5.076
+369,ECamStartAddress,PR/IO,0,795,100,,,INT,"E-Cam Start Address
+The start address of the data array to store E-Cam table data.This parameter can be set at any time, but is effective only at the moment when drive status changes from pre-engaged to engaged.","9-Motion_1
+24-E-CAM",,,,,P5.081
+370,ECamAreaNumber,PR/IO,5,720,5,,,INT,"E-Cam Area Number
+Indicates the E-Cam curve is divided into N areas, and the table should include N+1 data. Only writable when E-Cam stops. [See ID376 (P5 - 088.X) Bit0 = 0]. Its setting range must be smaller than or equal to ID303 (P5.010) minus ID369 (P5.081), and ID370 (P5.082) x ID372 (P5.084) must be smaller than or equal to 2147483647.","9-Motion_1
+24-E-CAM",,,,,P5.082
+371,ECamSlaveCycleNumberM,PR/IO,1,32767,1,,,INT,"E-CAM Slave Cycle Number M
+When receiving pulse number defined by P5.084 from the master axis, E-Cam will rotate the cycle number defined by this value (One cycle of E-Cam = Rotate from 0°…360°). Only writable when E-Cam stops. [See ID376 (P5 - 088.X) Bit0 = 0].","9-Motion_1
+24-E-CAM",,,,,P5.083
+372,ECamMasterPulseNumberP,PR/IO,10,1073741823,3600,,,DINT,"E-CAM Master Pulse Number P
+When receiving the pulse number defined by this parameter from the master axis, E-Cam will rotate the cycle number defined by P5.083 (One cycle of E-Cam = Rotate from 0°…360°). This parameter can be
+modified at any time. Its setting range must be ID370 (P5 - 082) x ID371 (P5 - 083) smaller than or equal to ID 372 (P5.084), and ID370 (P5.082) x ID372 (P5.084) must be smaller than or equal to 2147483647.","9-Motion_1
+24-E-CAM",,,,,P5.084
+373,ECamEngagedAreaNumber,PR/IO,0,719,0,,,INT,"E-CAM Engaged Area Number
+The area number of E-Cam when E-Cam engaged (Area number in E-Cam table).","9-Motion_1
+24-E-CAM",,,,,P5.085
+374,ECamMasterAxisPosition,PR/IO,-2147483648,2147483647,0,,,DINT,"E-CAM Master Axis Position
+Position counter of the E-Cam Master. It increases when E-Cam operating. Only writable when E-Cam stops. [See ID376 (P5 - 088.X) Bit0 = 0].","9-Motion_1
+24-E-CAM",,,,x,P5.086
+375,ECamLeadPulseBeforeEngaged,PR/IO,-1073741824,1073741823,0,,,DINT,"E-CAM Lead Pulse Before Engaged
+When the engaging condition of E-Cam ID376 (P5.088.Z) is met, the pulse number from the master axis must exceed the setting value of this parameter for the E-Cam to fully engage.","9-Motion_1
+24-E-CAM",,,,,P5.087
+376,ECamControl,PR/IO,0x00000010,0x0063F147,0x00000010,,,UDINT,Enable E-CAM ControlSee E-Cam in the user manual.See Detailed Definitions ID 376 (P5.088).,"9-Motion_1
+24-E-CAM",,,,,P5.088
+377,ECamMasterPositionToDisengage,PR/IO,-1073741824,1073741823,0,,,DINT,"E-CAM Master Position to Disengage
+When pulse number of the master axis reaches this value, the clutch will disengage based on the disengage timing setting ID376 (P5.088.U).","9-Motion_1
+24-E-CAM",,,,,P5.089
+378,ECamDOCamArea1RisingEdgeAngle,PR/IO,0,360,270,,Degrees,INT,"E-CAM DO.CAM_Area1 Rising Edge Angle
+See Digital Output CAM_Area Settings in the user manual.
+
+1. ID378 (P5.090)>=ID379 (P5.091): DO.CAM_AREA1 (0x18) is on when the master axis position angle is bigger than ID379 (P5.091) but not bigger than ID378 (P5.090).
+2.P5.090<ID379 (P5.091): DO.CAM_AREA1 (0x18) is on when the master axis position angle is bigger than ID378 (P5.090) but not bigger than ID379 (P5.091).","9-Motion_1
+24-E-CAM",,,,,P5.090
+379,ECamDOCamArea1FallingEdgeAngle,PR/IO,0,360,360,,Degrees,INT,"E-CAM DO.CAM_Area1 Falling Edge Angle
+See Digital Output CAM_Area Settings in the user manual.
+
+1. ID378 (P5.090)>=ID379 (P5.091): DO.COM is on when the master axis position angle is bigger than P5.091 but not bigger than ID378 (P5.090).
+2.ID378 (P5.090)<ID379 (P5.091): DO.COM is on when the master axis position angle is bigger than ID378 (P5.090) but not bigger than ID379 (P5.091).","9-Motion_1
+24-E-CAM",,,,,P5.091
+380,ECamSkippedMasterPulses,PR/IO,-2147483648,2147483647,0,,,DINT,"E-CAM Skipped Master Position Pulses before Re-Engage
+This parameter goes with the selection of ID376 (P5.088.U = 4) E-Cam disengages if moving distance is exceeded: After disengaging, it enters pre-engaged status.
+This parameter determines the lead pulse. The pulse number from the master axis must exceed this value for the E-Cam to engage again.",9-Motion_1,,,,,P5.092
+381,MacroCmdParameter4,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Macro Command Parameter 4
+Before issuing the macro command, the relevant parameters #4 must be set in advance. The function of the parameter is determined by the macro command. Not every macro command has to set this parameter.",9-Motion_1,,,,,P5.093
+382,MacroCmdParameter3,All,-2147483648,2147483647,0,,,DINT,"Macro Command Parameter 3
+Before issuing the macro command, the relevant parameters #3 must be set in advance. The function of the parameter is determined by the macro command. Not every macro command has to set this parameter.",9-Motion_1,,,,,P5.094
+383,MacroCmdParameter2,All,-2147483648,2147483647,0,,,DINT,"Macro Command Parameter 2
+Before issuing the macro command, the relevant parameters #2 must be set in advance. The function of the parameter is determined by the macro command. Not every macro command has to set this parameter.",9-Motion_1,,,,,P5.095
+384,MacroCmdParameter1,All,-2147483648,2147483647,0,,,DINT,"Macro Command Parameter 1
+Before issuing the macro command, the relevant parameters #1 must be set in advance. The function of the parameter is determined by the macro command. Not every macro command has to set this parameter.",9-Motion_1,,,,,P5.096
+385,MacroCmdIssue&Result,All,0x0000,0xF99F,0x0000,,,UINT,"Macro Command Issue / Result
+See Macro Commands in the user manual for details on macro commands, success and failure codes.
+
+Write data(0x0ZYX, U=0) to issue the macro command.
+Read data(0xUZYX) to examine the result of the macro command.
+Example: Write 0x0001, return 0x1001 if success and return 0xFxxx(depending on the command description) if fail . If the issued command is not supported, failure code 0xF001 will be returned.",9-Motion_1,,,,x,P5.097
+386,EventRisingEdgePRNumber,PR/IO,0x0000,0xDDDD,0x0000,,,UINT,"PR Command Number at Event Rising Edge
+
+X:PR triggered when DI.EV1 (0x39) has a zero-to-one transition
+0=No action
+1…D=Execute PR#51…63
+Y: PR triggered when DI.EV2 (0x3A) has a zero-to-one transition
+0=No action
+1…D=Execute PR#51…63
+Z: PR triggered when DI.EV3 (0x3B) has a zero-to-one transition
+0=No action
+1…D=Execute PR#51…63
+U: PR triggered when DI.EV4 (0x3C) has a zero-to-one transition
+0=No action
+1…D=Execute PR#51…63","9-Motion_1
+22-Event Setting",,,,,P5.098
+387,EventFallingEdgePRNumber,PR/IO,0x0000,0xDDDD,0x0000,,,UINT,"PR Command Number at Event Falling Edge
+
+X:PR triggered when DI.EV1 (0x39) has a one-to-zero transition
+0=No action
+1…D=Execute PR#51…63
+Y: PR triggered when DI.EV2 (0x3A) has a one-to-zero transition
+0=No action
+1…D=Execute PR#51…63
+Z: PR triggered when DI.EV3 (0x3B) has a one-to-zero transition
+0=No action
+1…D=Execute PR#51…63
+U: PR triggered when DI.EV4 (0x3C) has a one-to-zero transition
+0=No action
+1…D=Execute PR#51…63","9-Motion_1
+22-Event Setting",,,,,P5.099
+388,DataArrayRWValue3,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value3
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.100
+389,DataArrayRWValue4,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value4
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.101
+390,DataArrayRWValue5,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value5
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.102
+391,DataArrayRWValue6,All,-2147483648,2147483647,0,,,DINT,"Data Array Read/Write Value6
+See Data Array in the user manual for detailed information on how reading and writing methods differ.",9-Motion_1,,,,x,P5.103
+392,DI10CaptureStartAddress,All,0,799,10,,,INT,"DI10 CAPTURE Start Address
+The start address of the data array to store DI10 CAPTURE data. Only writable when DI10 CAPTURE stops. See ID395 (P5.110).","9-Motion_1
+25-Capture",,,,,P5.107
+393,DI10CaptureAxisPosition,All,-2147483648,2147483647,0,,,DINT,"DI10 CAPTURE Axis Position
+Displays the axis position of DI10 CAPTURE pulse source.Only writable when DI10 CAPTURE stops. See ID395 (P5.110).If the source is the main encoder, this parameter is write-protected and the DI10 CAPTURE axis position is the feedback position of the motor (monitoring variable 00h).","9-Motion_1
+25-Capture",,,,x,P5.108
+394,DI10CaptureRemainedCount,All,0,800,1,,,INT,"DI10 CAPTURE Remained Count
+When DI 10 CAPTURE stops, it indicates the number of data expected to be captured (readable and writable).
+When DI10 CAPTURE activates, it indicates the remaining number of data that has not been captured (read-only). Each time it captures one data, this value decrements by 1 until the value is 0, indicating that capturing is completed.","9-Motion_1
+25-Capture",,,,x,P5.109
+395,DI10CaptureControl,All,0x00000000,0x6F00F13F,0x3C002010,,,UDINT,"DI10 CAPTURE Control
+See High Speed Capture Function (CAP) in the user manual.
+
+X: Capture Setting (set 1 to enable for each bit function)
+Bit0=Activate capture. Bit is cleared when capture completes.
+Bit1=After capturing first data, reset first data to ID396 (P5.111).
+Bit2=Reserved.
+Bit3=Execute PR#50 when finishing Capture.
+Y: Axis source of Capture
+0=Capture is not working
+1=Source is the auxiliary feedback (AUX)
+2=Source is the pulse command (terminal block input)
+3=Source is the main encoder (MFB)
+Z: Triggering logic
+0=Normally open (NO)
+1=Normally closed (NC)
+U: Trigger minimum interval in ms","9-Motion_1
+25-Capture",,,,x,P5.110
+396,DI10FirstCaptureResetPosition,All,-1073741824,1073741823,0,,,DINT,"DI10 First Capture Reset Position
+If the position reset function is enabled [ID395 (P5.110.X) Bit1 = 1], after the first position data is captured, the servo will reset the coordinates of the first point, which is defined by this parameter.","9-Motion_1
+25-Capture",,,,,P5.111
+397,HomingSetting,PR/IO,0x00000000,0xFFFFFF63,0x00000000,,,UDINT,"Homing Setting
+Defines the homing operation, including path type (YX), acceleration (Z), deceleration (U and A), delay time (B) and whether to execute homing on power up (D).
+See Homing in the user manual.
+
+YX: Command type
+0x0=Stop: Homing complete and stop
+0x1…0x63=Auto: Homing complete and execute the specific command (#1…#99)
+Z: ACC, select 0…F for acceleration time
+0…F=corresponds to ID312 (P5.020)…ID327 (P5.035)
+U: DEC1, select 0…F for homing deceleration time
+0…F=corresponds to ID312 (P5.020)…ID327 (P5.035)
+A: DEC2, select 0…F for homing return/creep deceleration time
+0…F=corresponds to ID312 (P5.020)…ID327 (P5.035)
+B: DLY, select 0…F for delay time
+0…F=corresponds to ID332 (P5.040)…ID347 (P5.055)
+C: Reserved
+D: BOOT setting
+0=Do not execute homing when the drive powers up
+1=Execute homing automatically when the drive powers up","10-Motion_2
+23-Homing Setting",,,,,P6.000
+398,HomePosition,PR/IO,-2147483648,2147483647,0,,,DINT,"Home Position
+Defines the origin","10-Motion_2
+23-Homing Setting",,,,,P6.001
+399,PRCmd1Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,PR Command1 SettingSee PR Command Setting and Data Definitions in the user manual for details on these settings and see the Motion Control in PR Mode chapter.See PRCmd#Setting on the Detailed Definitions tab,10-Motion_2,,,,,P6.002
+400,PRCmd1Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command1 Data
+See PR Command Setting and Data Definitions in the user manual for details on these settings and see the Motion Control in PR Mode chapter.
+
+Defines the target position of ID399 (P6.002) or the target command for the JUMP command.",10-Motion_2,,,,,P6.003
+401,PRCmd2Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command2 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.004
+402,PRCmd2Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command2 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.005
+403,PRCmd3Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command3 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.006
+404,PRCmd3Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command3 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.007
+405,PRCmd4Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command4 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.008
+406,PRCmd4Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command4 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.009
+407,PRCmd5Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command5 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.010
+408,PRCmd5Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command5 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.011
+409,PRCmd6Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command6 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.012
+410,PRCmd6Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command6 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.013
+411,PRCmd7Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command7 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.014
+412,PRCmd7Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command7 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.015
+413,PRCmd8Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command8 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.016
+414,PRCmd8Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command8 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.017
+415,PRCmd9Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command9 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.018
+416,PRCmd9Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command9 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.019
+417,PRCmd10Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command10 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.020
+418,PRCmd10Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command10 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.021
+419,PRCmd11Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command11 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.022
+420,PRCmd11Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command11 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.023
+421,PRCmd12Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command12 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.024
+422,PRCmd12Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command12 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.025
+423,PRCmd13Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command13 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.026
+424,PRCmd13Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command13 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.027
+425,PRCmd14Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command14 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.028
+426,PRCmd14Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command14 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.029
+427,PRCmd15Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command15 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.030
+428,PRCmd15Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command15 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.031
+429,PRCmd16Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command16 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.032
+430,PRCmd16Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command16 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.033
+431,PRCmd17Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command17 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.034
+432,PRCmd17Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command17 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.035
+433,PRCmd18Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command18 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.036
+434,PRCmd18Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command18 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.037
+435,PRCmd19Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command19 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.038
+436,PRCmd19Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command19 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.039
+437,PRCmd20Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command20 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.040
+438,PRCmd20Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command20 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.041
+439,PRCmd21Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command21 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.042
+440,PRCmd21Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command21 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.043
+441,PRCmd22Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command22 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.044
+442,PRCmd22Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command22 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.045
+443,PRCmd23Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command23 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.046
+444,PRCmd23Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command23 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.047
+445,PRCmd24Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command24 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.048
+446,PRCmd24Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command24 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.049
+447,PRCmd25Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command25 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.050
+448,PRCmd25Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command25 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.051
+449,PRCmd26Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command26 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.052
+450,PRCmd26Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command26 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.053
+451,PRCmd27Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command27 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.054
+452,PRCmd27Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command27 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.055
+453,PRCmd28Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command28 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.056
+454,PRCmd28Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command28 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.057
+455,PRCmd29Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command29 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.058
+456,PRCmd29Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command29 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.059
+457,PRCmd30Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command30 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.060
+458,PRCmd30Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command30 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.061
+459,PRCmd31Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command31 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.062
+460,PRCmd31Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command31 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.063
+461,PRCmd32Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command32 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.064
+462,PRCmd32Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command32 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.065
+463,PRCmd33Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command33 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.066
+464,PRCmd33Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command33 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.067
+465,PRCmd34Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command34 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.068
+466,PRCmd34Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command34 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.069
+467,PRCmd35Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command35 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.070
+468,PRCmd35Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command35 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.071
+469,PRCmd36Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command36 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.072
+470,PRCmd36Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command36 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.073
+471,PRCmd37Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command37 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.074
+472,PRCmd37Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command37 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.075
+473,PRCmd38Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command38 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.076
+474,PRCmd38Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command38 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.077
+475,PRCmd39Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command39 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.078
+476,PRCmd39Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command39 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.079
+477,PRCmd40Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command40 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.080
+478,PRCmd40Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command40 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.081
+479,PRCmd41Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command41 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.082
+480,PRCmd41Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command41 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.083
+481,PRCmd42Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command42 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.084
+482,PRCmd42Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command42 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.085
+483,PRCmd43Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command43 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.086
+484,PRCmd43Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command43 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.087
+485,PRCmd44Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command44 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.088
+486,PRCmd44Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command44 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.089
+487,PRCmd45Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command45 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.090
+488,PRCmd45Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command45 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.091
+489,PRCmd46Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command46 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.092
+490,PRCmd46Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command46 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.093
+491,PRCmd47Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command47 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.094
+492,PRCmd47Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command47 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.095
+493,PRCmd48Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command48 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.096
+494,PRCmd48Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command48 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.097
+495,PRCmd49Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command49 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P6.098
+496,PRCmd49Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command49 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P6.099
+497,PRCmd50Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command50 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.000
+498,PRCmd50Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command50 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.001
+499,PRCmd51Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command51 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.002
+500,PRCmd51Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command51 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.003
+501,PRCmd52Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command52 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.004
+502,PRCmd52Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command52 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.005
+503,PRCmd53Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command53 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.006
+504,PRCmd53Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command53 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.007
+505,PRCmd54Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command54 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.008
+506,PRCmd54Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command54 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.009
+507,PRCmd55Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command55 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.010
+508,PRCmd55Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command55 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.011
+509,PRCmd56Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command56 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.012
+510,PRCmd56Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command56 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.013
+511,PRCmd57Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command57 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.014
+512,PRCmd57Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command57 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.015
+513,PRCmd58Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command58 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.016
+514,PRCmd58Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command58 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.017
+515,PRCmd59Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command59 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.018
+516,PRCmd59Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command59 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.019
+517,PRCmd60Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command60 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.020
+518,PRCmd60Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command60 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.021
+519,PRCmd61Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command61 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.022
+520,PRCmd61Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command61 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.023
+521,PRCmd62Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command62 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.024
+522,PRCmd62Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command62 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.025
+523,PRCmd63Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command63 Setting
+Please refer to the description of ID399 (P6.002).","10-Motion_2
+22-Event Setting",,,,,P7.026
+524,PRCmd63Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command63 Data
+Please refer to the description of ID400 (P6.003).","10-Motion_2
+22-Event Setting",,,,,P7.027
+525,PRCmd64Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command64 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.028
+526,PRCmd64Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command64 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.029
+527,PRCmd65Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command65 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.030
+528,PRCmd65Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command65 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.031
+529,PRCmd66Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command66 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.032
+530,PRCmd66Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command66 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.033
+531,PRCmd67Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command67 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.034
+532,PRCmd67Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command67 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.035
+533,PRCmd68Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command68 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.036
+534,PRCmd68Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command68 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.037
+535,PRCmd69Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command69 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.038
+536,PRCmd69Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command69 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.039
+537,PRCmd70Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command70 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.040
+538,PRCmd70Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command70 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.041
+539,PRCmd71Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command71 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.042
+540,PRCmd71Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command71 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.043
+541,PRCmd72Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command72 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.044
+542,PRCmd72Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command72 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.045
+543,PRCmd73Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command73 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.046
+544,PRCmd73Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command73 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.047
+545,PRCmd74Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command74 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.048
+546,PRCmd74Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command74 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.049
+547,PRCmd75Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command75 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.050
+548,PRCmd75Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command75 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.051
+549,PRCmd76Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command76 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.052
+550,PRCmd76Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command76 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.053
+551,PRCmd77Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command77 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.054
+552,PRCmd77Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command77 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.055
+553,PRCmd78Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command78 Setting
+Please refer to the description of ID399 (P6.002) .",10-Motion_2,,,,,P7.056
+554,PRCmd78Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command78 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.057
+555,PRCmd79Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command79 Setting
+Please refer to the description of ID399 (P6.002) .",10-Motion_2,,,,,P7.058
+556,PRCmd79Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command79 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.059
+557,PRCmd80Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command80 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.060
+558,PRCmd80Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command80 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.061
+559,PRCmd81Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command81 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.062
+560,PRCmd81Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command81 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.063
+561,PRCmd82Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command82 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.064
+562,PRCmd82Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command82 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.065
+563,PRCmd83Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command83 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.066
+564,PRCmd83Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command83 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.067
+565,PRCmd84Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command84 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.068
+566,PRCmd84Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command84 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.069
+567,PRCmd85Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command85 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.070
+568,PRCmd85Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command85 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.071
+569,PRCmd86Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command86 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.072
+570,PRCmd86Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command86 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.073
+571,PRCmd87Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command87 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.074
+572,PRCmd87Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command87 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.075
+573,PRCmd88Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command88 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.076
+574,PRCmd88Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command88 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.077
+575,PRCmd89Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command89 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.078
+576,PRCmd89Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command89 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.079
+577,PRCmd90Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command90 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.080
+578,PRCmd90Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command90 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.081
+579,PRCmd91Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command91 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.082
+580,PRCmd91Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command91 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.083
+581,PRCmd92Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command92 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.084
+582,PRCmd92Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command92 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.085
+583,PRCmd93Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command93 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.086
+584,PRCmd93Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command93 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.087
+585,PRCmd94Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command94 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.088
+586,PRCmd94Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command94 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.089
+587,PRCmd95Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command95 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.090
+588,PRCmd95Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command95 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.091
+589,PRCmd96Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command96 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.092
+590,PRCmd96Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command96 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.093
+591,PRCmd97Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command97 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.094
+592,PRCmd97Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command97 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.095
+593,PRCmd98Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command98 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.096
+594,PRCmd98Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command98 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.097
+595,PRCmd99Setting,PR/IO,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"PR Command99 Setting
+Please refer to the description of ID399 (P6.002).",10-Motion_2,,,,,P7.098
+596,PRCmd99Data,PR/IO,-2147483648,2147483647,0,,,DINT,"PR Command99 Data
+Please refer to the description of ID400 (P6.003).",10-Motion_2,,,,,P7.099
+687,PRCmdFilterTime,PR,0x0000,0x107F,0x0000,,10ms,UINT,"The format is UZYX.
+YX: acceleration / deceleration time limit (0 - 1270 ms)
+Z: reserved
+U: reverse inhibit",10-Motion_2,,,,,P1.022
