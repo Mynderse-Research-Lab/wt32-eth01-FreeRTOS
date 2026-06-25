@@ -13,4 +13,18 @@ menu "Gantry application"
             command and the basic_tests.cpp source from the firmware without
             losing test coverage.
 
+    config GANTRY_SUPPRESS_GEOMETRY_WARNING
+        bool "Suppress dev-rig geometry compile reminder"
+        default n
+        help
+            axis_drivetrain_params.h emits a #warning when gantry geometric
+            offsets are still development-rig placeholders. ESP-IDF v6 treats
+            that as a build error (-Werror=cpp).
+
+            Enable this for CI or bring-up builds that knowingly use unfrozen
+            geometry. Local developer builds should leave this disabled so the
+            one-time reminder in main.cpp stays visible.
+
+            Equivalent to defining GANTRY_SUPPRESS_GEOMETRY_WARNING in C.
+
 endmenu
