@@ -1,0 +1,59 @@
+# Standalone host (native) unit-test project for the WT32-ETH01 gantry firmware.
+#
+# This project does NOT use ESP-IDF. It compiles only the hardware-independent
+# motion logic (kinematics, trajectory) and exercises it with the Unity test
+# framework so the core math can be regression-tested on a plain CI runner.
+#
+# Build + run:
+#   cmake -S test/host -B build/host
+#   cmake --build build/host
+#   ctest --test-dir build/host --output-on-failure
+#
+# The full firmware still builds with ESP-IDF (idf.py -C idf build); that is a
+# separate target and is exercised in CI, not here.
+
+cmake_minimum_required(VERSION 3.16)
+project(gantry_host_tests LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+
+enable_testing()
+
+# Repo root, two levels up from test/host/.
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+
+# --- Unity test framework -----------------------------------------------------
+# Fetch a pinned release of ThrowTheSwitch/Unity. Cached in the build tree, so
+# repeated configures (e.g. from the commit hook) do not re-download.
+include(FetchContent)
+FetchContent_Declare(
+    unity
+    GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git
+    GIT_TAG        v2.6.0
+)
+FetchContent_MakeAvailable(unity)
+
+# --- Hardware-independent logic under test ------------------------------------
+# Only sources that compile without ESP-IDF / FreeRTOS belong here.
+add_library(gantry_logic STATIC
+    "${REPO_ROOT}/lib/Gantry/src/GantryKinematics.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryTrajectory.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryConfig.cpp"
+)
+target_include_directories(gantry_logic PUBLIC
+    "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/include"
+)
+
+# --- Test executables ---------------------------------------------------------
+# Each test file is its own Unity runner registered with CTest.
+function(add_host_test name)
+    add_executable(${name} "${name}.cpp")
+    target_link_libraries(${name} PRIVATE gantry_logic unity)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+add_host_test(test_kinematics)
+add_host_test(test_trajectory)

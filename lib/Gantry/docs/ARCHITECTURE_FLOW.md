@@ -27,7 +27,8 @@ flowchart TD
   Exp["gpio_expander<br/>C shim (single MCP handle)"]
   MCP["MCP23S17<br/>16-bit SPI GPIO expander (SPI2 @ 1 MHz)"]
   DGPIO["driver/gpio<br/>direct ESP32 GPIO out"]
-  HW["Electromechanical hardware<br/>Kinetix 5100 (X, Y) · custom ERD driver (Theta)<br/>SCHUNK KGG gripper valve"]
+  HW["Electromechanical hardware<br/>Kinetix 5100 (X, Z) · HCS01 (Theta)<br/>SCHUNK KGG gripper valve"]
+  IF["Motion I/O interface board<br/>HCPL-2530 · VO14642AT · HCPL-3700<br/>74AHCT244 · 24 V field (see docs/MOTION_IO_INTERFACE.md)"]
   Sens["Sensors<br/>quadrature encoders · limit switches · alarm lines"]
 
   App -- "motion API (the only supported control path)" --> Gantry
@@ -55,14 +56,17 @@ flowchart TD
   LSX --> Exp
   Exp --> MCP
 
-  LEDC -- "pulse train" --> HW
-  MCP -- "DIR, ENABLE, ALARM_RESET, GRIPPER" --> HW
+  LEDC -- "pulse train" --> IF
+  MCP -- "DIR, ENABLE, ALARM_RESET" --> IF
+  IF -- "24 V PTI / digital I/O" --> HW
   DGPIO -- "GRIPPER (if direct-encoded)" --> HW
+  MCP -- "GRIPPER, limits" --> HW
 
-  %% ----- upstream (feedback) -----
+  Sens -- "fb: alarm (drive outputs)" --> IF
+  IF -- "fb: alarm (optocoupled)" --> Exp
   Sens -- "fb: A/B quadrature" --> PCNT
-  Sens -- "fb: alarm / limit levels" --> MCP
-  MCP  -- "fb: alarm / limit reads" --> Exp
+  Sens -- "fb: limit levels" --> MCP
+  MCP  -- "fb: limit / alarm reads" --> Exp
   PCNT -- "fb: encoder counts" --> PMX
   PCNT -- "fb: encoder counts" --> PMY
   PCNT -- "fb: encoder counts" --> PMT
@@ -120,22 +124,27 @@ Every `fb:`-prefixed edge is an **upstream feedback** edge. The feedback tree is
 
 ## 3. Signal routing table
 
+Motion I/O between WT32/MCP and the motor drives is documented in
+[`docs/MOTION_IO_INTERFACE.md`](../../../docs/MOTION_IO_INTERFACE.md)
+(opto-isolated 3.3 V → 24 V). The table below is the **firmware** view;
+physical wiring adds the interface board hop on pulse, DIR, SON, ARST, and ALM.
+
 ### 3.1 Downstream (control) signals
 
 | Signal | Owner struct/class | Transport | Destination |
 |---|---|---|---|
-| `PULSE` (X, Y, Theta step train) | `PulseMotorDriver` | `ledc_*` → direct ESP32 GPIO | Motor driver STEP input |
-| `DIR` (X, Y, Theta) | `PulseMotorDriver` | `gpio_expander_write` → `mcp23s17_write_pin` → SPI | Motor driver DIR input |
-| `ENABLE` / `SON` (X, Y, Theta) | `PulseMotorDriver` | `gpio_expander_write` → MCP | Motor driver SON input |
-| `ALARM_RESET` / `ARST` (X, Y) | `PulseMotorDriver` | `gpio_expander_write` → MCP (pulsed) | Motor driver ARST input |
+| `PULSE` (X, Y, Theta step train) | `PulseMotorDriver` | `ledc_*` → ESP32 GPIO → **Motion I/O IF** → 24 V PTI | Motor driver STEP input |
+| `DIR` (X, Y, Theta) | `PulseMotorDriver` | `gpio_expander_write` → MCP → **Motion I/O IF** → 24 V PTI | Motor driver DIR input |
+| `ENABLE` / `SON` (X, Y, Theta) | `PulseMotorDriver` | `gpio_expander_write` → MCP → **Motion I/O IF** → 24 V digital out | Motor driver SON input |
+| `ALARM_RESET` / `ARST` (X, Y) | `PulseMotorDriver` | `gpio_expander_write` → MCP → **Motion I/O IF** (pulsed) | Motor driver ARST input |
 | `GRIPPER` (digital on/off) | `GantryEndEffector` | `gpio_expander_write` → MCP **or** `gpio_set_level` (direct GPIO) | Gripper solenoid valve |
 
 ### 3.2 Upstream (feedback) signals
 
 | Signal | Sensor | Transport | Consumer |
 |---|---|---|---|
-| Quadrature encoder A/B (X, Y, Theta) | Motor encoder | GPIO → `pulse_cnt` → 64-bit accumulator in `PulseMotorDriver` | `GantryPulseMotor{Linear,Rotary}Axis::getEncoderPulses()` → `Gantry::getXEncoder()` / `getCurrentY()` / `getCurrentTheta()` |
-| `ALARM` status (X, Y) | Motor driver open-drain | MCP → `gpio_expander_read` → `PulseMotorDriver::getAlarmStatus()` | `Gantry::isAlarmActive()` / `Gantry::clearAlarm()` |
+| Quadrature encoder A/B (X, Z, Theta) | Motor encoder | GPIO → `pulse_cnt` → 64-bit accumulator in `PulseMotorDriver` | `GantryPulseMotor{Linear,Rotary}Axis::getEncoderPulses()` → `Gantry::getXEncoder()` / `getCurrentZ()` / `getCurrentTheta()` |
+| `ALARM` status (X, Y) | Motor driver open-drain | Drive → **Motion I/O IF** → MCP → `gpio_expander_read` → `PulseMotorDriver::getAlarmStatus()` | `Gantry::isAlarmActive()` / `Gantry::clearAlarm()` |
 | `LIMIT_MIN` / `LIMIT_MAX` (X; Y and Theta wired, not yet wrapped) | Inductive switch | MCP → `gpio_expander_read` → `GantryLimitSwitch::read()` with N-sample debounce | `Gantry::home()` / `Gantry::calibrate()` / safety abort |
 
 ## 4. Where each layer lives in the repo

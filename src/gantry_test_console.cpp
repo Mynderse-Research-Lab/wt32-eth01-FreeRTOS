@@ -1,6 +1,8 @@
 #include "gantry_test_console.h"
 
+#if CONFIG_GANTRY_SELFTEST
 #include "basic_tests.h"
+#endif
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
@@ -128,10 +130,10 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
     const float xEncMm = cfg->gantry->getXEncoderMm();
     const float xCmdDisp = convertMmToSelected(xCmdMm);
     const float xEncDisp = convertMmToSelected(xEncMm);
-    const float yDisp = convertMmToSelected(joint.y);
-    ESP_LOGI(TAG, "LIVE POS: x_cmd=%.2f %s, x_enc=%.2f %s, y=%.2f %s, theta=%.2f deg",
+    const float zDisp = convertMmToSelected(joint.z);
+    ESP_LOGI(TAG, "LIVE POS: x_cmd=%.2f %s, x_enc=%.2f %s, z=%.2f %s, theta=%.2f deg",
              xCmdDisp, getLinearUnitLabel(), xEncDisp, getLinearUnitLabel(),
-             yDisp, getLinearUnitLabel(), joint.theta);
+             zDisp, getLinearUnitLabel(), joint.theta);
     g_lastLiveMotionLogMs = nowMs;
   }
   g_liveMotionWasBusy = busy;
@@ -150,7 +152,7 @@ void calibrationTask(void *param) {
   int len = cfg->gantry->calibrate();
   if (len > 0) {
     cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)len,
-                                AXIS_Y_HARD_LIMIT_MIN_MM, AXIS_Y_HARD_LIMIT_MAX_MM,
+                                AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
                                 AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
@@ -271,10 +273,10 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "=== Gantry Status ===");
   Gantry::JointConfig current = gantry->getCurrentJointConfig();
   const float xDisp = convertMmToSelected(current.x);
-  const float yDisp = convertMmToSelected((float)gantry->getCurrentY());
+  const float zDisp = convertMmToSelected((float)gantry->getCurrentZ());
   ESP_LOGI(TAG, "X Position: %.3f %s", xDisp, getLinearUnitLabel());
   ESP_LOGI(TAG, "X Encoder : %d pulses", gantry->getXEncoder());
-  ESP_LOGI(TAG, "Y Position: %.3f %s", yDisp, getLinearUnitLabel());
+  ESP_LOGI(TAG, "Z Position: %.3f %s (+Z = up; belt = 0)", zDisp, getLinearUnitLabel());
   ESP_LOGI(TAG, "Theta: %d deg", gantry->getCurrentTheta());
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
@@ -292,9 +294,9 @@ void printStatus(Gantry::Gantry *gantry) {
            getLinearUnitLabel());
   ESP_LOGI(TAG, "Units: linear=%s (internal mm)", getLinearUnitLabel());
 
-  ESP_LOGI(TAG, "Joint Config: x=%.3f %s, y=%.3f %s, theta=%.1f deg",
+  ESP_LOGI(TAG, "Joint Config: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
            convertMmToSelected(current.x), getLinearUnitLabel(),
-           convertMmToSelected(current.y), getLinearUnitLabel(), current.theta);
+           convertMmToSelected(current.z), getLinearUnitLabel(), current.theta);
 
   Gantry::EndEffectorPose pose = gantry->getCurrentEndEffectorPose();
   ESP_LOGI(TAG, "End-Effector: x=%.1f y=%.1f z=%.1f theta=%.1f", pose.x, pose.y, pose.z,
@@ -389,8 +391,8 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
   printMcpPin("X Enable", cfg->x_enable_pin);
   printMcpPin("X Alarm In", cfg->x_alarm_pin);
   printMcpPin("X Alarm Rst", cfg->x_alarm_reset_pin);
-  printMcpPin("Y Alarm In", cfg->y_alarm_pin);
-  printMcpPin("Y Alarm Rst", cfg->y_alarm_reset_pin);
+  printMcpPin("Z Alarm In", cfg->z_alarm_pin);
+  printMcpPin("Z Alarm Rst", cfg->z_alarm_reset_pin);
   if (cfg->use_mcp23s17) {
     printMcpPin("X Min Limit", cfg->limit_min_pin);
     printMcpPin("X Max Limit", cfg->limit_max_pin);
@@ -398,19 +400,19 @@ void printActivePins(const GantryTestConsoleConfig *cfg) {
 
   ESP_LOGI(TAG, "--- ESP32 pins ---");
   printDirectPin("X Pulse", cfg->x_pulse_pin);
-  printDirectPin("Y Pulse", cfg->y_pulse_pin);
-  printDirectPin("Theta Pulse", cfg->theta_pwm_pin);
+  printDirectPin("Z Pulse", cfg->z_pulse_pin);
+  printDirectPin("Theta Pulse", cfg->theta_pulse_pin);
   printDirectPin("X Encoder A", cfg->x_encoder_a_pin);
   printDirectPin("X Encoder B", cfg->x_encoder_b_pin);
-  printDirectPin("Y Encoder A", cfg->y_encoder_a_pin);
-  printDirectPin("Y Encoder B", cfg->y_encoder_b_pin);
+  printDirectPin("Z Encoder A", cfg->z_encoder_a_pin);
+  printDirectPin("Z Encoder B", cfg->z_encoder_b_pin);
   if (!cfg->use_mcp23s17) {
     printDirectPin("X Min Limit", cfg->limit_min_pin);
     printDirectPin("X Max Limit", cfg->limit_max_pin);
   }
 
-  ESP_LOGI(TAG, "LEDC: X ch %d, Y ch %d, Theta ch %d", cfg->x_pulse_ledc_channel,
-           cfg->y_pulse_ledc_channel, cfg->theta_pulse_ledc_channel);
+  ESP_LOGI(TAG, "LEDC: X ch %d, Z ch %d, Theta ch %d", cfg->x_pulse_ledc_channel,
+           cfg->z_pulse_ledc_channel, cfg->theta_pulse_ledc_channel);
   ESP_LOGI(TAG, "========================================");
 }
 
@@ -622,13 +624,14 @@ void runGpioDriveCommand(const char *cmd) {
 }
 
 // ---- Per-axis homing / calibration dispatchers ---------------------------
-// These wrap the existing X-axis-only paths and add Y / Theta stubs that
+// These wrap the existing X-axis-only paths and add Z / Theta stubs that
 // log a placeholder. The console command parser tokenizes the rest of the
 // line (after `home` / `calibrate`) into axis names and calls these in
 // order. `home` / `calibrate` with no arguments defaults to X (current
-// behavior).
+// behavior). The vertical actuator's axis token is `z` (was `y` in
+// pre-2026-05 firmware).
 
-enum class AxisToken { X, Y, THETA };
+enum class AxisToken { X, Z, THETA };
 
 bool parseAxisToken(const char *tok, AxisToken &out) {
   if (tok == nullptr) return false;
@@ -636,8 +639,8 @@ bool parseAxisToken(const char *tok, AxisToken &out) {
     out = AxisToken::X;
     return true;
   }
-  if (strcmp(tok, "y") == 0) {
-    out = AxisToken::Y;
+  if (strcmp(tok, "z") == 0) {
+    out = AxisToken::Z;
     return true;
   }
   if (strcmp(tok, "t") == 0 || strcmp(tok, "theta") == 0) {
@@ -684,9 +687,9 @@ void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
     case AxisToken::X:
       runHomeXSequence(cfg);
       break;
-    case AxisToken::Y:
-      cfg->gantry->homeY();
-      ESP_LOGI(TAG, "OK Y home accepted (stub - not yet wired)");
+    case AxisToken::Z:
+      cfg->gantry->homeZ();
+      ESP_LOGI(TAG, "OK Z home accepted (stub - not yet wired)");
       break;
     case AxisToken::THETA:
       cfg->gantry->homeTheta();
@@ -719,9 +722,9 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
       }
       break;
     }
-    case AxisToken::Y:
-      cfg->gantry->calibrateY();
-      ESP_LOGI(TAG, "OK Y calibrate accepted (stub - not yet wired)");
+    case AxisToken::Z:
+      cfg->gantry->calibrateZ();
+      ESP_LOGI(TAG, "OK Z calibrate accepted (stub - not yet wired)");
       break;
     case AxisToken::THETA:
       cfg->gantry->calibrateTheta();
@@ -731,7 +734,7 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
 }
 
 // Parses tokens after the leading command word and dispatches per axis.
-// `cmd` is the lowercased full command line (e.g. "home x y" or "calibrate").
+// `cmd` is the lowercased full command line (e.g. "home x z" or "calibrate").
 // `leading` is the word to skip ("home" or "calibrate").
 // `runFn` is called for each parsed axis in the order they appear.
 void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
@@ -751,7 +754,7 @@ void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
 
   bool sawAnyToken = false;
   bool ranX = false;
-  bool ranY = false;
+  bool ranZ = false;
   bool ranT = false;
 
   for (char *tok = strtok_r(nullptr, " \t", &saveptr); tok != nullptr;
@@ -759,21 +762,21 @@ void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
     sawAnyToken = true;
     if (strcmp(tok, "all") == 0) {
       if (!ranX) { runFn(cfg, AxisToken::X);     ranX = true; }
-      if (!ranY) { runFn(cfg, AxisToken::Y);     ranY = true; }
+      if (!ranZ) { runFn(cfg, AxisToken::Z);     ranZ = true; }
       if (!ranT) { runFn(cfg, AxisToken::THETA); ranT = true; }
       continue;
     }
     AxisToken axis;
     if (!parseAxisToken(tok, axis)) {
-      ESP_LOGE(TAG, "ERROR: Unknown %s axis '%s'; use x|y|t|all", leading, tok);
+      ESP_LOGE(TAG, "ERROR: Unknown %s axis '%s'; use x|z|t|all", leading, tok);
       continue;
     }
     if (axis == AxisToken::X && ranX) continue;
-    if (axis == AxisToken::Y && ranY) continue;
+    if (axis == AxisToken::Z && ranZ) continue;
     if (axis == AxisToken::THETA && ranT) continue;
     runFn(cfg, axis);
     if (axis == AxisToken::X) ranX = true;
-    if (axis == AxisToken::Y) ranY = true;
+    if (axis == AxisToken::Z) ranZ = true;
     if (axis == AxisToken::THETA) ranT = true;
   }
 
@@ -1002,22 +1005,22 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     float x = 0.0f;
-    float y = 0.0f;
+    float z = 0.0f;
     float theta = 0.0f;
-    int parsed = sscanf(cmd, "move %f %f %f", &x, &y, &theta);
+    int parsed = sscanf(cmd, "move %f %f %f", &x, &z, &theta);
     if (parsed < 3) {
-      ESP_LOGE(TAG, "Usage: move <x_%s> <y_%s> <theta_deg>",
+      ESP_LOGE(TAG, "Usage: move <x_%s> <z_%s> <theta_deg>",
                getLinearUnitLabel(), getLinearUnitLabel());
       return;
     }
 
     Gantry::JointConfig target;
     target.x = convertSelectedToMm(x);
-    target.y = convertSelectedToMm(y);
+    target.z = convertSelectedToMm(z);
     target.theta = theta;
 
-    ESP_LOGI(TAG, "Moving to: x=%.3f %s, y=%.3f %s, theta=%.1f deg",
-             x, getLinearUnitLabel(), y, getLinearUnitLabel(), theta);
+    ESP_LOGI(TAG, "Moving to: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
+             x, getLinearUnitLabel(), z, getLinearUnitLabel(), theta);
     Gantry::GantryError result = cfg->gantry->moveTo(
         target, g_moveSpeedMmPerS, g_moveSpeedDegPerS, g_moveAccelMmPerS2, g_moveDecelMmPerS2);
     if (result == Gantry::GantryError::OK) {
@@ -1053,9 +1056,11 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     } else {
       ESP_LOGE(TAG, "ERROR: Alarm reset failed (ARST pin may be disabled)");
     }
+#if CONFIG_GANTRY_SELFTEST
   } else if (strcmp(cmdLower, "selftest") == 0) {
     BasicTestSummary result = runBasicTests();
     ESP_LOGI(TAG, "Selftest complete: passed=%d failed=%d", result.passed, result.failed);
+#endif
   } else {
     ESP_LOGE(TAG, "ERROR: Unknown command: %s", cmd);
     ESP_LOGI(TAG, "Type 'help' for available commands");
@@ -1079,19 +1084,21 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home [x|y|t|all]     - home one or more axes (default x; Y/Theta stubbed)");
-  ESP_LOGI(TAG, "  calibrate [x|y|t|all] - calibrate one or more axes (default x; Y/Theta stubbed)");
+  ESP_LOGI(TAG, "  home [x|z|t|all]     - home one or more axes (default x; Z/Theta stubbed)");
+  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate one or more axes (default x; Z/Theta stubbed)");
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
   ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
   ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");
   ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable speed+accel/decel range clamps");
   ESP_LOGI(TAG, "  livepos <hz>         - set LIVE POS periodic rate (0=off, default off)");
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
-  ESP_LOGI(TAG, "  move <x> <y> <t>     - move to position (requires home+calibrate this startup)");
+  ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=up, z=joint datum");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
   ESP_LOGI(TAG, "  stop                 - stop all motion");
   ESP_LOGI(TAG, "  alarmreset | arst    - pulse alarm reset output (ARST)");
+#if CONFIG_GANTRY_SELFTEST
   ESP_LOGI(TAG, "  selftest             - run basic math/config tests");
+#endif
   ESP_LOGI(TAG, "");
 }
 

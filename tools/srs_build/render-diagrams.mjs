@@ -1,9 +1,13 @@
 /**
- * Reads repo-root Pickup_algo_and_MQTTBridge_SRS.md, extracts ```mermaid blocks,
- * renders each with @mermaid-js/mermaid-cli (mmdc), writes SRS_preprocessed.md
- * into docs/srs/_build/ with ![...](diagram_N.png) in the same folder.
+ * Reads an SRS Markdown file under the repo root (default: Pickup_algo_and_MQTTBridge_SRS.md),
+ * extracts ```mermaid blocks, renders each with @mermaid-js/mermaid-cli (mmdc), writes a
+ * preprocessed .md into docs/srs/_build/ with ![...](diagram_N.png) in the same folder.
  *
- * Run from tools/srs_build after `npm ci`. Invoked by build.ps1.
+ * Usage (from tools/srs_build after `npm ci`):
+ *   node render-diagrams.mjs
+ *   node render-diagrams.mjs Pickup_algo_and_MQTTBridge_SRS_flat.md SRS_flat_preprocessed.md
+ *
+ * Args are optional: input path relative to repo root, then output basename inside _build/.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -12,7 +16,15 @@ import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const srsMd = path.join(repoRoot, "Pickup_algo_and_MQTTBridge_SRS.md");
+
+const inputRel =
+  process.argv[2] || "Pickup_algo_and_MQTTBridge_SRS.md";
+const preprocessedBasename =
+  process.argv[3] || "SRS_preprocessed.md";
+
+const srsMd = path.isAbsolute(inputRel)
+  ? inputRel
+  : path.join(repoRoot, inputRel);
 const buildDir = path.join(repoRoot, "docs", "srs", "_build");
 
 const MERMAID_BLOCK = /```mermaid\n([\s\S]*?)```/g;
@@ -82,7 +94,7 @@ function main() {
     console.warn("No ```mermaid blocks found; copying SRS verbatim to _build.");
   }
 
-  const preprocessed = path.join(buildDir, "SRS_preprocessed.md");
+  const preprocessed = path.join(buildDir, preprocessedBasename);
   fs.writeFileSync(preprocessed, out, "utf8");
   console.log("Wrote:", preprocessed);
   console.log("Diagrams rendered:", index);

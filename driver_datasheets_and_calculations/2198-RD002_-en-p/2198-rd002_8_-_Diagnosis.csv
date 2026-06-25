@@ -1,0 +1,60 @@
+"Kinetix 5100 Servo Drive Parameters 
+For more information see:",Unnamed: 1,Unnamed: 2,Unnamed: 3,Unnamed: 4,Unnamed: 5,Unnamed: 6,Unnamed: 7,Unnamed: 8,Unnamed: 9,Unnamed: 10,Unnamed: 11,Unnamed: 12,Unnamed: 13,Unnamed: 14,Unnamed: 15
+"Kinetix 5100 Servo Drive User Manual, 
+publication 2198-UM004",,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+101,FltWarnCode,All,0x0000,0xFFFF,0x0000,,,UINT,"Fault/Warning Code
+
+0X0000=Fault Reset (same operation as DI.ARST)
+0x0001…0xFFFF=Displays fault/warning code",8-Diagnosis,,,,x,P0.001
+104,PowerOnTime,All,0x00000000,0xFFFFFFFF,0x00000000,,Hour,UDINT,"Power On Time
+Shows the total operation time of the servo drive. The unit is by hour and durations less than 1 hour are not recorded. The recorded hours are saved when the servo is power off.
+
+DCBA (high word): Servo on time
+UZYX (Low word): Power on time",8-Diagnosis,x,,,,P0.008
+109,AbsSysStatus,All,0x0000,0x001F,0x0000,,,UINT,"Absolute System Status
+
+Bit 0:
+1=absolute position lost
+0=normal
+Bit 1:
+1=battery undervoltage
+0=normal
+Bit 2:
+1=absolute multi-turn is overflowing
+0=normal
+Bit 3:
+1=PUU is overflowing
+0=normal
+Bit 4:
+1=absolute coordinate has not been set
+0=normal
+Bit 5 …Bit 15=reserved (0)",8-Diagnosis,x,,,x,P0.050
+115,Exceed400VDuration,All,0,2147483647,0,,ms,DINT,"Exceed 400V Duration
+Records the length of time that the DC bus voltage exceeded 400V.",8-Diagnosis,x,,,,P0.063
+274,FaultRecordN,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Fault Record N
+The (N)th abnormal status record. 1st, 2nd, 3rd,…, (N-1)th, (N)th. The (N)th record is the most resent fault.
+
+UZYX (Low word): Display fault/warning code
+DCBA (high word): Reserved",8-Diagnosis,,,,x,P4.000
+275,FaultRecordN1,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Fault Record N-1
+The (N-1)th abnormal status record.
+
+UZYX (Low word): Display fault/warning code
+DCBA (high word): Reserved",8-Diagnosis,x,,,x,P4.001
+276,FaultRecordN2,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Fault Record N-2
+The (N-2)th abnormal status record.
+
+UZYX (Low word): Display fault/warning code
+DCBA (high word): Reserved",8-Diagnosis,x,,,x,P4.002
+277,FaultRecordN3,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Fault Record N-3
+The (N-3)th abnormal status record.
+
+UZYX (Low word): Display fault/warning code
+DCBA (high word): Reserved",8-Diagnosis,x,,,x,P4.003
+278,FaultRecordN4,All,0x00000000,0xFFFFFFFF,0x00000000,,,UDINT,"Fault Record N-4
+The (N-4)th abnormal status record.
+
+UZYX (Low word): Display fault/warning code
+DCBA (high word): Reserved",8-Diagnosis,x,,,x,P4.004

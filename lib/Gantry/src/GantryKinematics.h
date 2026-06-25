@@ -1,12 +1,16 @@
 /**
  * @file GantryKinematics.h
- * @brief Forward and inverse kinematics for 3-axis gantry
- * @version 1.0.0
- * 
- * This module provides kinematic functions for converting between:
- * - Joint space (x, y, theta) and Cartesian space (x, y, z, theta)
- * - Forward kinematics: Joint space -> Cartesian space
- * - Inverse kinematics: Cartesian space -> Joint space
+ * @brief Forward and inverse kinematics for the 3-axis gantry.
+ * @version 2.0.0
+ *
+ * Coordinate convention (firmware-wide):
+ *   - X: horizontal traverse along the gantry beam.
+ *   - Y: along-belt direction; -Y is conveyor downstream. The gantry has no
+ *        Y actuator, so JointConfig has no y member; the workspace pose Y
+ *        field is filled from kinematic parameters (z_axis_y_offset_mm).
+ *   - Z: vertical (+Z = up). Joint z = homing datum; pose.z = height above
+ *        physical bed via GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (see axis_drivetrain_params.h).
+ *   - Theta: rotation about Z.
  */
 
 #ifndef GANTRY_KINEMATICS_H
@@ -31,46 +35,35 @@ namespace Gantry {
 
 /**
  * @class Kinematics
- * @brief Forward and inverse kinematics for 3-axis gantry
+ * @brief Forward and inverse kinematics for the 3-axis gantry.
  */
 class Kinematics {
 public:
     /**
-     * @brief Forward kinematics: Joint space -> Cartesian space
-     * 
-     * Calculates the end-effector pose from joint positions.
+     * @brief Forward kinematics: joint space -> cartesian (workspace) space.
+     *
      * For this gantry configuration:
-     * - X and Y positions are directly from joints (orthogonal prismatic joints)
-     * - Z position is constant (from kinematic parameters)
-     * - Theta orientation is directly from joint
-     * 
-     * @param joints Joint configuration
-     * @param params Kinematic parameters
-     * @return End-effector pose in cartesian coordinates
+     *   - pose.x = joint.x + theta_x_offset (theta rotates about Z, doesn't
+     *              change pose.x in the simple TCP model)
+     *   - pose.y = z_axis_y_offset_mm (along-belt placement is fixed)
+     *   - pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (+Z = up;
+     *              TCP height above physical belt/bed when offset non-zero)
+     *   - pose.theta = joint.theta
      */
-    static EndEffectorPose forward(const JointConfig& joints, 
+    static EndEffectorPose forward(const JointConfig& joints,
                                     const KinematicParameters& params);
-    
+
     /**
-     * @brief Inverse kinematics: Cartesian space -> Joint space
-     * 
-     * Calculates the required joint positions from end-effector pose.
-     * For this gantry configuration, the solution is straightforward
-     * since X and Y are independent prismatic joints.
-     * 
-     * @param pose End-effector pose
-     * @param params Kinematic parameters
-     * @return Joint configuration
+     * @brief Inverse kinematics: cartesian (workspace) space -> joint space.
+     *
+     * Drops pose.y (no Y actuator) and pose-z offsets, leaving the two
+     * prismatic joints and the theta angle.
      */
     static JointConfig inverse(const EndEffectorPose& pose,
                                 const KinematicParameters& params);
-    
+
     /**
-     * @brief Validate joint configuration against limits
-     * 
-     * @param joints Joint configuration to validate
-     * @param limits Joint limits
-     * @return true if valid, false otherwise
+     * @brief Validate joint configuration against limits.
      */
     static bool validate(const JointConfig& joints, const JointLimits& limits);
 };

@@ -1,7 +1,6 @@
 # gpio_expander component. Implementation lives at ../../../src/gpio_expander.c
 # and its header at ../../../include/gpio_expander.h. We keep those at the repo
-# root so the PlatformIO layout is preserved, and point the ESP-IDF component
-# build at them by absolute path.
+# root and point the ESP-IDF component build at them by absolute path.
 
 set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../..")
 

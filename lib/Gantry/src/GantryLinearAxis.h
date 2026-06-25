@@ -4,9 +4,9 @@
  *
  * Implemented by concrete classes (e.g. GantryPulseMotorLinearAxis) that back
  * this interface with a specific driver + drivetrain combination. The Gantry
- * class holds its X and Y axes as std::unique_ptr<GantryLinearAxis> so the
- * axis topology can be chosen per axis at construction time without any
- * compile-time flags.
+ * class holds its X (horizontal traverse) and Z (vertical descent) axes as
+ * std::unique_ptr<GantryLinearAxis> so the axis topology can be chosen per
+ * axis at construction time without any compile-time flags.
  */
 
 #ifndef GANTRY_LINEAR_AXIS_H

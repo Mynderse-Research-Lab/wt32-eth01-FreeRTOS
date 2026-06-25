@@ -1,9 +1,22 @@
 # Programming Reference — WT32-ETH01 Gantry Controller
 
 **Target:** ESP32 (WT32-ETH01)
-**Framework:** ESP-IDF v5.x (native `app_main`; no Arduino core in this firmware)
+**Framework:** ESP-IDF v6.0 (native `app_main`; no Arduino core in this firmware)
 
 This document is the single-source programming reference for the firmware. It covers the build and flash flow, the FreeRTOS entry point and task layout, the public C/C++ APIs of every library, the serial console command surface, and the current known bugs. For *conceptual* overviews ("what does this library do, why does it exist"), see `LIBRARIES_OVERVIEW.md`.
+
+### Coordinate conventions (read first)
+
+All firmware and documentation use the following right-handed world frame, shared with the MQTT bridge spec and the pickup-algorithm SRS:
+
+| Axis | Meaning | Sign convention | Hardware |
+|---|---|---|---|
+| **X** | Across the belt (horizontal, perpendicular to flow) | Firmware-defined; flip via `AXIS_X_INVERT_DIR` at compile time | Belt-drive linear axis (currently the only fully bring-up'd axis) |
+| **Y** | Along the belt (horizontal, parallel to flow) | **`-Y` is the downstream direction.** Used only as a world coordinate for MQTT/pickup math (`y_cam_mm < 0`, `y_pick_mm < 0`); the gantry itself has no `Y` joint. | Conveyor (not actuated by this firmware) |
+| **Z** | Vertical | **`+Z` is up; `Z = 0` is the belt surface.** | Ballscrew linear axis (descent) |
+| **Theta** | End-effector rotation about Z | Sign per `AXIS_THETA_INVERT_DIR` | SCHUNK ERD rotary stage |
+
+Joint space is therefore `(x, z, theta)` — there is no `JointConfig::y`. End-effector workspace pose is `(x, y, z, theta)`; the `y` field in the pose is the gantry tool position along the belt (always negative downstream of the gantry origin in the production layout).
 
 ---
 
@@ -20,7 +33,7 @@ This document is the single-source programming reference for the firmware. It co
 9. [Application-Level Constants](#9-application-level-constants)
 10. [Diagnostic Compile-Time Toggles](#10-diagnostic-compile-time-toggles)
 11. [Known Bugs & Gotchas](#11-known-bugs--gotchas)
-12. [Y & Theta Axis Assembly & Bring-up](#12-y--theta-axis-assembly--bring-up)
+12. [Z & Theta Axis Assembly & Bring-up](#12-z--theta-axis-assembly--bring-up)
 
 ---
 
@@ -30,9 +43,9 @@ This document is the single-source programming reference for the firmware. It co
 
 | Tool | Version |
 |---|---|
-| ESP-IDF | 5.x (tested on v5.1.x and v6.0) |
+| ESP-IDF | v6.0 |
 | Target chip | `esp32` |
-| Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see §11.2) |
+| Python | bundled with ESP-IDF (do **not** mix with `scoop`/system Python, see section 11.2) |
 | `CONFIG_FREERTOS_HZ` | must be `1000` (set in `idf/sdkconfig.defaults`) |
 
 ### 1.2 Project layout that matters at build time
@@ -71,7 +84,7 @@ lib/                          # each subfolder is an ESP-IDF component (CMakeLis
 Use **ESP-IDF Command Prompt** from the Start Menu (it runs `export.bat` for your install), or in `cmd.exe`:
 
 ```bat
-call C:\Espressif\frameworks\esp-idf-v5.x\export.bat
+call C:\Espressif\frameworks\esp-idf-v6.0\export.bat
 ```
 
 (Adjust the path to match your ESP-IDF version; the installer also documents `%IDF_PATH%\export.bat`.)
@@ -125,11 +138,11 @@ Defined in `src/main.cpp`. Startup order:
 
 1. **`initMcp23s17()`** — brings up the SPI2 bus and creates the MCP23S17 handle (mutex included) via `gpio_expander_init(&mcp_config)`. This is the one place the application layer still builds an `mcp23s17_config_t`: it is bus/clock/device-address configuration, not motion-control logic.
 2. **Build three `(PulseMotor::DriverConfig, PulseMotor::DrivetrainConfig)` pairs** via the per-axis `makeXDriverConfig()` / `makeXDrivetrainConfig()` etc. helpers. Each pair consumes the per-axis macros from `include/axis_pulse_motor_params.h` and `include/axis_drivetrain_params.h`.
-3. **`initDirectOutputs()`** — direct ESP32 GPIO seeding for `PIN_Y_PULSE` (GPIO2 is a strapping pin and benefits from a clean low level before LEDC takes over). This stays in `main.cpp` because it operates on chip peripherals the Gantry library does not own.
-4. **`Gantry::Gantry::preparePinsForBoot(xDrv, yDrv, tDrv, PIN_GRIPPER)`** — idempotent power-on-safety seeder for MCP-routed pins only. For each `DriverConfig` it drives `DIR`, `ENABLE`/`SON`, and `ALARM_RESET` to output-low on the MCP23S17 and sets `ALARM_STATUS` to input with pull-up; it also seeds `PIN_GRIPPER` low if that pin is routed to the MCP. Pulse pins (encoded as `GPIO_EXPANDER_DIRECT_PIN(...)`) and plain direct GPIOs are skipped because they are owned by LEDC / `driver/gpio`. All downstream `PulseMotorDriver::initialize()`, `GantryEndEffector::begin()`, and `GantryLimitSwitch::begin()` calls will re-apply pin directions with the same values — this call is purely defensive.
-5. **Construct `Gantry::Gantry gantry(xDrv, xDt, yDrv, yDt, tDrv, tDt, PIN_GRIPPER)`** as a `static`.
-6. **`gantry.setLimitPins()`, `setJointLimits()`, `setYAxisLimits()`, `setThetaLimits()`, `setSafeYHeight()`** — lightweight configuration that the driver/drivetrain configs did not already cover.
-7. **`gantry.begin()`** — initialises X, Y, and Theta PulseMotor drivers plus the end-effector (MCP pin).
+3. **`initDirectOutputs()`** — direct ESP32 GPIO seeding for `PIN_Z_PULSE` (GPIO2 is a strapping pin and benefits from a clean low level before LEDC takes over). This stays in `main.cpp` because it operates on chip peripherals the Gantry library does not own.
+4. **`Gantry::Gantry::preparePinsForBoot(xDrv, zDrv, tDrv, PIN_GRIPPER)`** — idempotent power-on-safety seeder for MCP-routed pins only. For each `DriverConfig` it drives `DIR`, `ENABLE`/`SON`, and `ALARM_RESET` to output-low on the MCP23S17 and sets `ALARM_STATUS` to input with pull-up; it also seeds `PIN_GRIPPER` low if that pin is routed to the MCP. Pulse pins (encoded as `GPIO_EXPANDER_DIRECT_PIN(...)`) and plain direct GPIOs are skipped because they are owned by LEDC / `driver/gpio`. All downstream `PulseMotorDriver::initialize()`, `GantryEndEffector::begin()`, and `GantryLimitSwitch::begin()` calls will re-apply pin directions with the same values — this call is purely defensive.
+5. **Construct `Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, PIN_GRIPPER)`** as a `static`.
+6. **`gantry.setLimitPins()`, `setJointLimits()`, `setZAxisLimits()`, `setThetaLimits()`, `setSafeZHeight()`** — lightweight configuration that the driver/drivetrain configs did not already cover.
+7. **`gantry.begin()`** — initialises X, Z, and Theta PulseMotor drivers plus the end-effector (MCP pin).
 8. **`gantry.enable()`** — sets SON on all three axis drivers.
 9. **Create FreeRTOS tasks.**
 
@@ -163,7 +176,7 @@ The `app_main` task calls `vTaskDelete(NULL)` after task creation — the two Fr
 
 ## 3. Pin Map
 
-Source of truth: `include/gantry_app_constants.h`. `pinout.csv` mirrors the same values as a spreadsheet-friendly artifact.
+Source of truth: `include/gantry_app_constants.h`. `pinout.csv` mirrors the same values as a spreadsheet-friendly artifact (including motion I/O interface columns). **Drive field wiring** (WT32/MCP → opto board → K5100 TBIO / HCS01 X31) is documented in [`docs/MOTION_IO_INTERFACE.md`](docs/MOTION_IO_INTERFACE.md).
 
 ### 3.1 Direct ESP32 GPIO (WT32-ETH01)
 
@@ -174,12 +187,12 @@ Source of truth: `include/gantry_app_constants.h`. `pinout.csv` mirrors the same
 | `MCP23S17_SPI_MOSI_PIN` | 12 | SPI2 MOSI | Strap pin — must be LOW at reset. |
 | `MCP23S17_SPI_SCLK_PIN` | 5 | SPI2 SCK | |
 | `PIN_X_PULSE` | 14 | LEDC ch0 | X-axis pulse-train output (belt-drive linear axis). |
-| `PIN_Y_PULSE` | 2 | LEDC ch1 | Y-axis pulse-train output (ballscrew linear axis). Strap pin — must be LOW/floating at reset. |
+| `PIN_Z_PULSE` | 2 | LEDC ch1 | Z-axis pulse-train output (ballscrew linear axis; vertical descent). Strap pin — must be LOW/floating at reset. |
 | `PIN_THETA_PULSE` (alias `PIN_THETA_PWM`) | 0 | LEDC ch2 | Theta pulse-train output (rotary-direct axis). Strap pin — must be HIGH at reset. |
 | `PIN_X_ENC_A` | 4 | PCNT unit 0 | Encoder A+. General-purpose header pin. |
 | `PIN_X_ENC_B` | 36 | PCNT unit 0 | Encoder B+. Input-only. |
-| `PIN_Y_ENC_A` | 39 | PCNT unit 1 | Encoder A+. Input-only. |
-| `PIN_Y_ENC_B` | 32 | PCNT unit 1 | Encoder B+. |
+| `PIN_Z_ENC_A` | 39 | PCNT unit 1 | Encoder A+. Input-only. |
+| `PIN_Z_ENC_B` | 32 | PCNT unit 1 | Encoder B+. |
 
 MCP SPI bus runs at **1 MHz** (`MCP23S17_SPI_CLOCK_HZ_WORKING`).
 
@@ -195,12 +208,12 @@ MCP SPI bus runs at **1 MHz** (`MCP23S17_SPI_CLOCK_HZ_WORKING`).
 | `PIN_X_ALARM_RESET` | 5 | A.5 | Out | ARST pulse |
 | *(available)* | 6 | A.6 | — | `PA6_AVAILABLE` |
 | `PIN_GRIPPER` | 7 | A.7 | Out | Digital end-effector |
-| `PIN_Y_DIR` | 8 | B.0 | Out | |
-| `PIN_Y_ENABLE` | 9 | B.1 | Out | |
-| `PIN_Y_LIMIT_MIN` | 10 | B.2 | In pull-up | Active-low |
-| `PIN_Y_LIMIT_MAX` | 11 | B.3 | In pull-up | Active-low |
-| `PIN_Y_ALARM_STATUS` | 12 | B.4 | In pull-up | Active-low |
-| `PIN_Y_ALARM_RESET` | 13 | B.5 | Out | |
+| `PIN_Z_DIR` | 8 | B.0 | Out | |
+| `PIN_Z_ENABLE` | 9 | B.1 | Out | |
+| `PIN_Z_LIMIT_MIN` | 10 | B.2 | In pull-up | Active-low |
+| `PIN_Z_LIMIT_MAX` | 11 | B.3 | In pull-up | Active-low |
+| `PIN_Z_ALARM_STATUS` | 12 | B.4 | In pull-up | Active-low |
+| `PIN_Z_ALARM_RESET` | 13 | B.5 | Out | |
 | `PIN_THETA_DIR` | 14 | B.6 | Out | Theta direction line. Previously `PIN_THETA_LIMIT_MIN` in the PWM-hobby-servo build. |
 | `PIN_THETA_ENABLE` | 15 | B.7 | Out | Theta enable / SON. Previously `PIN_THETA_LIMIT_MAX`. |
 
@@ -212,7 +225,7 @@ A single `int` pin field can carry two kinds of pins:
 |---|---|
 | `0..15` | MCP logical pin. |
 | `>= GPIO_DIRECT_PIN_BASE (0x10)` | Direct ESP32 GPIO number, e.g. `14` → GPIO14 on WT32. |
-| `GPIO_EXPANDER_DIRECT_PIN(n)` → `0x100 \| n` | Explicitly-flagged direct GPIO, used when the raw number would overlap MCP pin space (e.g. the Y-pulse at GPIO2 needs the flag so it isn't interpreted as MCP pin 2). |
+| `GPIO_EXPANDER_DIRECT_PIN(n)` → `0x100 \| n` | Explicitly-flagged direct GPIO, used when the raw number would overlap MCP pin space (e.g. the Z-pulse at GPIO2 needs the flag so it isn't interpreted as MCP pin 2). |
 | `-1` | Not routed / disabled. |
 
 Helpers in `include/gpio_expander.h`:
@@ -233,7 +246,7 @@ Consumers (e.g. `GantryEndEffector`) branch on `isMcpLogicalPin(pin)` vs `isEnco
 
 Namespace: `Gantry`. All types below live in it unless noted.
 
-> **Single entry point.** The application layer interacts exclusively with `Gantry::Gantry` for motion, gripping, homing, calibration, and status. Direct use of `PulseMotor::PulseMotorDriver`, `gpio_expander_*`, or `mcp23s17_*` is reserved for the diagnostic console (`gantry_test_console`) and for register-level bring-up; it is **not** a supported path for new application code. The one exception on the control path is `Gantry::preparePinsForBoot()` (see §2.1 and §4.2), which is itself a Gantry-namespace helper. See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) §2 for the full invariant list.
+> **Single entry point.** The application layer interacts exclusively with `Gantry::Gantry` for motion, gripping, homing, calibration, and status. Direct use of `PulseMotor::PulseMotorDriver`, `gpio_expander_*`, or `mcp23s17_*` is reserved for the diagnostic console (`gantry_test_console`) and for register-level bring-up; it is **not** a supported path for new application code. The one exception on the control path is `Gantry::preparePinsForBoot()` (see section 2.1 and section 4.2), which is itself a Gantry-namespace helper. See [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) section 2 for the full invariant list.
 
 ### 4.1 Core types
 
@@ -246,27 +259,27 @@ enum class GantryError {
 
 enum class HomingStatus { IDLE, IN_PROGRESS, COMPLETE, FAILED };
 
-struct JointConfig {        // joint space (mm, mm, deg)
-    float x, y, theta;
+struct JointConfig {        // joint space (mm, mm, deg) = (x, z, theta). No y joint.
+    float x, z, theta;
     JointConfig operator+(const JointConfig&) const;
     JointConfig operator-(const JointConfig&) const;
     JointConfig operator*(float) const;
 };
 
 struct JointLimits {
-    float x_min, x_max, y_min, y_max, theta_min, theta_max;
+    float x_min, x_max, z_min, z_max, theta_min, theta_max;
     bool isValid(const JointConfig&) const;
 };
 
-struct EndEffectorPose {    // workspace coordinates (mm, mm, mm, deg)
+struct EndEffectorPose {    // workspace (mm, mm, mm, deg) — (x across, y along-belt, z vertical +up, theta)
     float x, y, z, theta;
 };
 
 struct KinematicParameters {
-    float y_axis_z_offset_mm;           // default 80
+    float z_axis_y_offset_mm;           // default 80   (Z-axis carriage offset along the conveyor)
     float theta_x_offset_mm;            // default -55
-    float gripper_y_offset_mm;          // default 385
-    float gripper_z_offset_mm;          // default 80
+    float gripper_x_offset_mm;          // default 385  (gripper offset along across-belt X)
+    float gripper_z_offset_mm;          // default 80   (gripper offset along vertical Z)
     float x_axis_ball_screw_pitch_mm;   // default 40
 };
 
@@ -289,20 +302,20 @@ Construction:
 ```cpp
 Gantry(const PulseMotor::DriverConfig&     xDrv,
        const PulseMotor::DrivetrainConfig& xDt,
-       const PulseMotor::DriverConfig&     yDrv,
-       const PulseMotor::DrivetrainConfig& yDt,
+       const PulseMotor::DriverConfig&     zDrv,
+       const PulseMotor::DrivetrainConfig& zDt,
        const PulseMotor::DriverConfig&     tDrv,
        const PulseMotor::DrivetrainConfig& tDt,
        int gripperPin);
 ```
 
-The constructor factories a concrete `GantryPulseMotorLinearAxis` for X and Y (the `xDt.type` / `yDt.type` must be a linear drivetrain — `DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, or `DRIVETRAIN_RACKPINION`) and a `GantryPulseMotorRotaryAxis` for Theta (`tDt.type` must be `DRIVETRAIN_ROTARY_DIRECT`). If a type/axis pair is mis-configured the corresponding `unique_ptr` is null and `begin()` returns `false` for X (the required axis) or logs a warning for Y/Theta.
+The constructor factories a concrete `GantryPulseMotorLinearAxis` for X and Z (the `xDt.type` / `zDt.type` must be a linear drivetrain — `DRIVETRAIN_BALLSCREW`, `DRIVETRAIN_BELT`, or `DRIVETRAIN_RACKPINION`) and a `GantryPulseMotorRotaryAxis` for Theta (`tDt.type` must be `DRIVETRAIN_ROTARY_DIRECT`). If a type/axis pair is mis-configured the corresponding `unique_ptr` is null and `begin()` returns `false` for X (the required axis) or logs a warning for Z/Theta.
 
 #### Boot-time pin seeding
 
 ```cpp
 static void preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
-                               const PulseMotor::DriverConfig& yDrv,
+                               const PulseMotor::DriverConfig& zDrv,
                                const PulseMotor::DriverConfig& tDrv,
                                int gripperPin);
 ```
@@ -314,11 +327,11 @@ Idempotent power-on-safety helper. Call once in `app_main()` **after** `gpio_exp
 | Method | Purpose |
 |---|---|
 | `void setLimitPins(int xMin, int xMax)` | X-axis limit switch pins (MCP or direct). |
-| `void setYAxisLimits(float minMm, float maxMm)` | Y travel envelope. |
+| `void setZAxisLimits(float minMm, float maxMm)` | Z travel envelope (vertical; +Z = up, belt = Z = 0). |
 | `void setThetaLimits(float minDeg, float maxDeg)` | Theta angular limits (also propagates to `GantryPulseMotorRotaryAxis`). |
-| `void setJointLimits(float xMin, float xMax, float yMin, float yMax, float thetaMin, float thetaMax)` | Joint validation envelope used by `moveTo(JointConfig)`. |
+| `void setJointLimits(float xMin, float xMax, float zMin, float zMax, float thetaMin, float thetaMax)` | Joint validation envelope used by `moveTo(JointConfig)`. |
 | `void setEndEffectorPin(int pin, bool activeHigh = true)` | Override constructor gripper pin. |
-| `void setSafeYHeight(float mm)` | Safe retraction height used before X travel. Default 150 mm. |
+| `void setSafeZHeight(float mm)` | Safe retraction height (Z mm, +up from belt) used before X travel. Default 150 mm. |
 | `void setHomingSpeed(uint32_t pps)` | Homing speed (pulses/s); mutates the X driver's `DriverConfig.homing_speed_pps`. |
 | `void setStepsPerRevolution(float steps)` | Legacy shim used by diagnostics. Per-axis scaling lives in `DrivetrainConfig`. |
 
@@ -328,7 +341,7 @@ Per-axis mm<->pulse scaling, motion caps, and inversion flags come from the two 
 
 ```cpp
 bool begin();          // initialize all axes; returns false on any failure
-void enable();         // enable X servo + Y stepper
+void enable();         // enable X servo + Z stepper
 void disable();        // disable both (motors freewheel)
 bool isEnabled() const;
 void update();         // call from GantryUpdate task @100 Hz
@@ -337,7 +350,7 @@ void update();         // call from GantryUpdate task @100 Hz
 #### Motion
 
 ```cpp
-void moveTo(int32_t x, int32_t y, int32_t theta, uint32_t speed_pps);
+void moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed_pps);
 GantryError moveTo(const JointConfig& joint,
                    uint32_t speed_mm_per_s = 50,
                    uint32_t speed_deg_per_s = 30,
@@ -370,7 +383,7 @@ int   getXEncoderRaw() const;       // raw hardware counter
 int32_t getXCommandedPulses() const;
 float getXCommandedMm() const;
 float getXEncoderMm() const;
-int   getCurrentY() const;          // mm (integer)
+int   getCurrentZ() const;          // mm (integer)
 int   getCurrentTheta() const;      // degrees (integer)
 
 JointConfig       getCurrentJointConfig() const;
@@ -423,7 +436,7 @@ static float interpolate(const TrapezoidalProfile&,
 ```cpp
 constexpr float    DEFAULT_STEPS_PER_REV          = 6000.0f;
 constexpr float    DEFAULT_PULSES_PER_MM          = 150.0f;
-constexpr float    DEFAULT_SAFE_Y_HEIGHT_MM       = 150.0f;
+constexpr float    DEFAULT_SAFE_Z_HEIGHT_MM       = 150.0f;
 constexpr uint32_t DEFAULT_HOMING_SPEED_PPS       = 6000;
 constexpr uint32_t DEFAULT_SPEED_MM_PER_S         = 50;
 constexpr uint32_t DEFAULT_SPEED_DEG_PER_S        = 30;
@@ -653,14 +666,14 @@ Commands are parsed from a single line; leading/trailing spaces are trimmed by t
 | Command | Description |
 |---|---|
 | `help` / `?` | Print the command list (same content as this subsection, condensed). |
-| `status` | Dump gantry status: commanded X, encoder pulse count, Y, theta, enabled/busy/alarm, motion profile (speed/accel/decel, range-limit state), units, joint config, end-effector pose. |
+| `status` | Dump gantry status: commanded X, encoder pulse count, Z, theta, enabled/busy/alarm, motion profile (speed/accel/decel, range-limit state), units, joint config, end-effector pose. |
 | `limits` | Read **X** MIN / MAX limit switches (via `gpio_expander_read` on the configured limit pins). |
-| `pins` | Print active pin configuration: MCP expander pins used for motion/alarm/limits (with live MCP register snapshot when available), direct ESP32 pins (pulse, encoders, limits if not on MCP), and a summary line `LEDC: X ch …, Y ch …, Theta ch …` for pulse channels. |
+| `pins` | Print active pin configuration: MCP expander pins used for motion/alarm/limits (with live MCP register snapshot when available), direct ESP32 pins (pulse, encoders, limits if not on MCP), and a summary line `LEDC: X ch …, Z ch …, Theta ch …` for pulse channels. |
 | `gpio_drive <gpio> <0\|1>` | Configure a direct ESP32 GPIO (`0..39`) as input/output and drive it low/high. **Not** for MCP pins — use `mcp_pin_mode` when `MCP_DEBUG_CMDS` is enabled. |
 | `enable` | `gantry.enable()`. |
 | `disable` | `gantry.disable()`. |
-| `home [x \| y \| t \| theta \| all] ...` | Homing dispatcher. With **no** axis tokens, defaults to **X** (same as `home x`). Otherwise runs each listed axis once, in order: tokens `x`, `y`, `t` or `theta`, and `all` (X then Y then Theta). **X** runs the real homing sequence; **Y** / **Theta** call `homeY()` / `homeTheta()` (currently stubs — see §12). |
-| `calibrate [x \| y \| t \| theta \| all] ...` | Same axis token rules as `home`. **X** starts the async calibration task (measures travel, updates X max); requires a successful **`home` / `home x`** earlier this session. **Y** / **Theta** call `calibrateY()` / `calibrateTheta()` (stubs). Only one X calibration task at a time. |
+| `home [x \| z \| t \| theta \| all] ...` | Homing dispatcher. With **no** axis tokens, defaults to **X** (same as `home x`). Otherwise runs each listed axis once, in order: tokens `x`, `z`, `t` or `theta`, and `all` (X then Z then Theta). **X** runs the real homing sequence; **Z** / **Theta** call `homeZ()` / `homeTheta()` (currently stubs — see section 12). |
+| `calibrate [x \| z \| t \| theta \| all] ...` | Same axis token rules as `home`. **X** starts the async calibration task (measures travel, updates X max); requires a successful **`home` / `home x`** earlier this session. **Z** / **Theta** call `calibrateZ()` / `calibrateTheta()` (stubs). Only one X calibration task at a time. |
 | `units <mm \| in \| inch \| inches>` | Select linear unit for `speed`, `accel`, `move` numeric inputs and for linear fields in `status` / `LIVE POS`. |
 | `speed <v> [deg/s]` | Set traverse speed: linear axis speed `v` in the **currently selected** linear unit per second, clamped to internal mm/s limits (see `status` for range-limit state). Optional second argument sets theta speed in **deg/s** (independent of linear unit). |
 | `accel <a> [d]` | Set accel to `a` in selected linear units/s²; optional `d` sets decel (if omitted, decel tracks the new accel). Values are converted to mm/s² internally; zero is rejected. |
@@ -669,7 +682,7 @@ Commands are parsed from a single line; leading/trailing spaces are trimmed by t
 | `livepos <hz>` | Set the `LIVE POS:` log cadence in Hz (`0` = off, **default**). When on, `src/gantry_test_console.cpp` emits `LIVE POS: x_cmd=… x_enc=… y=… theta=…` on motion/idle transitions and on the timer (~`1000/hz` ms); linear values follow `units`. |
 | `axislog` | With **no** argument: print whether periodic per-axis MOVE logging is on and at what Hz. |
 | `axislog <hz>` | Set `Gantry::setAxisLogRateHz` for periodic in-move logs (`0` = off; axis START/END logs still appear). |
-| `move <x> <y> <t>` | Absolute move: `x` / `y` in selected linear units, `t` in degrees. Requires **both** `home` (X homing satisfied for this session) **and** successful **`calibrate` / `calibrate x`** this session. See §11.1 for encoder vs commanded X. |
+| `move <x> <z> <t>` | Absolute move: `x` / `z` in selected linear units (`+Z = up`, belt = Z = 0), `t` in degrees. Requires **both** `home` (X homing satisfied for this session) **and** successful **`calibrate` / `calibrate x`** this session. See section 11.1 for encoder vs commanded X. |
 | `grip <0\|1>` | `gantry.grip()`: `1` = closed, `0` = open. |
 | `stop` | `requestAbort()` then `disable()`; also requests calibration abort if X calibration is running. |
 | `alarmreset` / `arst` | `gantry.clearAlarm()` — pulse alarm-reset outputs on configured drives. |
@@ -691,7 +704,7 @@ These lines are emitted by the console task without a matching user command (exc
 
 - **`CTRL INIT:`** — once after startup: debounced snapshot of `motor_enabled`, `busy`, `alarm`, `min_limit`, `max_limit`, and raw X alarm pin level (if configured).
 - **`CTRL FLIP: <name> <old> -> <new>`** — when a debounced control signal changes (same `name` strings as above: `motor_enabled`, `busy`, `alarm`, `min_limit`, `max_limit`, `raw_alarm_pin_level`). Requires ~12 ms stable before logging.
-- **`LIVE POS: x_cmd=... x_enc=... y=... theta=...`** — only when `livepos <hz>` has been set with `hz > 0` (see §8.1). Default is **off**. Linear fields use the unit selected by `units`; theta is always degrees.
+- **`LIVE POS: x_cmd=... x_enc=... y=... theta=...`** — only when `livepos <hz>` has been set with `hz > 0` (see section 8.1). Default is **off**. Linear fields use the unit selected by `units`; theta is always degrees.
 
 ---
 
@@ -714,27 +727,27 @@ Board-specific wiring only. No mechanical or electrical tuning.
 // MCP logical pin assignments (Port A = 0..7, Port B = 8..15)
 // X axis: PIN_X_DIR, PIN_X_ENABLE, PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX,
 //         PIN_X_ALARM_STATUS, PIN_X_ALARM_RESET, PIN_GRIPPER
-// Y axis: PIN_Y_DIR, PIN_Y_ENABLE, PIN_Y_LIMIT_MIN, PIN_Y_LIMIT_MAX,
-//         PIN_Y_ALARM_STATUS, PIN_Y_ALARM_RESET
+// Z axis: PIN_Z_DIR, PIN_Z_ENABLE, PIN_Z_LIMIT_MIN, PIN_Z_LIMIT_MAX,
+//         PIN_Z_ALARM_STATUS, PIN_Z_ALARM_RESET
 // Theta:  PIN_THETA_DIR (14), PIN_THETA_ENABLE (15)
 
 // Direct ESP32 GPIO (LEDC / PCNT)
 #define PIN_X_PULSE          14
-#define PIN_Y_PULSE           2
+#define PIN_Z_PULSE           2
 #define PIN_THETA_PULSE       0       // legacy alias PIN_THETA_PWM
 #define PIN_X_ENC_A           4
 #define PIN_X_ENC_B          36
-#define PIN_Y_ENC_A          39
-#define PIN_Y_ENC_B          32
+#define PIN_Z_ENC_A          39
+#define PIN_Z_ENC_B          32
 #define PIN_THETA_ENC_A      -1       // not wired in this hardware revision
 #define PIN_THETA_ENC_B      -1
 
 // Peripheral channel allocation
 #define X_PULSE_LEDC_CHANNEL        0
-#define Y_PULSE_LEDC_CHANNEL        1
+#define Z_PULSE_LEDC_CHANNEL        1
 #define THETA_PULSE_LEDC_CHANNEL    2     // legacy alias THETA_PWM_LEDC_CHANNEL
 #define X_ENCODER_PCNT_UNIT         0
-#define Y_ENCODER_PCNT_UNIT         1
+#define Z_ENCODER_PCNT_UNIT         1
 #define THETA_ENCODER_PCNT_UNIT     2
 
 // MCP defaults
@@ -753,7 +766,7 @@ Board-specific wiring only. No mechanical or electrical tuning.
 
 ### 9.2 `include/axis_pulse_motor_params.h` — per-axis electrical tuning
 
-Motor + driver + optional gearbox parameters. One block per axis (X / Y / Theta):
+Motor + driver + optional gearbox parameters. One block per axis (X / Z / Theta):
 
 ```c
 #define AXIS_X_ENCODER_PPR                 10000u
@@ -767,7 +780,7 @@ Motor + driver + optional gearbox parameters. One block per axis (X / Y / Theta)
 #define AXIS_X_HOMING_SPEED_PPS              8000u
 #define AXIS_X_LIMIT_DEBOUNCE_CYCLES           10u
 #define AXIS_X_LIMIT_SAMPLE_INTERVAL_MS         3u
-// (analogous AXIS_Y_* and AXIS_THETA_* blocks follow)
+// (analogous AXIS_Z_* and AXIS_THETA_* blocks follow)
 ```
 
 ### 9.3 `include/axis_drivetrain_params.h` — per-axis mechanical tuning
@@ -781,12 +794,12 @@ Drivetrain topology + hard-limit envelope + motion caps + position tolerance + g
 #define AXIS_X_HARD_LIMIT_MAX_MM      550.0f      // mechanical stroke
 #define AXIS_X_POSITION_TOLERANCE_MM    0.08f     // datasheet repeatability
 
-// Y: SCHUNK Beta 80-SRS ballscrew actuator
-#define AXIS_Y_DRIVETRAIN             DT_BALLSCREW
-#define AXIS_Y_LEAD_MM_PER_REV         20.0f      // screw pitch
-#define AXIS_Y_CRITICAL_RPM            3000u      // whip-speed ceiling
-#define AXIS_Y_HARD_LIMIT_MAX_MM      150.0f
-#define AXIS_Y_POSITION_TOLERANCE_MM    0.03f
+// Z: SCHUNK Beta 80-SRS ballscrew actuator (vertical, +Z up)
+#define AXIS_Z_DRIVETRAIN             DT_BALLSCREW
+#define AXIS_Z_LEAD_MM_PER_REV         20.0f      // screw pitch
+#define AXIS_Z_CRITICAL_RPM            3000u      // whip-speed ceiling
+#define AXIS_Z_HARD_LIMIT_MAX_MM      150.0f
+#define AXIS_Z_POSITION_TOLERANCE_MM    0.03f
 
 // Theta: SCHUNK ERD 04-40-D-H-N rotary module
 #define AXIS_THETA_DRIVETRAIN             DT_ROTARY_DIRECT
@@ -797,15 +810,15 @@ Drivetrain topology + hard-limit envelope + motion caps + position tolerance + g
 #define AXIS_THETA_POSITION_TOLERANCE_DEG   0.01f
 
 // Gantry-level
-#define GANTRY_SAFE_Y_HEIGHT_MM         150.0f
+#define GANTRY_SAFE_Z_HEIGHT_MM         150.0f
 #define GANTRY_GRIPPER_OPEN_TIME_MS     190u      // SCHUNK KGG 100-80
 #define GANTRY_GRIPPER_CLOSE_TIME_MS    150u
-// Kinematic offsets: GANTRY_Y_AXIS_Z_OFFSET_MM, GANTRY_THETA_X_OFFSET_MM,
-//                    GANTRY_GRIPPER_Y_OFFSET_MM, GANTRY_GRIPPER_Z_OFFSET_MM
+// Kinematic offsets: GANTRY_Z_AXIS_Y_OFFSET_MM, GANTRY_THETA_X_OFFSET_MM,
+//                    GANTRY_GRIPPER_X_OFFSET_MM, GANTRY_GRIPPER_Z_OFFSET_MM
 
 // Derived helpers (macro form, for preprocessor-only contexts):
-//   AXIS_X_PULSES_PER_MM, AXIS_Y_PULSES_PER_MM, AXIS_THETA_PULSES_PER_DEG
-//   AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S
+//   AXIS_X_PULSES_PER_MM, AXIS_Z_PULSES_PER_MM, AXIS_THETA_PULSES_PER_DEG
+//   AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S
 ```
 
 Runtime code generally prefers `PulseMotor::pulsesPerMm(dt)` / `PulseMotor::pulsesPerDeg(dt)` applied to a `DrivetrainConfig` rather than the macros — the macros are mainly for diagnostics and unit tests.
@@ -814,12 +827,12 @@ Runtime code generally prefers `PulseMotor::pulsesPerMm(dt)` / `PulseMotor::puls
 
 #### 9.3.1 Geometry freeze gate
 
-The kinematic offsets in `axis_drivetrain_params.h` — `GANTRY_Y_AXIS_Z_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_Y_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Y_HEIGHT_MM` — are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder to update them against the frozen production design before deployment.
+The kinematic offsets in `axis_drivetrain_params.h` — `GANTRY_Z_AXIS_Y_OFFSET_MM`, `GANTRY_THETA_X_OFFSET_MM`, `GANTRY_GRIPPER_X_OFFSET_MM`, `GANTRY_GRIPPER_Z_OFFSET_MM`, `GANTRY_SAFE_Z_HEIGHT_MM` — are **development-rig placeholders**. The header emits a one-shot compile-time `#warning` from `src/main.cpp` as a reminder to update them against the frozen production design before deployment.
 
 Deployment attestation procedure:
 
 1. Measure the five offsets against the frozen CAD drawings, or on the as-built assembly with a calibration fixture / CMM.
-2. Overwrite the five macros in `axis_drivetrain_params.h` with the measured values (do not set them at runtime; this header is consumed at compile time and also feeds `AXIS_*_PULSES_PER_MM` / `AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`).
+2. Overwrite the five macros in `axis_drivetrain_params.h` with the measured values (do not set them at runtime; this header is consumed at compile time and also feeds `AXIS_*_PULSES_PER_MM` / `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`).
 3. Define `GANTRY_GEOMETRY_FROZEN` as a compile definition to silence the reminder and attest that the geometry has been frozen. Typical wiring in an ESP-IDF deployment component:
 
    ```cmake
@@ -851,9 +864,9 @@ Inherited from the reset-loop investigation. All default to disabled in the prod
 | `DIAG_MCP_SPI_CLOCK_HZ_OVERRIDE=<hz>` | Override SPI clock (default 1 MHz). |
 | `DIAG_HALT_AFTER_MCP_INIT=1` | Halt after MCP setup (isolates downstream bring-up). |
 | `DIAG_STARTUP_HALT_PHASE=<0..5>` | 1: after direct pulse GPIO; 2: after driver wiring; 3: before `begin`; 4: after `begin`; 5: after `enable`. |
-| `DIAG_SKIP_DIRECT_PULSE_GPIO_CONFIG=1` | Skip X/Y pulse-pin `gpio_config`. |
+| `DIAG_SKIP_DIRECT_PULSE_GPIO_CONFIG=1` | Skip X/Z pulse-pin `gpio_config`. |
 | `GANTRY_DIAG_SKIP_AXIS_X_INIT=1` | Skip X init inside `Gantry::begin()`. |
-| `GANTRY_DIAG_SKIP_AXIS_Y_INIT=1` | Skip Y init inside `Gantry::begin()`. |
+| `GANTRY_DIAG_SKIP_AXIS_Z_INIT=1` | Skip Z init inside `Gantry::begin()`. |
 | `GANTRY_DIAG_SKIP_THETA_INIT=1` | Skip Theta init inside `Gantry::begin()`. |
 
 Full rationale: `RESET_LOOP_DIAGNOSTICS.md`.
@@ -864,15 +877,15 @@ Full rationale: `RESET_LOOP_DIAGNOSTICS.md`.
 
 ### 11.1 X-axis encoder feedback (history and current state)
 
-**Motion command path — resolved.** The original "`move` accepts the command but motion never starts" symptom (`x_cmd` flat after `OK Move started`) is no longer reproducible on the consolidated `main`. The state machine exercises the full path: `startSequentialMotion` → `Y_DESCENDING` → `X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`, and `LIVE POS` shows `x_cmd` ramping smoothly to the commanded target.
+**Motion command path — resolved.** The original "`move` accepts the command but motion never starts" symptom (`x_cmd` flat after `OK Move started`) is no longer reproducible on the consolidated `main`. The state machine exercises the full path: `startSequentialMotion` → `Z_DESCENDING` → `X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`, and `LIVE POS` shows `x_cmd` ramping smoothly to the commanded target.
 
-**Encoder feedback pin — fixed in firmware.** An earlier hardware trace showed `x_enc=0.00 mm` across the entire ramp while `x_cmd` advanced normally, and the `[X_MOVE] ... encoder=0 ...` log confirmed PCNT was seeing no counts. Root cause was `PIN_X_ENC_A` being mapped to **GPIO34**, which `WT32_ETH01_PINOUT.md` lists as *"Not routed to header"* — i.e. no physical pad existed to wire the encoder A+ signal to. GPIO34 was itself a remap away from the original `35`, which had shared an electrical trace with `MCP23S17_SPI_MISO_PIN`. Firmware now maps `PIN_X_ENC_A` to **GPIO4**, a general-purpose header pin with no strap, Ethernet, or peripheral-allocation conflict; PCNT routes any GPIO through the input matrix (see `WT32_ETH01_PINOUT.md` §"Design notes"). After re-wiring encoder A+ from whatever pad was previously in use to the GPIO4 header pin and rebuilding, `x_enc` should track `x_cmd` under motion. `PIN_X_ENC_B` remains on GPIO36 (unaffected, exposed on the right header).
+**Encoder feedback pin — fixed in firmware.** An earlier hardware trace showed `x_enc=0.00 mm` across the entire ramp while `x_cmd` advanced normally, and the `[X_MOVE] ... encoder=0 ...` log confirmed PCNT was seeing no counts. Root cause was `PIN_X_ENC_A` being mapped to **GPIO34**, which `WT32_ETH01_PINOUT.md` lists as *"Not routed to header"* — i.e. no physical pad existed to wire the encoder A+ signal to. GPIO34 was itself a remap away from the original `35`, which had shared an electrical trace with `MCP23S17_SPI_MISO_PIN`. Firmware now maps `PIN_X_ENC_A` to **GPIO4**, a general-purpose header pin with no strap, Ethernet, or peripheral-allocation conflict; PCNT routes any GPIO through the input matrix (see `WT32_ETH01_PINOUT.md` section "Design notes"). After re-wiring encoder A+ from whatever pad was previously in use to the GPIO4 header pin and rebuilding, `x_enc` should track `x_cmd` under motion. `PIN_X_ENC_B` remains on GPIO36 (unaffected, exposed on the right header).
 
 **Code pointers (still useful for diagnosis):**
 
 - `src/gantry_test_console.cpp` — `move` handler around the `g_homeCompletedThisSession && g_calibratedThisSession` gate.
 - `lib/Gantry/src/Gantry.cpp:280-310` — `moveTo(JointConfig, ...)` validates via `Kinematics::validate(joint, config_.limits)` then `startSequentialMotion()`.
-- `lib/Gantry/src/Gantry.cpp:795-980` — state machine: `startSequentialMotion` → `Y_DESCENDING`/`X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`.
+- `lib/Gantry/src/Gantry.cpp:795-980` — state machine: `startSequentialMotion` → `Z_DESCENDING`/`X_MOVING` → `startXAxisMotion` → `axisX_.moveRelative(...)`.
 - `lib/Gantry/src/Gantry.cpp:923-978` — `startXAxisMotion` emits `[X_MOVE] current=... tracked=... driver=... encoder=... target=... delta=... speed=... accel=... decel=...` once per move; the `encoder=` field is the first place to look when chasing zero-feedback issues.
 
 ### 11.2 ESP-IDF component cache corruption
@@ -911,7 +924,7 @@ Fresh clones need no manual regeneration beyond `cd idf`, `idf.py set-target esp
 
 ### 11.4 Strap pins and boot stability
 
-`GPIO0` (Theta PWM), `GPIO2` (Y pulse), and `GPIO12` (MCP MOSI) are ESP32 strap pins. They are safe **only** because:
+`GPIO0` (Theta PWM), `GPIO2` (Z pulse), and `GPIO12` (MCP MOSI) are ESP32 strap pins. They are safe **only** because:
 
 - GPIO0 is pulled HIGH at reset by external hardware and the firmware drives it via LEDC only after boot.
 - GPIO2 is LOW at reset and the firmware keeps it low (`initDirectOutputs` sets it 0) before any pulse activity.
@@ -925,30 +938,36 @@ Any rework that drives these pins externally during reset will brick the boot.
 
 ---
 
-## 12. Y & Theta Axis Assembly & Bring-up
+## 12. Z & Theta Axis Assembly & Bring-up
 
-When the Y ballscrew and Theta rotary stage are physically assembled, most of the pin map, drivetrain math, motion caps, and the `PulseMotor::DriverConfig` for each axis are already in place. What is **not** in place is the Gantry-layer plumbing that converts those defined pins into real homing/calibration behavior. Today `Gantry::homeY()`, `Gantry::calibrateY()`, `Gantry::homeTheta()`, and `Gantry::calibrateTheta()` are stubs that log a warning; the `home y|t|all` and `calibrate y|t|all` console commands accept the request but the Y/Theta paths do not command motion. This section is the roadmap from "stubbed" to "real".
+> **Axis convention:** `X` is the horizontal across-belt axis (currently the only fully bring-up'd axis), `Z` is the vertical descent axis (ballscrew, `+Z = up`, belt = `Z = 0`), `Theta` is the rotary end-effector. The conveyor downstream direction is `-Y` in the world frame; the gantry itself has no Y joint.
 
-### 12.1 Y axis — hardware wiring
+When the Z ballscrew and Theta rotary stage are physically assembled, most of the pin map, drivetrain math, motion caps, and the `PulseMotor::DriverConfig` for each axis are already in place. **Motion commands to the K5100 and HCS01 drives pass through the opto-isolated interface board** — see [`docs/MOTION_IO_INTERFACE.md`](docs/MOTION_IO_INTERFACE.md) for signal routing, parts list, and the per-axis invert commissioning checklist (`AXIS_*_INVERT_DIR`, `AXIS_*_INVERT_OUTPUT_LOGIC`).
 
-All Y pins are already defined in [`pinout.csv`](pinout.csv) and [`include/gantry_app_constants.h`](include/gantry_app_constants.h). Wire them as follows.
+What is **not** in place is the Gantry-layer plumbing that converts those defined pins into real homing/calibration behavior. Today `Gantry::homeZ()`, `Gantry::calibrateZ()`, `Gantry::homeTheta()`, and `Gantry::calibrateTheta()` are stubs that log a warning; the `home z|t|all` and `calibrate z|t|all` console commands accept the request but the Z/Theta paths do not command motion. This section is the roadmap from "stubbed" to "real".
+
+After the opto interface is wired, run the commissioning checklist in [`docs/MOTION_IO_INTERFACE.md`](docs/MOTION_IO_INTERFACE.md) before first motion on each axis.
+
+### 12.1 Z axis — hardware wiring
+
+All Z pins are already defined in [`pinout.csv`](pinout.csv) and [`include/gantry_app_constants.h`](include/gantry_app_constants.h). Route motion signals through the interface board per [`docs/MOTION_IO_INTERFACE.md`](docs/MOTION_IO_INTERFACE.md).
 
 | Symbol | Where | Connects to | Convention |
 |---|---|---|---|
-| `PIN_Y_DIR` (MCP Port B bit 0, logical 8) | K5100 servo drive | SIGN/DIR input | Output, polarity set by `AXIS_Y_INVERT_DIR` in `axis_pulse_motor_params.h` |
-| `PIN_Y_ENABLE` (MCP B1, logical 9) | K5100 SON | Servo-on enable | Output, active per `AXIS_Y_INVERT_OUTPUT_LOGIC` |
-| `PIN_Y_LIMIT_MIN` (MCP B2, logical 10) | Home/MIN switch on the screw | Input | Active LOW, MCP internal pull-up |
-| `PIN_Y_LIMIT_MAX` (MCP B3, logical 11) | End/MAX switch on the screw | Input | Active LOW, MCP internal pull-up |
-| `PIN_Y_ALARM_STATUS` (MCP B4, logical 12) | K5100 ALM output | Input | Active LOW |
-| `PIN_Y_ALARM_RESET` (MCP B5, logical 13) | K5100 ARST input | Output | Pulse to clear alarm |
-| `PIN_Y_PULSE` (ESP32 **GPIO2**) | K5100 PULSE input | LEDC pulse train | **Strapping pin — must stay LOW/floating at reset.** Already pre-seeded by `initDirectOutputs()` in `src/main.cpp`. |
-| `PIN_Y_ENC_A` / `PIN_Y_ENC_B` (GPIO39 / GPIO32) | K5100 PAO / PBO encoder outputs | PCNT unit 1 | Optional. Leave `AXIS_Y_HAS_ENCODER = 0` in `axis_pulse_motor_params.h` until both lines are physically wired; firmware dead-reckons via commanded pulses until then. |
+| `PIN_Z_DIR` (MCP Port B bit 0, logical 8) | K5100 servo drive | SIGN/DIR input | Output, polarity set by `AXIS_Z_INVERT_DIR` in `axis_pulse_motor_params.h`. `+Z` corresponds to upward travel. |
+| `PIN_Z_ENABLE` (MCP B1, logical 9) | K5100 SON | Servo-on enable | Output, active per `AXIS_Z_INVERT_OUTPUT_LOGIC` |
+| `PIN_Z_LIMIT_MIN` (MCP B2, logical 10) | Bottom/MIN switch on the screw (closest to the belt) | Input | Active LOW, MCP internal pull-up. This is the **home** switch (`Z = 0` near the belt). |
+| `PIN_Z_LIMIT_MAX` (MCP B3, logical 11) | Top/MAX switch on the screw | Input | Active LOW, MCP internal pull-up |
+| `PIN_Z_ALARM_STATUS` (MCP B4, logical 12) | K5100 ALM output | Input | Active LOW |
+| `PIN_Z_ALARM_RESET` (MCP B5, logical 13) | K5100 ARST input | Output | Pulse to clear alarm |
+| `PIN_Z_PULSE` (ESP32 **GPIO2**) | K5100 PULSE input | LEDC pulse train | **Strapping pin — must stay LOW/floating at reset.** Already pre-seeded by `initDirectOutputs()` in `src/main.cpp`. |
+| `PIN_Z_ENC_A` / `PIN_Z_ENC_B` (GPIO39 / GPIO32) | K5100 PAO / PBO encoder outputs | PCNT unit 1 | Phase B. Set `AXIS_Z_ENCODER_FEEDBACK_ENABLED` to `1` in `axis_pulse_motor_params.h` after AM26LV32 receiver is wired; default `0` for open-loop bring-up. |
 
-Both Y limit switches must use the same active-low + pull-up convention as X. This is what `GantryLimitSwitch` assumes by default (`xMinSwitch_.configure(pin_, true, true, 6)` in `Gantry.cpp`).
+Both Z limit switches must use the same active-low + pull-up convention as X. This is what `GantryLimitSwitch` assumes by default (`xMinSwitch_.configure(pin_, true, true, 6)` in `Gantry.cpp`).
 
 ### 12.2 Theta axis — hardware wiring
 
-Theta is simpler than Y because the SCHUNK ERD 04-40-D-H-N has unlimited mechanical rotation — there are **no limit switches**. The pins are already finalized.
+Theta is simpler than Z because the SCHUNK ERD 04-40-D-H-N has unlimited mechanical rotation — there are **no limit switches**. The pins are already finalized.
 
 | Symbol | Where | Connects to | Convention |
 |---|---|---|---|
@@ -959,45 +978,45 @@ Theta is simpler than Y because the SCHUNK ERD 04-40-D-H-N has unlimited mechani
 
 The MCP bits that **used to** host theta limit switches (B6/B7) were repurposed to DIR/ENABLE — see the comment block in [`include/gantry_app_constants.h`](include/gantry_app_constants.h) around `PIN_THETA_DIR`. Do not put limit switches back on those pins. The firmware design treats `AXIS_THETA_HARD_LIMIT_MIN/MAX_DEG = ±180°` (in `axis_drivetrain_params.h`) as the **firmware-enforced effective hard limit** (cable management constraint), not a switch.
 
-### 12.3 Software changes — Y axis
+### 12.3 Software changes — Z axis
 
-The Y `DriverConfig` in `src/main.cpp` (`makeYDriverConfig()`) is already wired with alarm/alarm-reset, pulse, dir, enable, and encoder pins. What is missing is the Y limit-switch plumbing on the Gantry side. Concretely:
+The Z `DriverConfig` in `src/main.cpp` (`makeZDriverConfig()`) is already wired with alarm/alarm-reset, pulse, dir, enable, and encoder pins. What is missing is the Z limit-switch plumbing on the Gantry side. Concretely:
 
-**`lib/Gantry/src/Gantry.h`** — add Y twins of the X members:
+**`lib/Gantry/src/Gantry.h`** — add Z twins of the X members:
 
 ```cpp
-int  yMinPin_, yMaxPin_;
-GantryLimitSwitch yMinSwitch_;
-GantryLimitSwitch yMaxSwitch_;
-uint32_t lastYPositionCounts_;
-float    yPulsesPerMmOverride_;
+int  zMinPin_, zMaxPin_;
+GantryLimitSwitch zMinSwitch_;
+GantryLimitSwitch zMaxSwitch_;
+uint32_t lastZPositionCounts_;
+float    zPulsesPerMmOverride_;
 ```
 
-Plus a setter signature: `void setYLimitPins(int yMinPin, int yMaxPin);` (or extend `setLimitPins` to take all four pins).
+Plus a setter signature: `void setZLimitPins(int zMinPin, int zMaxPin);` (or extend `setLimitPins` to take all four pins).
 
 **`lib/Gantry/src/Gantry.cpp`** — five concrete changes:
 
-1. **`begin()`** — call `yMinSwitch_.begin()` and `yMaxSwitch_.begin()` alongside the existing X calls.
-2. **`setYLimitPins()`** — mirror of `setLimitPins()`. Configure both switches with `(pin, true /*activeLow*/, true /*pullup*/, 6 /*debounce*/)`.
-3. **Replace `homeY()` stub** with the same recipe as `homeX()`:
+1. **`begin()`** — call `zMinSwitch_.begin()` and `zMaxSwitch_.begin()` alongside the existing X calls.
+2. **`setZLimitPins()`** — mirror of `setLimitPins()`. Configure both switches with `(pin, true /*activeLow*/, true /*pullup*/, 6 /*debounce*/)`.
+3. **Replace `homeZ()` stub** with the same recipe as `homeX()`, with the direction inverted — homing drives the carriage **down** (toward `-Z`) until the MIN switch (mounted near the belt) trips, then anchors `Z = 0` there:
    - Check switch configured, check alarm, debounce both switches.
    - Snapshot MIN; if already active, set pulses to 0 and return.
-   - Seed `axisY_->setCurrentPulses(kHomingStartPosition)` **and** `lastYPositionCounts_ = kHomingStartPosition`. The seed step is essential — without it `updateAxisPositions()` will misclassify the first tick as "moving toward MAX" and abort, the same bug the X path had (see `homeX()` for the seeded comment block).
-   - `axisY_->moveToPulses(0, speed, speed, speed)`.
-4. **Replace `calibrateY()` stub** with the X recipe:
-   - Run `homeY()`, wait for MIN to be hit.
+   - Seed `axisZ_->setCurrentPulses(kHomingStartPosition)` **and** `lastZPositionCounts_ = kHomingStartPosition`. The seed step is essential — without it `updateAxisPositions()` will misclassify the first tick as "moving toward MAX" and abort, the same bug the X path had (see `homeX()` for the seeded comment block).
+   - `axisZ_->moveToPulses(0, speed, speed, speed)` (target `0` pulses corresponds to `Z = 0` mm at the bottom).
+4. **Replace `calibrateZ()` stub** with the X recipe:
+   - Run `homeZ()`, wait for MIN to be hit.
    - Command `moveToPulses(huge_target)`, wait for MAX to assert.
-   - `commandedPulses = axisY_->getCurrentPulses()`; `hardSpanMm = AXIS_Y_HARD_LIMIT_MAX_MM - AXIS_Y_HARD_LIMIT_MIN_MM` (150 mm for the Beta 80-SRS).
-   - `yPulsesPerMmOverride_ = commandedPulses / hardSpanMm`. Re-anchor as `calibrateX()` already does for X.
-5. **`updateAxisPositions()`** — add Y's debounce + stop-on-active guards alongside the X block. Same pattern: `yMinSwitch_.update()` / `yMaxSwitch_.update()`, then if `axisY_->isMotionActive()` check direction vs. last counts and stop on the appropriate switch.
+   - `commandedPulses = axisZ_->getCurrentPulses()`; `hardSpanMm = AXIS_Z_HARD_LIMIT_MAX_MM - AXIS_Z_HARD_LIMIT_MIN_MM` (150 mm for the Beta 80-SRS).
+   - `zPulsesPerMmOverride_ = commandedPulses / hardSpanMm`. Re-anchor as `calibrateX()` already does for X.
+5. **`updateAxisPositions()`** — add Z's debounce + stop-on-active guards alongside the X block. Same pattern: `zMinSwitch_.update()` / `zMaxSwitch_.update()`, then if `axisZ_->isMotionActive()` check direction vs. last counts and stop on the appropriate switch.
 
 **`src/main.cpp`** — one line near the existing X call:
 
 ```cpp
-gantry.setYLimitPins(PIN_Y_LIMIT_MIN, PIN_Y_LIMIT_MAX);
+gantry.setZLimitPins(PIN_Z_LIMIT_MIN, PIN_Z_LIMIT_MAX);
 ```
 
-**`src/gantry_test_console.cpp`** — only one change worth considering: today the move-gate (`g_homeCompletedThisSession && g_calibratedThisSession`) is X-only. Once Y homing is real, decide whether `move <x> <y> <theta>` should also require `home y` + `calibrate y` before allowing non-zero Y targets. The simplest path is to add two new session flags (`g_homeYCompletedThisSession`, `g_calibratedYThisSession`) and gate accordingly.
+**`src/gantry_test_console.cpp`** — only one change worth considering: today the move-gate (`g_homeCompletedThisSession && g_calibratedThisSession`) is X-only. Once Z homing is real, decide whether `move <x> <z> <theta>` should also require `home z` + `calibrate z` before allowing non-zero Z targets. The simplest path is to add two new session flags (`g_homeZCompletedThisSession`, `g_calibratedZThisSession`) and gate accordingly.
 
 ### 12.4 Software changes — Theta axis
 
@@ -1017,30 +1036,30 @@ void Gantry::homeTheta() {
 - **Trivial path (recommended):** return `360` (full rotation soft envelope) and mark calibrated; do not command motion.
 - **Datasheet-trust path:** keep `AXIS_THETA_HARD_LIMIT_MIN_DEG`..`MAX_DEG` as the working envelope and treat `calibrateTheta()` as a no-op success.
 
-A Theta equivalent of `yPulsesPerMmOverride_` is **not** needed: theta's pulses-per-degree comes straight from encoder PPR and gear ratio, both of which are commissioning-fixed in the custom driver. There is no physical span to anchor against.
+A Theta equivalent of `zPulsesPerMmOverride_` is **not** needed: theta's pulses-per-degree comes straight from encoder PPR and gear ratio, both of which are commissioning-fixed in the custom driver. There is no physical span to anchor against.
 
 ### 12.5 Bring-up checklist (in this order)
 
 When the axes are actually assembled, work in this order — each step is independently testable, and each unlocks the next.
 
 1. **Power wiring + alarm.** Wire DIR/ENABLE/ALM/ARST through the MCP first. Verify with the existing `alarmreset` and `pins` console commands.
-2. **Pulse path.** Wire only PULSE. After manually enabling motors, issue `move 0 1 0` and confirm the Y motor turns the expected direction. If it goes the wrong way, flip `AXIS_Y_INVERT_DIR` in [`include/axis_pulse_motor_params.h`](include/axis_pulse_motor_params.h) — do **not** flip wires.
-3. **Y limit switches.** Wire MIN + MAX. Use the existing `limits` console command to read raw switch state before trusting `home y`.
-4. **Implement `homeY`.** Run `home y`, watch the new per-axis logs (`MOVE START`/`MOVE END` from `axislog`) and the `[HOME]` lines confirm the motion really starts, and stops on the MIN switch.
-5. **Implement `calibrateY`.** Run `calibrate y` and check the `[CAL]` log shows `commandedPulses / 150 mm = correctedPpm`. The derived ppm should be close to the compile-time `AXIS_Y_PULSES_PER_MM`; large divergence means a step-resolution mismatch on the K5100 commissioning.
-6. **Y encoder (optional).** When ready, wire `PIN_Y_ENC_A` / `PIN_Y_ENC_B` and flip `AXIS_Y_HAS_ENCODER` to `1` in `axis_pulse_motor_params.h`. No firmware changes beyond that — `GantryPulseMotorLinearAxis` already routes through PCNT when the flag is on.
+2. **Pulse path.** Wire only PULSE. After manually enabling motors, issue `move 0 1 0` (1 mm in +Z, i.e. up) and confirm the Z motor lifts the carriage upward. If it goes the wrong way, flip `AXIS_Z_INVERT_DIR` in [`include/axis_pulse_motor_params.h`](include/axis_pulse_motor_params.h) — do **not** flip wires.
+3. **Z limit switches.** Wire MIN (bottom, near belt) + MAX (top). Use the existing `limits` console command to read raw switch state before trusting `home z`.
+4. **Implement `homeZ`.** Run `home z`, watch the new per-axis logs (`MOVE START`/`MOVE END` from `axislog`) and the `[HOME]` lines confirm the motion really starts, and stops on the MIN switch.
+5. **Implement `calibrateZ`.** Run `calibrate z` and check the `[CAL]` log shows `commandedPulses / 150 mm = correctedPpm`. The derived ppm should be close to the compile-time `AXIS_Z_PULSES_PER_MM`; large divergence means a step-resolution mismatch on the K5100 commissioning.
+6. **Z encoder (Phase B).** When AM26LV32 receiver is wired to PAO/PBO, set `AXIS_Z_ENCODER_FEEDBACK_ENABLED` to `1` in `axis_pulse_motor_params.h`. See [`docs/MOTION_IO_INTERFACE.md`](docs/MOTION_IO_INTERFACE.md).
 7. **Theta.** Wire DIR/ENABLE/PULSE. With unlimited rotation, just `home t` after power-on to zero the angle, then test `move 0 0 90` and `move 0 0 -90` against the ±180° firmware clamp.
 
 ### 12.6 What stays the same
 
-- The `home all` / `calibrate all` token dispatcher in `gantry_test_console.cpp` requires no changes — once `homeY/Theta` and `calibrateY/Theta` stop being stubs, those commands will produce real motion automatically.
-- Per-axis MOVE logging (`MOVE START` / `MOVE END` / periodic `MOVE`) already covers Y and Theta as soon as their `update()` methods are called from `Gantry::updateAxisPositions()` (which they already are).
+- The `home all` / `calibrate all` token dispatcher in `gantry_test_console.cpp` requires no changes — once `homeZ/Theta` and `calibrateZ/Theta` stop being stubs, those commands will produce real motion automatically.
+- Per-axis MOVE logging (`MOVE START` / `MOVE END` / periodic `MOVE`) already covers Z and Theta as soon as their `update()` methods are called from `Gantry::updateAxisPositions()` (which they already are).
 - `axislog <hz>` and `livepos <hz>` need no updates.
-- `gantry.setJointLimits(...)` already loads `AXIS_Y_HARD_LIMIT_MIN/MAX_MM` and the theta envelope as soft caps at boot, so `moveTo` is already bounded. `calibrateY` only **refines** that envelope to whatever the physical sweep measured.
+- `gantry.setJointLimits(...)` already loads `AXIS_Z_HARD_LIMIT_MIN/MAX_MM` and the theta envelope as soft caps at boot, so `moveTo` is already bounded. `calibrateZ` only **refines** that envelope to whatever the physical sweep measured.
 
-### 12.7 Additional Y-axis consideration: critical-speed cap
+### 12.7 Additional Z-axis consideration: critical-speed cap
 
-The Y ballscrew has a critical-speed cap of 3000 rpm from `AXIS_Y_CRITICAL_RPM` in [`include/axis_drivetrain_params.h`](include/axis_drivetrain_params.h). The macro `AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` computes the resulting linear-speed ceiling. Nothing currently enforces this in the move pipeline. When Y is wired up, either:
+The Z ballscrew has a critical-speed cap of 3000 rpm from `AXIS_Z_CRITICAL_RPM` in [`include/axis_drivetrain_params.h`](include/axis_drivetrain_params.h). The macro `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` computes the resulting linear-speed ceiling. Nothing currently enforces this in the move pipeline. When Z is wired up, either:
 
-- Clamp `speed_mm_per_s_` to the derived cap inside `Gantry::startSequentialMotion()` for the Y phase, or
-- Add a `setYSpeedCap()` API and clamp at the console layer before forwarding to `moveTo()`.
+- Clamp `speed_mm_per_s_` to the derived cap inside `Gantry::startSequentialMotion()` for the Z phase, or
+- Add a `setZSpeedCap()` API and clamp at the console layer before forwarding to `moveTo()`.

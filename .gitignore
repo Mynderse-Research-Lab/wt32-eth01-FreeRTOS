@@ -1,4 +1,3 @@
-.pio
 .vscode/
 
 *.code-workspace
@@ -8,7 +7,7 @@
 .clangd
 compile_commands.json
 
-# ESP-IDF build and generated config (canonical project is idf/ — see PROGRAMMING_REFERENCE.md §1.2)
+# ESP-IDF build and generated config (canonical project is idf/ — see PROGRAMMING_REFERENCE.md section 1.2)
 idf/build/
 build/
 idf/sdkconfig

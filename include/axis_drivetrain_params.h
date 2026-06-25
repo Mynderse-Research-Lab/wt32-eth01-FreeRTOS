@@ -38,9 +38,19 @@
  * position tolerance, kinematic offsets, gripper timing. Motor/driver/gearbox
  * ELECTRICAL values live in include/axis_pulse_motor_params.h.
  *
+ * Coordinate convention:
+ *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
+ *   - Y: along-belt direction; the gantry has NO Y actuator. Conveyor downstream
+ *        is the -Y direction. Used by the pick scheduler to describe battery
+ *        positions on the belt; not consumed by the motion layer.
+ *   - Z: vertical (gantry descent axis). +Z = up (away from belt). Firmware
+ *        joint Z=0 is the homing datum (limit switch), which is generally
+ *        NOT exactly on the belt touch plane; see GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM.
+ *        Z_max is the top / home / safe-retracted position.
+ *
  * Verified target actuators:
  *   - X: SCHUNK Beta 100-ZRS toothed-belt linear actuator (200 mm/rev, 550 mm stroke, +/-0.08 mm repeatability)
- *   - Y: SCHUNK Beta 80-SRS ballscrew linear actuator (20 mm pitch, 150 mm stroke, +/-0.03 mm repeatability, 3000 rpm critical)
+ *   - Z: SCHUNK Beta 80-SRS ballscrew linear actuator (20 mm pitch, 150 mm stroke, +/-0.03 mm repeatability, 3000 rpm critical)
  *   - Theta: SCHUNK ERD 04-40-D-H-N miniature rotary unit (unlimited rotation, 600 rpm max, +/-0.01 deg)
  */
 
@@ -79,23 +89,47 @@
 #define AXIS_X_POSITION_TOLERANCE_MM         0.08f  /* per datasheet repeatability */
 
 /* ===========================================================================
- * Y AXIS  -  SCHUNK Beta 80-SRS ballscrew linear actuator
+ * Z AXIS  -  SCHUNK Beta 80-SRS ballscrew linear actuator (vertical descent)
  * ===========================================================================
+ * Was historically labelled "Y" in pre-2026-05 firmware; the vertical actuator
+ * is now named Z to free the Y symbol for the conveyor along-belt direction.
+ *
  * Datasheet: "Beta 80-SRS-M-2020-150-530-2EO10-1ES10-4NS3-1-MGK1-GS19"
- *   screw pitch:      20 mm    -> AXIS_Y_LEAD_MM_PER_REV
+ *   screw pitch:      20 mm    -> AXIS_Z_LEAD_MM_PER_REV
  *   thread dia:       20 mm    (informational)
- *   critical speed:   3000 rpm -> AXIS_Y_CRITICAL_RPM (whip-speed ceiling)
- *   mech. stroke:     150 mm   -> AXIS_Y_HARD_LIMIT_MAX_MM
- *   axial tolerance:  0.08 mm; repeat accuracy: +/-0.03 mm */
-#define AXIS_Y_DRIVETRAIN                   DT_BALLSCREW
-#define AXIS_Y_LEAD_MM_PER_REV               20.0f
-#define AXIS_Y_CRITICAL_RPM                  3000u
-#define AXIS_Y_HARD_LIMIT_MIN_MM              0.0f
-#define AXIS_Y_HARD_LIMIT_MAX_MM            150.0f
-#define AXIS_Y_MAX_SPEED_MM_PER_S           500.0f  /* clamped below by critical-speed derived cap */
-#define AXIS_Y_ACCEL_MM_PER_S2             5000.0f  /* placeholder */
-#define AXIS_Y_DECEL_MM_PER_S2             5000.0f  /* placeholder */
-#define AXIS_Y_POSITION_TOLERANCE_MM         0.03f
+ *   critical speed:   3000 rpm -> AXIS_Z_CRITICAL_RPM (whip-speed ceiling)
+ *   mech. stroke:     150 mm   -> AXIS_Z_HARD_LIMIT_MAX_MM
+ *   axial tolerance:  0.08 mm; repeat accuracy: +/-0.03 mm
+ *
+ * Sign convention: +Z = up. Joint Z=0 is the homing datum (see
+ * GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM for the physical belt/bed plane).
+ * Z_HARD_LIMIT_MAX_MM is the top of stroke and the safe-retracted height. */
+#define AXIS_Z_DRIVETRAIN                   DT_BALLSCREW
+#define AXIS_Z_LEAD_MM_PER_REV               20.0f
+#define AXIS_Z_CRITICAL_RPM                  3000u
+#define AXIS_Z_HARD_LIMIT_MIN_MM              0.0f
+#define AXIS_Z_HARD_LIMIT_MAX_MM            150.0f
+#define AXIS_Z_MAX_SPEED_MM_PER_S           500.0f  /* clamped below by critical-speed derived cap */
+#define AXIS_Z_ACCEL_MM_PER_S2             5000.0f  /* placeholder */
+#define AXIS_Z_DECEL_MM_PER_S2             5000.0f  /* placeholder */
+#define AXIS_Z_POSITION_TOLERANCE_MM         0.03f
+
+/*
+ * Physical belt / bed vs firmware Z datum (mm, +Z up).
+ *
+ * After homing, joint Z=0 sits at a mechanical reference (e.g. MIN limit),
+ * which is usually offset from the actual belt or bed contact plane.
+ *   GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM = distance from the belt/bed contact
+ *   plane to the firmware joint Z datum, measured along +Z (positive means
+ *   the Z=0 datum lies above the bed; the bed is at joint z = -this value).
+ *
+ * Forward kinematics sets pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+ * so pose.z reads as TCP height above the physical bed when this is non-zero.
+ * Default 0 keeps legacy behaviour (datum coincident with the bed plane).
+ */
+#ifndef GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+#define GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM  0.0f
+#endif
 
 /* ===========================================================================
  * THETA AXIS  -  SCHUNK ERD 04-40-D-H-N miniature rotary unit
@@ -134,11 +168,23 @@
  * the frozen production design before the firmware can command correct TCP
  * poses. See the "Geometry freeze gate" block a few lines down for the
  * attestation macro that silences the reminder once the design is frozen. */
-#define GANTRY_Y_AXIS_Z_OFFSET_MM            80.0f
+/* Kinematic offsets in the new X / Y(=along-belt, -Y downstream) / Z(=up)
+ * frame. Semantics (unchanged numbers from the development rig):
+ *   GANTRY_Z_AXIS_Y_OFFSET_MM     - along-belt offset of the Z-column from
+ *                                   the X beam datum (formerly Y_AXIS_Z_OFFSET).
+ *   GANTRY_THETA_X_OFFSET_MM      - X offset of the theta module from the
+ *                                   Z column.
+ *   GANTRY_GRIPPER_X_OFFSET_MM    - X offset of the gripper TCP from the
+ *                                   theta module (formerly GRIPPER_Y_OFFSET).
+ *   GANTRY_GRIPPER_Z_OFFSET_MM    - Z offset of the gripper TCP from the
+ *                                   theta module mounting flange.
+ *   GANTRY_SAFE_Z_HEIGHT_MM       - safe retracted Z height (high; +Z = up).
+ *                                   Was GANTRY_SAFE_Y_HEIGHT_MM. */
+#define GANTRY_Z_AXIS_Y_OFFSET_MM            80.0f
 #define GANTRY_THETA_X_OFFSET_MM            -55.0f
-#define GANTRY_GRIPPER_Y_OFFSET_MM          385.0f
+#define GANTRY_GRIPPER_X_OFFSET_MM          385.0f
 #define GANTRY_GRIPPER_Z_OFFSET_MM           80.0f
-#define GANTRY_SAFE_Y_HEIGHT_MM             150.0f
+#define GANTRY_SAFE_Z_HEIGHT_MM             150.0f
 
 /* Pneumatic gripper (SCHUNK KGG 100-80). Open/close times from datasheet. */
 #define GANTRY_GRIPPER_OPEN_TIME_MS            190u
@@ -147,7 +193,7 @@
 /* ---------------------------------------------------------------------------
  * Geometry freeze gate.
  *
- * The five GANTRY_*_OFFSET_*_MM / GANTRY_SAFE_Y_HEIGHT_MM values above are
+ * The five GANTRY_*_OFFSET_*_MM / GANTRY_SAFE_Z_HEIGHT_MM values above are
  * placeholders from the development rig. Before deployment the application
  * engineer must:
  *   1. Measure the as-built adapter-plate offsets from the frozen production
@@ -172,9 +218,9 @@
     !defined(GANTRY_SUPPRESS_GEOMETRY_WARNING) && \
      defined(AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS)
 #  if defined(__GNUC__) || defined(__clang__)
-#    warning "axis_drivetrain_params.h: gantry geometric offsets (GANTRY_Y_AXIS_Z_OFFSET_MM, GANTRY_THETA_X_OFFSET_MM, GANTRY_GRIPPER_Y_OFFSET_MM, GANTRY_GRIPPER_Z_OFFSET_MM, GANTRY_SAFE_Y_HEIGHT_MM) are DEVELOPMENT-RIG placeholders. Re-measure against the frozen production design and define GANTRY_GEOMETRY_FROZEN to silence this reminder (or define GANTRY_SUPPRESS_GEOMETRY_WARNING for CI / bring-up builds)."
+#    warning "axis_drivetrain_params.h: gantry geometric offsets (GANTRY_Z_AXIS_Y_OFFSET_MM, GANTRY_THETA_X_OFFSET_MM, GANTRY_GRIPPER_X_OFFSET_MM, GANTRY_GRIPPER_Z_OFFSET_MM, GANTRY_SAFE_Z_HEIGHT_MM) are DEVELOPMENT-RIG placeholders. Re-measure against the frozen production design and define GANTRY_GEOMETRY_FROZEN to silence this reminder (or define GANTRY_SUPPRESS_GEOMETRY_WARNING for CI / bring-up builds)."
 #  elif defined(_MSC_VER)
-#    pragma message("axis_drivetrain_params.h: GANTRY_*_OFFSET_*_MM and GANTRY_SAFE_Y_HEIGHT_MM are DEVELOPMENT-RIG placeholders. Update per the frozen production design and #define GANTRY_GEOMETRY_FROZEN to silence.")
+#    pragma message("axis_drivetrain_params.h: GANTRY_*_OFFSET_*_MM and GANTRY_SAFE_Z_HEIGHT_MM are DEVELOPMENT-RIG placeholders. Update per the frozen production design and #define GANTRY_GEOMETRY_FROZEN to silence.")
 #  endif
 #endif
 
@@ -189,14 +235,14 @@
 #define AXIS_X_PULSES_PER_MM \
     (((double)AXIS_X_ENCODER_PPR * (double)AXIS_X_MOTOR_REDUCER_RATIO) / (double)AXIS_X_LEAD_MM_PER_REV)
 
-/* Y: encoder pulses per mm of linear travel */
-#define AXIS_Y_PULSES_PER_MM \
-    (((double)AXIS_Y_ENCODER_PPR * (double)AXIS_Y_MOTOR_REDUCER_RATIO) / (double)AXIS_Y_LEAD_MM_PER_REV)
+/* Z: encoder pulses per mm of linear travel */
+#define AXIS_Z_PULSES_PER_MM \
+    (((double)AXIS_Z_ENCODER_PPR * (double)AXIS_Z_MOTOR_REDUCER_RATIO) / (double)AXIS_Z_LEAD_MM_PER_REV)
 
-/* Y: ballscrew speed cap derived from critical RPM. Never command a linear
+/* Z: ballscrew speed cap derived from critical RPM. Never command a linear
  * speed that would put the screw above this RPM. */
-#define AXIS_Y_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
-    (((double)AXIS_Y_CRITICAL_RPM / 60.0) * (double)AXIS_Y_LEAD_MM_PER_REV)
+#define AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
+    (((double)AXIS_Z_CRITICAL_RPM / 60.0) * (double)AXIS_Z_LEAD_MM_PER_REV)
 
 /* Theta: rotary encoder pulses per degree */
 #define AXIS_THETA_PULSES_PER_DEG \
@@ -209,8 +255,8 @@
  * ---------------------------------------------------------------------------
  *   #define AXIS_X_REFLECTED_INERTIA_KGM2      ...
  *   #define AXIS_X_REQUIRED_TORQUE_NM          ...
- *   #define AXIS_Y_REFLECTED_INERTIA_KGM2      ...
- *   #define AXIS_Y_REQUIRED_TORQUE_NM          ...
+ *   #define AXIS_Z_REFLECTED_INERTIA_KGM2      ...
+ *   #define AXIS_Z_REQUIRED_TORQUE_NM          ...
  *   #define AXIS_THETA_REFLECTED_INERTIA_KGM2  ...
  *   #define AXIS_THETA_REQUIRED_TORQUE_NM      ...
  *   #define GANTRY_CYCLE_TIME_TARGET_S         2.04

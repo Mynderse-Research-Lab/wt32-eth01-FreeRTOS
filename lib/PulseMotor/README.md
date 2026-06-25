@@ -1,6 +1,6 @@
 # PulseMotor
 
-Generic pulse+direction motor driver library for ESP32 (Arduino core via PlatformIO).
+Generic pulse+direction motor driver library for ESP32 (ESP-IDF component).
 
 PulseMotor is hardware-agnostic: any motor driver whose command interface is a pulse train plus a direction line can be driven with this library. The driver is pulse-domain only — unit conversion (mm, degrees) lives in the consumer, typically a `DrivetrainConfig` carried by a gantry-style wrapper.
 

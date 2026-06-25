@@ -21,7 +21,7 @@ idf_component_register(
         gpio_expander
 )
 
-# Preserve the build flags that platformio.ini used to set.
+# Build flags for this component (host threading model + debug trace).
 target_compile_definitions(${COMPONENT_LIB} PUBLIC
     PULSE_MOTOR_USE_FREERTOS=0
     PULSE_MOTOR_DEBUG=1

@@ -1,0 +1,33 @@
+"Kinetix 5100 Servo Drive Parameters 
+For more information see:",Unnamed: 1,Unnamed: 2,Unnamed: 3,Unnamed: 4,Unnamed: 5,Unnamed: 6,Unnamed: 7,Unnamed: 8,Unnamed: 9,Unnamed: 10,Unnamed: 11,Unnamed: 12,Unnamed: 13,Unnamed: 14,Unnamed: 15
+"Kinetix 5100 Servo Drive User Manual, 
+publication 2198-UM004",,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,
+ID,Name,Control Mode,Min.,Max.,Default Value,Precision,Units,Data Type,Comments,Groups,Read-only,Set When Servo Off,Valid After Power Cycle,Volatile Parameter,Parameter Number
+267,USBCommTimeout,All,0,20,0,,s,UINT,"USB Communication Time Out
+0=Disabled
+1…20=Enable communication timeout immediately",7-Communication,,,,,P3.004
+269,USBCommRespDelayTime,All,0,1000,0,,0.5ms,UINT,"USB Communication Response Delay Time
+Delay time of the communication response from the servo drive to the controller.
+",7-Communication,,,,,P3.007
+270,IPAddress,All,0,0xFFFFFFFF,0xC0A80101,,,UDINT,IP Address,"7-Communication
+11-System",,x,x,,P3.039
+271,SubnetMask,All,0,0xFFFFFFFF,0xFFFFFF00,,,UDINT,Subnet Mask,"7-Communication
+11-System",,x,x,,P3.040
+272,DefaultGateway,All,0,0xFFFFFFFF,0xC0A801FE,,,UDINT,Default Gateway,"7-Communication
+11-System",,x,x,,P3.041
+273,DHCPEnable,All,0,1,0,,,UDINT,"DHCP Enable
+0=Disable
+1= Enable","7-Communication
+11-System",,x,x,,P3.042
+650,EnableCommunicationPorts,All,0,0xC107,0x0007,,,UINT,"Enable Communication Ports
+Byte 0: Port status (0 – disabled; 1 -  Enabled)
+-  Bit 0: EIP Port 1
+-  Bit 1: EIP Port 2
+-  Bit 2: USB Port
+Byte 1: Configure selection (return 0 if read)
+-  Bit 6-7:  Port Selection (01-Port 1; 10-Port 2; 11–USB port)
+-  Bit 0: Action (0 – disable; 1 – enable)
+1. Write 0xC100 to enable USB port, 0xC000 to disable USB port.
+2. Write 0x4100 to enable EIP port1, 0x4000 to disable EIP port1.
+3. Write 0x8100 to enable EIP port2, 0x8000 to disable EIP port2.",7-Communication,,x,,,PN.026

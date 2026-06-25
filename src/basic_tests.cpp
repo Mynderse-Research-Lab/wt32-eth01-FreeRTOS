@@ -28,30 +28,37 @@ BasicTestSummary runBasicTests() {
     }
   };
 
+  // Coordinate frame: X = horizontal traverse, Y = along-belt (no actuator;
+  // -Y = downstream), Z = vertical (+Z = up). Joint z=0 is homing datum; physical
+  // bed vs TCP height in pose uses GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (see axis_drivetrain_params.h).
+  // therefore carries z_axis_y_offset_mm (along-belt offset of the Z column)
+  // instead of the pre-2026-05 y_axis_z_offset_mm.
   Gantry::KinematicParameters params;
-  params.theta_x_offset_mm = -55.0f;
-  params.y_axis_z_offset_mm = 80.0f;
+  params.theta_x_offset_mm  = -55.0f;
+  params.z_axis_y_offset_mm =  80.0f;
 
   // Forward kinematics sanity.
+  // JointConfig(x_mm, z_mm, theta_deg); pose carries x/y(=along-belt)/z/theta.
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, params);
   check(nearlyEqual(pose.x, 45.0f), "forward: x includes theta offset");
-  check(nearlyEqual(pose.y, 25.0f), "forward: y passthrough");
-  check(nearlyEqual(pose.z, 80.0f), "forward: z fixed from params");
+  check(nearlyEqual(pose.y, 80.0f), "forward: y fixed from z_axis_y_offset_mm");
+  check(nearlyEqual(pose.z, 25.0f + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM),
+        "forward: pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM");
   check(nearlyEqual(pose.theta, 30.0f), "forward: theta passthrough");
 
-  // Inverse kinematics round-trip.
+  // Inverse kinematics round-trip (pose.y is dropped - no Y actuator).
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
   check(nearlyEqual(inv.x, joints.x), "inverse: x round-trip");
-  check(nearlyEqual(inv.y, joints.y), "inverse: y round-trip");
+  check(nearlyEqual(inv.z, joints.z), "inverse: z round-trip");
   check(nearlyEqual(inv.theta, joints.theta), "inverse: theta round-trip");
 
-  // Limit validation sanity.
+  // Limit validation sanity. JointLimits has x/z/theta (no y).
   Gantry::JointLimits limits;
   limits.x_min = 0.0f;
   limits.x_max = 200.0f;
-  limits.y_min = 0.0f;
-  limits.y_max = 100.0f;
+  limits.z_min = 0.0f;
+  limits.z_max = 100.0f;
   limits.theta_min = -90.0f;
   limits.theta_max = 90.0f;
   check(Gantry::Kinematics::validate(joints, limits), "validate: inside limits");

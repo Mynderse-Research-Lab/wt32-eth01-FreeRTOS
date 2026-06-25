@@ -18,7 +18,10 @@ namespace Gantry {
 namespace Constants {
     constexpr float DEFAULT_STEPS_PER_REV = 6000.0f;
     constexpr float DEFAULT_PULSES_PER_MM = 150.0f;
-    constexpr float DEFAULT_SAFE_Y_HEIGHT_MM = 150.0f;
+    // Safe retracted Z height (top of stroke; +Z = up). The gantry retracts to
+    // this Z value before traversing in X / theta. Was DEFAULT_SAFE_Y_HEIGHT_MM
+    // in pre-2026-05 firmware when the vertical axis was called "Y".
+    constexpr float DEFAULT_SAFE_Z_HEIGHT_MM = 150.0f;
     constexpr uint32_t DEFAULT_HOMING_SPEED_PPS = 6000;
     constexpr uint32_t DEFAULT_SPEED_MM_PER_S = 50;
     constexpr uint32_t DEFAULT_SPEED_DEG_PER_S = 30;

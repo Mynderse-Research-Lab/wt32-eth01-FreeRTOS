@@ -43,13 +43,17 @@
 // PA6 (6) is currently unassigned (available).
 #define PIN_GRIPPER           7
 
-// Port B (8..15) - Y-axis signals + theta pulse-train control
-#define PIN_Y_DIR             8
-#define PIN_Y_ENABLE          9
-#define PIN_Y_LIMIT_MIN      10
-#define PIN_Y_LIMIT_MAX      11
-#define PIN_Y_ALARM_STATUS   12
-#define PIN_Y_ALARM_RESET   13
+// Port B (8..15) - Z-axis signals + theta pulse-train control
+// The vertical actuator was historically labelled "Y" in pre-2026-05 firmware
+// and silkscreen. With the new coordinate convention (X=horizontal traverse,
+// Z=vertical descent, Y=along-belt with -Y downstream), the vertical actuator
+// is now Z. The MCP port-B pin numbers are unchanged.
+#define PIN_Z_DIR             8
+#define PIN_Z_ENABLE          9
+#define PIN_Z_LIMIT_MIN      10
+#define PIN_Z_LIMIT_MAX      11
+#define PIN_Z_ALARM_STATUS   12
+#define PIN_Z_ALARM_RESET   13
 // Theta axis pulse-train control lines.
 // Previously pins 14 and 15 were PIN_THETA_LIMIT_MIN / PIN_THETA_LIMIT_MAX for
 // a PWM hobby-servo configuration. With theta moving to pulse-train control
@@ -69,15 +73,15 @@
 // - Avoid driving GPIO32/33 as pulse outputs on this hardware setup.
 // - For Ethernet compatibility, avoid GPIO17 pulse usage (ETH clock output).
 #define PIN_X_PULSE          14
-#define PIN_Y_PULSE           2
+#define PIN_Z_PULSE           2
 // PIN_X_ENC_A: GPIO4 (general-purpose header pin). Previously GPIO34 which is
 // not routed to any WT32-ETH01 header pad, and before that GPIO35 which shares
 // a trace with MCP23S17 SPI MISO. GPIO4 has no strap/Ethernet conflict and
 // PCNT can route any GPIO via the input matrix.
 #define PIN_X_ENC_A           4
 #define PIN_X_ENC_B          36
-#define PIN_Y_ENC_A          39
-#define PIN_Y_ENC_B          32
+#define PIN_Z_ENC_A          39
+#define PIN_Z_ENC_B          32
 // Theta pulse output. GPIO0 is a boot-strapping pin; keep HIGH during reset
 // for normal boot. The custom ERD pulse-train driver tolerates this because
 // commissioning releases the pin to LEDC only after reset completes.
@@ -99,13 +103,13 @@
 // Hardware peripheral channel allocation
 // ============================================================================
 #define X_PULSE_LEDC_CHANNEL     0
-#define Y_PULSE_LEDC_CHANNEL     1
+#define Z_PULSE_LEDC_CHANNEL     1
 #define THETA_PULSE_LEDC_CHANNEL 2
 // Legacy alias (previous PWM-hobby-servo build).
 #define THETA_PWM_LEDC_CHANNEL   THETA_PULSE_LEDC_CHANNEL
 
 #define X_ENCODER_PCNT_UNIT      0
-#define Y_ENCODER_PCNT_UNIT      1
+#define Z_ENCODER_PCNT_UNIT      1
 #define THETA_ENCODER_PCNT_UNIT  2
 
 // MCP23S17 defaults
@@ -123,5 +127,9 @@
 #define CONSOLE_TASK_STACK          4096
 #define CONSOLE_TASK_PRIORITY          1
 #define CONSOLE_TASK_CORE              0
+
+#define PICK_SCHEDULER_TASK_STACK   4096
+#define PICK_SCHEDULER_TASK_PRIORITY   4
+#define PICK_SCHEDULER_TASK_CORE       1
 
 #endif  // GANTRY_APP_CONSTANTS_H

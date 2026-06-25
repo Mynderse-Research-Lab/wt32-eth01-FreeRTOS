@@ -22,6 +22,7 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/PulseMotor"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Gantry"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/MqttBridge"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

@@ -1,9 +1,9 @@
 # SRS → DOCX (with Mermaid diagrams as PNG)
 
-Reproducible pipeline for `Pickup_algo_and_MQTTBridge_SRS.md`:
+Reproducible pipeline for `Pickup_algo_and_MQTTBridge_SRS.md` and, with `-Flat`, for `Pickup_algo_and_MQTTBridge_SRS_flat.md`:
 
-1. **`render-diagrams.mjs`** — finds every ` ```mermaid ` … ` ``` ` block in the SRS, writes each to `docs/srs/_build/diagram_N.mmd`, runs **mmdc** (Mermaid CLI) to produce `diagram_N.png`, and writes `docs/srs/_build/SRS_preprocessed.md` with `![](diagram_N.png)` in place of the fenced blocks.
-2. **pandoc** — converts `SRS_preprocessed.md` to `Pickup_algo_and_MQTTBridge_SRS.docx` at the repo root, with `--resource-path` pointing at `docs/srs/_build` so images embed correctly.
+1. **`render-diagrams.mjs`** — finds every ` ```mermaid ` … ` ``` ` block in the chosen SRS, writes each to `docs/srs/_build/diagram_N.mmd`, runs **mmdc** (Mermaid CLI) to produce `diagram_N.png`, and writes `docs/srs/_build/SRS_preprocessed.md` (or `SRS_flat_preprocessed.md`) with `![](diagram_N.png)` in place of the fenced blocks.
+2. **pandoc** — converts the preprocessed file to `Pickup_algo_and_MQTTBridge_SRS.docx` or `Pickup_algo_and_MQTTBridge_SRS_flat.docx` at the repo root, with `--resource-path` pointing at `docs/srs/_build` so images embed correctly.
 
 The **source SRS** keeps Mermaid fenced blocks for GitHub / editor preview; the preprocessed file is generated only for the Word export.
 
@@ -23,6 +23,7 @@ From the repository root:
 
 ```powershell
 .\tools\srs_build\build.ps1
+.\tools\srs_build\build.ps1 -Flat
 ```
 
 Or manually:
@@ -39,13 +40,27 @@ pandoc docs\srs\_build\SRS_preprocessed.md `
   -o Pickup_algo_and_MQTTBridge_SRS.docx
 ```
 
+Flat SRS (same diagram pipeline, different intermediate/output names):
+
+```powershell
+cd tools\srs_build
+npm ci
+node .\render-diagrams.mjs Pickup_algo_and_MQTTBridge_SRS_flat.md SRS_flat_preprocessed.md
+cd ..\..
+pandoc docs\srs\_build\SRS_flat_preprocessed.md `
+  --from=markdown+pipe_tables+backtick_code_blocks+fenced_code_attributes `
+  --to=docx --toc --toc-depth=3 `
+  --resource-path="docs\srs\_build" `
+  -o Pickup_algo_and_MQTTBridge_SRS_flat.docx
+```
+
 ## Outputs (gitignored)
 
 Under `docs/srs/_build/`:
 
 - `diagram_*.mmd` — extracted Mermaid source (audit trail)
 - `diagram_*.png` — rendered figures
-- `SRS_preprocessed.md` — Markdown fed to pandoc
+- `SRS_preprocessed.md` or `SRS_flat_preprocessed.md` — Markdown fed to pandoc
 
 ## Adding a new diagram
 

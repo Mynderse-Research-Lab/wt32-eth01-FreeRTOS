@@ -3,7 +3,16 @@
 **Project:** WT32-ETH01 Gantry Controller (consumer-battery sorting MVP)
 **Subsystem under specification:** Communications bridge (Ethernet + MQTT + JSON) and battery-pickup planning / sequencing layer on the gantry firmware.
 **Document status:** Draft for intermediate development.
-**Revision:** 0.1 — 2026-05-13.
+**Revision:** 0.2 — 2026-05-13.
+
+**Coordinate convention (firmware-wide, as of revision 0.2):**
+
+- **X** — horizontal traverse along the gantry beam, across the conveyor belt.
+- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **−Y direction**; battery detections move toward more-negative `y` as they advance.
+- **Z** — vertical (gantry descent axis). **+Z = up**; belt surface is `Z = 0`; safe-retracted top-home is `Z = Z_max`.
+- **Theta** — rotation about the vertical (Z) axis, in degrees.
+
+This is a change from revision 0.1, which used `+s` downstream and `y_across_mm` for the across-belt coordinate. The firmware codebase has been refactored to the X / Y(=along-belt) / Z(=up) convention; this SRS follows suit.
 
 **DOCX export (diagrams as embedded images):** From the repository root run `.\tools\srs_build\build.ps1` (requires Node.js + npm + pandoc). See `tools/srs_build/README.md`.
 
@@ -26,7 +35,7 @@ This SRS is the contract that downstream design, implementation, and acceptance 
 
 - Ethernet link bring-up on the WT32-ETH01 LAN8720 PHY.
 - MQTT client lifecycle (connect, reconnect, subscribe, publish).
-- JSON parsing and validation for four topics defined in §4.
+- JSON parsing and validation for four topics defined in section 4.
 - Time-base synchronization between MQTT epoch timestamps and local monotonic time.
 - Conveyor configuration (belt width) request / response on a single shared topic.
 - Detection-queue management between the network thread and the scheduler.
@@ -54,10 +63,11 @@ This SRS is the contract that downstream design, implementation, and acceptance 
 | **Camera plane** | The fixed along-belt position at which the vision system reports detections. |
 | **Local time** | `esp_timer_get_time()` in microseconds; monotonic from boot. |
 | **Epoch time** | `t_epoch_us` carried in external MQTT payloads; UTC microseconds. |
-| `s` | Along-belt scalar coordinate in mm. |
-| `+s` | Downstream direction (toward the pickup plane). |
-| `D_mm` | Along-belt intercept distance: `s_pick_mm − s_bat_mm`. |
-| `τ` (tau) | Time-to-intercept: `D_mm / v_belt`. |
+| `y` (along-belt) | Along-belt scalar coordinate in mm. `−Y` is downstream (toward the pickup plane). |
+| `x` (across-belt) | Across-belt lateral coordinate in mm. `+X` aligns with the gantry beam's positive traverse direction. |
+| `z` (vertical) | Vertical coordinate in mm. `+Z = up`; belt surface is `Z = 0`. |
+| `D_mm` | Along-belt intercept distance the battery still has to travel before reaching the pickup plane: `D_mm = y_bat_mm − y_pick_mm`. Positive when the battery is still upstream of the pickup plane. |
+| `τ` (tau) | Time-to-intercept: `D_mm / v_belt`, where `v_belt = abs(speed_mm_per_s)` > 0. |
 | **Stale** | A telemetry sample whose age exceeds the configured freshness threshold. |
 | **SKIP** | A `/gantry/status` message that reports a non-fatal refusal to execute a pick, with a machine-readable reason code. |
 
@@ -81,7 +91,7 @@ flowchart LR
   CV["Conveyor controller"]
   BR["MQTT broker"]
   GW["Gantry firmware<br/>(this SRS)"]
-  GA["Gantry mechanism<br/>(X / Y / Theta + gripper)"]
+  GA["Gantry mechanism<br/>(X / Z / Theta + gripper)"]
 
   ID -- "/BatID" --> BR
   CV -- "/conveyorA/speed" --> BR
@@ -91,6 +101,8 @@ flowchart LR
   GW -- "moveTo / grip / abort" --> GA
   GA -- "encoder / limit / alarm feedback" --> GW
 ```
+
+The gantry has two prismatic actuators (X horizontal traverse, Z vertical descent) and one rotary actuator (Theta about Z). The along-belt direction Y is a coordinate-frame axis only; physical along-belt motion is produced entirely by the conveyor.
 
 The firmware is the **only** moving party on the network; the vision system and conveyor controller are passive publishers of telemetry. The gantry hardware is commanded exclusively through the existing `Gantry` C++ public API.
 
@@ -120,13 +132,13 @@ The firmware is the **only** moving party on the network; the vision system and 
 - The firmware **shall not bypass** the existing `Gantry::Gantry` public API for motion, gripping, homing, calibration, or status queries.
 - The 100 Hz `gantryUpdateTask` is owned by the motion layer and **shall remain unchanged** by anything in this SRS.
 - New code shall be added under `lib/MqttBridge/` and `src/pick_scheduler.{h,cpp}`; the `idf/main/CMakeLists.txt` shall list `MqttBridge` in `REQUIRES`.
-- All compile-time constants used by the planner (`s_cam_mm`, `s_pick_mm`, bin pose, grip latency margin, freshness thresholds) shall live in a single header `include/conveyor_intercept_params.h` analogous to the existing axis-parameter headers, with no runtime setters.
+- All compile-time constants used by the planner (`y_cam_mm`, `y_pick_mm`, bin pose, grip latency margin, freshness thresholds) shall live in a single header `include/conveyor_intercept_params.h` analogous to the existing axis-parameter headers, with no runtime setters.
 - No dynamic allocation in any callback or ISR path. The detection queue and snapshot stores use static FreeRTOS primitives or fixed-size buffers.
 
 ### 2.5 Assumptions and dependencies
 
 - The vision and conveyor teams own their MQTT topic payloads. Schema changes on those topics require a coordinated update to the JSON schema (Appendix A) and the parser unit tests before this firmware accepts them.
-- A single conveyor instance named `conveyorA` exists; multi-conveyor support is a future extension (§9).
+- A single conveyor instance named `conveyorA` exists; multi-conveyor support is a future extension (section 9).
 - A single pickup destination (one bin pose) exists at MVP; multi-bin routing is a future extension.
 - Network time (SNTP) anchoring is **not** assumed; the system shall function purely on the epoch offset learned from message timestamps. SNTP, when added later, plugs into the same `EpochTimeSync` interface.
 
@@ -134,32 +146,45 @@ The firmware is the **only** moving party on the network; the vision system and 
 
 ## 3. Coordinate frames, units, and time
 
-### 3.1 Along-belt frame
+### 3.1 Along-belt frame (Y)
 
-REQ-IF-001 — The firmware shall use a single along-belt scalar coordinate `s` measured in millimetres, with the origin at the belt roller axis datum projected into the belt plane, `+s` pointing **downstream** (toward the pickup plane), so that `s_pick_mm > s_cam_mm`.
+REQ-IF-001 — The firmware shall use a single along-belt scalar coordinate `y` measured in millimetres, with the origin at the belt roller axis datum projected into the belt plane, `−Y` pointing **downstream** (toward the pickup plane). Because both the camera plane and the pickup plane lie downstream of the roller datum, `y_pick_mm < y_cam_mm < 0`.
 
-REQ-IF-002 — Two compile-time constants in `include/conveyor_intercept_params.h` shall pin the camera plane and pickup plane onto the `s` axis:
+REQ-IF-002 — Two compile-time constants in `include/conveyor_intercept_params.h` shall pin the camera plane and the pickup plane onto the `y` axis:
 
 | Symbol | Constant | Nominal as-built value (mm) |
 |--------|----------|------------------------------|
-| `s_cam_mm` | `CONVEYOR_S_CAM_MM` | 336.55 |
-| `s_pick_mm` | `CONVEYOR_S_PICK_MM` | 1016.00 |
+| `y_cam_mm`  | `CONVEYOR_Y_CAM_MM`  | −336.55 |
+| `y_pick_mm` | `CONVEYOR_Y_PICK_MM` | −1016.00 |
 
-REQ-IF-003 — The intercept distance shall be computed as `D_mm = s_pick_mm − s_bat_mm`, where `s_bat_mm` is the authoritative along-belt coordinate of the battery reference point at `t_epoch_us`, published by the vision system on `/BatID`. The firmware **shall not** apply any additional camera-FOV correction to `s_bat_mm`; that fold-in is the vision system’s responsibility.
+REQ-IF-003 — The intercept distance shall be computed as `D_mm = y_bat_mm − y_pick_mm`, where `y_bat_mm` is the authoritative along-belt coordinate of the battery reference point at `t_epoch_us`, published by the vision system on `/BatID`. `D_mm > 0` means the battery is upstream of (closer to the roller than) the pickup plane and still has `D_mm` of belt travel before crossing the pick line. `D_mm ≤ 0` means the battery has already passed the pickup plane and the detection is infeasible. The firmware **shall not** apply any additional camera-FOV correction to `y_bat_mm`; that fold-in is the vision system's responsibility.
 
-REQ-IF-004 — Time-to-intercept shall be computed as `τ = D_mm / v_belt`, where `v_belt > 0` is the latest non-stale conveyor speed. `τ ≤ 0` shall be treated as infeasible (`SKIP:past_pickup_plane`).
+REQ-IF-004 — Time-to-intercept shall be computed as `τ = D_mm / v_belt`, where `v_belt = |speed_mm_per_s|` is the magnitude of the latest non-stale conveyor speed. `τ ≤ 0` shall be treated as infeasible (`SKIP:past_pickup_plane`).
 
-### 3.2 Across-belt and gantry mapping
+### 3.2 Across-belt frame (X) and gantry mapping
 
-REQ-IF-005 — The vision system publishes `y_across_mm` as the lateral position of the battery across the belt. The mapping from `y_across_mm` to gantry X target shall be implemented as a single calibration constant `CONVEYOR_Y_TO_GANTRY_X_OFFSET_MM` plus an optional sign flag, validated against the runtime `width_mm` from `/conveyorA/config`.
+REQ-IF-005 — The vision system publishes `x_across_mm` as the lateral position of the battery across the belt, measured from a conveyor-side datum at `x_across_mm = 0` and increasing toward the opposite belt edge at `x_across_mm = width_mm`. The mapping from `x_across_mm` to the gantry's X joint target shall be implemented as a single calibration constant `CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM` plus an optional sign flag, validated against the runtime `width_mm` from `/conveyorA/config`.
 
-REQ-IF-006 — Detections with `y_across_mm < 0` or `y_across_mm > width_mm` shall be rejected at validation time with `SKIP:y_across_out_of_range`.
+REQ-IF-006 — Detections with `x_across_mm < 0` or `x_across_mm > width_mm` shall be rejected at validation time with `SKIP:x_across_out_of_range`.
 
-### 3.3 Time
+### 3.3 Vertical frame (Z)
 
-REQ-IF-007 — All external timestamps carried in MQTT payloads shall be **epoch microseconds (`uint64_t`)** under the field name `t_epoch_us`.
+REQ-IF-007 — Workspace Z is the vertical coordinate of the gripper TCP, measured positive upward from the belt surface (`Z = 0`). The gantry Z actuator joint `joint.z` maps directly to this workspace Z (no sign flip).
 
-REQ-IF-008 — All internal deadlines (pick instant, wait-until points, freshness ages) shall be expressed in **local monotonic microseconds** as returned by `esp_timer_get_time()`.
+REQ-IF-008 — Two compile-time constants in `include/conveyor_intercept_params.h` shall pin the planner's vertical targets:
+
+| Symbol | Constant | Nominal as-built value (mm) |
+|--------|----------|------------------------------|
+| `z_safe_mm`  | `CONVEYOR_Z_SAFE_MM`   | `AXIS_Z_HARD_LIMIT_MAX_MM` (default 150) |
+| `z_pick_mm`  | `CONVEYOR_Z_PICK_MM`   | 5.0 (gripper just above the belt surface) |
+
+`approach_pose.z` shall always be set to `z_safe_mm`. `descend_pose.z` shall be `z_pick_mm` minus any battery-height-dependent grip offset.
+
+### 3.4 Time
+
+REQ-IF-020 — All external timestamps carried in MQTT payloads shall be **epoch microseconds (`uint64_t`)** under the field name `t_epoch_us`.
+
+REQ-IF-021 — All internal deadlines (pick instant, wait-until points, freshness ages) shall be expressed in **local monotonic microseconds** as returned by `esp_timer_get_time()`.
 
 REQ-TS-001 — `EpochTimeSync` shall maintain `offset_epoch_minus_local_us`, updated on each accepted MQTT message that carries `t_epoch_us`, using a filtering policy that suppresses single-sample jumps greater than 50 ms (configurable).
 
@@ -189,7 +214,7 @@ REQ-MB-003 — On `MQTT_EVENT_CONNECTED` the bridge shall:
 1. Subscribe to `/BatID` (QoS 0).
 2. Subscribe to `/conveyorA/speed` (QoS 0).
 3. Subscribe to `/conveyorA/config` (QoS 1).
-4. Publish exactly one fresh `/conveyorA/config` **request** (see §4.4).
+4. Publish exactly one fresh `/conveyorA/config` **request** (see section 4.4).
 5. Publish one `/gantry/status` message with `state: "LINK_UP"`.
 
 ### 4.2 Topic `/BatID` (subscribe)
@@ -200,12 +225,12 @@ REQ-MB-011 — A `/BatID` payload shall be accepted only if **all** of the follo
 
 - All required fields are present and of the expected types.
 - `t_epoch_us > 0`.
-- `s_bat_mm` falls within `[s_cam_mm − X_conv_margin, s_cam_mm + X_conv_margin]`, where `X_conv_margin` is a compile-time constant (default 300 mm) approximating half the camera FOV plus tolerance.
-- `y_across_mm` is within `[0, width_mm]` when conveyor width is known; otherwise within `[0, MAX_PLAUSIBLE_WIDTH_MM]` (default 1500 mm).
+- `y_bat_mm` falls within `[y_cam_mm − CAM_FOV_HALF_MM, y_cam_mm + CAM_FOV_HALF_MM]`, where `CAM_FOV_HALF_MM` is a compile-time constant (default 300 mm) approximating half the camera FOV plus tolerance. Because `y_cam_mm < 0`, this window straddles the camera plane on both the upstream (`+y` side) and downstream (`−y` side) of the camera datum.
+- `x_across_mm` is within `[0, width_mm]` when conveyor width is known; otherwise within `[0, MAX_PLAUSIBLE_WIDTH_MM]` (default 1500 mm).
 - No dimension is NaN, negative, or implausibly large (length / width / height each ≤ 500 mm by default).
 - `theta_deg ∈ [−180, 180]`.
 
-REQ-MB-012 — Accepted `/BatID` payloads shall be transformed into a `BatteryDetection` struct (Appendix A.4) and enqueued onto the detection queue (§5.5).
+REQ-MB-012 — Accepted `/BatID` payloads shall be transformed into a `BatteryDetection` struct (Appendix A.4) and enqueued onto the detection queue (section 5.5).
 
 REQ-MB-013 — Rejected `/BatID` payloads shall be logged at `ESP_LOG_WARN` with a reason code and shall **not** be enqueued.
 
@@ -233,7 +258,7 @@ REQ-MB-034 — If no valid `ConveyorConfig` has been received within `CONVEYOR_C
 
 REQ-MB-040 — The bridge shall provide a `publishStatus(GantryStatusMessage)` method that serializes a typed struct to JSON and publishes on `/gantry/status` (QoS 0) with `retain = false`.
 
-REQ-MB-041 — The status JSON shall include at minimum: `state` (string), `t_epoch_us` (uint64; `0` if not yet synced), `seq` (monotonic uint32), and an optional `reason` (string) for `SKIP` and `ABORT` states. Pick-context fields (`bat_id`, `s_bat_mm`, `tau_us`, `D_mm`) shall be included when relevant.
+REQ-MB-041 — The status JSON shall include at minimum: `state` (string), `t_epoch_us` (uint64; `0` if not yet synced), `seq` (monotonic uint32), and an optional `reason` (string) for `SKIP` and `ABORT` states. Pick-context fields (`bat_id`, `y_bat_mm`, `x_across_mm`, `tau_us`, `D_mm`) shall be included when relevant.
 
 REQ-MB-042 — The set of valid `state` values shall be: `LINK_UP`, `LINK_DOWN`, `IDLE`, `APPROACH`, `WAIT_DEADLINE`, `DESCEND`, `GRIP`, `RETRACT`, `TRANSFER`, `RELEASE`, `COMPLETE`, `SKIP`, `ABORT`, `DISABLED`.
 
@@ -306,10 +331,13 @@ REQ-PL-002 — `PickPlan` shall contain at minimum:
 struct PickPlan {
     bool                  feasible;
     SkipReason            skip_reason;        // valid iff !feasible
-    Gantry::JointConfig   approach_pose;      // X, safeY, theta_target
-    Gantry::JointConfig   descend_pose;       // X, y_pick, theta_target
+    // Gantry joint poses. JointConfig carries (x_mm, z_mm, theta_deg).
+    // The along-belt direction Y has no gantry actuator and therefore
+    // no presence in JointConfig.
+    Gantry::JointConfig   approach_pose;      // x=x_target, z=z_safe_mm,  theta=theta_target
+    Gantry::JointConfig   descend_pose;       // x=x_target, z=z_pick_mm,  theta=theta_target
     int64_t               t_pick_local_us;    // deadline for DESCEND start
-    float                 D_mm;
+    float                 D_mm;               // = y_bat_mm - y_pick_mm  (positive when feasible)
     float                 tau_us_f;
 };
 ```
@@ -318,12 +346,12 @@ REQ-PL-003 — Infeasibility shall be reported (not exceptioned) for at least th
 
 | `SkipReason` | Trigger |
 |--------------|---------|
-| `past_pickup_plane` | `D_mm ≤ 0` |
-| `speed_invalid` | `speed.speed_mm_per_s ≤ 1` or stale |
+| `past_pickup_plane` | `D_mm ≤ 0`, i.e. `y_bat_mm ≤ y_pick_mm` (battery already past pick line) |
+| `speed_invalid` | `speed.speed_mm_per_s` magnitude ≤ 1 or stale |
 | `time_not_synced` | `ts.isValid() == false` |
 | `outside_pick_zone` | Computed `t_pick_local_us` is in the past, or `tau < tau_min` (default 100 ms = grip latency floor) |
-| `y_out_of_range` | `det.y_across_mm` outside `[0, width_mm]` after width is known |
-| `pose_unreachable` | Approach or descend pose violates the soft-limit envelope reported by `Gantry::JointLimits` |
+| `x_across_out_of_range` | `det.x_across_mm` outside `[0, width_mm]` after width is known |
+| `pose_unreachable` | Approach or descend pose violates the soft-limit envelope reported by `Gantry::JointLimits` (X or Z range, theta range) |
 
 REQ-PL-004 — The planner shall **not** require, query, or modify any hardware. It is intended to be exercisable in host-side unit tests.
 
@@ -380,7 +408,7 @@ REQ-NF-002 — The scheduler shall be able to plan and start an `APPROACH` move 
 
 REQ-NF-003 — The pick state machine shall be able to handle a sustained detection rate of at least 1 Hz at the design belt speed of 1524 mm/s.
 
-REQ-NF-004 — `GRIP_LATENCY_MARGIN_US` (default 50 000 µs) shall provide adequate margin such that at the design speed (1524 mm/s) the battery has not moved more than ±5 mm past the planned pick point at the moment `gantry.grip(true)` is issued.
+REQ-NF-004 — `GRIP_LATENCY_MARGIN_US` (default 50 000 µs) shall provide adequate margin such that at the design speed (1524 mm/s) the battery has not moved more than ±5 mm in the `−Y` direction past the planned pick point at the moment `gantry.grip(true)` is issued.
 
 ### 6.2 Safety
 
@@ -406,7 +434,7 @@ REQ-NF-031 — The combined bridge + scheduler shall add no more than 80 KiB to 
 
 REQ-NF-040 — `planPick`, `EpochTimeSync`, and the JSON parsers shall be exercisable in host-side unit tests with no ESP-IDF dependency. A small fixture set of canonical JSON payloads (Appendix A) shall be checked in under `tools/test_fixtures/`.
 
-REQ-NF-041 — A test console command `simpick <s_bat_mm> <y_across_mm> <theta_deg> <speed_mm_per_s>` shall be added to the existing gantry console for HIL planning tests that bypass MQTT but still drive the scheduler and planner end-to-end.
+REQ-NF-041 — A test console command `simpick <y_bat_mm> <x_across_mm> <theta_deg> <speed_mm_per_s>` shall be added to the existing gantry console for HIL planning tests that bypass MQTT but still drive the scheduler and planner end-to-end.
 
 REQ-NF-042 — A test console command `mqttdump <0|1>` shall enable verbose logging of every accepted and rejected MQTT payload, with the rejection reason for rejected ones.
 
@@ -427,9 +455,9 @@ REQ-FM-001 — The bridge and scheduler shall emit `SKIP` messages drawn from th
 | `gantry_not_ready` | Not enabled, alarm active, or home/calibrate gate not satisfied | scheduler |
 | `pose_unreachable` | Planner rejected on soft limits | planner |
 | `outside_pick_zone` | `τ < τ_min` or `t_pick_local_us` in the past | planner |
-| `past_pickup_plane` | `D_mm ≤ 0` | planner |
-| `speed_invalid` | `v ≤ 1 mm/s` or NaN | planner |
-| `y_across_out_of_range` | `y_across_mm` not in `[0, width_mm]` | bridge |
+| `past_pickup_plane` | `D_mm ≤ 0` (battery already at or past pick line in `−Y`) | planner |
+| `speed_invalid` | `abs(v) ≤ 1 mm/s` or NaN | planner |
+| `x_across_out_of_range` | `x_across_mm` not in `[0, width_mm]` | bridge |
 | `bat_id_validation_failed` | Schema/range/sanity rejection of `/BatID` | bridge |
 | `queue_overflow` | A detection was dropped from `detectionQueue` | bridge |
 
@@ -449,7 +477,7 @@ REQ-VT-004 — HIL test 1 — *Link bring-up*: Power-cycle the gantry. Observe w
 
 REQ-VT-005 — HIL test 2 — *Config round-trip*: Bridge publishes `/conveyorA/config` request; an external script publishes a response with `width_mm = 600`. Observe `IDLE` heartbeats within 2 s of the response.
 
-REQ-VT-006 — HIL test 3 — *Plan-only*: Run `simpick 400 300 0 1524` with the gantry **disabled**. Observe a `SKIP:gantry_not_ready` with populated `D_mm`, `tau_us`, and `bat_id` fields, confirming the planner ran end-to-end.
+REQ-VT-006 — HIL test 3 — *Plan-only*: Run `simpick -400 300 0 1524` (arguments: `y_bat_mm`, `x_across_mm`, `theta_deg`, `speed_mm_per_s`) with the gantry **disabled**. Observe a `SKIP:gantry_not_ready` with populated `D_mm`, `tau_us`, and `bat_id` fields, confirming the planner ran end-to-end.
 
 REQ-VT-007 — HIL test 4 — *Battery #1 end-to-end pick*: With a single battery on the belt at design speed and the gantry enabled+homed+calibrated, observe the full transition `LINK_UP → IDLE → APPROACH → WAIT_DEADLINE → DESCEND → GRIP → RETRACT → TRANSFER → RELEASE → COMPLETE` on `/gantry/status`, and verify the physical pick.
 
@@ -480,13 +508,18 @@ REQ-VT-010 — Acceptance gate: tests REQ-VT-001 through REQ-VT-009 shall pass o
 
 ### A.1 `/BatID` (subscribe)
 
+Field naming follows the X / Y(=along-belt, −Y downstream) / Z(=up) convention:
+
+- `y_bat_mm` — along-belt position of the battery centroid at `t_epoch_us`. Negative when the battery is downstream of the roller datum; less-negative values are farther upstream (closer to the camera or beyond).
+- `x_across_mm` — across-belt position from the conveyor-side datum, `0 ≤ x_across_mm ≤ width_mm`.
+
 ```json
 {
   "t_epoch_us":   1747166400123456,
   "bat_id":       "batch-2026-05-13-00042",
   "seq":          42,
-  "s_bat_mm":     820.5,
-  "y_across_mm":  310.0,
+  "y_bat_mm":     -480.0,
+  "x_across_mm":  310.0,
   "theta_deg":    12.4,
   "length_mm":    65.0,
   "width_mm":     18.0,
@@ -495,7 +528,7 @@ REQ-VT-010 — Acceptance gate: tests REQ-VT-001 through REQ-VT-009 shall pass o
 }
 ```
 
-- Required: `t_epoch_us`, `s_bat_mm`, `y_across_mm`, `theta_deg`, `length_mm`, `width_mm`, `height_mm`.
+- Required: `t_epoch_us`, `y_bat_mm`, `x_across_mm`, `theta_deg`, `length_mm`, `width_mm`, `height_mm`.
 - Optional: `bat_id`, `seq`, `class`.
 - Ranges (validation): see REQ-MB-011.
 
@@ -541,11 +574,11 @@ REQ-VT-010 — Acceptance gate: tests REQ-VT-001 through REQ-VT-009 shall pass o
 struct BatteryDetection {
     uint64_t t_epoch_us;
     int64_t  t_local_us;       // filled at MQTT-receive time
-    float    s_bat_mm;
-    float    y_across_mm;
-    float    theta_deg;
+    float    y_bat_mm;         // along-belt (negative = downstream)
+    float    x_across_mm;      // across-belt, [0, width_mm]
+    float    theta_deg;        // rotation about Z
     float    length_mm;
-    float    width_mm;
+    float    width_mm;         // battery width, not belt width
     float    height_mm;
     uint32_t seq;              // 0 if absent in JSON
     char     bat_id[32];       // '\0' if absent in JSON
@@ -555,12 +588,16 @@ struct BatteryDetection {
 
 ### A.5 `/gantry/status` (publish)
 
+`D_mm` is the along-belt intercept distance (`y_bat_mm − y_pick_mm`); positive while the battery is upstream of the pick line.
+
 ```json
 {
   "seq":          18,
   "t_epoch_us":   1747166400500000,
   "state":        "DESCEND",
   "bat_id":       "batch-2026-05-13-00042",
+  "y_bat_mm":     -820.5,
+  "x_across_mm":  310.0,
   "D_mm":         195.5,
   "tau_us":       128280,
   "reason":       null
@@ -586,4 +623,4 @@ Future requirements shall use unallocated IDs in the appropriate range. Once all
 
 ---
 
-*End of SRS, revision 0.1.*
+*End of SRS, revision 0.2.*
