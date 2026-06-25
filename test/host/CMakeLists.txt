@@ -47,6 +47,20 @@ target_include_directories(gantry_logic PUBLIC
     "${REPO_ROOT}/include"
 )
 
+# --- EtherNet/IP encoding layer under test ------------------------------------
+# Pure, freestanding C++17 (no ESP-IDF). Same sources the firmware will link in
+# a later phase; here they are regression-tested byte-for-byte on the host.
+add_library(ethernet_ip STATIC
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipEncapsulation.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipCpf.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
+)
+target_include_directories(ethernet_ip PUBLIC
+    "${REPO_ROOT}/lib/EtherNetIP/src"
+)
+
 # --- Test executables ---------------------------------------------------------
 # Each test file is its own Unity runner registered with CTest.
 function(add_host_test name)
@@ -57,3 +71,8 @@ endfunction()
 
 add_host_test(test_kinematics)
 add_host_test(test_trajectory)
+
+# EtherNet/IP encoding tests link the ethernet_ip lib instead of gantry_logic.
+add_executable(test_eip_encoding "test_eip_encoding.cpp")
+target_link_libraries(test_eip_encoding PRIVATE ethernet_ip unity)
+add_test(NAME test_eip_encoding COMMAND test_eip_encoding)
