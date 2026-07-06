@@ -120,6 +120,25 @@ struct InputAssembly154 {
   // input is shorter than kInput154Size.
   bool deserialize(const Bytes& data);
   bool deserialize(const uint8_t* data, size_t len);
+
+  // Drive-endstop status: the Kinetix 5100 monitors its TBIO digital inputs
+  // internally. A limit-switch trigger causes the drive to fault and stop.
+  // These helpers aggregate the status bits the firmware uses to react.
+
+  /// True when the drive reports a fault (bit1) or uncertain (bit2) condition.
+  /// Limit switch activation is one possible cause among others.
+  bool hasDriveFault() const { return fault || uncertain; }
+
+  /// True when the drive reports motion stopped (bit6).
+  bool isMotionStopped() const { return stopped; }
+
+  /// Heuristic: likely a limit-switch stop when both fault and stopped are
+  /// asserted. The drive's KNX5100C DIO configuration must assign digital
+  /// inputs as Forward/Reverse Limit for this to be meaningful.
+  bool isLikelyLimitStop() const { return hasDriveFault() && isMotionStopped(); }
+
+  /// True when the drive is ready to accept motion commands.
+  bool isReady() const { return ready && !fault && !uncertain; }
 };
 
 }  // namespace k5100

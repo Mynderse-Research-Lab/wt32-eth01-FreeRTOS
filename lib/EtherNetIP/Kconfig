@@ -1,21 +1,140 @@
 menu "EtherNet/IP originator"
 
     config EIP_SCANNER_ENABLED
-        bool "Enable EtherNet/IP scanner task (scaffold)"
+        bool "Enable EtherNet/IP scanner task"
         default n
         help
-            When enabled, starts a background FreeRTOS task that attempts
-            TCP RegisterSession to a configured drive IP. This is transport
-            scaffolding only; ForwardOpen and cyclic I/O are not yet wired
-            to Gantry motion. Default off so live PulseMotor + MQTT behavior
-            is unchanged.
+            When enabled, starts a background FreeRTOS task that waits for
+            Ethernet link-up, then runs RegisterSession, ForwardOpen, cyclic
+            Class 1 I/O at RPI, and ForwardClose on loss.
+            Default off so live PulseMotor + MQTT behaviour is unchanged.
+            Bench validation against a real drive is still required.
+
+    choice EIP_AXIS_SELECT
+        prompt "EtherNet/IP axis selection"
+        depends on EIP_SCANNER_ENABLED
+        default EIP_AXIS_NONE
+        help
+            Select one axis to run over EtherNet/IP. All other axes stay on
+            PulseMotor.  Multi-axis simultaneous EIP is not yet supported
+            (the scanner connects to a single IP).
+
+        config EIP_AXIS_NONE
+            bool "None (scanner runs idle; no process image)"
+
+        config EIP_AXIS_X
+            bool "X axis over EIP (Kinetix 5100)"
+
+        config EIP_AXIS_Z
+            bool "Z axis over EIP (Kinetix 5100)"
+
+        config EIP_AXIS_THETA
+            bool "Theta axis over EIP (HCS01)"
+    endchoice
 
     config EIP_TARGET_IP
-        string "Target drive IP address (scanner scaffold)"
+        string "Target drive IP address"
         default "192.168.1.100"
         depends on EIP_SCANNER_ENABLED
         help
-            IP address of the first EtherNet/IP target for the scanner task
-            to connect to (TCP 44818). Bench validation required.
+            IP address of the selected EtherNet/IP target drive
+            (TCP 44818). Bench validation required.
+
+    config EIP_AXIS_X_PUU_PER_MM
+        float "X-axis PUU/mm scaling (Kinetix 5100)"
+        default 1000.0
+        depends on EIP_AXIS_X
+        help
+            Position-units-per-mm for the X (belt) axis Kinetix 5100
+            drive.  Default matches SCHUNK Beta 100-ZRS test bench.
+
+    config EIP_AXIS_Z_PUU_PER_MM
+        float "Z-axis PUU/mm scaling (Kinetix 5100)"
+        default 4000.0
+        depends on EIP_AXIS_Z
+        help
+            Position-units-per-mm for the Z (ballscrew) axis Kinetix 5100
+            drive.  Default matches SCHUNK Beta 80-SRS test bench.
+
+    config EIP_AXIS_THETA_PUU_PER_DEG
+        float "Theta-axis PUU/deg scaling (HCS01)"
+        default 100.0
+        depends on EIP_AXIS_THETA
+        help
+            Position-units-per-degree for the HCS01 rotary axis drive.
+            Default is a placeholder; bench validation determines the
+            correct value from the IndraWorks position scaling.
+
+    config EIP_X_RPI_US
+        int "X/Z axis RPI (microseconds)"
+        default 5000
+        depends on EIP_AXIS_X || EIP_AXIS_Z
+        help
+            Requested packet interval for the Kinetix 5100 Class 1
+            implicit I/O connection, in microseconds.
+
+    config EIP_THETA_RPI_US
+        int "Theta axis RPI (microseconds)"
+        default 4000
+        depends on EIP_AXIS_THETA
+        help
+            Requested packet interval for the HCS01 Class 1 implicit
+            I/O connection, in microseconds.
+
+    choice EIP_ENDSTOP_SOURCE
+        prompt "Endstop limit switch reporting path"
+        depends on EIP_SCANNER_ENABLED
+        default EIP_ENDSTOP_FROM_DRIVE
+        help
+            Select where the firmware reads limit switch status. When
+            endstops are wired to drive digital inputs (TBIO/X31), the
+            drive stops internally and reports Fault/Stopped via EIP
+            assembly feedback. When endstops stay on MCP23S17, the
+            firmware reads them via GPIO expander (step/dir fallback).
+
+        config EIP_ENDSTOP_FROM_DRIVE
+            bool "Drive digital inputs (via EIP assembly status)"
+            help
+                Limit switches wired to Kinetix 5100 TBIO INPUT1-4 or
+                HCS01 X31.5/X31.6. The drive monitors them internally;
+                firmware reads Fault/Stopped bits from the assembly.
+
+        config EIP_ENDSTOP_FROM_MCP
+            bool "MCP23S17 GPIO expander"
+            help
+                Limit switches wired to MCP23S17 (PIN_X_LIMIT_MIN/MAX,
+                PIN_Z_LIMIT_MIN/MAX). Firmware reads GPIO via the
+                GantryLimitSwitch debounced path. Used for step/dir
+                fallback mode.
+    endchoice
+
+    config EIP_CONFIG_ASSEMBLY_INSTANCE
+        int "Config assembly instance for ForwardOpen"
+        default 1
+        depends on EIP_SCANNER_ENABLED
+        help
+            CIP config-assembly instance used in the ForwardOpen
+            connection path. PROVISIONAL (default 1) until confirmed
+            against the Kinetix 5100 / HCS01 EDS files.
+            Common values: Kinetix 5100 = 1; HCS01 = varies by config.
+
+    config EIP_INCLUDE_RUN_IDLE_HEADER
+        bool "Include 32-bit Run/Idle header in cyclic O->T frames"
+        default y
+        depends on EIP_SCANNER_ENABLED
+        help
+            When enabled, a 32-bit Run/Idle header is placed in the
+            CIP sequence count slot of each cyclic output frame.
+            PROVISIONAL until confirmed against the target drive's EDS
+            RunIdle capability flag. Kinetix 5100 typically requires it.
+
+    config EIP_ORIGINATOR_VENDOR_ID
+        int "Originator vendor ID for ForwardOpen"
+        default 0
+        depends on EIP_SCANNER_ENABLED
+        help
+            Vendor ID sent in the ForwardOpen request. PROVISIONAL
+            (default 0). Some drives require a non-zero vendor ID
+            (e.g. Rockwell uses 0x0001). Set to 0 to accept any.
 
 endmenu

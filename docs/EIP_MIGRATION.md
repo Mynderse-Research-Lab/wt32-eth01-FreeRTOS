@@ -293,28 +293,39 @@ flowchart TB
     cm["ConnectionManager - ListIdentity, RegisterSession, ForwardOpen"]
     k5100["Kinetix5100Assembly - 104 out, 154 in"]
     hcs01["Hcs01Assembly - 101 out, 102 in"]
+    img["EipProcessImage - cmd/fbk bridge"]
+    eipLin["GantryEipLinearAxis - X and Z"]
+    eipRot["GantryEipRotaryAxis - theta"]
     sess["EipSession - TCP explicit"]
     io["EipIoConnection - Class1 UDP framing"]
   end
-  subgraph fw [Firmware scaffold - Kconfig gated]
+  subgraph fw [Firmware - Kconfig gated]
     sock["EipSocketEspIdf - lwIP"]
-    task["EipScannerTask - RegisterSession loop"]
+    scan["EipScanner - lifecycle orchestrator"]
+    task["EipScannerTask - link wait + RPI loop"]
   end
-  subgraph motion [Motion - deferred]
-    axis["EipAxis adapter -> Gantry"]
+  subgraph motion [Motion wiring - DONE]
+    axis["Gantry DI constructor + Kconfig"]
   end
   cm --> enc
   k5100 --> cip
   hcs01 --> cip
   sess --> enc
   io --> enc
+  scan --> sess
+  scan --> io
+  scan --> cm
+  scan --> img
+  eipLin --> img
+  eipRot --> img
+  eipLin --> k5100
+  eipRot --> hcs01
   pure --> fw
   fw -. later .-> motion
 ```
 
-Standard ports (for the deferred transport phase): explicit + session over
-**TCP 44818**, cyclic Class 1 I/O over **UDP 2222**, `ListIdentity` discovery
-over **UDP 44818** (broadcast).
+Standard ports: explicit + session over **TCP 44818**, cyclic Class 1 I/O over
+**UDP 2222**, `ListIdentity` discovery over **UDP 44818** (broadcast).
 
 ---
 
@@ -331,23 +342,62 @@ Pure `lib/EtherNetIP/` component: encapsulation + CPF + CIP MR + ListIdentity /
 RegisterSession / ForwardOpen builders+parsers + Kinetix 5100 104/154 structs,
 with byte-exact host unit tests in the existing CTest/CI lane.
 
-### Phase 2 - Transport scaffolding (DONE for scaffold)
+### Phase 2 - Transport (DONE, code-complete)
 `EipSession` (TCP explicit), `EipIoConnection` (Class 1 UDP framing),
-`EipSocketEspIdf`, and a Kconfig-gated `EipScannerTask` (default off) that
-retries RegisterSession with backoff. Host tests in `test_eip_transport.cpp`.
-Firmware links the component; scanner is off by default so PulseMotor + MQTT
-behavior is unchanged. ForwardOpen + cyclic RPI loop and bench validation
-still deferred. Run/Idle header and connection path are **PROVISIONAL** until
-EDS + hardware confirm.
+`EipScanner` (RegisterSession -> ForwardOpen -> cyclic RPI exchange ->
+ForwardClose lifecycle), `EipSocketEspIdf`, and a Kconfig-gated `EipScannerTask`
+(default off) that waits on Ethernet link-up then drives the scanner at RPI.
+Host tests in `test_eip_transport.cpp`. Firmware links the component; scanner is
+off by default so PulseMotor + MQTT behavior is unchanged. Cyclic O->T payload
+is an idle (servo-off) buffer until Phase 3 motion integration.
 
-### Phase 3 - Motion integration (deferred)
-`EipAxis` adapter feeding `Gantry`, console commands, and a Kconfig switch to
-select the EtherNet/IP path vs. the pulse/dir path per axis. Start with X.
+**Bench validation still open:** confirm ForwardOpen connection path, config-
+assembly instance, and Run/Idle header against Kinetix/HCS01 EDS + hardware.
+These do not block closing Phase 2 as a software deliverable.
+
+### Phase 3 - Motion integration (DONE)
+`EipProcessImage` (mutex-guarded command/feedback bridge), `GantryEipLinearAxis`
+(Kinetix 5100 104/154 — covers **both X belt and Z ballscrew** via config),
+`GantryEipRotaryAxis` (HCS01 101/102 theta), and `EipScanner::setProcessImage()`
+integration are implemented and host-tested in `test_eip_axis.cpp`.
+
+The `Gantry` **dependency-injection constructor** accepts pre-built
+`unique_ptr<GantryLinearAxis>` (X, Z) and `unique_ptr<GantryRotaryAxis>` (theta)
+objects. Public static factories `makePulseMotorLinearAxis()` /
+`makePulseMotorRotaryAxis()` let `app_main` build non-EIP axes independently.
+
+Per-axis Kconfig (`EIP_AXIS_SELECT` choice: None / X / Z / Theta) selects one
+axis at run time for EtherNet/IP; all others stay on PulseMotor. The selected
+EIP axis gets a static `EipProcessImage` shared with the scanner task.
+`EipScannerTask` picks the correct assemblies and drive family (Kinetix 104/154
+or HCS01 101/102) from the Kconfig choice. PulseMotor remains the default
+unchanged path when `EIP_AXIS_NONE` is selected.
+
+**Still deferred:** console commands, and bench validation on real drives.
+See [EIP_VALIDATION_CHECKLIST.md](EIP_VALIDATION_CHECKLIST.md) for the step-by-step
+bench bring-up sequence. Start live integration with X when hardware + EDS are available.
 
 ### Phase 4 - HCS01 / theta assembly layer (DONE for positioning map)
 `Hcs01ControlStatus` + `Hcs01Assembly` implement the section-4 positioning map
 (host-tested). Remaining: IndraWorks commissioning (EDS import, `P-0-408x`
 setup) and bench validation. Fallback to step/dir on X31 if bring-up stalls.
+
+### Phase 5 - EtherCAT/SOEM de-scoped (2026-07-03)
+
+Per [DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md](DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md),
+the EtherCAT path via SOEM/W5500 has been de-scoped from active build targets:
+
+- The Kinetix 5100 drives (X, Z) do not support EtherCAT -- only the HCS01 (Theta) does.
+- The HCS01 already supports EtherNet/IP via its Multi-Ethernet module, making
+  EtherNet/IP the only unified bus covering all three drives.
+- The `lib/SOEM/` component is removed from `EXTRA_COMPONENT_DIRS` and no
+  longer compiles into the firmware image. Source files remain in the repo for
+  reference.
+- The `lib/W5500/` SPI driver and its host tests (`test_w5500_spi`) are kept
+  for potential future use (e.g. W5500-as-Ethernet-PHY), but no EtherCAT master
+  stack is built on top of it.
+- The standalone `test/w5500_loopback/` validation project remains available
+  for hardware verification of the WIZ850io module.
 
 ---
 
@@ -358,7 +408,8 @@ setup) and bench validation. Fallback to step/dir on X31 if bring-up stalls.
 | Rexroth EtherNet/IP **EDS** (`IndraDrive_EIP_MPx18.EDS`) | MISSING | Exact connection points + config-assembly instance for ForwardOpen (Functions manual line 5816) |
 | Verify `P-0-4074` data format / 32-bit word order | TO CONFIRM | Tab. 4-20/4-22 list `(H)` before `(L)` per i32, in tension with "Intel format" - pin against EDS + bench capture before trusting the codec for HCS01 |
 | HCS01 scaling setup (`S-0-0282`, `S-0-0259` units) | TO CONFIG | Map theta degrees/PUU + velocity units in IndraWorks |
-| Kinetix 5100 **EDS** | MISSING | Exact ForwardOpen config-assembly instance + connection parameters at bench bring-up |
+| Kinetix 5100 **EDS** | MISSING | Bench validation: ForwardOpen config-assembly instance, connection path, Run/Idle header (currently PROVISIONAL defaults in `EipScanner`) |
+| Bench validation (Kinetix + HCS01) | TO DO | Confirm Class 1 lifecycle against real drives on the wire — see [EIP_VALIDATION_CHECKLIST.md](EIP_VALIDATION_CHECKLIST.md) |
 | Rexroth **MPB Functional Description** | NICE TO HAVE | X31 step/dir pin assignment (only needed if taking the fallback path) |
 | Safe Torque Off (STO) wiring | OUT OF SCOPE | Remains hardwired regardless of bus |
 

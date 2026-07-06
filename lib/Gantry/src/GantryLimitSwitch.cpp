@@ -39,11 +39,14 @@ uint8_t readPinLevel(int pin) {
 } // namespace
 
 GantryLimitSwitch::GantryLimitSwitch()
-    : pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(6),
-      sampleState_(false), stableState_(false), stableCount_(0), initialized_(false) {}
+    : source_(Source::kGpio),
+      pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(6),
+      sampleState_(false), stableState_(false), stableCount_(0), initialized_(false),
+      externalActive_(false) {}
 
 void GantryLimitSwitch::configure(int pin, bool activeLow, bool enablePullup,
                                   uint8_t debounceCycles) {
+    source_ = Source::kGpio;
     pin_ = pin;
     activeLow_ = activeLow;
     enablePullup_ = enablePullup;
@@ -52,9 +55,27 @@ void GantryLimitSwitch::configure(int pin, bool activeLow, bool enablePullup,
     stableState_ = false;
     stableCount_ = 0;
     initialized_ = false;
+    externalActive_ = false;
+}
+
+void GantryLimitSwitch::configureExternal() {
+    source_ = Source::kDriveManaged;
+    pin_ = -1;
+    externalActive_ = false;
+    initialized_ = true;   // No hardware init needed.
+}
+
+void GantryLimitSwitch::setExternalActive(bool active) {
+    if (source_ == Source::kDriveManaged) {
+        externalActive_ = active;
+    }
 }
 
 bool GantryLimitSwitch::begin() {
+    if (source_ == Source::kDriveManaged) {
+        initialized_ = true;
+        return true;
+    }
     if (pin_ < 0) {
         return false;
     }
@@ -88,6 +109,10 @@ bool GantryLimitSwitch::begin() {
 }
 
 void GantryLimitSwitch::update(bool force) {
+    // Drive-managed switches are updated via setExternalActive(), not GPIO polling.
+    if (source_ == Source::kDriveManaged) {
+        return;
+    }
     if (pin_ < 0) {
         return;
     }
@@ -119,10 +144,16 @@ void GantryLimitSwitch::update(bool force) {
 }
 
 bool GantryLimitSwitch::isConfigured() const {
+    if (source_ == Source::kDriveManaged) {
+        return initialized_;
+    }
     return pin_ >= 0;
 }
 
 bool GantryLimitSwitch::isActive() const {
+    if (source_ == Source::kDriveManaged) {
+        return externalActive_;
+    }
     return stableState_;
 }
 

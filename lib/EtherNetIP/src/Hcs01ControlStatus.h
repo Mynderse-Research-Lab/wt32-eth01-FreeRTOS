@@ -79,6 +79,21 @@ struct Hcs01StatusWord {
   bool isReadyForOperation() const {
     return ready == ReadyForOperation::kInOperation;
   }
+
+  // Drive-endstop status: the HCS01 monitors its X31 digital inputs
+  // internally. A limit-switch trigger causes a class-1 error (drive
+  // interlock) and the drive stops following commands.
+
+  /// True when the drive reports a class-1 error (bit13, drive interlock).
+  /// Limit switch activation via X31.5/X31.6 is one possible cause.
+  bool hasDriveError() const { return class1_error; }
+
+  /// True when the drive is not following commands (bit7), e.g. due to
+  /// Drive Halt, limit switch stop, or E-Stop.
+  bool isMotionBlocked() const { return not_following_command; }
+
+  /// True when the drive reports a class-2 warning (bit12).
+  bool hasWarning() const { return class2_warning; }
 };
 
 }  // namespace hcs01

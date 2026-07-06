@@ -23,6 +23,10 @@ Standalone index for everything under `docs/`. This file is independent of [`dri
 | [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design | Networking / scheduler |
 | [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements | Integration |
 | [EIP_MIGRATION.md](EIP_MIGRATION.md) | EtherNet/IP wire format and migration status | Firmware / networking |
+| [EIP_VALIDATION_CHECKLIST.md](EIP_VALIDATION_CHECKLIST.md) | EIP bench bring-up: hardware, commissioning, validation sequences | Bench validation |
+| [BENCH_VALIDATION_PLAN.md](BENCH_VALIDATION_PLAN.md) | Detailed procedural bench validation plan for all three drives | Bench operator |
+| [DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md](DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md) | Drive protocol compatibility analysis and endstop connectivity review | Architecture |
+| [ENDSTOP_WIRING_PLAN.md](ENDSTOP_WIRING_PLAN.md) | Limit switch pin assignments and drive-side wiring tables | Panel wiring |
 
 ---
 
