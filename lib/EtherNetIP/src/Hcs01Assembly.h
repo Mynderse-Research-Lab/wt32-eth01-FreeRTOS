@@ -1,6 +1,7 @@
 // HCS01 / IndraDrive EtherNet/IP assembly (de)serialization.
 //
-// Recommended drive-controlled-positioning map from docs/EIP_MIGRATION.md
+// Recommended drive-controlled-positioning map from docs/LOW_LEVEL_GANTRY_CONTROL.md
+// and IndraDrive Functions manual.
 // section 4.2 (Functions manual Tab. 4-21/4-22):
 //
 //   Output assembly, instance 101 (O->T): 10 bytes  (command to drive)

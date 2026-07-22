@@ -1,7 +1,7 @@
 // Kinetix 5100 EtherNet/IP assembly (de)serialization.
 //
 // Byte maps are taken from the Kinetix 5100 user manual (2198-UM004),
-// Tables 102-106, and reproduced in docs/EIP_MIGRATION.md. All scalars are
+// Tables 102-106, and reproduced in docs/LOW_LEVEL_GANTRY_CONTROL.md. All scalars are
 // little-endian. Position/speed/etc. use the drive's engineering units
 // (0.1 RPM, PUU, 0.1% torque) - see docs for the unit table.
 //

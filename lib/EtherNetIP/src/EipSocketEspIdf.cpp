@@ -1,5 +1,7 @@
 #include "EipSocketEspIdf.h"
 
+#include "EipConnectionManager.h"
+
 #include <cstring>
 
 #include "lwip/sockets.h"
@@ -61,7 +63,7 @@ EipSocketUdpEndpoint::EipSocketUdpEndpoint() = default;
 
 EipSocketUdpEndpoint::~EipSocketUdpEndpoint() { close(); }
 
-bool EipSocketUdpEndpoint::bind(uint16_t port) {
+bool EipSocketUdpEndpoint::bind(uint16_t port, uint32_t multicast_connection_id) {
   close();
   fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (fd_ < 0) return false;
@@ -74,6 +76,14 @@ bool EipSocketUdpEndpoint::bind(uint16_t port) {
       0) {
     close();
     return false;
+  }
+
+  if (multicast_connection_id != 0) {
+    const uint32_t mcast_ip = multicastIpFromConnectionId(multicast_connection_id);
+    struct ip_mreq mreq {};
+    mreq.imr_multiaddr.s_addr = htonl(mcast_ip);
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    (void)setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
   }
   return true;
 }

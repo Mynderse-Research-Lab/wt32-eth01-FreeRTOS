@@ -102,7 +102,7 @@ Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
   ByteWriter dw(data);
   dw.u16(cip_sequence);
   if (include_run_idle_header) {
-    // PROVISIONAL: Run state (0x00000001). Confirm against drive EDS at bench.
+    // Run state (0x00000001). Confirmed for Kinetix 5100 via PC testing.
     dw.u32(0x00000001);
   }
   dw.bytes(assembly);
@@ -111,6 +111,30 @@ Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
   items.emplace_back(CpfItemType::kSequencedAddress, std::move(addr));
   items.emplace_back(CpfItemType::kConnectedData, std::move(data));
   return encodeCpf(items);
+}
+
+bool parseClass1InputCpf(const Bytes& frame, uint32_t& out_connection_id,
+                         Bytes& out_assembly, bool skip_run_idle) {
+  std::vector<CpfItem> items;
+  if (!decodeCpf(frame, items)) return false;
+
+  bool have_id = false;
+  bool have_data = false;
+  for (const CpfItem& item : items) {
+    if (item.type_id == static_cast<uint16_t>(CpfItemType::kSequencedAddress)) {
+      if (item.data.size() < 4) return false;
+      ByteReader r(item.data);
+      if (!r.u32(out_connection_id)) return false;
+      have_id = true;
+    } else if (item.type_id ==
+               static_cast<uint16_t>(CpfItemType::kConnectedData)) {
+      if (!decodeSendUnitDataAssembly(item.data, skip_run_idle, out_assembly)) {
+        return false;
+      }
+      have_data = true;
+    }
+  }
+  return have_id && have_data;
 }
 
 }  // namespace eip

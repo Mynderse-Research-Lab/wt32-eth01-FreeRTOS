@@ -64,6 +64,11 @@ Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
                            uint16_t cip_sequence, const Bytes& assembly,
                            bool include_run_idle_header);
 
+// Parse Class 1 T->O CPF: extract sequenced-address connection ID + assembly.
+// Used by multi-axis demux (match frame to axis by T->O connection ID).
+bool parseClass1InputCpf(const Bytes& frame, uint32_t& out_connection_id,
+                         Bytes& out_assembly, bool skip_run_idle = false);
+
 }  // namespace eip
 
 #endif  // ETHERNET_IP_EIP_CPF_H

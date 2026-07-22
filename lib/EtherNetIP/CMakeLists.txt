@@ -1,7 +1,7 @@
 # EtherNetIP component - EtherNet/IP + CIP originator encoding and transport.
 #
 # Pure C++17 encoding (host-testable) plus ESP-IDF socket/scanner scaffolding.
-# Scanner is Kconfig-gated (default off); see docs/EIP_MIGRATION.md.
+# Scanner is Kconfig-gated (default off); see docs/LOW_LEVEL_GANTRY_CONTROL.md.
 
 idf_component_register(
     SRCS
@@ -14,13 +14,18 @@ idf_component_register(
         "src/Hcs01Assembly.cpp"
         "src/EipSession.cpp"
         "src/EipIoConnection.cpp"
+        "src/EipScanner.cpp"
+        "src/EipMultiScanner.cpp"
+        "src/EipProcessImage.cpp"
         "src/EipSocketEspIdf.cpp"
+        "src/EipSocketW5500.cpp"
         "src/EipScannerTask.cpp"
     INCLUDE_DIRS
         "src"
     REQUIRES
         lwip
         esp_netif
+        W5500
         freertos
         log
 )

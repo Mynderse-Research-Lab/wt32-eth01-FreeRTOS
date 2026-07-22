@@ -20,40 +20,29 @@ Bytes EipIoConnection::buildOutputFrame(const Bytes& assembly) {
   ++encap_sequence_;
   ++cip_sequence_;
 
-  Bytes cpf = buildClass1OutputCpf(config_.connection_id, encap_sequence_,
-                                   cip_sequence_, assembly,
-                                   config_.include_run_idle_header);
-  Bytes payload = encodeSendUnitDataPayload(cpf);
-
-  EncapHeader header;
-  header.setCommand(EncapCommand::kSendUnitData);
-  header.session_handle = config_.session_handle;
-  return encodeEncapsulation(header, payload);
+  // Class 1 implicit I/O over UDP 2222 carries a CPF directly, with no
+  // EtherNet/IP encapsulation header. The CPF contains a sequenced address
+  // item (connection ID + encapsulation sequence) and a connected data item
+  // (CIP sequence count + optional Run/Idle header + assembly data).
+  return buildClass1OutputCpf(config_.connection_id, encap_sequence_,
+                              cip_sequence_, assembly,
+                              config_.ot_include_run_idle_header);
 }
 
 bool EipIoConnection::parseInputFrame(const Bytes& frame, Bytes& out_assembly) {
-  EncapHeader header;
-  size_t off = 0;
-  size_t len = 0;
-  if (!decodeEncapsulation(frame, header, off, len)) return false;
-  if (header.command != static_cast<uint16_t>(EncapCommand::kSendUnitData))
-    return false;
+  auto parse_connected = [&](const Bytes& connected_data) {
+    return decodeSendUnitDataAssembly(connected_data,
+                                      config_.to_include_run_idle_header,
+                                      out_assembly);
+  };
 
-  Bytes payload(frame.begin() + off, frame.begin() + off + len);
-  ByteReader r(payload);
-  uint32_t interface_handle = 0;
-  uint16_t timeout = 0;
-  if (!r.u32(interface_handle)) return false;
-  if (!r.u16(timeout)) return false;
-
+  // Class 1 implicit T->O is a raw CPF UDP payload.
   std::vector<CpfItem> items;
-  if (!decodeCpf(r.cursor(), r.remaining(), items)) return false;
+  if (!decodeCpf(frame, items)) return false;
 
   for (const CpfItem& item : items) {
     if (item.type_id == static_cast<uint16_t>(CpfItemType::kConnectedData)) {
-      return decodeSendUnitDataAssembly(item.data,
-                                        config_.include_run_idle_header,
-                                        out_assembly);
+      return parse_connected(item.data);
     }
   }
   return false;

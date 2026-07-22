@@ -27,7 +27,7 @@ class EipSocketUdpEndpoint : public IUdpEndpoint {
   EipSocketUdpEndpoint();
   ~EipSocketUdpEndpoint() override;
 
-  bool bind(uint16_t port) override;
+  bool bind(uint16_t port, uint32_t multicast_connection_id = 0) override;
   ssize_t sendTo(const uint8_t* data, size_t len, const char* host,
                  uint16_t port) override;
   ssize_t recvFrom(uint8_t* buf, size_t max_len, uint32_t timeout_ms) override;

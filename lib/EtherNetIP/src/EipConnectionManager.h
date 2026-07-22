@@ -60,13 +60,24 @@ uint16_t makeNetworkConnectionParams(uint16_t connection_size_bytes,
                                      ConnectionType type,
                                      ConnectionPriority priority,
                                      bool variable_size = false,
-                                     bool redundant_owner = false);
+                                     bool redundant_owner = false,
+                                     bool run_idle_header = false);
 
 // Transport class/trigger byte: bit7 direction (1=server), bits6-4 production
 // trigger (0=cyclic, 1=change-of-state, 2=application), bits3-0 transport
 // class. For a Class 1 originator: client(0), cyclic(0), class 1 -> 0x01.
 uint8_t makeTransportClassTrigger(uint8_t transport_class, uint8_t trigger,
                                   bool server_direction = false);
+
+// Build the Class-1 connection path: Assembly class, config instance (logical
+// instance segment 0x24/0x25), then O->T and T->O connection points (0x2C/0x2D).
+// Kinetix 5100 EDS Connection1 path: "20 04 24 BF 2C 68 2C 9A".
+Bytes buildAssemblyConnectionPath(uint16_t config_instance,
+                                  uint16_t ot_connection_point,
+                                  uint16_t to_connection_point);
+
+// EtherNet/IP Class 1 T->O multicast address from a connection ID (239.192.x.y).
+uint32_t multicastIpFromConnectionId(uint32_t connection_id);
 
 struct ForwardOpenParams {
   uint8_t priority_time_tick = 0x0A;   // tick time exponent

@@ -60,6 +60,9 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01Assembly.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipSession.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipIoConnection.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipScanner.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScanner.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipProcessImage.cpp"
 )
 target_include_directories(ethernet_ip PUBLIC
     "${REPO_ROOT}/lib/EtherNetIP/src"
@@ -88,3 +91,14 @@ add_test(NAME test_hcs01_assembly COMMAND test_hcs01_assembly)
 add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
+
+
+# W5500 SPI frame encoding test (pure C++ constexpr logic, no ESP-IDF)
+add_executable(test_w5500_spi "test_w5500_spi.cpp")
+target_include_directories(test_w5500_spi PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+)
+target_link_libraries(test_w5500_spi PRIVATE unity)
+add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
+
+

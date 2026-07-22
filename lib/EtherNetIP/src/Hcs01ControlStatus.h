@@ -1,7 +1,7 @@
 // HCS01 / IndraDrive field-bus control and status words (P-0-4077 / P-0-4078).
 //
 // Bit maps from the Parameters Reference Book (Tab. 4-357 / 4-358) and
-// docs/EIP_MIGRATION.md section 4.3 / 4.4. Used with profile type 0xFFFE
+// docs/LOW_LEVEL_GANTRY_CONTROL.md. Used with profile type 0xFFFE
 // (freely configurable) and the drive-controlled-positioning process-data map.
 
 #ifndef ETHERNET_IP_HCS01_CONTROL_STATUS_H

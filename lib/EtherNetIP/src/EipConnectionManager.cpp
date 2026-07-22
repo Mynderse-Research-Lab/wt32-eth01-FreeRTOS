@@ -55,11 +55,16 @@ bool parseListIdentityReply(const Bytes& frame, Identity& out) {
 uint16_t makeNetworkConnectionParams(uint16_t connection_size_bytes,
                                      ConnectionType type,
                                      ConnectionPriority priority,
-                                     bool variable_size, bool redundant_owner) {
+                                     bool variable_size, bool redundant_owner,
+                                     bool run_idle_header) {
   uint16_t params = 0;
   params |= static_cast<uint16_t>(connection_size_bytes & 0x01FF);
   params |= static_cast<uint16_t>((variable_size ? 1u : 0u) << 9);
   params |= static_cast<uint16_t>((static_cast<uint16_t>(priority) & 0x3) << 10);
+  if (run_idle_header) {
+    // O->T Run/Idle header format (ODVA Vol 2, network params bit 8).
+    params |= static_cast<uint16_t>(1u << 8);
+  }
   params |= static_cast<uint16_t>((static_cast<uint16_t>(type) & 0x3) << 13);
   params |= static_cast<uint16_t>((redundant_owner ? 1u : 0u) << 15);
   return params;
@@ -71,6 +76,50 @@ uint8_t makeTransportClassTrigger(uint8_t transport_class, uint8_t trigger,
   v |= static_cast<uint8_t>((trigger & 0x07) << 4);
   v |= static_cast<uint8_t>((server_direction ? 1u : 0u) << 7);
   return v;
+}
+
+Bytes buildAssemblyConnectionPath(uint16_t config_instance,
+                                  uint16_t ot_connection_point,
+                                  uint16_t to_connection_point) {
+  auto append_instance = [](ByteWriter& w, uint16_t instance) {
+    if (instance <= 0xFF) {
+      w.u8(0x24);
+      w.u8(static_cast<uint8_t>(instance));
+    } else {
+      w.u8(0x25);
+      w.u8(0);
+      w.u16(instance);
+    }
+  };
+  auto append_connection_point = [](ByteWriter& w, uint16_t cp) {
+    if (cp <= 0xFF) {
+      w.u8(0x2C);
+      w.u8(static_cast<uint8_t>(cp));
+    } else {
+      w.u8(0x2D);
+      w.u8(0);
+      w.u16(cp);
+    }
+  };
+
+  Bytes path;
+  ByteWriter w(path);
+  w.u8(0x20);
+  w.u8(static_cast<uint8_t>(CipClass::kAssembly));
+  append_instance(w, config_instance);
+  append_connection_point(w, ot_connection_point);
+  append_connection_point(w, to_connection_point);
+  return path;
+}
+
+uint32_t multicastIpFromConnectionId(uint32_t connection_id) {
+  uint8_t o3 = static_cast<uint8_t>(connection_id & 0xFF);
+  uint8_t o4 = static_cast<uint8_t>((connection_id >> 8) & 0xFF);
+  if (o3 == 0 && o4 == 0 && connection_id != 0) {
+    o3 = static_cast<uint8_t>((connection_id >> 16) & 0xFF);
+    o4 = static_cast<uint8_t>((connection_id >> 24) & 0xFF);
+  }
+  return (239u << 24) | (192u << 16) | (static_cast<uint32_t>(o3) << 8) | o4;
 }
 
 Bytes buildForwardOpenRequest(const ForwardOpenParams& p) {
