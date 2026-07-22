@@ -50,7 +50,10 @@ bool Bridge::start(const char* gantry_id) {
         return false;
     }
     if (!ethernet_link_->waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
-        ESP_LOGE(TAG, "Ethernet did not become ready within timeout");
+        ESP_LOGW(TAG,
+                 "Ethernet PHY/IP not ready within %d ms — MQTT not started "
+                 "(EIP/console unaffected; restore LAN8720 link and reboot to enable MQTT)",
+                 ETH_IP_WAIT_TIMEOUT_MS);
         return false;
     }
 

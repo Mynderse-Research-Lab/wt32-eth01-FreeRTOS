@@ -1,5 +1,5 @@
 // Host unit tests for HCS01 control/status words and positioning assemblies.
-// Byte maps from docs/EIP_MIGRATION.md section 4.
+// Byte maps from docs/LOW_LEVEL_GANTRY_CONTROL.md / HCS01 sources.
 
 #include "unity.h"
 

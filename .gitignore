@@ -2,20 +2,46 @@
 
 *.code-workspace
 
+# Cursor IDE / agent local state (rules, hooks, MCP, worklog, plans)
+.cursor/
+
 # IDE/tooling
 .cache/
 .clangd
 compile_commands.json
 
-# ESP-IDF build and generated config (canonical project is idf/ — see PROGRAMMING_REFERENCE.md section 1.2)
+# ESP-IDF build and generated config (canonical project is idf/ — see docs/LOW_LEVEL_GANTRY_CONTROL.md)
 idf/build/
 build/
 idf/sdkconfig
+idf/sdkconfig.old
 idf/managed_components/
 managed_components/
+idf/dependencies.lock
 
 # Local capture of idf.py output (optional)
 idf/build_output.log
 
-# SRS Word export (regenerate: .\tools\srs_build\build.ps1)
-Pickup_algo_and_MQTTBridge_SRS.docx
+# Secrets / local env
+.env
+
+# Bench / tool scratch logs
+*.log
+motion_*.txt
+check_log.txt
+test_log.txt
+tools/.eip_*.log
+tools/.eip_*.json
+
+# Python
+**/__pycache__/
+
+# KiCad local/cache (track .kicad_pro / .kicad_sch / exports; ignore caches)
+docs/schematics/**/*.kicad_prl
+docs/schematics/**/*-backups/
+docs/schematics/**/*.lck
+docs/schematics/**/fp-info-cache
+docs/schematics/**/#auto_saved_files#
+docs/schematics/exports/_*.pdf
+docs/schematics/exports/_*.kicad_sch
+docs/schematics/exports/*.erc.rpt

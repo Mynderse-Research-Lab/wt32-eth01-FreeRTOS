@@ -17,9 +17,9 @@
 namespace MqttBridge {
 
 static const char* TAG = "EthernetLink";
-// WT32-ETH01 internal LAN8720 (see WT32_ETH01_PINOUT.md).
+// WT32-ETH01 internal LAN8720 (see pinout.csv / docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md).
 static constexpr int ETH_PHY_POWER_GPIO = 16;  // PHY supply enable, not a strap pin
-static constexpr int ETH_PHY_ADDR = 1;
+static constexpr int ETH_PHY_ADDR = -1;  // ESP_ETH_PHY_ADDR_AUTO — let driver probe addresses 0-31
 
 static bool enablePhyPower() {
     gpio_config_t io = {};
