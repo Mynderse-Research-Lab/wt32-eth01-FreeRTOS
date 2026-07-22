@@ -1,7 +1,7 @@
 // Host unit tests for the pure EtherNet/IP + CIP encoding layer
 // (lib/EtherNetIP). Every test pins exact bytes-on-the-wire and/or round-trips
 // an encode->decode so the framing is regression-locked before any live socket
-// transport is written. See docs/EIP_MIGRATION.md for the byte maps.
+// transport is written. See docs/LOW_LEVEL_GANTRY_CONTROL.md for the byte maps.
 
 #include "unity.h"
 
@@ -228,6 +228,20 @@ static void test_transport_class_trigger(void) {
   TEST_ASSERT_EQUAL_HEX8(0x93, eip::makeTransportClassTrigger(3, 1, true));
 }
 
+static void test_assembly_connection_path_kinetix(void) {
+  // Kinetix 5100 EDS Connection1: "20 04 24 BF 2C 68 2C 9A"
+  const Bytes path = eip::buildAssemblyConnectionPath(191, 104, 154);
+  const Bytes expected = {0x20, 0x04, 0x24, 0xBF, 0x2C, 0x68, 0x2C, 0x9A};
+  assertBytesEqual(expected, path);
+}
+
+static void test_multicast_ip_from_connection_id(void) {
+  TEST_ASSERT_EQUAL_HEX32(0xEFC03412u,
+                          eip::multicastIpFromConnectionId(0x00001234));
+  TEST_ASSERT_EQUAL_HEX32(0xEFC0F0FCu,
+                          eip::multicastIpFromConnectionId(0xFCF00000u));
+}
+
 static void test_forward_open_request_framing(void) {
   eip::ForwardOpenParams p;
   p.connection_path = eip::buildConnectionPointPath(0x04, 104);
@@ -431,6 +445,8 @@ int main(void) {
   RUN_TEST(test_message_router_response_parse_error_status);
   RUN_TEST(test_network_connection_params_packing);
   RUN_TEST(test_transport_class_trigger);
+  RUN_TEST(test_assembly_connection_path_kinetix);
+  RUN_TEST(test_multicast_ip_from_connection_id);
   RUN_TEST(test_forward_open_request_framing);
   RUN_TEST(test_forward_open_reply_parse);
   RUN_TEST(test_list_identity_reply_parse);

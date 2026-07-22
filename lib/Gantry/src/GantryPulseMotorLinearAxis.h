@@ -5,6 +5,11 @@
  * Works for any linear drivetrain (BALLSCREW, BELT, RACKPINION). The
  * conversion from mm to encoder pulses comes from the DrivetrainConfig
  * supplied at construction time.
+ *
+ * @deprecated As of 2026-07 refactor, all drive control is EtherNet/IP only.
+ *             This file is retained for reference but is NOT compiled into the
+ *             firmware. See lib/Gantry/src/GantryEipLinearAxis.h for the
+ *             current EIP-backed implementation.
  */
 
 #ifndef GANTRY_PULSE_MOTOR_LINEAR_AXIS_H

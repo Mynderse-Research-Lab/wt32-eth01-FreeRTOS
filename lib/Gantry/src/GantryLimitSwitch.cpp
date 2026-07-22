@@ -1,7 +1,22 @@
 #include "GantryLimitSwitch.h"
 
-#include "gpio_expander.h"
 #include "driver/gpio.h"
+
+// gpio_expander stubs — MCP23S17 removed (2026-07 refactor)
+// GantryLimitSwitch no longer uses MCP IO; all limit switches are
+// drive-managed via EIP assembly. These constants and stubs satisfy
+// the linker for the dead code paths that still reference MCP symbols.
+
+#define GPIO_DIRECT_PIN_BASE        0x10
+#define GPIO_EXPANDER_DIRECT_FLAG   0x100
+#define GPIO_EXPANDER_DIRECT_MASK   0x0FF
+
+extern "C" {
+uint8_t gpio_expander_read(int pin) { return 1; }
+esp_err_t gpio_expander_set_direction(int pin, bool output) { return ESP_OK; }
+esp_err_t gpio_expander_set_pullup(int pin, bool enable) { return ESP_OK; }
+esp_err_t gpio_expander_write(int pin, uint8_t level) { return ESP_OK; }
+}
 
 namespace Gantry {
 namespace {

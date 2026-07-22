@@ -92,6 +92,17 @@ add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
 
+add_executable(test_eip_axis "test_eip_axis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxis.cpp"
+)
+target_include_directories(test_eip_axis PRIVATE
+    "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/include"
+)
+target_link_libraries(test_eip_axis PRIVATE ethernet_ip unity)
+add_test(NAME test_eip_axis COMMAND test_eip_axis)
 
 # W5500 SPI frame encoding test (pure C++ constexpr logic, no ESP-IDF)
 add_executable(test_w5500_spi "test_w5500_spi.cpp")

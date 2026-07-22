@@ -28,10 +28,6 @@ idf_component_register(
         Gantry
         MqttBridge
         EtherNetIP
-        PulseMotor
-        MCP23S17
-        gpio_expander
-        esp_driver_gpio
         esp_timer
         log
         freertos

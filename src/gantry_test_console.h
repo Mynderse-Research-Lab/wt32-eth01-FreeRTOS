@@ -15,8 +15,8 @@
  */
 struct GantryTestConsoleConfig {
   Gantry::Gantry *gantry = nullptr;
-  uint8_t limit_min_pin = 0;
-  uint8_t limit_max_pin = 0;
+  int limit_min_pin = -1;
+  int limit_max_pin = -1;
   bool use_mcp23s17 = false;
   bool limit_switches_active = false;
   int x_pulse_pin = -1;

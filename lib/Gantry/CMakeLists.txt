@@ -13,16 +13,14 @@ idf_component_register(
         "src/GantryEndEffector.cpp"
         "src/GantryKinematics.cpp"
         "src/GantryLimitSwitch.cpp"
-        "src/GantryPulseMotorLinearAxis.cpp"
-        "src/GantryPulseMotorRotaryAxis.cpp"
+        "src/GantryEipLinearAxis.cpp"
+        "src/GantryEipRotaryAxis.cpp"
         "src/GantryTrajectory.cpp"
     INCLUDE_DIRS
         "src"
         "${APP_ROOT}/include"
     REQUIRES
-        PulseMotor
-        gpio_expander
-        esp_driver_gpio
+        EtherNetIP
         esp_common
         esp_timer
         log

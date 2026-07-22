@@ -4,6 +4,11 @@
  *
  * Works with DRIVETRAIN_ROTARY_DIRECT drivetrains. Converts deg <-> pulses
  * using DrivetrainConfig.
+ *
+ * @deprecated As of 2026-07 refactor, all drive control is EtherNet/IP only.
+ *             This file is retained for reference but is NOT compiled into the
+ *             firmware. See lib/Gantry/src/GantryEipRotaryAxis.h for the
+ *             current EIP-backed implementation.
  */
 
 #ifndef GANTRY_PULSE_MOTOR_ROTARY_AXIS_H

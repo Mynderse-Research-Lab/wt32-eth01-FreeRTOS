@@ -24,7 +24,9 @@
 #define ETH_STATIC_NETMASK_OCTET_3  255
 #define ETH_STATIC_NETMASK_OCTET_4  0
 
-// How long start() waits for a usable IP (static or DHCP).
-#define ETH_IP_WAIT_TIMEOUT_MS      30000
+// How long Bridge::start() blocks app_main waiting for LAN8720 PHY+IP.
+// Static IP is ready as soon as PHY is up — keep this short so EIP console
+// bring-up is not stalled when the MQTT cable is unplugged (MQTT is non-fatal).
+#define ETH_IP_WAIT_TIMEOUT_MS      3000
 
 #endif  // ETHERNET_APP_CONFIG_H

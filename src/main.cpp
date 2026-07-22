@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Gantry control application for WT32-ETH01 with MCP23S17 IO expansion.
+ * @brief Gantry control application for WT32-ETH01 with W5500 EtherNet/IP.
  *
  * Coordinate convention (firmware-wide, as of 2026-05):
  *   X = horizontal traverse (across belt), Y = along-belt (no gantry actuator;
@@ -8,68 +8,40 @@
  *   physical bed offset: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (axis_drivetrain_params.h).
  *
  * FreeRTOS application with:
- * - MCP23S17 SPI GPIO expander initialization
- * - X-axis pulse-train servo control (Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt)
- * - Z-axis pulse-train servo control (Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew)
- * - Theta-axis pulse-train rotary control (custom driver + SCHUNK ERD 04-40-D-H-N)
- * - End-effector: SCHUNK KGG 100-80 pneumatic gripper
+ * - W5500 SPI Ethernet for EtherNet/IP drive control (X, Z)
+ * - LAN8720 RMII for MQTT bridge
+ * - End-effector: SCHUNK KGG 100-80 pneumatic gripper (direct GPIO)
  * - Interactive serial console (gantry_test_console)
  * - Periodic gantry update task at 100 Hz
  *
+ * All drive control is EtherNet/IP only. MCP23S17 and step/direction removed.
  * Pin assignments live in gantry_app_constants.h.
- * Motor/driver electrical tuning lives in axis_pulse_motor_params.h.
- * Mechanical / drivetrain / envelope tuning lives in axis_drivetrain_params.h.
  */
 
 // Ask axis_drivetrain_params.h to emit its deployment-time reminders in this
-// TU only. This keeps the geometry-freeze warning (and any future
-// single-point-of-truth reminders) to ONE copy per build instead of one per
-// translation unit that transitively pulls the header in. MUST be defined
-// before any include that may transitively pull axis_drivetrain_params.h
-// (e.g. "Gantry.h" -> "GantryConfig.h" -> "axis_drivetrain_params.h").
+// TU only.
 #define AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS
 
 #include "Gantry.h"
-#include "PulseMotor.h"
-#include "freertos/task.h"
-#include "esp_log.h"
 #include "sdkconfig.h"
-#include "driver/gpio.h"
-#include "gpio_expander.h"
-#include "MCP23S17.h"
+#include "esp_log.h"
 #include "gantry_test_console.h"
 #include "gantry_app_constants.h"
-#include "axis_pulse_motor_params.h"
 #include "axis_drivetrain_params.h"
 #include "mqtt_topics.h"
 #include "MqttBridge.h"
 #include "pick_scheduler.h"
 
 #if CONFIG_EIP_SCANNER_ENABLED
+#include "W5500.h"
+#include "W5500SpiHal.h"
 #include "EipScannerTask.h"
+#include "EipProcessImage.h"
+#include "EipSocketW5500.h"
+#include "GantryEipLinearAxis.h"
 #endif
 
 static const char* TAG = "GantryApp";
-
-// Pulse pins must run on direct ESP32 GPIOs (LEDC). Encode them so the
-// gpio_expander-aware pin path treats them as direct GPIOs.
-static const int PIN_X_PULSE_EXP     = GPIO_EXPANDER_DIRECT_PIN(PIN_X_PULSE);
-static const int PIN_Z_PULSE_EXP     = GPIO_EXPANDER_DIRECT_PIN(PIN_Z_PULSE);
-static const int PIN_THETA_PULSE_EXP = GPIO_EXPANDER_DIRECT_PIN(PIN_THETA_PULSE);
-
-static void initDirectOutputs(void) {
-    // PIN_Z_PULSE (GPIO2) is a strapping pin; pre-seed it LOW on the raw ESP32
-    // GPIO before LEDC binds the channel, so the line is in a known state
-    // through reset.
-    gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << PIN_Z_PULSE);
-    io_conf.mode         = GPIO_MODE_OUTPUT;
-    io_conf.pull_up_en   = GPIO_PULLUP_DISABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type    = GPIO_INTR_DISABLE;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
-    ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)PIN_Z_PULSE, 0));
-}
 
 // ---------------------------------------------------------------------------
 // Task parameter structures
@@ -99,214 +71,71 @@ void gantryUpdateTask(void* param) {
 }
 
 // ---------------------------------------------------------------------------
-// MCP23S17 initialization helper
-// ---------------------------------------------------------------------------
-static bool initMcp23s17(void) {
-    ESP_LOGI(TAG, "Initializing MCP23S17 GPIO expander...");
-    mcp23s17_config_t mcp_config = {};
-    mcp_config.spi_host       = SPI2_HOST;
-    mcp_config.cs_pin         = (gpio_num_t)MCP23S17_SPI_CS_PIN;
-    mcp_config.miso_pin       = (gpio_num_t)MCP23S17_SPI_MISO_PIN;
-    mcp_config.mosi_pin       = (gpio_num_t)MCP23S17_SPI_MOSI_PIN;
-    mcp_config.sclk_pin       = (gpio_num_t)MCP23S17_SPI_SCLK_PIN;
-    mcp_config.device_address = MCP23S17_DEVICE_ADDRESS;
-    mcp_config.clock_speed_hz = MCP23S17_SPI_CLOCK_HZ_WORKING;
-    ESP_LOGI(TAG, "MCP SPI config: CS=%d MISO=%d MOSI=%d SCLK=%d CLK=%lu",
-             static_cast<int>(mcp_config.cs_pin),
-             static_cast<int>(mcp_config.miso_pin),
-             static_cast<int>(mcp_config.mosi_pin),
-             static_cast<int>(mcp_config.sclk_pin),
-             static_cast<unsigned long>(mcp_config.clock_speed_hz));
-
-    if (!gpio_expander_init(&mcp_config)) {
-        ESP_LOGE(TAG, "FATAL: Failed to initialize MCP23S17; cannot continue.");
-        return false;
-    }
-    ESP_LOGI(TAG, "MCP23S17 initialized successfully");
-
-    // Defensive per-pin seeding (DIR/EN/ALM/ARST/GRIPPER low, limit inputs
-    // with pull-up) is now owned by Gantry::Gantry::preparePinsForBoot(), so
-    // the application layer no longer reaches past the Gantry abstraction to
-    // poke individual MCP pins. See lib/Gantry/docs/ARCHITECTURE_FLOW.md
-    // invariant 6.
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Build PulseMotor DriverConfig / DrivetrainConfig per axis
-// ---------------------------------------------------------------------------
-
-static PulseMotor::DriverConfig makeXDriverConfig() {
-    PulseMotor::DriverConfig cfg;
-    cfg.pulse_pin        = PIN_X_PULSE_EXP;
-    cfg.dir_pin          = PIN_X_DIR;
-    cfg.enable_pin       = PIN_X_ENABLE;
-    cfg.alarm_reset_pin  = PIN_X_ALARM_RESET;
-    cfg.alarm_pin        = PIN_X_ALARM_STATUS;
-    cfg.encoder_a_pin    = PIN_X_ENC_A;
-    cfg.encoder_b_pin    = PIN_X_ENC_B;
-
-    // Limits are enforced at the Gantry layer; driver sees no limit inputs.
-    cfg.limit_min_pin    = -1;
-    cfg.limit_max_pin    = -1;
-
-    cfg.pulse_mode       = PulseMotor::PulseMode::PULSE_DIRECTION;
-    cfg.encoder_ppr      = AXIS_X_ENCODER_PPR;
-    cfg.max_pulse_freq   = AXIS_X_MAX_PULSE_FREQ_HZ;
-    cfg.gear_numerator   = AXIS_X_GEAR_NUMERATOR;
-    cfg.gear_denominator = AXIS_X_GEAR_DENOMINATOR;
-    cfg.invert_dir_pin   = AXIS_X_INVERT_DIR != 0;
-    cfg.invert_output_logic = AXIS_X_INVERT_OUTPUT_LOGIC != 0;
-    cfg.ledc_channel     = X_PULSE_LEDC_CHANNEL;
-    cfg.ledc_resolution  = AXIS_X_LEDC_RESOLUTION_BITS;
-    cfg.pcnt_unit        = X_ENCODER_PCNT_UNIT;
-    cfg.enable_encoder_feedback = (AXIS_X_ENCODER_FEEDBACK_ENABLED != 0);
-    cfg.homing_speed_pps = AXIS_X_HOMING_SPEED_PPS;
-    cfg.limit_debounce_cycles    = AXIS_X_LIMIT_DEBOUNCE_CYCLES;
-    cfg.limit_sample_interval_ms = AXIS_X_LIMIT_SAMPLE_INTERVAL_MS;
-    return cfg;
-}
-
-static PulseMotor::DrivetrainConfig makeXDrivetrainConfig() {
-    PulseMotor::DrivetrainConfig dt;
-    dt.type                   = (PulseMotor::DrivetrainType)AXIS_X_DRIVETRAIN;
-    dt.belt_lead_mm_per_rev   = AXIS_X_LEAD_MM_PER_REV;
-    dt.encoder_ppr            = AXIS_X_ENCODER_PPR;
-    dt.motor_reducer_ratio    = AXIS_X_MOTOR_REDUCER_RATIO;
-    return dt;
-}
-
-static PulseMotor::DriverConfig makeZDriverConfig() {
-    PulseMotor::DriverConfig cfg;
-    cfg.pulse_pin        = PIN_Z_PULSE_EXP;
-    cfg.dir_pin          = PIN_Z_DIR;
-    cfg.enable_pin       = PIN_Z_ENABLE;
-    cfg.alarm_reset_pin  = PIN_Z_ALARM_RESET;
-    cfg.alarm_pin        = PIN_Z_ALARM_STATUS;
-    cfg.encoder_a_pin    = PIN_Z_ENC_A;
-    cfg.encoder_b_pin    = PIN_Z_ENC_B;
-
-    cfg.limit_min_pin    = -1;
-    cfg.limit_max_pin    = -1;
-
-    cfg.pulse_mode       = PulseMotor::PulseMode::PULSE_DIRECTION;
-    cfg.encoder_ppr      = AXIS_Z_ENCODER_PPR;
-    cfg.max_pulse_freq   = AXIS_Z_MAX_PULSE_FREQ_HZ;
-    cfg.gear_numerator   = AXIS_Z_GEAR_NUMERATOR;
-    cfg.gear_denominator = AXIS_Z_GEAR_DENOMINATOR;
-    cfg.invert_dir_pin   = AXIS_Z_INVERT_DIR != 0;
-    cfg.invert_output_logic = AXIS_Z_INVERT_OUTPUT_LOGIC != 0;
-    cfg.ledc_channel     = Z_PULSE_LEDC_CHANNEL;
-    cfg.ledc_resolution  = AXIS_Z_LEDC_RESOLUTION_BITS;
-    cfg.pcnt_unit        = Z_ENCODER_PCNT_UNIT;
-    cfg.enable_encoder_feedback = (AXIS_Z_ENCODER_FEEDBACK_ENABLED != 0);
-    cfg.homing_speed_pps = AXIS_Z_HOMING_SPEED_PPS;
-    cfg.limit_debounce_cycles    = AXIS_Z_LIMIT_DEBOUNCE_CYCLES;
-    cfg.limit_sample_interval_ms = AXIS_Z_LIMIT_SAMPLE_INTERVAL_MS;
-    return cfg;
-}
-
-static PulseMotor::DrivetrainConfig makeZDrivetrainConfig() {
-    PulseMotor::DrivetrainConfig dt;
-    dt.type                    = (PulseMotor::DrivetrainType)AXIS_Z_DRIVETRAIN;
-    dt.ballscrew_lead_mm       = AXIS_Z_LEAD_MM_PER_REV;
-    dt.ballscrew_critical_rpm  = AXIS_Z_CRITICAL_RPM;
-    dt.encoder_ppr             = AXIS_Z_ENCODER_PPR;
-    dt.motor_reducer_ratio     = AXIS_Z_MOTOR_REDUCER_RATIO;
-    return dt;
-}
-
-static PulseMotor::DriverConfig makeThetaDriverConfig() {
-    PulseMotor::DriverConfig cfg;
-    cfg.pulse_pin        = PIN_THETA_PULSE_EXP;
-    cfg.dir_pin          = PIN_THETA_DIR;
-    cfg.enable_pin       = PIN_THETA_ENABLE;
-    cfg.alarm_reset_pin  = -1;             // not wired in this revision
-    cfg.alarm_pin        = -1;             // not wired in this revision
-    cfg.encoder_a_pin    = PIN_THETA_ENC_A;
-    cfg.encoder_b_pin    = PIN_THETA_ENC_B;
-
-    cfg.limit_min_pin    = -1;
-    cfg.limit_max_pin    = -1;
-
-    cfg.pulse_mode       = PulseMotor::PulseMode::PULSE_DIRECTION;
-    cfg.encoder_ppr      = AXIS_THETA_ENCODER_PPR;
-    cfg.max_pulse_freq   = AXIS_THETA_MAX_PULSE_FREQ_HZ;
-    cfg.gear_numerator   = AXIS_THETA_GEAR_NUMERATOR;
-    cfg.gear_denominator = AXIS_THETA_GEAR_DENOMINATOR;
-    cfg.invert_dir_pin   = AXIS_THETA_INVERT_DIR != 0;
-    cfg.invert_output_logic = AXIS_THETA_INVERT_OUTPUT_LOGIC != 0;
-    cfg.ledc_channel     = THETA_PULSE_LEDC_CHANNEL;
-    cfg.ledc_resolution  = AXIS_THETA_LEDC_RESOLUTION_BITS;
-    cfg.pcnt_unit        = THETA_ENCODER_PCNT_UNIT;
-    // Theta encoder not wired yet; enable_encoder_feedback false until the
-    // custom driver's pulse/dir-feedback lines are routed.
-    cfg.enable_encoder_feedback = (PIN_THETA_ENC_A >= 0 && PIN_THETA_ENC_B >= 0);
-    cfg.homing_speed_pps = AXIS_THETA_HOMING_SPEED_PPS;
-    cfg.limit_debounce_cycles    = AXIS_THETA_LIMIT_DEBOUNCE_CYCLES;
-    cfg.limit_sample_interval_ms = AXIS_THETA_LIMIT_SAMPLE_INTERVAL_MS;
-    return cfg;
-}
-
-static PulseMotor::DrivetrainConfig makeThetaDrivetrainConfig() {
-    PulseMotor::DrivetrainConfig dt;
-    dt.type                = (PulseMotor::DrivetrainType)AXIS_THETA_DRIVETRAIN;
-    dt.output_gear_ratio   = AXIS_THETA_OUTPUT_GEAR_RATIO;
-    dt.encoder_ppr         = AXIS_THETA_ENCODER_PPR;
-    dt.motor_reducer_ratio = AXIS_THETA_MOTOR_REDUCER_RATIO;
-    return dt;
-}
-
-// ---------------------------------------------------------------------------
 // app_main
 // ---------------------------------------------------------------------------
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "\n========================================");
-    ESP_LOGI(TAG, "WT32-ETH01 Gantry Controller (PulseMotor)");
+    ESP_LOGI(TAG, "WT32-ETH01 Gantry Controller (EIP over W5500)");
+    ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z (Theta unpowered; PC uplink exclusive)");
     ESP_LOGI(TAG, "========================================\n");
 
-    if (!initMcp23s17()) {
+#if CONFIG_EIP_SCANNER_ENABLED
+    // --- W5500 init (must outlive scanner task; app_main deletes itself) ---
+    static W5500 w5500;
+    W5500Config w5500Cfg = {};
+    w5500Cfg.spi_host  = W5500_SPI_HOST;
+    w5500Cfg.cs_gpio   = W5500_CS_GPIO;
+    w5500Cfg.int_gpio  = W5500_INT_GPIO;
+    w5500Cfg.rst_gpio  = W5500_RST_GPIO;
+    w5500Cfg.mosi_gpio = W5500_MOSI_GPIO;
+    w5500Cfg.miso_gpio = W5500_MISO_GPIO;
+    w5500Cfg.sclk_gpio = W5500_SCLK_GPIO;
+    w5500Cfg.sclk_hz   = W5500_SCLK_HZ;
+    if (!w5500.init(w5500Cfg)) {
+        ESP_LOGE(TAG, "FATAL: W5500 init failed");
         return;
     }
+    ESP_LOGI(TAG, "W5500 initialized (version 0x%02X)", w5500.getVersion());
 
-    // ------------------------------------------------------------------
-    // Build per-axis configs
-    // ------------------------------------------------------------------
-    PulseMotor::DriverConfig     xDrv = makeXDriverConfig();
-    PulseMotor::DrivetrainConfig xDt  = makeXDrivetrainConfig();
-    PulseMotor::DriverConfig     zDrv = makeZDriverConfig();
-    PulseMotor::DrivetrainConfig zDt  = makeZDrivetrainConfig();
-    PulseMotor::DriverConfig     tDrv = makeThetaDriverConfig();
-    PulseMotor::DrivetrainConfig tDt  = makeThetaDrivetrainConfig();
+    // --- EIP process images (one per drive) ---
+    static eip::EipProcessImage eipImageX;
+    static eip::EipProcessImage eipImageZ;
 
-    // ------------------------------------------------------------------
-    // Boot-time pin seeding (defensive; idempotent).
-    //
-    //   initDirectOutputs()        - pre-seeds PIN_Z_PULSE (GPIO2, strap)
-    //                                low on direct ESP GPIO before LEDC
-    //                                takes over. Stays in main because it
-    //                                is chip-peripheral setup, not Gantry
-    //                                business.
-    //   Gantry::preparePinsForBoot - MCP-routed DIR/EN/ALM_RESET/GRIPPER
-    //                                seeding; replaces the old per-pin
-    //                                gpio_expander_* block. See
-    //                                ARCHITECTURE_FLOW.md invariant 6.
-    // ------------------------------------------------------------------
-    initDirectOutputs();
-    Gantry::Gantry::preparePinsForBoot(xDrv, zDrv, tDrv, PIN_GRIPPER);
+    // Kinetix assembly 104 speed/accel/decel refs are 0.1 RPM (or 0.1 RPM/s).
+    // Linear mm/s -> motor RPM: rpm = mm_s * i / lead * 60;
+    // ref = rpm * 10 = 600 * i * mm_s / lead.
+#if defined(CONFIG_EIP_AXIS_X)
+    const double xSpeedRefPerMmS =
+        600.0 * static_cast<double>(AXIS_X_MOTOR_REDUCER_RATIO) /
+        static_cast<double>(AXIS_X_LEAD_MM_PER_REV);
+    auto xAxis = std::make_unique<Gantry::GantryEipLinearAxis>(
+        eipImageX, Gantry::EipLinearAxisConfig{
+            CONFIG_EIP_AXIS_X_PUU_PER_MM, xSpeedRefPerMmS, xSpeedRefPerMmS,
+            xSpeedRefPerMmS, AXIS_X_LEAD_MM_PER_REV});
+    ESP_LOGI(TAG, "X axis over EIP (Kinetix 5100, %.1f PUU/mm, speed_ref/mm_s=%.3f), target %s",
+             CONFIG_EIP_AXIS_X_PUU_PER_MM, xSpeedRefPerMmS, CONFIG_EIP_TARGET_IP_X);
+#else
+    auto xAxis = std::unique_ptr<Gantry::GantryLinearAxis>(nullptr);
+#endif
 
-    // ------------------------------------------------------------------
-    // Create Gantry instance
-    // ------------------------------------------------------------------
-    static Gantry::Gantry gantry(xDrv, xDt, zDrv, zDt, tDrv, tDt, PIN_GRIPPER);
+#if defined(CONFIG_EIP_AXIS_Z)
+    const double zSpeedRefPerMmS =
+        600.0 * static_cast<double>(AXIS_Z_MOTOR_REDUCER_RATIO) /
+        static_cast<double>(AXIS_Z_LEAD_MM_PER_REV);
+    auto zAxis = std::make_unique<Gantry::GantryEipLinearAxis>(
+        eipImageZ, Gantry::EipLinearAxisConfig{
+            CONFIG_EIP_AXIS_Z_PUU_PER_MM, zSpeedRefPerMmS, zSpeedRefPerMmS,
+            zSpeedRefPerMmS, AXIS_Z_LEAD_MM_PER_REV});
+    ESP_LOGI(TAG, "Z axis over EIP (Kinetix 5100, %.1f PUU/mm, speed_ref/mm_s=%.3f), target %s",
+             CONFIG_EIP_AXIS_Z_PUU_PER_MM, zSpeedRefPerMmS, CONFIG_EIP_TARGET_IP_Z);
+#else
+    auto zAxis = std::unique_ptr<Gantry::GantryLinearAxis>(nullptr);
+#endif
 
-    // X-axis limit switches (via MCP23S17)
-    gantry.setLimitPins(PIN_X_LIMIT_MIN, PIN_X_LIMIT_MAX);
+    static Gantry::Gantry gantry(std::move(xAxis), std::move(zAxis),
+        /*theta*/ nullptr, PIN_GRIPPER);
 
-    // Seed the joint-limit envelope with the MECHANICAL hard limits from
-    // axis_drivetrain_params.h. Soft limits derived from the homing /
-    // calibration sweep will override these on boot-reset via
-    // Gantry::calibrate() and the homing task.
+    // Seed joint-limit envelope with mechanical hard limits.
     gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM,     AXIS_X_HARD_LIMIT_MAX_MM,
                           AXIS_Z_HARD_LIMIT_MIN_MM,     AXIS_Z_HARD_LIMIT_MAX_MM,
                           AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
@@ -314,37 +143,61 @@ extern "C" void app_main(void) {
     gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     gantry.setSafeZHeight(GANTRY_SAFE_Z_HEIGHT_MM);
 
-    // ------------------------------------------------------------------
-    // Initialize and enable
-    // ------------------------------------------------------------------
     ESP_LOGI(TAG, "Initializing gantry...");
     if (!gantry.begin()) {
         ESP_LOGE(TAG, "ERROR: Gantry initialization failed!");
-        ESP_LOGE(TAG, "Check pin connections and try again.");
         return;
     }
     ESP_LOGI(TAG, "OK Gantry initialized");
-
-    gantry.enable();
-    ESP_LOGI(TAG, "OK Motors enabled");
-
-    // ------------------------------------------------------------------
-    // FreeRTOS tasks
-    // ------------------------------------------------------------------
-    BaseType_t result;
-    static MqttBridge::EthernetLink ethernetLink;
-    static MqttBridge::Bridge mqttBridge(&ethernetLink);
-    if (!mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
-        ESP_LOGE(TAG, "FATAL: MQTT bridge failed to start; halting application startup.");
-        gantry.disable();
-        return;
-    }
-    (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
-
-#if CONFIG_EIP_SCANNER_ENABLED
-    eip::startScannerTask();
+    // Defer gantry.enable() until Class 1 + GantryUpdate are running.
+    // Boot enable before the scanner wastes the ServoOn edge (A603 on first move).
+    ESP_LOGI(TAG, "Motors idle — run 'enable' after Class 1 is online");
+#else
+    // Non-EIP build: placeholder gantry, skip all init.
+    static Gantry::Gantry gantry(
+        std::unique_ptr<Gantry::GantryLinearAxis>(nullptr),
+        std::unique_ptr<Gantry::GantryLinearAxis>(nullptr),
+        std::unique_ptr<Gantry::GantryRotaryAxis>(nullptr),
+        PIN_GRIPPER);
 #endif
 
+    // ------------------------------------------------------------------
+    // EIP scanner tasks (before MQTT so daisy-chain stays alive even if
+    // LAN8720/MQTT fails)
+    // ------------------------------------------------------------------
+#if CONFIG_EIP_SCANNER_ENABLED
+    // W5500 link status adapter for scanner tasks
+    class W5500LinkStatusAdapter : public eip::ILinkStatus {
+        W5500& w5500_;
+    public:
+        explicit W5500LinkStatusAdapter(W5500& w) : w5500_(w) {}
+        bool isUp() const override { return w5500_.isLinkUp(); }
+    };
+    static W5500LinkStatusAdapter w5500LinkStatus(w5500);
+    static W5500SpiHal w5500Hal(w5500);
+
+    eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus,
+#if defined(CONFIG_EIP_AXIS_X)
+                          &eipImageX,
+#else
+                          nullptr,
+#endif
+#if defined(CONFIG_EIP_AXIS_Z)
+                          &eipImageZ
+#else
+                          nullptr
+#endif
+    );
+#endif
+
+    // ------------------------------------------------------------------
+    // FreeRTOS tasks first — do not block console / motion behind MQTT wait.
+    // Construct Bridge before tasks take its address; start() runs after.
+    // ------------------------------------------------------------------
+    static MqttBridge::EthernetLink ethernetLink;
+    static MqttBridge::Bridge mqttBridge(&ethernetLink);
+
+    BaseType_t result;
     static PickSchedulerTaskConfig pickCfg = { &gantry, &mqttBridge };
     result = xTaskCreatePinnedToCore(
         pickSchedulerTask, "PickScheduler",
@@ -366,26 +219,10 @@ extern "C" void app_main(void) {
 
     static GantryTestConsoleConfig consoleCfg = {};
     consoleCfg.gantry                 = &gantry;
-    consoleCfg.limit_min_pin          = PIN_X_LIMIT_MIN;
-    consoleCfg.limit_max_pin          = PIN_X_LIMIT_MAX;
-    consoleCfg.use_mcp23s17           = true;
-    consoleCfg.limit_switches_active  = true;
-    consoleCfg.x_pulse_pin            = PIN_X_PULSE;
-    consoleCfg.x_dir_pin              = PIN_X_DIR;
-    consoleCfg.x_enable_pin           = PIN_X_ENABLE;
-    consoleCfg.x_alarm_pin            = PIN_X_ALARM_STATUS;
-    consoleCfg.x_alarm_reset_pin      = PIN_X_ALARM_RESET;
-    consoleCfg.z_alarm_pin            = PIN_Z_ALARM_STATUS;
-    consoleCfg.z_alarm_reset_pin      = PIN_Z_ALARM_RESET;
-    consoleCfg.x_encoder_a_pin        = PIN_X_ENC_A;
-    consoleCfg.x_encoder_b_pin        = PIN_X_ENC_B;
-    consoleCfg.z_pulse_pin            = PIN_Z_PULSE;
-    consoleCfg.z_encoder_a_pin        = PIN_Z_ENC_A;
-    consoleCfg.z_encoder_b_pin        = PIN_Z_ENC_B;
-    consoleCfg.x_pulse_ledc_channel    = X_PULSE_LEDC_CHANNEL;
-    consoleCfg.z_pulse_ledc_channel    = Z_PULSE_LEDC_CHANNEL;
-    consoleCfg.theta_pulse_ledc_channel = THETA_PULSE_LEDC_CHANNEL;
-    consoleCfg.theta_pulse_pin         = PIN_THETA_PULSE;
+    consoleCfg.limit_min_pin          = -1;   // MCP removed, limits deferred
+    consoleCfg.limit_max_pin          = -1;
+    consoleCfg.use_mcp23s17           = false;
+    consoleCfg.limit_switches_active  = false;
 
     result = xTaskCreatePinnedToCore(
         gantryTestConsoleTask, "SerialCmd",
@@ -395,7 +232,19 @@ extern "C" void app_main(void) {
         ESP_LOGE(TAG, "Failed to create Serial task!");
     }
 
-    ESP_LOGI(TAG, "All tasks created successfully");
+    // ------------------------------------------------------------------
+    // MQTT bridge (non-fatal — brief PHY wait only; EIP/console already live)
+    // ------------------------------------------------------------------
+    bool mqttReady = false;
+    if (mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
+        mqttReady = true;
+        (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
+    } else {
+        ESP_LOGW(TAG, "MQTT bridge failed to start — EIP and console will still work; "
+                 "pick scheduling unavailable until LAN8720 link is restored.");
+    }
+
+    ESP_LOGI(TAG, "All tasks created successfully (MQTT %s)", mqttReady ? "online" : "offline");
     ESP_LOGI(TAG, "System ready - type 'help' for commands");
     gantryTestPrintHelp();
 

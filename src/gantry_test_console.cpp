@@ -6,10 +6,19 @@
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
-#include "gpio_expander.h"
-#include "MCP23S17.h"
+// MCP23S17 and gpio_expander removed — all drive control is EtherNet/IP only.
+// Limit switch and MCP debug console commands are no-ops.
 #include "esp_log.h"
 #include "driver/gpio.h"
+
+// MCP23S17 stubs — all drive control is EtherNet/IP only (2026-07 refactor).
+static inline uint8_t gpio_expander_read(int) { return 1; }
+static inline void*   gpio_expander_get_mcp_handle() { return nullptr; }
+static inline esp_err_t gpio_expander_set_direction(int, bool) { return ESP_OK; }
+static inline esp_err_t gpio_expander_write(int, uint8_t) { return ESP_OK; }
+static inline esp_err_t gpio_expander_set_pullup(int, bool) { return ESP_OK; }
+typedef void* mcp23s17_handle_t;
+static inline int mcp23s17_debug_read_register(mcp23s17_handle_t, uint8_t, uint8_t*) { return -1; }
 
 #include <ctype.h>
 #include <stddef.h>
@@ -51,10 +60,10 @@ static bool g_homeCompletedThisSession = false;
 static bool g_calibratedThisSession = false;
 static bool g_calibrationInProgress = false;
 enum class LinearUnitMode { MM = 0, INCH = 1 };
-static uint32_t g_moveSpeedMmPerS = 50;
-static uint32_t g_moveSpeedDegPerS = 30;
-static uint32_t g_moveAccelMmPerS2 = 0;
-static uint32_t g_moveDecelMmPerS2 = 0;
+static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
+static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
+static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
+static uint32_t g_moveDecelMmPerS2 = GANTRY_DEFAULT_DECEL_MM_PER_S2;
 static bool g_motionProfileRangeLimitEnabled = true;
 static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
 // LIVE POS periodic logger frequency control.
@@ -66,11 +75,32 @@ static uint32_t g_axisLogFrequencyHz = 0;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
 
+bool limitsWired(const GantryTestConsoleConfig *cfg) {
+  return cfg != nullptr && cfg->limit_switches_active &&
+         cfg->limit_min_pin >= 0 && cfg->limit_max_pin >= 0;
+}
+
 static constexpr float kMmPerInch = 25.4f;
 static constexpr uint32_t kMinSpeedMmPerS = 1;
-static constexpr uint32_t kMaxSpeedMmPerS = 500;
 static constexpr uint32_t kMinAccelMmPerS2 = 100;
-static constexpr uint32_t kMaxAccelMmPerS2 = 12000;
+
+// SCHUNK hard caps (shared linear profile): never exceed the tighter of X/Z,
+// and never exceed Z ballscrew critical-RPM derived linear speed.
+uint32_t maxLinearSpeedMmPerS() {
+  uint32_t xCap = static_cast<uint32_t>(AXIS_X_MAX_SPEED_MM_PER_S);
+  uint32_t zCap = static_cast<uint32_t>(AXIS_Z_MAX_SPEED_MM_PER_S);
+  const double crit = AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S;
+  if (crit > 0.0 && crit < static_cast<double>(zCap)) {
+    zCap = static_cast<uint32_t>(crit);
+  }
+  return (xCap < zCap) ? xCap : zCap;
+}
+
+uint32_t maxLinearAccelMmPerS2() {
+  const uint32_t xCap = static_cast<uint32_t>(AXIS_X_ACCEL_MM_PER_S2);
+  const uint32_t zCap = static_cast<uint32_t>(AXIS_Z_ACCEL_MM_PER_S2);
+  return (xCap < zCap) ? xCap : zCap;
+}
 
 uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
   if (!enabled) {
@@ -181,8 +211,13 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
   cur.enabled = cfg->gantry->isEnabled();
   cur.busy = cfg->gantry->isBusy();
   cur.alarm = cfg->gantry->isAlarmActive();
-  cur.min_limit_active = (gpio_expander_read(cfg->limit_min_pin) == 0);
-  cur.max_limit_active = (gpio_expander_read(cfg->limit_max_pin) == 0);
+  if (limitsWired(cfg)) {
+    cur.min_limit_active = (gpio_expander_read(cfg->limit_min_pin) == 0);
+    cur.max_limit_active = (gpio_expander_read(cfg->limit_max_pin) == 0);
+  } else {
+    cur.min_limit_active = false;
+    cur.max_limit_active = false;
+  }
   cur.raw_alarm_level = (cfg->x_alarm_pin >= 0) ? gpio_expander_read(cfg->x_alarm_pin) : -1;
 
   if (!g_controlDebounce.initialized) {
@@ -281,6 +316,18 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
+  {
+    char xSum[192] = {};
+    char zSum[192] = {};
+    const bool xTrip = gantry->getXDriveAlarmSummary(xSum, sizeof(xSum));
+    const bool zTrip = gantry->getZDriveAlarmSummary(zSum, sizeof(zSum));
+    if (xTrip && xSum[0] && strcmp(xSum, "clear") != 0) {
+      ESP_LOGW(TAG, "X drive: %s", xSum);
+    }
+    if (zTrip && zSum[0] && strcmp(zSum, "clear") != 0) {
+      ESP_LOGW(TAG, "Z drive: %s", zSum);
+    }
+  }
   ESP_LOGI(TAG, "Motion Profile: speed=%.3f %s/s, theta=%lu deg/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
            convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
            (unsigned long)g_moveSpeedDegPerS,
@@ -288,11 +335,15 @@ void printStatus(Gantry::Gantry *gantry) {
            convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
   ESP_LOGI(TAG, "Range Limits: %s (speed:%.3f-%.3f %s/s, accel/decel:%.3f-%.3f %s/s2)",
            g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED",
-           convertMmToSelected((float)kMinSpeedMmPerS), convertMmToSelected((float)kMaxSpeedMmPerS),
+           convertMmToSelected((float)kMinSpeedMmPerS),
+           convertMmToSelected((float)maxLinearSpeedMmPerS()),
            getLinearUnitLabel(),
-           convertMmToSelected((float)kMinAccelMmPerS2), convertMmToSelected((float)kMaxAccelMmPerS2),
+           convertMmToSelected((float)kMinAccelMmPerS2),
+           convertMmToSelected((float)maxLinearAccelMmPerS2()),
            getLinearUnitLabel());
   ESP_LOGI(TAG, "Units: linear=%s (internal mm)", getLinearUnitLabel());
+  ESP_LOGI(TAG, "PUU scale: X=%.3f PUU/mm  Z=%.3f PUU/mm (use puuinfo / puucal)",
+           gantry->getPulsesPerMm(), gantry->getZPulsesPerMm());
 
   ESP_LOGI(TAG, "Joint Config: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
            convertMmToSelected(current.x), getLinearUnitLabel(),
@@ -301,6 +352,81 @@ void printStatus(Gantry::Gantry *gantry) {
   Gantry::EndEffectorPose pose = gantry->getCurrentEndEffectorPose();
   ESP_LOGI(TAG, "End-Effector: x=%.1f y=%.1f z=%.1f theta=%.1f", pose.x, pose.y, pose.z,
            pose.theta);
+}
+
+void printPuuInfo(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+
+  const float xPpm = gantry->getPulsesPerMm();
+  const float zPpm = gantry->getZPulsesPerMm();
+  const float xMm = gantry->getXEncoderMm();
+  const float zMm = gantry->getZEncoderMm();
+  const Gantry::JointConfig target = gantry->getTargetJointConfig();
+
+  ESP_LOGI(TAG, "=== PUU / mm scaling ===");
+  ESP_LOGI(TAG, "X: scale=%.4f PUU/mm  actual=%.3f mm (%d PUU)  target=%.3f mm  lead=%.1f mm/rev",
+           xPpm, xMm, gantry->getXEncoderRaw(), target.x, AXIS_X_LEAD_MM_PER_REV);
+  ESP_LOGI(TAG, "Z: scale=%.4f PUU/mm  actual=%.3f mm (%ld PUU)  target=%.3f mm  lead=%.1f mm/rev",
+           zPpm, zMm, static_cast<long>(gantry->getZEncoderPulses()), target.z,
+           AXIS_Z_LEAD_MM_PER_REV);
+  ESP_LOGI(TAG, "Calibrate: move a known delta, measure travel, then:");
+  ESP_LOGI(TAG, "  puucal <x|z> <commanded_mm> <measured_mm>");
+  ESP_LOGI(TAG, "Suggested Kconfig: EIP_AXIS_X_PUU_PER_MM / EIP_AXIS_Z_PUU_PER_MM");
+  ESP_LOGI(TAG, "Formula: new = current * (commanded / measured)");
+}
+
+void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+
+  char axis = '\0';
+  float commanded = 0.0f;
+  float measured = 0.0f;
+  if (sscanf(cmd, "puucal %c %f %f", &axis, &commanded, &measured) != 3) {
+    ESP_LOGE(TAG, "Usage: puucal <x|z> <commanded_mm> <measured_mm>");
+    return;
+  }
+  axis = static_cast<char>(tolower(static_cast<unsigned char>(axis)));
+  if (axis != 'x' && axis != 'z') {
+    ESP_LOGE(TAG, "Axis must be x or z");
+    return;
+  }
+  if (commanded <= 0.0f || measured <= 0.0f) {
+    ESP_LOGE(TAG, "commanded_mm and measured_mm must be > 0");
+    return;
+  }
+
+  const float current =
+      (axis == 'x') ? gantry->getPulsesPerMm() : gantry->getZPulsesPerMm();
+  if (current <= 0.0f) {
+    ESP_LOGE(TAG, "No PUU/mm scale available for axis %c", axis);
+    return;
+  }
+
+  const double suggested =
+      static_cast<double>(current) *
+      (static_cast<double>(commanded) / static_cast<double>(measured));
+  const float errPct =
+      (measured - commanded) / commanded * 100.0f;
+
+  ESP_LOGI(TAG, "=== PUU calibration (%c) ===", axis);
+  ESP_LOGI(TAG, "Commanded=%.3f mm  Measured=%.3f mm  error=%+.2f%%",
+           commanded, measured, errPct);
+  ESP_LOGI(TAG, "Current scale=%.4f PUU/mm", current);
+  ESP_LOGI(TAG, "Suggested scale=%.4f PUU/mm", suggested);
+  if (axis == 'x') {
+    ESP_LOGI(TAG, "Set CONFIG_EIP_AXIS_X_PUU_PER_MM=%.4f then rebuild/flash",
+             suggested);
+  } else {
+    ESP_LOGI(TAG, "Set CONFIG_EIP_AXIS_Z_PUU_PER_MM=%.4f then rebuild/flash",
+             suggested);
+  }
+  ESP_LOGI(TAG, "Target tol: X +/-0.08 mm (SCHUNK), Z +/-0.03 mm (first pass +/-0.5 mm OK)");
 }
 
 void printLimits(const GantryTestConsoleConfig *cfg) {
@@ -624,12 +750,9 @@ void runGpioDriveCommand(const char *cmd) {
 }
 
 // ---- Per-axis homing / calibration dispatchers ---------------------------
-// These wrap the existing X-axis-only paths and add Z / Theta stubs that
-// log a placeholder. The console command parser tokenizes the rest of the
-// line (after `home` / `calibrate`) into axis names and calls these in
-// order. `home` / `calibrate` with no arguments defaults to X (current
-// behavior). The vertical actuator's axis token is `z` (was `y` in
-// pre-2026-05 firmware).
+// Tokenize `home` / `calibrate` args (default X). EIP with
+// limit_switches_active=false uses soft-home / soft-calibrate; pulse-motor
+// builds with wired limits keep physical MIN/MAX sweeps.
 
 enum class AxisToken { X, Z, THETA };
 
@@ -650,11 +773,44 @@ bool parseAxisToken(const char *tok, AxisToken &out) {
   return false;
 }
 
+// EIP soft-home / soft-calibrate when limit_switches_active=false.
+
+void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
+  cfg->gantry->softHomeJointDatum();
+  g_homeCompletedThisSession = true;
+  ESP_LOGI(TAG,
+           "OK soft-home (X+Z). Joint datum = current drive positions "
+           "(X %.3f mm / %d PUU joint, Z %.3f mm). "
+           "`move` targets are relative to this datum — not absolute drive PUU.",
+           cfg->gantry->getXEncoderMm(), cfg->gantry->getXEncoderRaw(),
+           cfg->gantry->getCurrentZ());
+}
+
+void runSoftCalibrateX(const GantryTestConsoleConfig *cfg) {
+  const float xMax = AXIS_X_HARD_LIMIT_MAX_MM;
+  cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, xMax,
+                              AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
+                              AXIS_THETA_HARD_LIMIT_MIN_DEG,
+                              AXIS_THETA_HARD_LIMIT_MAX_DEG);
+  g_calibratedThisSession = true;
+  ESP_LOGI(TAG,
+           "OK X soft-calibrate (no limit switches). Joint envelope X=%.1f..%.1f mm "
+           "from SCHUNK datasheet. Run puucal after measured moves.",
+           AXIS_X_HARD_LIMIT_MIN_MM, xMax);
+}
+
 void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
   if (!cfg->gantry->isEnabled()) {
     ESP_LOGE(TAG, "ERROR: Motors not enabled");
     return;
   }
+
+  if (!limitsWired(cfg)) {
+    ESP_LOGI(TAG, "Starting soft-home (X) — limit switches not wired (EIP mode)");
+    runSoftHomeX(cfg);
+    return;
+  }
+
   ESP_LOGI(TAG, "Starting homing sequence (X)...");
 
   bool minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
@@ -704,6 +860,10 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
       if (!g_homeCompletedThisSession) {
         ESP_LOGE(TAG, "ERROR: Run 'home x' first after startup");
         return;
+      }
+      if (!limitsWired(cfg)) {
+        runSoftCalibrateX(cfg);
+        break;
       }
       if (g_calibrationInProgress) {
         ESP_LOGI(TAG, "Calibration is already in progress");
@@ -820,6 +980,25 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     runGpioDriveCommand(cmd);
   } else if (strcmp(cmdLower, "status") == 0) {
     printStatus(cfg->gantry);
+  } else if (strcmp(cmdLower, "faults") == 0 || strcmp(cmdLower, "alarms") == 0) {
+    char xSum[192] = {};
+    char zSum[192] = {};
+    ESP_LOGI(TAG, "=== Drive faults / warnings ===");
+    if (cfg->gantry->getXDriveAlarmSummary(xSum, sizeof(xSum))) {
+      ESP_LOGI(TAG, "X: %s", xSum[0] ? xSum : "clear");
+    } else {
+      ESP_LOGI(TAG, "X: (no EIP summary)");
+    }
+    if (cfg->gantry->getZDriveAlarmSummary(zSum, sizeof(zSum))) {
+      ESP_LOGI(TAG, "Z: %s", zSum[0] ? zSum : "clear");
+    } else {
+      ESP_LOGI(TAG, "Z: (no EIP summary)");
+    }
+    cfg->gantry->logDriveAlarmSummaries();
+  } else if (strcmp(cmdLower, "puuinfo") == 0) {
+    printPuuInfo(cfg->gantry);
+  } else if (strncmp(cmdLower, "puucal", 6) == 0) {
+    runPuuCalCommand(cfg->gantry, cmd);
   } else if (strcmp(cmdLower, "limits") == 0) {
     printLimits(cfg);
   } else if (strcmp(cmdLower, "pins") == 0) {
@@ -827,7 +1006,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   } else if (strcmp(cmdLower, "enable") == 0) {
     cfg->gantry->enable();
     if (cfg->gantry->isEnabled()) {
-      ESP_LOGI(TAG, "OK Motors enabled");
+      ESP_LOGI(TAG, "OK Motors enabled (settling for Active — wait for 'Servo arm complete')");
     } else {
       ESP_LOGE(TAG, "ERROR: Motor enable failed (check alarm/driver state)");
     }
@@ -850,7 +1029,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)speedMm);
     const uint32_t clampedSpeedMm =
-        applyRangeLimitU32(requestedSpeedMm, kMinSpeedMmPerS, kMaxSpeedMmPerS,
+        applyRangeLimitU32(requestedSpeedMm, kMinSpeedMmPerS, maxLinearSpeedMmPerS(),
                            g_motionProfileRangeLimitEnabled);
     g_moveSpeedMmPerS = clampedSpeedMm;
     if (parsed >= 2 && speedDeg > 0) {
@@ -881,10 +1060,10 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         (parsed >= 2 && decel > 0) ? (uint32_t)convertSelectedToMm((float)decel)
                                    : (uint32_t)convertSelectedToMm((float)accel);
     const uint32_t clampedAccel =
-        applyRangeLimitU32(requestedAccel, kMinAccelMmPerS2, kMaxAccelMmPerS2,
+        applyRangeLimitU32(requestedAccel, kMinAccelMmPerS2, maxLinearAccelMmPerS2(),
                            g_motionProfileRangeLimitEnabled);
     const uint32_t clampedDecel =
-        applyRangeLimitU32(requestedDecel, kMinAccelMmPerS2, kMaxAccelMmPerS2,
+        applyRangeLimitU32(requestedDecel, kMinAccelMmPerS2, maxLinearAccelMmPerS2(),
                            g_motionProfileRangeLimitEnabled);
 
     g_moveAccelMmPerS2 = clampedAccel;
@@ -933,8 +1112,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     g_motionProfileRangeLimitEnabled = (enabled == 1);
     ESP_LOGI(TAG, "OK Range limits %s", g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED");
     ESP_LOGI(TAG, "Configured ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
-             (unsigned long)kMinSpeedMmPerS, (unsigned long)kMaxSpeedMmPerS,
-             (unsigned long)kMinAccelMmPerS2, (unsigned long)kMaxAccelMmPerS2);
+             (unsigned long)kMinSpeedMmPerS, (unsigned long)maxLinearSpeedMmPerS(),
+             (unsigned long)kMinAccelMmPerS2, (unsigned long)maxLinearAccelMmPerS2());
   } else if (strncmp(cmdLower, "livepos", 7) == 0) {
     int hz = -1;
     int parsed = sscanf(cmd, "livepos %d", &hz);
@@ -1001,7 +1180,9 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
   } else if (strncmp(cmdLower, "move", 4) == 0) {
     if (!g_homeCompletedThisSession || !g_calibratedThisSession) {
-      ESP_LOGE(TAG, "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup.");
+      ESP_LOGE(TAG,
+               "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup "
+               "(EIP without limit switches uses soft-home + SCHUNK envelope).");
       return;
     }
     float x = 0.0f;
@@ -1032,7 +1213,20 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Check alarm/limits and commanded-vs-encoder X position in status logs");
       }
     } else {
-      ESP_LOGE(TAG, "ERROR: Move failed: %d", (int)result);
+      const char *errName = "UNKNOWN";
+      switch (result) {
+        case Gantry::GantryError::NOT_INITIALIZED: errName = "NOT_INITIALIZED"; break;
+        case Gantry::GantryError::MOTOR_NOT_ENABLED: errName = "MOTOR_NOT_ENABLED"; break;
+        case Gantry::GantryError::ALREADY_MOVING: errName = "ALREADY_MOVING"; break;
+        case Gantry::GantryError::INVALID_POSITION: errName = "INVALID_POSITION"; break;
+        case Gantry::GantryError::INVALID_PARAMETER: errName = "INVALID_PARAMETER"; break;
+        case Gantry::GantryError::TIMEOUT: errName = "TIMEOUT (alarm?)"; break;
+        default: break;
+      }
+      ESP_LOGE(TAG, "ERROR: Move failed: %d (%s)", (int)result, errName);
+      if (result == Gantry::GantryError::ALREADY_MOVING) {
+        ESP_LOGI(TAG, "Gantry reports busy — wait for motion to finish, or 'stop' then 'enable'");
+      }
     }
   } else if (strncmp(cmdLower, "grip", 4) == 0) {
     int value = 0;
@@ -1044,15 +1238,24 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     cfg->gantry->grip(value != 0);
     ESP_LOGI(TAG, "OK Gripper %s", value ? "closed" : "opened");
   } else if (strcmp(cmdLower, "stop") == 0) {
+    // Stop motion while servos stay enabled, then disable. Do not reverse
+    // that order: disable-only left sticky CIP; re-enable ClearCip StopMotion
+    // then raised A603.
     cfg->gantry->requestAbort();
     cfg->gantry->disable();
-    ESP_LOGI(TAG, "OK Stop requested (motors disabled immediately)");
+    ESP_LOGI(TAG, "OK Stop requested (motion stopped, motors disabled)");
     if (g_calibrationInProgress) {
       ESP_LOGI(TAG, "Calibration abort requested");
     }
   } else if (strcmp(cmdLower, "alarmreset") == 0 || strcmp(cmdLower, "arst") == 0) {
     if (cfg->gantry->clearAlarm()) {
-      ESP_LOGI(TAG, "OK Alarm reset pulse sent");
+      ESP_LOGI(TAG, "OK Alarm reset pulse sent (clears Fault/Warning latch e.g. A603)");
+      char xSum[192] = {};
+      char zSum[192] = {};
+      (void)cfg->gantry->getXDriveAlarmSummary(xSum, sizeof(xSum));
+      (void)cfg->gantry->getZDriveAlarmSummary(zSum, sizeof(zSum));
+      ESP_LOGI(TAG, "After reset — X: %s | Z: %s",
+               xSum[0] ? xSum : "?", zSum[0] ? zSum : "?");
     } else {
       ESP_LOGE(TAG, "ERROR: Alarm reset failed (ARST pin may be disabled)");
     }
@@ -1074,6 +1277,9 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
+  ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix FaultCode/WarningCode (e.g. A603)");
+  ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm scale and positions");
+  ESP_LOGI(TAG, "  puucal <x|z> c m     - suggest new PUU/mm from commanded vs measured mm");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
 #if MCP_DEBUG_CMDS
@@ -1084,8 +1290,8 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home [x|z|t|all]     - home one or more axes (default x; Z/Theta stubbed)");
-  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate one or more axes (default x; Z/Theta stubbed)");
+  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: soft-home if limits unwired; else X sweep)");
+  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate (EIP: SCHUNK envelope if limits unwired)");
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
   ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
   ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");

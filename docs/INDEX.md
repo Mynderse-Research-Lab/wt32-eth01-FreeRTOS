@@ -1,58 +1,46 @@
 # Project documentation index
 
-Standalone index for everything under `docs/`. This file is independent of [`driver_datasheets_and_calculations/INDEX.md`](../driver_datasheets_and_calculations/INDEX.md) (vendor PDF catalog).
-
----
-
-## Hardware / integration
+Canonical product-design set (EIP production architecture):
 
 | Document | Summary | Audience |
 |----------|---------|----------|
-| [MOTION_IO_INTERFACE.md](MOTION_IO_INTERFACE.md) | WT32 → opto-isolated → K5100 (X/Z) + HCS01 (theta) wiring, parts list, commissioning | Panel wiring, bench bring-up |
+| [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
+| [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
+| [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware API, EIP Position Absolute, console, tests | Firmware developers |
+
+Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).
 
 ---
 
-## Firmware / software
+## Requirements / policy / tooling (retained)
 
-| Document | Summary | Audience |
-|----------|---------|----------|
-| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, PR expectations | All contributors |
-| [../AGENTS.md](../AGENTS.md) | AI agent entry point and repo map | Cursor / coding agents |
-| [../PROGRAMMING_REFERENCE.md](../PROGRAMMING_REFERENCE.md) | Pin map, Gantry API, console, bring-up | Firmware developers |
-| [../lib/Gantry/docs/ARCHITECTURE_FLOW.md](../lib/Gantry/docs/ARCHITECTURE_FLOW.md) | Control/feedback signal routing | Architecture review |
-| [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design | Networking / scheduler |
-| [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements | Integration |
-| [EIP_MIGRATION.md](EIP_MIGRATION.md) | EtherNet/IP wire format and migration status | Firmware / networking |
-| [EIP_VALIDATION_CHECKLIST.md](EIP_VALIDATION_CHECKLIST.md) | EIP bench bring-up: hardware, commissioning, validation sequences | Bench validation |
-| [BENCH_VALIDATION_PLAN.md](BENCH_VALIDATION_PLAN.md) | Detailed procedural bench validation plan for all three drives | Bench operator |
-| [DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md](DRIVE_PROTOCOL_AND_ENDSTOP_REVIEW.md) | Drive protocol compatibility analysis and endstop connectivity review | Architecture |
-| [ENDSTOP_WIRING_PLAN.md](ENDSTOP_WIRING_PLAN.md) | Limit switch pin assignments and drive-side wiring tables | Panel wiring |
+| Document | Summary |
+|----------|---------|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy |
+| [../AGENTS.md](../AGENTS.md) | AI agent entry point |
+| [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements |
+| [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design |
+| [MCP_SETUP.md](MCP_SETUP.md) | Cursor MCP server setup |
+| [../test/README](../test/README) | Host / on-target tests |
+| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
 
 ---
 
-## SRS build artifacts
+## Vendor references (commonly cited)
 
-| Path | Summary |
-|------|---------|
-| [srs/](srs/) | SRS source and build tooling (see `tools/srs_build/`) |
-
----
-
-## Related vendor PDFs
-
-Filenames live under `../driver_datasheets_and_calculations/`. Commonly used for motion I/O:
-
-| File | Topic |
-|------|-------|
-| `AB_Kinetix5100_user_manual.pdf` | K5100 PTI, digital I/O, commissioning |
-| `R911325518_07_EN_IndraDrive Drive Controllers Power Sections HCS01_Commissioning Manual.pdf` | HCS01 X13, X31, X47 |
-| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code, control voltage sizing |
+| File under `driver_datasheets_and_calculations/` | Topic |
+|--------------------------------------------------|-------|
+| `AB_Kinetix5100_user_manual.pdf` | K5100 commissioning / I/O |
+| `2198-in003_-en-p.pdf` | Kinetix installation |
+| `R911325518_07_EN_...HCS01_Commissioning Manual.pdf` | HCS01 connectors |
+| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code / control voltage |
+| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
+| `BOM.xlsx` / `WIRE_SIZE_SELECTION.xlsx` | Generated panel BOM / wire schedule |
 
 ---
 
-## Missing documents (motion I/O)
+## Explicitly rejected (do not restore as production docs)
 
-| Document | Blocks |
-|----------|--------|
-| **2198-IN020** (K5100 TBIO installation) | Formal TBIO pin drawing (informal pin list is in MOTION_IO_INTERFACE.md) |
-| **MPB-xxVRS Functional Description** (Rexroth) | Exact HCS01 X31 Step/Dir/Enable pin numbers |
+- Pulse-Train / MCP23S17 / opto PTI interface as production motion path
+- Speed+TM10 host StopMotion for PTP accuracy
+- Duplicate generated markdown copies of vendor PDFs as authoritative sources

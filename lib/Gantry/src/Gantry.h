@@ -37,9 +37,9 @@
 #include "GantryEndEffector.h"
 #include "GantryLimitSwitch.h"
 #include "GantryUtils.h"
-#include "PulseMotor.h"
 #include <memory>
 #include <cstdint>
+#include <cstddef>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -92,57 +92,36 @@ struct GantryStatus {
  * @class Gantry
  * @brief Multi-axis gantry control.
  *
- * Construction takes three (DriverConfig, DrivetrainConfig) pairs plus a
- * gripper pin. The Gantry factories the appropriate concrete linear/rotary
- * axis classes based on each axis's DrivetrainType.
+ * Construction takes pre-built axis objects via the dependency-injection
+ * constructor. PulseMotor constructor removed — all drive control is
+ * EtherNet/IP only.
  */
 class Gantry {
 public:
     /**
-     * @brief Construct with three per-axis driver/drivetrain pairs.
+     * @brief Dependency-injection constructor — accepts pre-built axis objects.
      *
-     * X and Z axes must be configured with a linear drivetrain
-     * (BALLSCREW / BELT / RACKPINION). Theta must be configured with
-     * DRIVETRAIN_ROTARY_DIRECT.
+     * Callers build GantryEipLinearAxis/GantryEipRotaryAxis externally.
+     * The Gantry takes ownership of all unique_ptrs.
      */
-    Gantry(const PulseMotor::DriverConfig&     xDrv,
-           const PulseMotor::DrivetrainConfig& xDt,
-           const PulseMotor::DriverConfig&     zDrv,
-           const PulseMotor::DrivetrainConfig& zDt,
-           const PulseMotor::DriverConfig&     tDrv,
-           const PulseMotor::DrivetrainConfig& tDt,
+    Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
+           std::unique_ptr<GantryLinearAxis> zAxis,
+           std::unique_ptr<GantryRotaryAxis> thetaAxis,
            int gripperPin);
+
+    /**
+     * @brief Factory helpers for building a PulseMotor-backed axis outside of
+     *        the standard constructor (e.g. when mixing EIP and PulseMotor axes).
+     *
+     * REMOVED — all drive control is EtherNet/IP only. No PulseMotor fallback.
+     */
 
     // ---------- Boot-time helpers (static) ----------
     /**
      * @brief Seed MCP23S17 pin directions and safe-low levels before begin().
      *
-     * Idempotent power-on-safety helper. Call once in app_main() AFTER
-     * gpio_expander_init() and BEFORE constructing Gantry::Gantry. For each
-     * of the three DriverConfigs and for the gripper pin, the helper sets
-     * the MCP-routed output lines (DIR, ENABLE/SON, ALARM_RESET, GRIPPER)
-     * to output direction and drives them to a safe-low initial level; for
-     * the MCP-routed input lines (ALARM_STATUS) it enables the input
-     * pull-up. Pulse pins are skipped because they are direct ESP32 GPIOs
-     * owned by LEDC and configured by PulseMotorDriver::initialize().
-     *
-     * The same pin directions and levels will be re-applied by
-     * PulseMotorDriver::initialize(), GantryEndEffector::begin(), and
-     * GantryLimitSwitch::begin() once gantry.begin() runs. This call is
-     * purely defensive - its purpose is to keep the application layer from
-     * reaching into gpio_expander_* directly, upholding the invariant that
-     * app code commands Gantry only.
-     *
-     * @param xDrv       X-axis PulseMotor::DriverConfig (DIR/EN/ALARM/ARST).
-     * @param zDrv       Z-axis PulseMotor::DriverConfig.
-     * @param tDrv       Theta-axis PulseMotor::DriverConfig.
-     * @param gripperPin End-effector pin (MCP or direct, same encoding as
-     *                   DriverConfig output pins).
+     * REMOVED — MCP23S17 removed per 2026-07 refactor.
      */
-    static void preparePinsForBoot(const PulseMotor::DriverConfig& xDrv,
-                                   const PulseMotor::DriverConfig& zDrv,
-                                   const PulseMotor::DriverConfig& tDrv,
-                                   int gripperPin);
 
     // ---------- Lifecycle ----------
     bool begin();
@@ -173,6 +152,11 @@ public:
     int  calibrateX();
     int  calibrateZ();
     int  calibrateTheta();
+
+    /// @brief EIP soft-home: set joint zero to the drive's current absolute PUU
+    ///        on X and Z (no limit-switch sweep). After this, move(100) means
+    ///        +100 mm from here — not absolute drive PUU for 100 mm.
+    void softHomeJointDatum();
 
     /// @brief Set the periodic-while-busy MOVE log rate (Hz) for all axes.
     ///        0 disables periodic output; START/END events always fire.
@@ -209,11 +193,19 @@ public:
     float   getXCommandedMm() const;
     float   getXEncoderMm() const;
     int     getCurrentZ() const;
+    float   getZCommandedMm() const;
+    float   getZEncoderMm() const;
+    int32_t getZEncoderPulses() const;
+    float   getZPulsesPerMm() const;
     int     getCurrentTheta() const;
 
     // ---------- Diagnostics ----------
     bool isAlarmActive() const;
     bool clearAlarm();
+    /// @brief Print X/Z EIP fault/warning summaries (no-op if no codes).
+    void logDriveAlarmSummaries() const;
+    bool getXDriveAlarmSummary(char* buf, size_t n) const;
+    bool getZDriveAlarmSummary(char* buf, size_t n) const;
     void setHomingSpeed(uint32_t speed_pps);
 
     // ---------- Kinematics ----------
@@ -287,6 +279,9 @@ private:
     uint32_t    gripperActuateDurationMs_;
     uint32_t    lastXPositionCounts_;
     float       xPulsesPerMmOverride_;
+    // Console/joint moves: Z→target then X→target (no SAFE_Z retract / gripper).
+    // Pose/pick moves keep the PnP sequence.
+    bool        jointDirectMove_;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;

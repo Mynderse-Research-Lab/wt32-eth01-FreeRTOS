@@ -12,6 +12,7 @@
 #ifndef GANTRY_LINEAR_AXIS_H
 #define GANTRY_LINEAR_AXIS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace Gantry {
@@ -53,6 +54,16 @@ public:
     // ---------- Faults ----------
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// @brief EIP: fill buf with FAULT/WARN summary (e.g. "WARN A603 ...").
+    ///        Pulse-motor backends return false / "n/a".
+    virtual bool getDriveAlarmSummary(char* buf, size_t n) const {
+        if (buf != nullptr && n > 0) {
+            buf[0] = '\0';
+        }
+        return false;
+    }
+    virtual uint16_t getDriveFaultCode() const { return 0; }
+    virtual uint16_t getDriveWarningCode() const { return 0; }
 
     // ---------- Scaling ----------
     virtual double pulsesPerMm() const = 0;
