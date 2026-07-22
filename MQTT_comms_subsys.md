@@ -274,4 +274,4 @@ T7  /gantry/status publishes COMPLETE (or IDLE) with correlation ids and timesta
 ## Related documents
 
 - Cursor plan (implementation todos and CMake details): `mqtt_communications_pipeline_5284ce15.plan.md` under your Cursor plans directory (same content as the agreed MQTT pipeline design).
-- After implementation: add a formal section to [PROGRAMMING_REFERENCE.md](PROGRAMMING_REFERENCE.md) and pin exact JSON field names for interoperability with the identification and conveyor teams.
+- After implementation: add a formal section to [docs/LOW_LEVEL_GANTRY_CONTROL.md](docs/LOW_LEVEL_GANTRY_CONTROL.md) and pin exact JSON field names for interoperability with the identification and conveyor teams.

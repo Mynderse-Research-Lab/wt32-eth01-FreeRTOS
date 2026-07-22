@@ -38,7 +38,7 @@ This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or t
 2. **Follow existing patterns** — read surrounding code before adding new abstractions.
 3. **Test hardware-independent logic on the host** — kinematics, trajectory, protocol encoding.
 4. **Respect architecture boundaries** — motion goes through `Gantry`; MQTT through `MqttBridge`.
-5. **Keep docs in sync** — update `PROGRAMMING_REFERENCE.md` for API/build changes; update `docs/EIP_MIGRATION.md` for wire-format changes.
+5. **Keep docs in sync** — update `docs/LOW_LEVEL_GANTRY_CONTROL.md` for API/build/console changes; update `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` / `docs/HV_LV_SCHEMATICS.md` for mechanical or electrical design changes.
 
 ## Testing policy
 
@@ -69,14 +69,13 @@ See `test/README` for details.
 
 | Document | Use for |
 |----------|---------|
-| [`PROGRAMMING_REFERENCE.md`](PROGRAMMING_REFERENCE.md) | Build, flash, APIs, pins, console |
-| [`lib/Gantry/docs/ARCHITECTURE_FLOW.md`](lib/Gantry/docs/ARCHITECTURE_FLOW.md) | Layered architecture (canonical) |
-| [`LIBRARIES_OVERVIEW.md`](LIBRARIES_OVERVIEW.md) | High-level library overview |
-| [`docs/INDEX.md`](docs/INDEX.md) | Integration doc index |
-| [`docs/EIP_MIGRATION.md`](docs/EIP_MIGRATION.md) | EtherNet/IP wire format and migration status |
+| [`docs/LOW_LEVEL_GANTRY_CONTROL.md`](docs/LOW_LEVEL_GANTRY_CONTROL.md) | Build, APIs, EIP motion, console, tests |
+| [`docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics, drives, networks, endstops |
+| [`docs/HV_LV_SCHEMATICS.md`](docs/HV_LV_SCHEMATICS.md) | HV/LV schematics (preliminary) |
+| [`docs/INDEX.md`](docs/INDEX.md) | Doc index |
 | [`test/README`](test/README) | Testing overview |
 
-When documents disagree, prefer **ARCHITECTURE_FLOW** for architecture and **PROGRAMMING_REFERENCE** for implementation details.
+When documents disagree, prefer the three canonical docs under `docs/` listed above.
 
 ## Pull requests
 
