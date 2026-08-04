@@ -62,11 +62,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   bool isA014WarningActive() const;
   bool isA015WarningActive() const;
 
-  /// True when the drive reports motion stopped (bit6) or actual speed is
-  /// near zero. Use after hold-here / settle to verify the axis is physically
-  /// stationary before declaring sequence complete.
-  bool isAxisPhysicallyStopped() const;
-
   double pulsesPerMm() const override;
   bool isEncoderFeedbackEnabled() const override;
 
@@ -75,18 +70,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
-
-  /// Cancel Absolute by StartMotion to the live feedback position (stay OM=1).
-  /// Prefer this over OM=0 StopMotion mid-creep — avoids A603 + coast with busy=0.
-  bool cancelAbsoluteToFeedback();
-
-  /// StopMotion + feedback wait: enter abort stop, then block until measured
-  /// encoder position holds still for 200 ms. The drive's stopped bit and speed
-  /// word both read "stopped" during a 1 mm/s creep, so position delta is the
-  /// only reliable gate. Returns true on success, false on timeout (≈3 s);
-  /// caller decides fallback. Blocks in the GantryUpdate task (one-off per
-  /// home/cal clear edge).
-  bool stopAndWaitForPhysicalStop();
 
   /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
   void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw);
@@ -108,7 +91,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   float target_mm_;
   int32_t zero_puu_;
   int32_t command_position_puu_;
-  bool start_motion_level_;
   const char* log_tag_;
   uint32_t log_rate_hz_;
   bool last_fault_latched_;
@@ -116,7 +98,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   uint16_t last_fault_code_;
   uint16_t last_warning_code_;
   bool motion_commanded_;
-  bool drive_homed_;
 
   // ServoOn edge: settle OM=0 TM=10 (never Position before Active — A603).
   // Then HomingMethod=34 if HomedStatus clear (unlock Absolute / clear E237).
@@ -135,9 +116,9 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   uint16_t home_wait_ticks_;
 
   // Position Absolute PTP (OM=1 TM=2 NonCyclic=0). Done on AtReference.
+  // kStopping holds isBusy() until encoder position is stable (single stop gate).
   enum class MovePhase : uint8_t {
     kIdle = 0,
-    kPreload,
     kStart,
     kRun,
     kStopping
@@ -145,7 +126,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   MovePhase move_phase_;
   uint8_t move_phase_ticks_;
   uint8_t fault_reset_pulse_ticks_;
-  uint8_t stop_motion_pulse_ticks_;
   float last_speed_mm_s_;
   float last_accel_mm_s2_;
   float last_decel_mm_s2_;

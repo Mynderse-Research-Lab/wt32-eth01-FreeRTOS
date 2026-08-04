@@ -3,10 +3,8 @@
  * @brief Multi-axis gantry control system for ESP32.
  * @version 2.1.0
  *
- * All three motion axes (X, Z, Theta) are driven by the generic PulseMotor
- * library. Drivetrain topology is chosen PER AXIS via a DrivetrainType enum,
- * so any axis can independently be a ballscrew, a belt, a rack-and-pinion, or
- * a direct-drive rotary.
+ * Production motion is EtherNet/IP only (Kinetix 5100 X/Z; HCS01 theta deferred).
+ * Application code drives axes exclusively through this Gantry facade.
  *
  * Coordinate convention (firmware-wide, as of 2026-05):
  *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
@@ -92,9 +90,8 @@ struct GantryStatus {
  * @class Gantry
  * @brief Multi-axis gantry control.
  *
- * Construction takes pre-built axis objects via the dependency-injection
- * constructor. PulseMotor constructor removed — all drive control is
- * EtherNet/IP only.
+ * Construction takes pre-built EIP axis objects via dependency injection.
+ * All drive control is EtherNet/IP only.
  */
 class Gantry {
 public:
@@ -108,13 +105,6 @@ public:
            std::unique_ptr<GantryLinearAxis> zAxis,
            std::unique_ptr<GantryRotaryAxis> thetaAxis,
            int gripperPin);
-
-    /**
-     * @brief Factory helpers for building a PulseMotor-backed axis outside of
-     *        the standard constructor (e.g. when mixing EIP and PulseMotor axes).
-     *
-     * REMOVED — all drive control is EtherNet/IP only. No PulseMotor fallback.
-     */
 
     // ---------- Boot-time helpers (static) ----------
     /**
@@ -302,9 +292,6 @@ private:
     unsigned long eipLimitPhaseStartMs_ = 0;
     // True once Absolute seek/creep has been observed busy (guards preempt race).
     bool eipLimitSawBusy_ = false;
-    // Settle-phase retry counter for physical-stop verification.
-    uint8_t eipHomeSettleRetries_ = 0;
-    uint8_t eipCalSettleRetries_ = 0;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;

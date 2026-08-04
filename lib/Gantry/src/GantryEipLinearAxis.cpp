@@ -16,13 +16,9 @@
 
 #if defined(ESP_PLATFORM)
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #else
 #define ESP_LOGW(tag, fmt, ...) ((void)0)
 #define ESP_LOGI(tag, fmt, ...) ((void)0)
-#include <thread>
-#include <chrono>
 #endif
 
 namespace Gantry {
@@ -59,7 +55,6 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       target_mm_(0.0f),
       zero_puu_(0),
       command_position_puu_(0),
-      start_motion_level_(false),
       log_tag_(""),
       log_rate_hz_(0),
       last_fault_latched_(false),
@@ -67,7 +62,6 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       last_fault_code_(0),
       last_warning_code_(0),
       motion_commanded_(false),
-      drive_homed_(false),
       arm_phase_(ArmPhase::kIdle),
       arm_phase_ticks_(0),
       a603_clear_attempts_(0),
@@ -75,7 +69,6 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       move_phase_(MovePhase::kIdle),
       move_phase_ticks_(0),
       fault_reset_pulse_ticks_(0),
-      stop_motion_pulse_ticks_(0),
       last_speed_mm_s_(50.0f),
       last_accel_mm_s2_(0.0f),
       last_decel_mm_s2_(0.0f),
@@ -105,14 +98,11 @@ bool GantryEipLinearAxis::enable() {
   motion_commanded_ = false;
   move_phase_ = MovePhase::kIdle;
   move_phase_ticks_ = 0;
-  stop_motion_pulse_ticks_ = 0;
-  drive_homed_ = false;
 
   eip::k5100::InputAssembly154 fb;
   if (readFeedback(fb)) {
     command_position_puu_ = fb.actual_position;
     target_mm_ = puuToMm(toJointPuu(command_position_puu_));
-    drive_homed_ = fb.homed_status;
   }
 
   arm_phase_ = ArmPhase::kServoLow;
@@ -127,7 +117,6 @@ bool GantryEipLinearAxis::disable() {
   motion_commanded_ = false;
   move_phase_ = MovePhase::kIdle;
   move_phase_ticks_ = 0;
-  stop_motion_pulse_ticks_ = 0;
   arm_phase_ = ArmPhase::kIdle;
   arm_phase_ticks_ = 0;
   eip::k5100::OutputAssembly104 cmd;
@@ -341,7 +330,6 @@ void GantryEipLinearAxis::advanceArmPhase() {
                  (int)fb.ready, (long)fb.actual_position);
         command_position_puu_ = fb.actual_position;
         if (fb.homed_status) {
-          drive_homed_ = true;
           arm_phase_ = ArmPhase::kHolding;
           arm_phase_ticks_ = 0;
           (void)publishCommand(buildSettleCommand(true));
@@ -387,7 +375,6 @@ void GantryEipLinearAxis::advanceArmPhase() {
     (void)publishCommand(buildHomeCommand(false));
     if (home_wait_ticks_ > 0) --home_wait_ticks_;
     if (have_fb && fb.homed_status) {
-      drive_homed_ = true;
       // Method 34 may redefine drive origin — resync joint zero to current.
       zero_puu_ = fb.actual_position;
       command_position_puu_ = fb.actual_position;
@@ -455,12 +442,6 @@ void GantryEipLinearAxis::advanceMovePhase(
 
   if (move_phase_ticks_ > 0) --move_phase_ticks_;
 
-  if (move_phase_ == MovePhase::kPreload && move_phase_ticks_ == 0) {
-    move_phase_ = MovePhase::kStart;
-    move_phase_ticks_ = kMoveStartMotionTicks;
-    republishMoveCommand(/*start_motion_edge=*/true);
-    return;
-  }
   if (move_phase_ == MovePhase::kStart && move_phase_ticks_ == 0) {
     move_phase_ = MovePhase::kRun;
     run_ticks_ = 0;
@@ -568,91 +549,6 @@ bool GantryEipLinearAxis::moveRelativeMm(float delta_mm, float speed_mm_per_s,
                                          float decel_mm_per_s2) {
   return moveToMm(getCurrentMm() + delta_mm, speed_mm_per_s, accel_mm_per_s2,
                   decel_mm_per_s2);
-}
-
-bool GantryEipLinearAxis::cancelAbsoluteToFeedback() {
-  if (!initialized_ || !enabled_ || config_.puu_per_mm <= 0.0) return false;
-  if (!image_.isOnline()) return false;
-  if (arm_phase_ != ArmPhase::kIdle && arm_phase_ != ArmPhase::kHolding) {
-    return false;
-  }
-
-  eip::k5100::InputAssembly154 fb;
-  if (!readFeedback(fb)) return false;
-  if (!fb.active || !fb.ready || fb.fault || fb.connection_faulted) {
-    return false;
-  }
-
-  // Retarget Absolute to the live position — cancels a long creep target without
-  // dropping to OM=0 (which A603s and lets Absolute coast with busy=0).
-  command_position_puu_ = fb.actual_position;
-  target_mm_ = puuToMm(toJointPuu(command_position_puu_));
-  stop_requested_ = false;
-  ignore_a014_abort_ =
-      fb.warning_present && eip::k5100::isWarningA014(fb.warning_code);
-  ignore_a015_abort_ =
-      fb.warning_present && eip::k5100::isWarningA015(fb.warning_code);
-  last_speed_mm_s_ = 1.0f;
-  last_accel_mm_s2_ = 500.0f;
-  last_decel_mm_s2_ = 500.0f;
-  move_speed_ref_ = static_cast<int32_t>(
-      llround(1.0 * config_.speed_ref_per_mm_s));
-  if (move_speed_ref_ < 1) move_speed_ref_ = 1;
-
-  motion_commanded_ = true;
-  move_phase_ = MovePhase::kStart;
-  move_phase_ticks_ = kMoveStartMotionTicks;
-  run_ticks_ = 0;
-  return publishCommand(buildMoveCommand(/*start_motion_edge=*/true));
-}
-
-bool GantryEipLinearAxis::stopAndWaitForPhysicalStop() {
-  if (!initialized_ || !enabled_) return false;
-  if (!image_.isOnline()) return false;
-
-  motion_commanded_ = true;
-  enterAbortStop();
-
-  // The drive asserts its `stopped` bit and reports near-zero speed during a
-  // 1 mm/s creep, so neither is trustworthy here. Gate on measured encoder
-  // delta: the axis is stopped only once position holds still for kStopStable-
-  // Ticks consecutive polls.
-  int32_t band_puu =
-      static_cast<int32_t>(llround(config_.puu_per_mm * kStopStableMmPerTick));
-  if (band_puu < 1) band_puu = 1;
-
-  int32_t last_puu = 0;
-  bool have_last = false;
-  uint16_t still_ticks = 0;
-
-  for (uint16_t tick = 0; tick < kStopTimeoutTicks; ++tick) {
-    update();
-
-    eip::k5100::InputAssembly154 fb;
-    if (readFeedback(fb)) {
-      if (have_last) {
-        const int32_t delta = fb.actual_position - last_puu;
-        if (delta <= band_puu && delta >= -band_puu) {
-          ++still_ticks;
-        } else {
-          still_ticks = 0;
-        }
-      }
-      last_puu = fb.actual_position;
-      have_last = true;
-      if (still_ticks >= kStopStableTicks) return true;
-    }
-
-#if defined(ESP_PLATFORM)
-    vTaskDelay(pdMS_TO_TICKS(10));
-#else
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-#endif
-  }
-
-  const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
-  ESP_LOGW(tag, "stopAndWaitForPhysicalStop timeout — axis still moving");
-  return false;
 }
 
 bool GantryEipLinearAxis::stopMotion() {
@@ -775,15 +671,6 @@ bool GantryEipLinearAxis::isA015WarningActive() const {
   return fb.warning_present && eip::k5100::isWarningA015(fb.warning_code);
 }
 
-bool GantryEipLinearAxis::isAxisPhysicallyStopped() const {
-  eip::k5100::InputAssembly154 fb;
-  if (!readFeedback(fb)) return true;  // fail-safe: can't read, assume stopped
-  if (fb.isMotionStopped()) return true;
-  // 0.8 RPM threshold (same order as kNearStopSpeedRef in advanceMovePhase).
-  constexpr int32_t kStopSpeedRef = 8;
-  return (fb.actual_speed <= kStopSpeedRef && fb.actual_speed >= -kStopSpeedRef);
-}
-
 void GantryEipLinearAxis::logAlarmEdge(const eip::k5100::InputAssembly154& fb) {
   const bool fault_now = fb.fault || fb.connection_faulted;
   const bool warn_now = fb.warning_present;
@@ -852,13 +739,6 @@ void GantryEipLinearAxis::update() {
   }
 
   advanceArmPhase();
-
-  if (stop_motion_pulse_ticks_ > 0) {
-    --stop_motion_pulse_ticks_;
-    if (stop_motion_pulse_ticks_ == 0 && enabled_ && !motion_commanded_) {
-      (void)publishCommand(buildSettleCommand(true));
-    }
-  }
 
   if (fault_reset_pulse_ticks_ > 0) {
     --fault_reset_pulse_ticks_;

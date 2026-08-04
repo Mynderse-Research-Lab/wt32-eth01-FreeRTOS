@@ -5,7 +5,8 @@
 [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [`pinout.csv`](../pinout.csv).
 
 Application code commands motion **only** through `Gantry::Gantry`. There is no
-supported PulseMotor / MCP23S17 / step-dir production path.
+supported PulseMotor / step-dir production path. MCP23S17 is used for Field I/O
+and TFT control on SPI3 — not for motion or endstops.
 
 This document explains **how the firmware software works** end-to-end: bring-up,
 Gantry orchestration, process-image mailbox, Class 1 UDP lifecycle (including
@@ -24,12 +25,14 @@ flowchart TD
   X["GantryEipLinearAxis X"]
   Z["GantryEipLinearAxis Z"]
   T["GantryEipRotaryAxis Theta deferred"]
-  EE["GantryEndEffector GPIO17"]
-  Disp["I2cDisplay stub SDA4 SCL14"]
+  EE["GantryEndEffector MCP PA0 DOUT0"]
+  Spi3["Spi3Bus SPI3"]
+  Mcp["MCP23S17 Field+UI"]
+  Disp["SpiDisplay stub MCP CS"]
   ImgX["EipProcessImage X"]
   ImgZ["EipProcessImage Z"]
   Scan["EipMultiScanner / EipScannerTask"]
-  W["W5500 SPI"]
+  W["W5500 SPI2"]
   DX["Kinetix X .20"]
   DZ["Kinetix Z .21"]
   Mqtt["MqttBridge"]
@@ -37,7 +40,9 @@ flowchart TD
 
   App --> G
   App --> Mqtt
-  App --> Disp
+  App --> Spi3
+  Spi3 --> Mcp
+  Spi3 --> Disp
   G --> X
   G --> Z
   G -.-> T
@@ -58,7 +63,7 @@ flowchart TD
 | Motion API | [`lib/Gantry/src/Gantry.h`](../lib/Gantry/src/Gantry.h) |
 | X/Z adapters | [`GantryEipLinearAxis`](../lib/Gantry/src/GantryEipLinearAxis.cpp) |
 | Theta adapter | [`GantryEipRotaryAxis`](../lib/Gantry/src/GantryEipRotaryAxis.cpp) (not wired in `main`) |
-| I2C display | [`lib/I2cDisplay/`](../lib/I2cDisplay/) (**stub** — no panel I/O yet) |
+| SPI3 / Field / TFT | [`lib/Spi3Bus/`](../lib/Spi3Bus/), [`lib/MCP23S17/`](../lib/MCP23S17/), [`lib/SpiDisplay/`](../lib/SpiDisplay/) |
 | Scanner / Class 1 | [`lib/EtherNetIP/`](../lib/EtherNetIP/) |
 | SPI Ethernet | [`lib/W5500/`](../lib/W5500/) |
 | Pins / tasks | [`include/gantry_app_constants.h`](../include/gantry_app_constants.h) |
@@ -76,41 +81,103 @@ at 200 mm/s; host Speed+TM10 StopMotion does **not** meet that accuracy at speed
 
 EIP and MQTT do **not** share one cable to the drives. LAN8720 down does not stop EIP.
 
+#### Plant switch vs EIP daisy-chain (do not merge)
+
+Both networks currently use addresses in `192.168.1.0/24`, but they must stay on **separate L2 segments**:
+
+| Segment | Devices on this L2 |
+|---------|--------------------|
+| **Plant** (SW-008 / LAN8720) | PC `192.168.1.10`, WT32 LAN8720 `192.168.1.100`, MQTT, TCP `:2323` |
+| **EIP** (WIZ daisy-chain only) | WT32 W5500 `192.168.1.10`, Kinetix X/Z, HCS01 |
+
+**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the plant unmanaged switch. That merges the domains: PC and W5500 both appear as `.10`, ARP/Class 1 flood the switch (all port LEDs blink), and `lan_debug_ui.py` / ping to `.100` fail until the EIP uplink is removed.
+
+```
+OK:   PC ── plant SW ── WT32 LAN8720
+      WIZ ── X ── Z ── HCS01   (EIP only; Port 2 stays on chain or open)
+
+BAD:  PC ── plant SW ── WT32 LAN8720
+                 └── HCS01 Port 2 / EIP uplink   ← IP clash + broadcast storm
+```
+
+Same numeric `.10` on PC (plant) vs W5500 (EIP) is intentional **only while the cables stay separate**. To put both on one switch later, renumber EIP to another subnet (e.g. `192.168.2.0/24`).
+
 ### W5500 pins and IPs
 
 | Signal | GPIO / value |
 |--------|----------------|
-| MOSI / MISO / SCLK | 12 / 35 / 5 |
-| CS / RST / INT | 15 / **32** / 33 (INT optional; polled OK) |
-| SPI clock | 20 MHz |
+| MOSI / MISO / SCLK | **17** / 35 / **5** |
+| CS / RST / INT | **15** (VDM frame edges) / **MCP PB7** / unused (polled) |
+| SPI clock | **20 MHz** default (`CONFIG_EIP_W5500_SPI_HZ`; GPIO-matrix full-duplex cap) |
 | W5500 IP | `192.168.1.10` |
 | Kinetix X / Z | `192.168.1.20` / `192.168.1.21` |
-| Gripper | GPIO **17** |
-| I2C display SDA / SCL | GPIO **4** / **14** (stub `lib/I2cDisplay`) |
+| Gripper | MCP23S17 **PA0** (Field DOUT0) |
+| SPI3 (MCP + TFT) | SCLK **14** / MOSI **4** / MISO **36** / CS_MCP **2**; TFT CS **MCP PB2**; BLK hardwired ON |
+| Free ADC | GPIO **12**, **32**, **33**, **39** |
+| Field 24 V I/O | MCP23S17 Port A (4 DOUT + 4 DIN) |
+| TFT DC/RES/BLK + encoder + W5500 RST | MCP23S17 Port B (BLK hardwired; KO on PB6) |
+
+#### W5500 SPI mode: keep VDM (CS GPIO15) — do not hardwire SCSn
+
+The W5500 SPI frame is Address + Control + Data. Control bits `OM[1:0]` select:
+
+| Mode | OM | Data phase | SCSn |
+|------|-----|------------|------|
+| **VDM** (firmware today) | `00` | Arbitrary N bytes | **Must toggle per frame** (edges delimit start/end) |
+| FDM | `01` / `10` / `11` | Fixed **1 / 2 / 4** bytes only | May stay low |
+
+**CIP Class 1 sizes are not FDM sizes.** FDM’s 1/2/4-byte limit is the **SPI data phase to the chip**, not the UDP/CIP payload on the wire. Assemblies and CPF still ship at full size; FDM only **chunks** the SPI copy into many tiny transactions.
+
+| Traffic | Size | Fits in one FDM frame? |
+|---------|------|------------------------|
+| Kinetix O→T assy 104 | 40 B | No |
+| Kinetix T→O assy 154 | 52 B | No |
+| Class 1 O→T CPF UDP (~104 + seq + run/idle) | ~64 B | No |
+| Class 1 T→O CPF UDP (~154) | ~72 B | No |
+| HCS01 cmd / actual | 18 / 14 B | No |
+| Explicit CIP / Forward Open (TCP) | tens–hundreds B | No |
+| W5500 register R/W | 1–2 B (MAC 6, IP 4) | Yes (per SPI frame) |
+
+For buffer copies the largest useful FDM length is **4 bytes** (`OM=11`). Register writes still need **OM=1 or 2** — using a 4-byte data phase for a 1-byte register would overwrite adjacent registers.
+
+**Hardwiring SCSn low (sole SPI2 device) is invalid under VDM.** Symptom seen on bench: `VERSIONR=0xFF` (MISO idle-high / frames not delimited). FDM rewrite could free GPIO15, but:
+
+- Each ~64–80 B UDP payload becomes **⌈N/4⌉** SPI frames (~1.7× bit traffic plus far more `spi_device_transmit` calls).
+- Dual X+Z `exchangeOnce` SPI call count rises from ~O(10) to ~O(70+); driver overhead dominates bit time at 20 MHz.
+- Class 1 does **not** become more deterministic — more SPI calls increase FreeRTOS/IRQ jitter exposure and shrink RPI margin.
+
+| Setup | Practical RPI floor if FDM-4 were used |
+|-------|----------------------------------------|
+| Single axis | **≥ ~2 ms** (1 ms / 500 µs gate likely fails) |
+| Dual X+Z | **≥ ~4–5 ms** with SPI3 contention |
+| + Theta / TCP reconnect | **≥ ~5–10 ms** during FO / explicit |
+
+**Decision:** stay on **VDM + CS GPIO15**. Class 1 UDP SENDOK/CR waits must **busy-spin** (no `taskYIELD` on short polls) — at FreeRTOS 1000 Hz a yield costs ~1 ms and dual-axis O→T was measured at ~3 ms from yields alone. SPI uses **`spi_device_polling_transmit`** with the bus acquired for the whole exchange (ISR path was ~40–60 µs per register). O→T uses dest caching + burst DIPR/DPORT; exchange is **produce-then-drain** (no blocking wait for T→O phase). Target: exchange p99 **under RPI** (default **2 ms** with `CONFIG_EIP_X_RPI_US=2000`).
 
 ### Boot order (`CONFIG_EIP_SCANNER_ENABLED`)
 
 From [`src/main.cpp`](../src/main.cpp):
 
-1. **W5500** — `w5500.init(...)` (static; must outlive the scanner; `app_main` deletes itself).
-2. **Process images** — `eipImageX` / `eipImageZ`.
-3. **Axes + Gantry** — `GantryEipLinearAxis` X/Z → `Gantry::Gantry(..., theta=nullptr, PIN_GRIPPER)` → joint limits → `gantry.begin()`.
-4. **`gantry.enable()` is deferred** until Class 1 + `GantryUpdate` are running (operator `enable` / console). Boot enable used to race A603 before cyclic I/O.
-5. **Scanner** — `eip::startScannerTask(...)` **before** MQTT so the daisy-chain stays alive if LAN8720 fails.
-6. **MQTT objects constructed** (not started yet).
-7. **FreeRTOS tasks** — PickScheduler → GantryUpdate (100 Hz) → SerialCmd (UART).
-8. **LAN8720 `EthernetLink::start()` + `waitForUp()`** — then **TCP net console** on port **2323** (even if MQTT broker is down).
-9. **MQTT `Bridge::start()`** — non-fatal; reuses EthernetLink.
-10. Print console help → `vTaskDelete(nullptr)`.
+1. **SPI3 + MCP** — bus init, Field/UI/TFT CS/W5500 RST; optional TFT stub.
+2. **W5500** — `w5500.init(...)` with MCP-driven RST (static; must outlive the scanner).
+3. **Process images** — `eipImageX` / `eipImageZ`.
+4. **Axes + Gantry** — `GantryEipLinearAxis` X/Z → `Gantry::Gantry(..., theta=nullptr, PIN_GRIPPER)` → joint limits → `gantry.begin()`.
+5. **`gantry.enable()` is deferred** until Class 1 + `GantryUpdate` are running (operator `enable` / console).
+6. **Scanner** — `eip::startScannerTask(...)` **before** MQTT (priority **6**, above gantry/SPI3 users).
+7. **MQTT objects constructed** (not started yet).
+8. **FreeRTOS tasks** — PickScheduler → GantryUpdate (100 Hz) → SerialCmd (UART).
+9. **LAN8720 `EthernetLink::start()` + `waitForUp()`** — then **TCP net console** on port **2323**.
+10. **MQTT `Bridge::start()`** — non-fatal; reuses EthernetLink.
+11. Print console help → `vTaskDelete(nullptr)`.
 
 ### Tasks and rates
 
 | Task | Priority | Core | Stack | Rate / role |
 |------|----------|------|-------|-------------|
+| `EipScannerM` / `EipScannerT` | **6** | **1** | 8192 | Class 1 exchange (highest vs SPI3 users) |
+| `EipHoldKA` | **7** | **1** | 4096 | ~5 ms O→T keepalive during 2nd FO only |
 | `GantryUpdate` | 5 | 1 | 4096 | **100 Hz** (10 ms) — axis SMs + orchestration |
 | `PickScheduler` | 4 | 1 | 4096 | MQTT pick queue (motion not wired) |
-| `EipHoldKA` | 4 | — | 4096 | ~5 ms O→T keepalive during 2nd FO only |
-| `EipScanner` | 3 | — | 8192 | Class 1 loop at granted RPI (~5 ms) |
 | `SerialCmd` | 1 | 0 | 4096 | UART console poll |
 | `NetConsole` | 1 | 0 | 4096 | TCP line console on LAN8720 `:2323` |
 
@@ -119,7 +186,9 @@ Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
 (`CONSOLE_TCP_*` via [`ethernet_app_config.h`](../include/ethernet_app_config.h)).  
 Plant IP: menuconfig **LAN8720 plant Ethernet**.  
 Scanner / HoldKA: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp).  
-X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **5000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)).
+X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T + non-blocking T→O drain so exchange fits under 2 ms. Class 1 pacing uses `esp_timer` µs remainder (FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/cycle/cmd-to-StartMotion p50/p99 plus
+reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
+**GO/NO-GO** is exchange p99 vs granted/configured RPI.
 
 ### Wiring checklist
 
@@ -129,11 +198,12 @@ X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **5000** µs ([`lib/EtherNetIP/Kconfig`
 | `GantryUpdate` 100 Hz + UART console | **Live** |
 | TCP console on LAN8720 (`:2323`) | **Live** (when plant ETH up) |
 | Soft-home / soft-calibrate (no GPIO limits) | **Live** (bench) |
+| Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover PASS**; **Z deferred** (motor not on screw) — see DEV_TRACKER #2 |
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Deferred** (`nullptr`) |
-| Drive endstop GPIO pins | **Off** (`limit_switches_active=false`) |
+| Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |
 | Pick → `moveTo(EndEffectorPose)` | **Not wired** (`SKIP:pick_motion_not_wired`) |
-| PulseMotor / MCP23S17 | **Removed** |
+| PulseMotor / MCP motion path | **Removed** (MCP restored only for Field/UI) |
 
 ---
 
@@ -182,7 +252,7 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 | `softHomeJointDatum()` | Zeros firmware `zero_puu_` on X+Z (not drive Homed) |
 | `requestAbort()` | Abort motion only — does **not** disable servos |
 | Console `stop` | `requestAbort()` + `disable()`; requires home+calibrate again |
-| Gripper open/close | Digital GPIO17 via `GantryEndEffector` |
+| Gripper open/close | MCP Field DOUT0 (PA0) via `GantryEndEffector` |
 
 `update()` must run ~100 Hz (`gantryUpdateTask`). Order inside `update()`:
 
@@ -317,17 +387,18 @@ A Class 1 connection only holds torque while O→T keeps arriving within the con
 3. Spawn **`EipHoldKA`** (~5 ms) so X keeps receiving O→T while Z’s FO runs.
 4. `openAxis(1)` (Z); stop HoldKA; abort connect if `ka.failed`.
 5. Cyclic `exchangeOnce`:
-   - Send O→T for all axes (command from process image, else idle).
+   - Send O→T for all axes starting at a **rotating** index (fairness).
    - Drain T→O until all freshened or timeout; **re-send O→T on API** while waiting (`sendKeepaliveAll`) so peers do not starve.
    - Demux by connection ID (`matchAxisByConnectionId`; fallback O→T CID).
+   - Track **per-axis** T→O miss streaks (teardown when any axis hits 3).
 6. Pace with `rpiRemainderMs(granted_api_ms, elapsed)` so period ≈ API, not ~2× API ([`EipClass1Timing.h`](../lib/EtherNetIP/src/EipClass1Timing.h)).
 
 Exchange outcomes:
 
 | Status | Meaning | Action |
 |--------|---------|--------|
-| `kOk` | All T→O freshened | Clear miss streak; sleep RPI remainder |
-| `kInputMiss` | Partial / timeout on T→O | Soft-retry; tear down only after **3** consecutive misses |
+| `kOk` | All T→O freshened | Clear per-axis miss streaks; sleep RPI remainder |
+| `kInputMiss` | Partial / timeout on T→O | Soft-retry per axis; tear down only after **3** consecutive misses **on any axis** |
 | `kOutputSendFailed` | O→T / W5500 SENDOK fail | Disconnect → `W5500::recover()` immediately |
 
 ### Recover ladder
@@ -337,10 +408,11 @@ From [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp) / [`W5500:
 | Step | Behavior |
 |------|----------|
 | Link gate | Wait `ILinkStatus::isUp()`; settle **300 ms** before FO (avoid ARP INIT→CLOSED) |
-| Soft T→O miss | Up to **3** consecutive `kInputMiss` before teardown (avoids cascading E602) |
-| Hard O→T fail | Disconnect → GPIO14 hard reset + reconfigure (`recover`) |
+| Soft T→O miss | **Per-axis** streak up to **3** consecutive misses before teardown; soft-miss `ESP_LOGW` rate-limited (~1 Hz) |
+| Hard O→T fail | Disconnect → GPIO **32** hard reset + reconfigure (`recover` under SPI bus mutex) |
 | Recover streak | Cap **3** consecutive recovers; then **`esp_restart()`** |
 | Backoff | Exponential on recover fail (cap 30 s); post-reset settle; reconnect idle **2500 ms** |
+| SENDOK wait | tight µs poll (UDP **2 ms** cap, TCP longer); polling SPI under bus acquire |
 
 ### Failure modes (root cause → fix)
 
@@ -363,7 +435,7 @@ Distinguish **silent drop** (no keypad fault) from **latched E602**. Same softwa
 | Class 1 UDP port | 2222 | `EipIoConnection::kDefaultUdpPort` |
 | O→T / T→O / config assemblies | 104 / 154 / 191 | `Kinetix5100Assembly.h` / Kconfig |
 | Assembled sizes | 40 B out / 52 B in | same |
-| X/Z RPI | 5000 µs | `CONFIG_EIP_X_RPI_US` |
+| X/Z RPI | 2000 µs | `CONFIG_EIP_X_RPI_US` (Kinetix FO 0x0112 rejects 1000; polling SPI + drain) |
 | CTM (firmware) | 7 | `makeKinetixConfig` |
 | Soft T→O misses before teardown | 3 | `shouldTeardownAfterInputMisses` |
 | Max chip recovers then restart | 3 | `kMaxChipRecovers` |
@@ -381,7 +453,7 @@ Transport interfaces ([`EipTransport.h`](../lib/EtherNetIP/src/EipTransport.h)) 
 
 | Field | Value |
 |-------|-------|
-| Assemblies | O→T **104**, T→O **154**, Class 1, RPI 5 ms |
+| Assemblies | O→T **104**, T→O **154**, Class 1, RPI 2 ms |
 | IO Mode | `P1.001 = 0xC` |
 | OperatingMode | **1** Position |
 | TravelMode | **2** non-cyclic |
@@ -413,13 +485,12 @@ Never command Position before Active (A603). `moveToMm` rejects unless arm is `k
 ### MovePhase (Absolute PTP)
 
 ```
-kIdle → kPreload → kStart → kRun → (kStopping on abort/timeout) → hold
+kIdle → kStart (fast-path) → kRun → (kStopping on abort/timeout) → hold
 ```
 
 | Phase | Ticks | Behavior |
 |-------|-------|----------|
-| `kPreload` | 4 | OM=1 TM=2 Absolute=0; `position_reference` = abs PUU; **StartMotion=0** |
-| `kStart` | 5 | StartMotion=1 edge |
+| `kStart` | 1 | `moveToMm` publishes OM=1 TM=2 Absolute + **StartMotion=1** immediately |
 | `kRun` | ≤6000 (~60 s) | StartMotion=0; wait done predicate |
 | `kStopping` | stop pulse 5; stable 10 | `stop_motion` pulse; wait ±0.02 mm stable and speed low; then hold |
 
@@ -478,11 +549,13 @@ Menuconfig: **Gantry kinematics** + EtherNet/IP originator (IPs, PUU/mm,
 
 | Mode | Behavior |
 |------|----------|
-| Soft-home (current bench) | `limit_switches_active=false`; `softHomeJointDatum()`; Home34 on arm |
-| Drive endstops (planned) | TBIO INPUT1–4 / HCS01 X31; Fault/Stopped via EIP — do not dual-poll GPIO |
-| Hard envelope | `AXIS_*_HARD_LIMIT_*` from SCHUNK stroke via soft-calibrate |
+| Soft-home (joint zero) | Only when **no** GPIO limits and **no** drive-managed endstops; `softHomeJointDatum()`; Home34 on arm |
+| Drive endstops (TBIO) | KNX Forward/Reverse Limit on INPUT1–4; `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → external `GantryLimitSwitch` |
+| Drive home / calibrate | Console `home`/`calibrate` use `Gantry::homeX` / `calibrateX` when drive-managed: **A014→min**, **A015→max** (bench: joint +X hits A015). Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
+| Hard envelope | Measured stroke from calibrate, or SCHUNK `AXIS_*_HARD_LIMIT_*` via soft-calibrate |
 | Abort | See §3 abort matrix |
 
+**Bench procedure:** see [EXPECTED §4](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md).  
 **Author invariants:** motion only via `Gantry`; respect hard limits; never bypass
 STO / Servo On checks when debugging EIP arm failures.
 
@@ -541,8 +614,8 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | Command | EIP-specific behavior |
 |---------|------------------------|
 | `enable` / `disable` | Arms / ServoOff via Gantry |
-| `home` | Soft-home: `softHomeJointDatum()` (joint datum = current actuals) |
-| `calibrate` | Soft-calibrate: SCHUNK hard envelope into joint limits (no GPIO sweep) |
+| `home` | Drive-managed: X sweep to **A014** (min); else soft-home joint datum |
+| `calibrate` | Drive-managed: measure to **A015** (max); else SCHUNK hard envelope |
 | `move` | Requires **home + calibrate this session** |
 | `stop` | Abort + disable; clears session gates |
 | `alarmreset` / `arst` | EIP **FaultReset** bit (not ARST GPIO) |
@@ -597,14 +670,29 @@ ctest --test-dir build/host --output-on-failure
 **Bench acceptance (2026-07-20):** `speed 200` / `accel 3000`;
 `move 150 150 0` and `move 0 0 0` → reported **150.000 / 0.000 mm** (within ±1 mm).
 
+**SPI3 / MCP / TFT smoke (after bring-up):**
+
+| Check | How |
+|-------|-----|
+| MCP alive | `mcp_dump a` / `mcp_dump b` — IODIR/OLAT match Field+UI config |
+| Field DOUT | `field_dout 0 1` then `0` — SSR/LED follows; boot state LOW |
+| Field DIN + encoder | `field_din` — isolator and A/B/PUSH/KO bits change with input |
+| TFT CS policy | After boot / `refreshStub`, MCP TFT CS idle HIGH; Class 1 still OK |
+| Free ADC | GPIO 12/32/33/39 available for isolated analogs |
+| W5500 Class 1 | `eiptiming` / jog — no regression vs SPI2-only |
+| Boot / console | UART0 + IO0 download still work; do not wire DC to IO0 |
+
+Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII CLK-out).
+
 ---
 
 ## 12. Explicitly not supported
 
 - PulseMotor / LEDC step-dir production control
-- MCP23S17 GPIO expander path
+- MCP23S17 as **motion / limit-switch** path (Field I/O + TFT on SPI3 is supported)
 - Opto PTI interface board as production control path
 - **Ephemeral Class 1 UDP** (bind/send/recv/close per frame)
 - OM=2 Speed + TM=10 + host StopMotion for PTP accuracy
   (OM=0 TM=10 settle/hold/abort remains)
 - CIP Motion / Motion Group / assembly 106 ECAM for picks
+- LVGL / encoder menu on TFT (stub only)

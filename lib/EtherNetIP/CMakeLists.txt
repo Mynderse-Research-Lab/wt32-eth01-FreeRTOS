@@ -17,15 +17,18 @@ idf_component_register(
         "src/EipScanner.cpp"
         "src/EipMultiScanner.cpp"
         "src/EipProcessImage.cpp"
-        "src/EipSocketEspIdf.cpp"
         "src/EipSocketW5500.cpp"
         "src/EipScannerTask.cpp"
+        "src/EipClass1TimingStats.cpp"
+        "src/EipReliabilityStats.cpp"
     INCLUDE_DIRS
         "src"
     REQUIRES
         lwip
         esp_netif
         W5500
+        Spi3Bus
         freertos
         log
+        esp_timer
 )

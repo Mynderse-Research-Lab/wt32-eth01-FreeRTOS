@@ -2,8 +2,7 @@
  * @file GantryLinearAxis.h
  * @brief Abstract interface for a linear (mm-domain) gantry axis.
  *
- * Implemented by concrete classes (e.g. GantryPulseMotorLinearAxis) that back
- * this interface with a specific driver + drivetrain combination. The Gantry
+ * Implemented by GantryEipLinearAxis (Kinetix 5100 Absolute PTP). The Gantry
  * class holds its X (horizontal traverse) and Z (vertical descent) axes as
  * std::unique_ptr<GantryLinearAxis> so the axis topology can be chosen per
  * axis at construction time without any compile-time flags.

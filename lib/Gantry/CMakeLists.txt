@@ -1,4 +1,4 @@
-# Gantry component - multi-axis gantry control layered on top of PulseMotor.
+# Gantry component - multi-axis gantry control over EtherNet/IP.
 #
 # Public headers live in src/. The Gantry component pulls the per-axis
 # mechanical parameter headers (axis_drivetrain_params.h, axis_pulse_motor_params.h)

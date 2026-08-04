@@ -4,10 +4,7 @@
 #include "unity.h"
 
 #include <algorithm>
-#include <atomic>
-#include <chrono>
 #include <cstring>
-#include <thread>
 #include <vector>
 
 #include "CipMessageRouter.h"
@@ -529,7 +526,7 @@ static void test_linear_absolute_aborts_busy_on_a015(void) {
                            "escape while A015 still set must not re-abort");
 }
 
-static void test_cancel_absolute_to_feedback_retargets(void) {
+static void test_stop_motion_clears_busy_when_position_stable(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
   Gantry::EipLinearAxisConfig cfg;
@@ -547,18 +544,31 @@ static void test_cancel_absolute_to_feedback_retargets(void) {
   axis.update();
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  // Mid-move cancel: Absolute StartMotion to live feedback (not OM=0 Hold).
-  image.setFeedback(run_fb);
-  TEST_ASSERT_TRUE(axis.cancelAbsoluteToFeedback());
+  TEST_ASSERT_TRUE(axis.stopMotion());
   TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Held position + stopped bit: kStopping clears busy after stable ticks.
+  Bytes held = makeK5100Input154(25000, false, false, false);
+  held[9] |= 0x04 | 0x08 | 0x20 | 0x40;
+  for (int i = 0; i < 40; ++i) {
+    image.setFeedback(held);
+    axis.update();
+    if (!axis.isBusy()) break;
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
-  TEST_ASSERT_EQUAL_INT8(1, static_cast<int8_t>(cmd[0]));  // OM=Position
-  TEST_ASSERT_EQUAL_INT32(25000, readLeI32(cmd, 16));       // position ref
-  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);                   // StartMotion bit4
+  TEST_ASSERT_EQUAL_INT8(0, static_cast<int8_t>(cmd[0]));  // OM=NotSpecified
+  TEST_ASSERT_EQUAL_UINT8(10, cmd[26]);                     // TM=10
+  TEST_ASSERT_TRUE((cmd[1] & 0x01) != 0);                   // servo_on
+  TEST_ASSERT_TRUE((cmd[1] & 0x04) == 0);                   // StopMotion cleared
 }
 
-static void test_stop_and_wait_returns_when_physically_stopped(void) {
+// Bench regression: during a 1 mm/s creep the drive asserts its `stopped` bit
+// and reports near-zero speed. kStopping must keep isBusy() until position
+// actually holds still.
+static void test_stop_motion_stays_busy_while_position_creeps(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
   Gantry::EipLinearAxisConfig cfg;
@@ -568,30 +578,27 @@ static void test_stop_and_wait_returns_when_physically_stopped(void) {
   TEST_ASSERT_TRUE(axis.begin());
   TEST_ASSERT_TRUE(axis.enable());
   armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(600.0f, 1.0f, 0.0f, 0.0f));
 
-  // Feedback: position held constant — the only trustworthy stop evidence.
-  Bytes fb = makeK5100Input154(0, false, false, false);
-  fb[9] |= 0x04 | 0x08 | 0x20 | 0x40;  // active + ready + HomedStatus + stopped
-  image.setFeedback(fb);
+  Bytes run_fb = makeK5100Input154(0, false, false, false);
+  run_fb[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(run_fb);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
 
-  TEST_ASSERT_TRUE(axis.stopAndWaitForPhysicalStop());
+  TEST_ASSERT_TRUE(axis.stopMotion());
 
-  // Advance the state machine through the remaining Stopping→Hold transition.
-  for (int i = 0; i < 30; ++i) {
+  // 10 PUU/tick ≈ 1 mm/s — same as the bench creep. Drive claims stopped.
+  int32_t puu = 0;
+  for (int i = 0; i < 50; ++i) {
+    Bytes fb = makeK5100Input154(puu, false, false, false);
+    fb[9] |= 0x04 | 0x08 | 0x20 | 0x40;
     image.setFeedback(fb);
     axis.update();
-    if (!axis.isBusy()) break;
+    TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(),
+                             "creeping feedback must keep kStopping busy");
+    puu += 10;
   }
-  TEST_ASSERT_FALSE(axis.isBusy());
-
-  // Hold must be the documented settle image (OM=0 TM=10). OM=1 here A603s on
-  // the drive, which then keeps running the previous Absolute profile.
-  Bytes cmd;
-  TEST_ASSERT_TRUE(image.getCommand(cmd));
-  TEST_ASSERT_EQUAL_INT8(0, static_cast<int8_t>(cmd[0]));  // OM=NotSpecified
-  TEST_ASSERT_EQUAL_UINT8(10, cmd[26]);                     // TM=10
-  TEST_ASSERT_TRUE((cmd[1] & 0x01) != 0);                   // servo_on
-  TEST_ASSERT_TRUE((cmd[1] & 0x04) == 0);                   // StopMotion cleared
 }
 
 // Bench regression: the drive A603s and ignores the abort if it changes anything
@@ -638,40 +645,6 @@ static void test_abort_image_differs_from_move_only_by_stop_bit(void) {
         run_cmd[i], stop_cmd[i],
         "abort image must not change OM/TM/speed/accel/decel mid-profile");
   }
-}
-
-// Bench regression: during a 1 mm/s creep the drive asserts its `stopped` bit
-// and reports near-zero speed, so the wait must not believe either one.
-static void test_stop_and_wait_rejects_creep_despite_stopped_bit(void) {
-  eip::EipProcessImage image;
-  image.setOnline(true);
-  Gantry::EipLinearAxisConfig cfg;
-  cfg.puu_per_mm = 1000.0;
-  cfg.speed_ref_per_mm_s = 15.0;
-  Gantry::GantryEipLinearAxis axis(image, cfg);
-  TEST_ASSERT_TRUE(axis.begin());
-  TEST_ASSERT_TRUE(axis.enable());
-  armAxisForMove(axis, image, 0);
-
-  // Creep the reported position by 1 mm/s (10 PUU per 10 ms poll) while the
-  // drive claims stopped, exactly as observed on the bench.
-  std::atomic<bool> running{true};
-  std::thread creeper([&] {
-    int32_t puu = 0;
-    while (running.load()) {
-      Bytes fb = makeK5100Input154(puu, false, false, false);
-      fb[9] |= 0x04 | 0x08 | 0x20 | 0x40;  // active + ready + Homed + stopped
-      image.setFeedback(fb);
-      puu += 10;
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-  });
-
-  const bool stopped = axis.stopAndWaitForPhysicalStop();
-  running.store(false);
-  creeper.join();
-
-  TEST_ASSERT_FALSE(stopped);  // must time out, not report a false stop
 }
 
 static void test_rotary_move_and_feedback(void) {
@@ -762,10 +735,9 @@ int main(void) {
   RUN_TEST(test_kinetix_a603_warning_decode);
   RUN_TEST(test_kinetix_a014_a015_helpers);
   RUN_TEST(test_linear_absolute_aborts_busy_on_a015);
-  RUN_TEST(test_cancel_absolute_to_feedback_retargets);
-  RUN_TEST(test_stop_and_wait_returns_when_physically_stopped);
+  RUN_TEST(test_stop_motion_clears_busy_when_position_stable);
+  RUN_TEST(test_stop_motion_stays_busy_while_position_creeps);
   RUN_TEST(test_abort_image_differs_from_move_only_by_stop_bit);
-  RUN_TEST(test_stop_and_wait_rejects_creep_despite_stopped_bit);
   RUN_TEST(test_rotary_move_and_feedback);
   RUN_TEST(test_rotary_alarm);
   RUN_TEST(test_scanner_process_image_exchange);

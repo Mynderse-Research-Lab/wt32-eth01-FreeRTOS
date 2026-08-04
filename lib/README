@@ -7,23 +7,23 @@ them up via EXTRA_COMPONENT_DIRS in idf/CMakeLists.txt.
 
 Typical layout:
 
-|--lib
-|  |
-|  |--Gantry
-|  |  |--docs
-|  |  |--examples
-|  |  |--src
-|  |  |   |- Gantry.cpp
-|  |  |   |- Gantry.h
-|  |  |- CMakeLists.txt   (idf_component_register: SRCS / INCLUDE_DIRS / REQUIRES)
-|  |
-|  |--PulseMotor
-|  |  |--src
-|  |  |   |- PulseMotor.cpp
-|  |  |   |- PulseMotor.h
-|  |  |- CMakeLists.txt
-|  |
-|  |- README --> THIS FILE
+    |--lib
+    |  |
+    |  |--Gantry
+    |  |  |--src
+    |  |  |   |- Gantry.cpp
+    |  |  |   |- Gantry.h
+    |  |  |- CMakeLists.txt   (idf_component_register: SRCS / INCLUDE_DIRS / REQUIRES)
+    |  |
+    |  |--EtherNetIP
+    |  |  |--src
+    |  |  |- CMakeLists.txt
+    |  |
+    |  |--W5500
+    |  |  |--src
+    |  |  |- CMakeLists.txt
+    |  |
+    |- README --> THIS FILE
 
 A component exposes its public headers via INCLUDE_DIRS and declares its
 dependencies via REQUIRES. Consumers add the component name to their own
@@ -32,4 +32,4 @@ REQUIRES list to link against it.
 Build the whole project from the repo root:
   idf.py -C idf build
 
-See PROGRAMMING_REFERENCE.md for the canonical build/flash workflow.
+See CONTRIBUTING.md and docs/LOW_LEVEL_GANTRY_CONTROL.md for build/flash workflow.

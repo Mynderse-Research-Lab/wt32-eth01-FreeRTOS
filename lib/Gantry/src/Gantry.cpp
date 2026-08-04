@@ -1049,13 +1049,9 @@ void Gantry::startEipPrecisionCalibrate() {
 }
 
 void Gantry::finishEipHomeOk() {
-    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
-    // Drive StopMotion bit cancels the in-flight creep (Absolute retarget-to-here
-    // was ignored while command_in_progress). Block until encoder position holds
-    // still, then let the settle hold command take over.
-    if (eip == nullptr || !eip->stopAndWaitForPhysicalStop()) {
-        axisX_->stopMotion();
-    }
+    // StopMotion aborts the in-flight creep; kStopping holds isBusy() until
+    // encoder position is stable, then kHomeSettle sets joint zero.
+    axisX_->stopMotion();
     eipLimitPhase_ = EipLimitPhase::kHomeSettle;
     eipLimitPhaseStartMs_ = gantry_millis();
     eipLimitSawBusy_ = false;
@@ -1063,10 +1059,7 @@ void Gantry::finishEipHomeOk() {
 }
 
 void Gantry::finishEipCalOk() {
-    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
-    if (eip == nullptr || !eip->stopAndWaitForPhysicalStop()) {
-        axisX_->stopMotion();
-    }
+    axisX_->stopMotion();
     const float max_mm = axisX_->getCurrentMm();
     axisLength_ = static_cast<int32_t>(llround(max_mm));
     if (axisLength_ < 1) axisLength_ = 1;
@@ -1109,7 +1102,6 @@ void Gantry::advanceEipLimitSequence() {
                 ESP_LOGI(TAG,
                          "[HOME] A014 tripped — will creep toward A015 @ %.1f mm/s",
                          eipCreepSpeedMmS());
-                axisX_->stopMotion();
                 eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
                 eipLimitSawBusy_ = false;
@@ -1138,31 +1130,9 @@ void Gantry::advanceEipLimitSequence() {
             break;
 
         case EipLimitPhase::kHomeSettle: {
-            constexpr uint8_t kMaxSettleRetries = 3;
-            // After clear-edge StopMotion, wait idle before zero / next Absolute.
+            // After clear-edge StopMotion, kStopping holds busy until position
+            // is stable — then set joint zero / hand off to calibrate.
             if (!axisX_->isBusy()) {
-                auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
-                // Verify the axis is physically stopped, not just firmware-idle.
-                // Early hold-here can leave the drive coasting even with busy=0
-                // (see GantryEipLinearAxis.cpp kStopping comment).
-                if (eip && !eip->isAxisPhysicallyStopped()) {
-                    if (eipHomeSettleRetries_ < kMaxSettleRetries) {
-                        ++eipHomeSettleRetries_;
-                        ESP_LOGW(TAG,
-                                 "[HOME] Settle wait: axis still moving after "
-                                 "hold-here (retry %u/%u) — re-issuing hold",
-                                 (unsigned)eipHomeSettleRetries_,
-                                 (unsigned)kMaxSettleRetries);
-                        eip->cancelAbsoluteToFeedback();
-                        eipLimitPhaseStartMs_ = gantry_millis();
-                        break;
-                    }
-                    ESP_LOGW(TAG,
-                             "[HOME] Settle retries exhausted (%u) — forcing "
-                             "complete; drift possible",
-                             (unsigned)kMaxSettleRetries);
-                }
-                eipHomeSettleRetries_ = 0;
                 axisX_->setCurrentPulses(0);
                 currentX_mm_ = axisX_->getCurrentMm();
                 homingInProgress_ = false;
@@ -1188,7 +1158,6 @@ void Gantry::advanceEipLimitSequence() {
                 ESP_LOGI(TAG,
                          "[CAL] A015 tripped — will creep toward A014 @ %.1f mm/s",
                          eipCreepSpeedMmS());
-                axisX_->stopMotion();
                 eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
                 eipLimitSawBusy_ = false;
@@ -1216,29 +1185,7 @@ void Gantry::advanceEipLimitSequence() {
             break;
 
         case EipLimitPhase::kCalReturnZero: {
-            constexpr uint8_t kMaxSettleRetries = 3;
             if (!axisX_->isBusy()) {
-                auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
-                // Verify physical stop — same root cause as kHomeSettle drift.
-                if (eip && !eip->isAxisPhysicallyStopped()) {
-                    if (eipCalSettleRetries_ < kMaxSettleRetries) {
-                        ++eipCalSettleRetries_;
-                        ESP_LOGW(TAG,
-                                 "[CAL] Settle wait: axis still moving after "
-                                 "hold-here (retry %u/%u) — re-issuing hold",
-                                 (unsigned)eipCalSettleRetries_,
-                                 (unsigned)kMaxSettleRetries);
-                        eip->cancelAbsoluteToFeedback();
-                        eipLimitPhaseStartMs_ = gantry_millis();
-                        break;
-                    }
-                    ESP_LOGW(TAG,
-                             "[CAL] Settle retries exhausted (%u) — forcing "
-                             "complete; drift possible",
-                             (unsigned)kMaxSettleRetries);
-                }
-                eipCalSettleRetries_ = 0;
-
                 if (!eipLimitSawBusy_) {
                     // First !busy: hold-here from finishEipCalOk completed.
                     // Now Absolute to joint 0 at profile speed if not already there.
