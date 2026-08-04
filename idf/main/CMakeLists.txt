@@ -9,6 +9,7 @@ set(APP_SRCS
     "${APP_ROOT}/src/main.cpp"
     "${APP_ROOT}/src/pick_scheduler.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
+    "${APP_ROOT}/src/gantry_net_console.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -28,9 +29,12 @@ idf_component_register(
         Gantry
         MqttBridge
         EtherNetIP
+        I2cDisplay
         esp_timer
         log
         freertos
+        lwip
+        esp_netif
 )
 
 # ESP-IDF v6 treats #warning as -Werror=cpp. When enabled via menuconfig (or

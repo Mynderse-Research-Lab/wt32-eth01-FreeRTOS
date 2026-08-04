@@ -11,6 +11,7 @@
  * - W5500 SPI Ethernet for EtherNet/IP drive control (X, Z)
  * - LAN8720 RMII for MQTT bridge
  * - End-effector: SCHUNK KGG 100-80 pneumatic gripper (direct GPIO)
+ * - I2C operator display stub (lib/I2cDisplay; panel I/O not implemented)
  * - Interactive serial console (gantry_test_console)
  * - Periodic gantry update task at 100 Hz
  *
@@ -26,11 +27,14 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "gantry_test_console.h"
+#include "gantry_net_console.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
 #include "mqtt_topics.h"
+#include "ethernet_app_config.h"
 #include "MqttBridge.h"
 #include "pick_scheduler.h"
+#include "I2cDisplay.h"
 
 #if CONFIG_EIP_SCANNER_ENABLED
 #include "W5500.h"
@@ -78,6 +82,19 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "WT32-ETH01 Gantry Controller (EIP over W5500)");
     ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z (Theta unpowered; PC uplink exclusive)");
     ESP_LOGI(TAG, "========================================\n");
+
+    // I2C display stub (non-fatal). Pins SDA4/SCL14; panel bring-up TBD.
+    static display::I2cDisplay i2cDisplay;
+    {
+        display::I2cDisplayConfig dispCfg = {};
+        dispCfg.sda_gpio = I2C_DISPLAY_SDA_GPIO;
+        dispCfg.scl_gpio = I2C_DISPLAY_SCL_GPIO;
+        dispCfg.i2c_addr = I2C_DISPLAY_ADDR;
+        dispCfg.scl_hz = I2C_DISPLAY_SCL_HZ;
+        if (!i2cDisplay.begin(dispCfg)) {
+            ESP_LOGW(TAG, "I2C display stub begin failed — continuing without UI");
+        }
+    }
 
 #if CONFIG_EIP_SCANNER_ENABLED
     // --- W5500 init (must outlive scanner task; app_main deletes itself) ---
@@ -233,7 +250,21 @@ extern "C" void app_main(void) {
     }
 
     // ------------------------------------------------------------------
-    // MQTT bridge (non-fatal — brief PHY wait only; EIP/console already live)
+    // LAN8720 first so TCP console works even if MQTT broker is down.
+    // Bridge::start() reuses EthernetLink (idempotent start()).
+    // ------------------------------------------------------------------
+    bool ethUp = false;
+    if (ethernetLink.start() && ethernetLink.waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
+        ethUp = true;
+        gantryNetConsoleStart(&consoleCfg);
+        ESP_LOGI(TAG, "Net console listening on TCP %d (plant / LAN8720)",
+                 CONSOLE_TCP_PORT);
+    } else {
+        ESP_LOGW(TAG, "LAN8720 not up — UART console only; net console skipped");
+    }
+
+    // ------------------------------------------------------------------
+    // MQTT bridge (non-fatal — eth may already be up; EIP/console already live)
     // ------------------------------------------------------------------
     bool mqttReady = false;
     if (mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
@@ -244,8 +275,10 @@ extern "C" void app_main(void) {
                  "pick scheduling unavailable until LAN8720 link is restored.");
     }
 
-    ESP_LOGI(TAG, "All tasks created successfully (MQTT %s)", mqttReady ? "online" : "offline");
-    ESP_LOGI(TAG, "System ready - type 'help' for commands");
+    ESP_LOGI(TAG, "All tasks created successfully (ETH %s, MQTT %s)",
+             ethUp ? "up" : "down", mqttReady ? "online" : "offline");
+    ESP_LOGI(TAG, "System ready - type 'help' for commands (UART and/or TCP %d)",
+             CONSOLE_TCP_PORT);
     gantryTestPrintHelp();
 
     vTaskDelete(nullptr);

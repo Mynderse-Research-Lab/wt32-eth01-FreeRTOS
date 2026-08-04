@@ -1,32 +1,92 @@
 #ifndef ETHERNET_APP_CONFIG_H
 #define ETHERNET_APP_CONFIG_H
 
-// Lab example (ADSB-PI-base broker.env):
-//   Broker Pi:  192.168.1.5   (MQTT_BROKER_URI_DEFAULT in mqtt_topics.h)
-//   WT32:       192.168.1.100
-//   Netmask:    255.255.255.0
-//   Gateway:    192.168.1.5   (Pi on same switch; no router required)
+/**
+ * @file ethernet_app_config.h
+ * @brief LAN8720 plant Ethernet + TCP console settings.
+ *
+ * Firmware: values come from idf.py menuconfig
+ *   - "LAN8720 plant Ethernet"
+ *   - "TCP gantry console (LAN8720)"
+ * Host builds without sdkconfig.h keep the defaults below.
+ */
 
-#define ETH_USE_STATIC_IP           1
+#include "gantry_kconfig.h"
 
-#define ETH_STATIC_IP_OCTET_1       192
-#define ETH_STATIC_IP_OCTET_2       168
-#define ETH_STATIC_IP_OCTET_3       1
-#define ETH_STATIC_IP_OCTET_4       100
+/* ---- LAN8720 addressing ------------------------------------------------- */
 
-#define ETH_STATIC_GW_OCTET_1       192
-#define ETH_STATIC_GW_OCTET_2       168
-#define ETH_STATIC_GW_OCTET_3       1
-#define ETH_STATIC_GW_OCTET_4       5
+#if defined(CONFIG_ETH_USE_STATIC_IP)
+#define ETH_USE_STATIC_IP 1
+#else
+#define ETH_USE_STATIC_IP 0
+#endif
 
-#define ETH_STATIC_NETMASK_OCTET_1  255
-#define ETH_STATIC_NETMASK_OCTET_2  255
-#define ETH_STATIC_NETMASK_OCTET_3  255
-#define ETH_STATIC_NETMASK_OCTET_4  0
+#ifdef CONFIG_ETH_STATIC_IP
+#define ETH_STATIC_IP CONFIG_ETH_STATIC_IP
+#else
+#define ETH_STATIC_IP "192.168.1.100"
+#endif
 
-// How long Bridge::start() blocks app_main waiting for LAN8720 PHY+IP.
-// Static IP is ready as soon as PHY is up — keep this short so EIP console
-// bring-up is not stalled when the MQTT cable is unplugged (MQTT is non-fatal).
-#define ETH_IP_WAIT_TIMEOUT_MS      3000
+#ifdef CONFIG_ETH_STATIC_GATEWAY
+#define ETH_STATIC_GATEWAY CONFIG_ETH_STATIC_GATEWAY
+#else
+#define ETH_STATIC_GATEWAY "192.168.1.5"
+#endif
+
+#ifdef CONFIG_ETH_STATIC_NETMASK
+#define ETH_STATIC_NETMASK CONFIG_ETH_STATIC_NETMASK
+#else
+#define ETH_STATIC_NETMASK "255.255.255.0"
+#endif
+
+#ifdef CONFIG_ETH_IP_WAIT_TIMEOUT_MS
+#define ETH_IP_WAIT_TIMEOUT_MS CONFIG_ETH_IP_WAIT_TIMEOUT_MS
+#else
+#define ETH_IP_WAIT_TIMEOUT_MS 3000
+#endif
+
+/* ---- TCP gantry console ------------------------------------------------- */
+
+#if defined(CONFIG_CONSOLE_TCP_ENABLE)
+#define CONSOLE_TCP_ENABLE 1
+#else
+#define CONSOLE_TCP_ENABLE 0
+#endif
+
+#ifdef CONFIG_CONSOLE_TCP_PORT
+#define CONSOLE_TCP_PORT CONFIG_CONSOLE_TCP_PORT
+#else
+#define CONSOLE_TCP_PORT 2323
+#endif
+
+#if defined(CONFIG_CONSOLE_TCP_AUTH_ENABLE)
+#define CONSOLE_TCP_AUTH_ENABLE 1
+#else
+#define CONSOLE_TCP_AUTH_ENABLE 0
+#endif
+
+#ifdef CONFIG_CONSOLE_TCP_PASSWORD
+#define CONSOLE_TCP_PASSWORD CONFIG_CONSOLE_TCP_PASSWORD
+#else
+#define CONSOLE_TCP_PASSWORD "LTU_1932"
+#endif
+
+#ifdef CONFIG_CONSOLE_TCP_AUTH_MAX_TRIES
+#define CONSOLE_TCP_AUTH_MAX_TRIES CONFIG_CONSOLE_TCP_AUTH_MAX_TRIES
+#else
+#define CONSOLE_TCP_AUTH_MAX_TRIES 3
+#endif
+
+#ifdef CONFIG_CONSOLE_TCP_AUTH_REMEMBER_S
+#define CONSOLE_TCP_AUTH_REMEMBER_S CONFIG_CONSOLE_TCP_AUTH_REMEMBER_S
+#else
+#define CONSOLE_TCP_AUTH_REMEMBER_S 600
+#endif
+
+#ifdef CONFIG_CONSOLE_TCP_AUTH_REMEMBER_MAX
+#define CONSOLE_TCP_AUTH_REMEMBER_MAX CONFIG_CONSOLE_TCP_AUTH_REMEMBER_MAX
+#else
+#define CONSOLE_TCP_AUTH_REMEMBER_MAX 4
+#endif
 
 #endif  // ETHERNET_APP_CONFIG_H

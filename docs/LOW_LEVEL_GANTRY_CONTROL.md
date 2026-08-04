@@ -24,7 +24,8 @@ flowchart TD
   X["GantryEipLinearAxis X"]
   Z["GantryEipLinearAxis Z"]
   T["GantryEipRotaryAxis Theta deferred"]
-  EE["GantryEndEffector GPIO4"]
+  EE["GantryEndEffector GPIO17"]
+  Disp["I2cDisplay stub SDA4 SCL14"]
   ImgX["EipProcessImage X"]
   ImgZ["EipProcessImage Z"]
   Scan["EipMultiScanner / EipScannerTask"]
@@ -36,6 +37,7 @@ flowchart TD
 
   App --> G
   App --> Mqtt
+  App --> Disp
   G --> X
   G --> Z
   G -.-> T
@@ -56,6 +58,7 @@ flowchart TD
 | Motion API | [`lib/Gantry/src/Gantry.h`](../lib/Gantry/src/Gantry.h) |
 | X/Z adapters | [`GantryEipLinearAxis`](../lib/Gantry/src/GantryEipLinearAxis.cpp) |
 | Theta adapter | [`GantryEipRotaryAxis`](../lib/Gantry/src/GantryEipRotaryAxis.cpp) (not wired in `main`) |
+| I2C display | [`lib/I2cDisplay/`](../lib/I2cDisplay/) (**stub** — no panel I/O yet) |
 | Scanner / Class 1 | [`lib/EtherNetIP/`](../lib/EtherNetIP/) |
 | SPI Ethernet | [`lib/W5500/`](../lib/W5500/) |
 | Pins / tasks | [`include/gantry_app_constants.h`](../include/gantry_app_constants.h) |
@@ -78,11 +81,12 @@ EIP and MQTT do **not** share one cable to the drives. LAN8720 down does not sto
 | Signal | GPIO / value |
 |--------|----------------|
 | MOSI / MISO / SCLK | 12 / 35 / 5 |
-| CS / RST / INT | 15 / 14 / 33 (INT optional; polled OK) |
+| CS / RST / INT | 15 / **32** / 33 (INT optional; polled OK) |
 | SPI clock | 20 MHz |
 | W5500 IP | `192.168.1.10` |
 | Kinetix X / Z | `192.168.1.20` / `192.168.1.21` |
-| Gripper | GPIO **4** |
+| Gripper | GPIO **17** |
+| I2C display SDA / SCL | GPIO **4** / **14** (stub `lib/I2cDisplay`) |
 
 ### Boot order (`CONFIG_EIP_SCANNER_ENABLED`)
 
@@ -94,9 +98,10 @@ From [`src/main.cpp`](../src/main.cpp):
 4. **`gantry.enable()` is deferred** until Class 1 + `GantryUpdate` are running (operator `enable` / console). Boot enable used to race A603 before cyclic I/O.
 5. **Scanner** — `eip::startScannerTask(...)` **before** MQTT so the daisy-chain stays alive if LAN8720 fails.
 6. **MQTT objects constructed** (not started yet).
-7. **FreeRTOS tasks** — PickScheduler → GantryUpdate (100 Hz) → SerialCmd console.
-8. **MQTT `start()`** — non-fatal; EIP/console already running.
-9. Print console help → `vTaskDelete(nullptr)`.
+7. **FreeRTOS tasks** — PickScheduler → GantryUpdate (100 Hz) → SerialCmd (UART).
+8. **LAN8720 `EthernetLink::start()` + `waitForUp()`** — then **TCP net console** on port **2323** (even if MQTT broker is down).
+9. **MQTT `Bridge::start()`** — non-fatal; reuses EthernetLink.
+10. Print console help → `vTaskDelete(nullptr)`.
 
 ### Tasks and rates
 
@@ -106,9 +111,13 @@ From [`src/main.cpp`](../src/main.cpp):
 | `PickScheduler` | 4 | 1 | 4096 | MQTT pick queue (motion not wired) |
 | `EipHoldKA` | 4 | — | 4096 | ~5 ms O→T keepalive during 2nd FO only |
 | `EipScanner` | 3 | — | 8192 | Class 1 loop at granted RPI (~5 ms) |
-| `SerialCmd` | 1 | 0 | 4096 | Console poll |
+| `SerialCmd` | 1 | 0 | 4096 | UART console poll |
+| `NetConsole` | 1 | 0 | 4096 | TCP line console on LAN8720 `:2323` |
 
 App constants: [`gantry_app_constants.h`](../include/gantry_app_constants.h).  
+Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
+(`CONSOLE_TCP_*` via [`ethernet_app_config.h`](../include/ethernet_app_config.h)).  
+Plant IP: menuconfig **LAN8720 plant Ethernet**.  
 Scanner / HoldKA: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp).  
 X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **5000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)).
 
@@ -117,7 +126,8 @@ X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **5000** µs ([`lib/EtherNetIP/Kconfig`
 | Item | Status |
 |------|--------|
 | W5500 + dual process images + X/Z Absolute | **Live** |
-| `GantryUpdate` 100 Hz + serial console | **Live** |
+| `GantryUpdate` 100 Hz + UART console | **Live** |
+| TCP console on LAN8720 (`:2323`) | **Live** (when plant ETH up) |
 | Soft-home / soft-calibrate (no GPIO limits) | **Live** (bench) |
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Deferred** (`nullptr`) |
@@ -172,7 +182,7 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 | `softHomeJointDatum()` | Zeros firmware `zero_puu_` on X+Z (not drive Homed) |
 | `requestAbort()` | Abort motion only — does **not** disable servos |
 | Console `stop` | `requestAbort()` + `disable()`; requires home+calibrate again |
-| Gripper open/close | Digital GPIO4 via `GantryEndEffector` |
+| Gripper open/close | Digital GPIO17 via `GantryEndEffector` |
 
 `update()` must run ~100 Hz (`gantryUpdateTask`). Order inside `update()`:
 
@@ -479,6 +489,47 @@ STO / Servo On checks when debugging EIP arm failures.
 ---
 
 ## 9. Console contract
+
+Shared command core: `gantryConsoleProcessLine()` in
+[`gantry_test_console.cpp`](../src/gantry_test_console.cpp). Transports:
+
+| Transport | Path | Notes |
+|-----------|------|-------|
+| **UART0** | `SerialCmd` / `getchar` | Flash + pre-link logs; always available |
+| **TCP :2323** | [`gantry_net_console.cpp`](../src/gantry_net_console.cpp) on **LAN8720** | After plant ETH IP up; **not** on W5500/EIP |
+
+Config (idf.py menuconfig): **LAN8720 plant Ethernet** and **TCP gantry console
+(LAN8720)** — bridged by [`ethernet_app_config.h`](../include/ethernet_app_config.h).
+Defaults: gantry IP **`192.168.1.100/24`**, TCP **`:2323`**, password **`LTU_1932`**,
+up to **4** remembered IPs for **600 s** (timer resets on reconnect). UART has no
+password. Single TCP client (backlog 1).
+
+### Connect from a PC (plant / LAN8720 subnet)
+
+Prerequisites: PC on `192.168.1.0/24`, gantry at `192.168.1.100`, link up.
+
+```powershell
+# Windows (ncat from Nmap)
+ncat 192.168.1.100 2323
+
+# PuTTY: Connection type Raw, Host 192.168.1.100, Port 2323
+```
+
+```bash
+# Linux / macOS
+nc 192.168.1.100 2323
+```
+
+1. At `Password:` prompt, enter the menuconfig password (`CONSOLE_TCP_PASSWORD`,
+   default `LTU_1932`) and press Enter. Recent IPs skip this for
+   **`CONSOLE_TCP_AUTH_REMEMBER_S`** seconds (default **600**); the timer resets
+   on each reconnect from that IP (max **`CONSOLE_TCP_AUTH_REMEMBER_MAX`**, default **4**).
+2. On success, type the same commands as serial (`help`, `status`, …), one line each.
+3. `logout` / `exit` / `quit` closes the TCP session.
+
+UART remains for bring-up before Ethernet is ready (no password).
+
+### Commands
 
 Primary: `help`, `status`, `faults` / `alarms`, `enable`, `disable`, `home`,
 `calibrate`, `speed`, `accel`, `move`, `grip`, `stop`, `alarmreset`,

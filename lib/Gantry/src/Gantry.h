@@ -130,6 +130,11 @@ public:
 
     // ---------- Configuration ----------
     void setLimitPins(int xMinPin, int xMaxPin);
+    /// Drive-managed endstops: X min/max switches take state from EIP assembly
+    /// feedback (A014/A015 + Fault+Stopped heuristic), not GPIO.
+    void configureDriveManagedLimits();
+    /// True after configureDriveManagedLimits() (external X limit switches).
+    bool driveManagedLimitsEnabled() const;
     void setZAxisLimits(float minMm, float maxMm);
     void setThetaLimits(float minDeg, float maxDeg);
     void setJointLimits(float xMin, float xMax,
@@ -283,6 +288,24 @@ private:
     // Pose/pick moves keep the PnP sequence.
     bool        jointDirectMove_;
 
+    // EIP drive-managed precision home/calibrate (A014/A015 clear-edge).
+    enum class EipLimitPhase : uint8_t {
+        kIdle = 0,
+        kHomeSeekMin,     // toward A014 at seek speed
+        kHomeCreepClear,  // creep toward A015 until A014 clears → joint zero
+        kHomeSettle,      // wait for stop after clear-edge zero before next Absolute
+        kCalSeekMax,      // toward A015 at profile speed
+        kCalCreepClear,   // creep toward A014 until A015 clears → joint max
+        kCalReturnZero,   // after max set, Absolute move back to joint 0
+    };
+    EipLimitPhase eipLimitPhase_ = EipLimitPhase::kIdle;
+    unsigned long eipLimitPhaseStartMs_ = 0;
+    // True once Absolute seek/creep has been observed busy (guards preempt race).
+    bool eipLimitSawBusy_ = false;
+    // Settle-phase retry counter for physical-stop verification.
+    uint8_t eipHomeSettleRetries_ = 0;
+    uint8_t eipCalSettleRetries_ = 0;
+
     // Helpers
     float   pulsesToMm(int32_t pulses) const;
     int32_t mmToPulses(float mm) const;
@@ -295,6 +318,19 @@ private:
     bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
     void     updateAxisPositions();
     void     stopAllMotion();
+
+    bool eipA014Active() const;
+    bool eipA015Active() const;
+    float eipSeekSpeedMmS() const;
+    float eipCreepSpeedMmS() const;
+    float eipCalSeekSpeedMmS() const;
+    bool eipStartMoveDelta(float delta_mm, float speed_mm_s);
+    void startEipPrecisionHome();
+    void startEipPrecisionCalibrate();
+    void advanceEipLimitSequence();
+    void finishEipHomeOk();
+    void finishEipCalOk();
+    void failEipLimitSequence(const char* why);
 };
 
 // ============================================================================

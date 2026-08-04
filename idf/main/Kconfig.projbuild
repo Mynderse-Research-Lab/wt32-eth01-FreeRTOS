@@ -214,3 +214,88 @@ menu "Gantry kinematics"
     endmenu
 
 endmenu
+
+menu "LAN8720 plant Ethernet"
+
+    config ETH_USE_STATIC_IP
+        bool "Use static IP on LAN8720 (MQTT / TCP console)"
+        default y
+        help
+            When enabled, assign a fixed IPv4 address (typical for a dumb
+            lab switch with no DHCP). When disabled, start the DHCP client.
+
+    config ETH_STATIC_IP
+        string "LAN8720 static IP address"
+        default "192.168.1.100"
+        depends on ETH_USE_STATIC_IP
+
+    config ETH_STATIC_GATEWAY
+        string "LAN8720 static gateway"
+        default "192.168.1.5"
+        depends on ETH_USE_STATIC_IP
+
+    config ETH_STATIC_NETMASK
+        string "LAN8720 static netmask"
+        default "255.255.255.0"
+        depends on ETH_USE_STATIC_IP
+
+    config ETH_IP_WAIT_TIMEOUT_MS
+        int "Wait for LAN8720 PHY+IP (ms)"
+        default 3000
+        range 100 60000
+        help
+            How long Bridge / net-console bring-up waits for link+IP.
+            Keep short so EIP continues when the plant cable is unplugged.
+
+endmenu
+
+menu "TCP gantry console (LAN8720)"
+
+    config CONSOLE_TCP_ENABLE
+        bool "Enable TCP diagnostic console"
+        default y
+        help
+            Listen on LAN8720 for the same gantry commands as the UART
+            console. Does not use the W5500 EIP daisy-chain.
+
+    config CONSOLE_TCP_PORT
+        int "TCP listen port"
+        default 2323
+        range 1 65535
+        depends on CONSOLE_TCP_ENABLE
+
+    config CONSOLE_TCP_AUTH_ENABLE
+        bool "Require password on TCP connect"
+        default y
+        depends on CONSOLE_TCP_ENABLE
+        help
+            UART console is unaffected. Recent peer IPs may skip the
+            prompt for CONSOLE_TCP_AUTH_REMEMBER_S seconds.
+
+    config CONSOLE_TCP_PASSWORD
+        string "TCP console password"
+        default "LTU_1932"
+        depends on CONSOLE_TCP_AUTH_ENABLE
+
+    config CONSOLE_TCP_AUTH_MAX_TRIES
+        int "Max password attempts per connection"
+        default 3
+        range 1 10
+        depends on CONSOLE_TCP_AUTH_ENABLE
+
+    config CONSOLE_TCP_AUTH_REMEMBER_S
+        int "Remember authenticated peer IP (seconds)"
+        default 600
+        range 0 86400
+        depends on CONSOLE_TCP_AUTH_ENABLE
+        help
+            Sliding TTL: resets on each reconnect from that IP. 0 means
+            never skip the password prompt.
+
+    config CONSOLE_TCP_AUTH_REMEMBER_MAX
+        int "Max remembered peer IPs"
+        default 4
+        range 1 16
+        depends on CONSOLE_TCP_AUTH_ENABLE
+
+endmenu

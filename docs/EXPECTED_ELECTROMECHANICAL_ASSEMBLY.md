@@ -47,6 +47,7 @@ flowchart TB
     WT32["WT32-ETH01"]
     W5500["WIZ850io W5500 EIP"]
     LAN["LAN8720 MQTT plant net"]
+    Disp["I2C display stub"]
   end
   WT32 --> W5500
   W5500 --> DX
@@ -55,7 +56,8 @@ flowchart TB
   DX --> Xact
   DZ --> Zact
   DT --> Tact
-  WT32 -->|GPIO4| GripIO
+  WT32 -->|GPIO17| GripIO
+  WT32 -->|I2C| Disp
   GripIO -. pneumatic .-> Grip
   WT32 --> LAN
 ```
@@ -104,9 +106,10 @@ Youngblood POs (see wire schedule).
 | Item | Role | Address / pin |
 |------|------|---------------|
 | WT32-ETH01 | Gantry MCU | — |
-| WIZ850io (W5500 SPI) | EIP originator | SPI: MOSI12 MISO35 SCLK5 CS15 RST14 INT33 |
-| LAN8720 (on-module) | MQTT / plant Ethernet | Separate physical net from EIP |
-| Gripper valve chain | 5 V relay → high-current 24 V relay → solenoid valve | ESP32 **GPIO4** |
+| WIZ850io (W5500 SPI) | EIP originator | SPI: MOSI12 MISO35 SCLK5 CS15 RST32 INT33 |
+| LAN8720 (on-module) | MQTT / plant Ethernet + TCP console `:2323` | Separate physical net from EIP; gantry `192.168.1.100` |
+| I2C display | Operator UI stub (`lib/I2cDisplay`) | SDA **GPIO4**, SCL **GPIO14** |
+| Gripper valve chain | 5 V relay → high-current 24 V relay → solenoid valve | ESP32 **GPIO17** |
 
 EIP daisy-chain (bench): `W5500 → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 → (PC)`.  
 IPs: WT32 `192.168.1.10`, X `.20`, Z `.21`, theta reserved `.30`.
@@ -186,6 +189,7 @@ datasheet beyond header macros.
 | Drive-wired endstops | **Planned** | Not installed on soft-home bench |
 | Geometry freeze | **Open** | Dev-rig offsets |
 | MQTT LAN8720 | **Open** | Link often down on bench; EIP unaffected |
+| TCP console `:2323` on LAN8720 | **When ETH up** | Password auth; same commands as UART; see LOW_LEVEL §9 |
 | Panel HV/LV construction | **Preliminary** | See schematics — not for construction |
 
 ---

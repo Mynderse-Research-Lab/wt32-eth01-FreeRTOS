@@ -3,6 +3,8 @@
 #if CONFIG_GANTRY_SELFTEST
 #include "basic_tests.h"
 #endif
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
@@ -21,6 +23,8 @@ typedef void* mcp23s17_handle_t;
 static inline int mcp23s17_debug_read_register(mcp23s17_handle_t, uint8_t, uint8_t*) { return -1; }
 
 #include <ctype.h>
+#include <cstdarg>
+#include <cstdio>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +33,34 @@ extern "C" int getchar(void);
 
 namespace {
 static const char *TAG = "GantryConsole";
+
+SemaphoreHandle_t g_consoleCmdMutex = nullptr;
+
+GantryConsoleReplyFn g_replyFn = nullptr;
+void *g_replyCtx = nullptr;
+vprintf_like_t g_prevVprintf = nullptr;
+
+int consoleTeeVprintf(const char *fmt, va_list args) {
+  char buf[512];
+  va_list copy;
+  va_copy(copy, args);
+  int n = vsnprintf(buf, sizeof(buf), fmt, copy);
+  va_end(copy);
+  if (g_replyFn != nullptr && n > 0) {
+    buf[sizeof(buf) - 1] = '\0';
+    g_replyFn(g_replyCtx, buf);
+  }
+  if (g_prevVprintf != nullptr) {
+    return g_prevVprintf(fmt, args);
+  }
+  return vprintf(fmt, args);
+}
+
+void ensureConsoleMutex() {
+  if (g_consoleCmdMutex == nullptr) {
+    g_consoleCmdMutex = xSemaphoreCreateMutex();
+  }
+}
 
 struct ControlStateSnapshot {
   bool enabled;
@@ -1271,6 +1303,33 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 }
 }  // namespace
 
+void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *line,
+                              GantryConsoleReplyFn reply_fn, void *reply_ctx) {
+  ensureConsoleMutex();
+  if (g_consoleCmdMutex != nullptr) {
+    xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
+  }
+
+  g_replyFn = reply_fn;
+  g_replyCtx = reply_ctx;
+  if (reply_fn != nullptr) {
+    g_prevVprintf = esp_log_set_vprintf(consoleTeeVprintf);
+  }
+
+  processCommand(cfg, line);
+
+  if (reply_fn != nullptr) {
+    esp_log_set_vprintf(g_prevVprintf != nullptr ? g_prevVprintf : vprintf);
+    g_prevVprintf = nullptr;
+  }
+  g_replyFn = nullptr;
+  g_replyCtx = nullptr;
+
+  if (g_consoleCmdMutex != nullptr) {
+    xSemaphoreGive(g_consoleCmdMutex);
+  }
+}
+
 void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "Gantry Library Example - Commands:");
@@ -1327,7 +1386,7 @@ void gantryTestConsoleTask(void *param) {
         if (inputIndex > 0) {
           inputLine[inputIndex] = '\0';
           ESP_LOGI(TAG, "[RX] %s", inputLine);
-          processCommand(cfg, inputLine);
+          gantryConsoleProcessLine(cfg, inputLine);
           inputIndex = 0;
         }
       } else if (c >= 32 && c <= 126 && inputIndex < sizeof(inputLine) - 1) {

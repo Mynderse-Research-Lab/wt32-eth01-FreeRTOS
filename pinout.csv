@@ -1,24 +1,26 @@
 Symbol,Domain,Pin,Direction,Function,Notes
 W5500_SPI_MOSI,ESP32 GPIO,12,Output,W5500/WIZ850io SPI MOSI,"HSPI_HOST (SPI2); 20 MHz"
-W5500_SPI_MISO,ESP32 GPIO,35,Input,W5500/WIZ850io SPI MISO,"VSPI_HOST; shared with MCP23S17 on original PCB"
-W5500_SPI_SCLK,ESP32 GPIO,5,Output,W5500/WIZ850io SPI clock,"VSPI_HOST; 20 MHz"
+W5500_SPI_MISO,ESP32 GPIO,35,Input,W5500/WIZ850io SPI MISO,"Input-only GPIO; 20 MHz"
+W5500_SPI_SCLK,ESP32 GPIO,5,Output,W5500/WIZ850io SPI clock,"HSPI_HOST (SPI2); 20 MHz"
 W5500_SPI_CS,ESP32 GPIO,15,Output,W5500/WIZ850io SPI chip select,"Active low; strapping pin (must be HIGH at boot)"
 W5500_INT,ESP32 GPIO,33,Input,W5500 interrupt,"Optional; polled mode works without it. Strategy 2 (interrupt-driven) deferred."
-W5500_RST,ESP32 GPIO,14,Output,W5500 hardware reset,"Active low; must be driven HIGH by firmware"
-GRIPPER,ESP32 GPIO,4,Output,Pneumatic gripper control,"24V valve driver; fewest alternate functions (ADC2_CH0, TOUCH0, RTC_GPIO10)"
+W5500_RST,ESP32 GPIO,32,Output,W5500 hardware reset,"Active low; driven HIGH by firmware. Relocated from GPIO14 for I2C SCL."
+GRIPPER,ESP32 GPIO,17,Output,Pneumatic gripper control,"24V valve driver. Relocated from GPIO4 for I2C SDA."
+I2C_DISPLAY_SDA,ESP32 GPIO,4,Bidirectional,I2C display SDA,"Stub driver lib/I2cDisplay; pull-ups to 3.3V if panel lacks them"
+I2C_DISPLAY_SCL,ESP32 GPIO,14,Bidirectional,I2C display SCL,"Stub driver lib/I2cDisplay; pull-ups to 3.3V if panel lacks them"
 MCP23S17_REMOVED,ESP32 GPIO,0..15,,Removed,"All MCP23S17 pins removed per 2026-07 refactor. Drive control is EtherNet/IP only."
-PULSE_DIR_REMOVED,ESP32 GPIO,0/2/14,,Removed,"Step/direction pulse outputs removed. X(GPIO14), Z(GPIO2), Theta(GPIO0)"
-ENCODER_REMOVED,ESP32 GPIO,4/32/36/39,,Removed,"Encoder inputs removed. X(GPIO4/36), Z(GPIO39/32). Feedback via EIP assembly."
+PULSE_DIR_REMOVED,ESP32 GPIO,0/2/14,,Removed,"Step/direction pulse outputs removed. X(GPIO14), Z(GPIO2), Theta(GPIO0). GPIO14 reused as I2C SCL."
+ENCODER_REMOVED,ESP32 GPIO,4/32/36/39,,Removed,"Encoder inputs removed. GPIO4=I2C SDA; GPIO32=W5500 RST."
 ALARM_IO_REMOVED,MCP23S17,,,Removed,"Alarm status/reset via MCP removed. Fault status via EIP InputAssembly154."
 DIR_ENABLE_REMOVED,MCP23S17,,,Removed,"Direction and enable signals via MCP removed. ServoOn via EIP OutputAssembly104."
 LIMIT_SWITCHES,MCP23S17,,,Removed,"Limit switches via MCP removed. Endstops deferred; will wire to drive TBIO INPUT1-4."
 EIP_DAISY_CHAIN,WIZ850io RJ45, — ,— ,EtherNet/IP to Kinetix drives,"WIZ850io → Kinetix X PORT1 → X PORT2 → Kinetix Z PORT1 → Z PORT2 → PC"
 EIP_SUBNET,All, — ,— ,EIP network,"WT32(W5500)=192.168.1.10, X=192.168.1.20, Z=192.168.1.21"
 MQTT_ETHERNET,ESP32 LAN8720, — ,— ,MQTT/plant network,"Separate physical network from EIP daisy-chain. RMII PHY on WT32-ETH01."
-FREED_GPIO2,,,,"Boot strapping pin (must be HIGH during reset). Formerly Z_PULSE."
-FREED_GPIO14,,,,Formerly X_PULSE (LEDC ch0). Available for future use.
-FREED_GPIO16,,,,Available for future use.
-FREED_GPIO32,,,,Formerly Z_ENC_B. Available for future use.
-FREED_GPIO36,,,,Input-only. Formerly X_ENC_B.
-FREED_GPIO39,,,,Input-only. Formerly Z_ENC_A.
+CONSOLE_TCP,LAN8720 TCP,menuconfig,— ,Gantry diagnostic console,"Port/password under menuconfig TCP gantry console. Default 192.168.1.100:2323. Not on W5500/EIP."
+FREED_GPIO2,,,,"Boot strapping pin (must be HIGH during reset). Formerly Z_PULSE. Spare."
+SPARE_GPIO33,,,,"Available if W5500 INT left disconnected (polled)."
+FREED_GPIO16,,,,"On-module ETH_PHY_POWER; not a free header GPIO."
+FREED_GPIO36,,,,"Input-only. Formerly X_ENC_B."
+FREED_GPIO39,,,,"Input-only. Formerly Z_ENC_A."
 HCS01_THETA,DEFERRED, — ,— ,Deferred,"3-phase AC supply unavailable. IP reserved: 192.168.1.30. Will insert between Kinetix Z and PC."

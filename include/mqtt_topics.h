@@ -1,7 +1,8 @@
 #ifndef MQTT_TOPICS_H
 #define MQTT_TOPICS_H
 
-// Broker on Pi (ADSB-PI-base broker.env BROKER_IP; same /24 as ethernet_app_config.h).
+// Broker on Pi (ADSB-PI-base broker.env BROKER_IP; same /24 as menuconfig
+// "LAN8720 plant Ethernet" / ethernet_app_config.h).
 #define MQTT_BROKER_URI_DEFAULT      "mqtt://192.168.1.5:1883"
 #define MQTT_CLIENT_ID_PREFIX        "wt32-gantry-"
 #define MQTT_GANTRY_ID_DEFAULT       "G01"

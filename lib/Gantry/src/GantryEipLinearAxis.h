@@ -10,6 +10,7 @@
 #define GANTRY_EIP_LINEAR_AXIS_H
 
 #include "GantryLinearAxis.h"
+#include "GantryLimitSwitch.h"
 #include "EipProcessImage.h"
 #include "Kinetix5100Assembly.h"
 
@@ -57,6 +58,14 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   bool getDriveAlarmSummary(char* buf, size_t n) const override;
   uint16_t getDriveFaultCode() const override;
   uint16_t getDriveWarningCode() const override;
+  /// True only while warning_present and code is A014/A015 (clear-edge safe).
+  bool isA014WarningActive() const;
+  bool isA015WarningActive() const;
+
+  /// True when the drive reports motion stopped (bit6) or actual speed is
+  /// near zero. Use after hold-here / settle to verify the axis is physically
+  /// stationary before declaring sequence complete.
+  bool isAxisPhysicallyStopped() const;
 
   double pulsesPerMm() const override;
   bool isEncoderFeedbackEnabled() const override;
@@ -66,6 +75,21 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
+
+  /// Cancel Absolute by StartMotion to the live feedback position (stay OM=1).
+  /// Prefer this over OM=0 StopMotion mid-creep — avoids A603 + coast with busy=0.
+  bool cancelAbsoluteToFeedback();
+
+  /// StopMotion + feedback wait: enter abort stop, then block until measured
+  /// encoder position holds still for 200 ms. The drive's stopped bit and speed
+  /// word both read "stopped" during a 1 mm/s creep, so position delta is the
+  /// only reliable gate. Returns true on success, false on timeout (≈3 s);
+  /// caller decides fallback. Blocks in the GantryUpdate task (one-off per
+  /// home/cal clear edge).
+  bool stopAndWaitForPhysicalStop();
+
+  /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
+  void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw);
 
  private:
   bool publishCommand(const eip::k5100::OutputAssembly104& cmd);
@@ -130,6 +154,13 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   uint8_t stop_stable_ticks_;
   int32_t last_stop_sample_puu_;
   bool stop_sample_valid_;
+
+  GantryLimitSwitch* limit_min_sw_ = nullptr;
+  GantryLimitSwitch* limit_max_sw_ = nullptr;
+  // When starting a move already on A014/A015 (escape/creep), do not abort on
+  // that same warning until it clears — otherwise back-off never runs.
+  bool ignore_a014_abort_ = false;
+  bool ignore_a015_abort_ = false;
 
   eip::k5100::OutputAssembly104 buildSettleCommand(bool servo_on) const;
   eip::k5100::OutputAssembly104 buildHomeCommand(bool start_motion_edge) const;

@@ -4,7 +4,10 @@
 #include "unity.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "CipMessageRouter.h"
@@ -57,7 +60,7 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
  public:
   void setEcho(bool echo) { echo_ = echo; }
   bool bind(uint16_t, uint32_t = 0) override { return true; }
-  ssize_t sendTo(const uint8_t* data, size_t len, const char*, uint16_t) override {
+  ssize_t sendTo(const uint8_t* data, size_t len, uint32_t, uint16_t) override {
     last_sent_.assign(data, data + len);
     if (echo_) echo_frame_.assign(data, data + len);
     return static_cast<ssize_t>(len);
@@ -242,23 +245,15 @@ static void test_linear_x_belt_move_command(void) {
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_UINT32(eip::k5100::kOutput104Size, cmd.size());
   TEST_ASSERT_EQUAL_INT32(12500, readLeI32(cmd, 16));
-  // Preload: OperatingMode=Position, TravelMode=2, Absolute, StartMotion low.
+  // Fast-path: OperatingMode=Position, TravelMode=2, Absolute, StartMotion high.
   TEST_ASSERT_EQUAL_INT8(1, (int8_t)cmd[0]);
   TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
   TEST_ASSERT_EQUAL_UINT8(0, cmd[24]);  // NonCyclicMoveType Absolute
-  TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  for (int i = 0; i < 4; ++i) {
-    axis.update();
-  }
-  TEST_ASSERT_TRUE(image.getCommand(cmd));
-  TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
-  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
-
-  for (int i = 0; i < 5; ++i) {
-    axis.update();
-  }
+  // One update clears the StartMotion edge and enters Run.
+  axis.update();
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
   TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
@@ -400,6 +395,24 @@ static void test_linear_z_ballscrew_scaling(void) {
   TEST_ASSERT_TRUE(axis.pulsesPerMm() > 3999.0 && axis.pulsesPerMm() < 4001.0);
 }
 
+static void test_linear_move_rejects_drive_limit_stop(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+
+  // Fault + Stopped (isLikelyLimitStop) — move must be rejected.
+  Bytes limit = makeK5100Input154(0, true, false, false);
+  limit[9] |= 0x04 | 0x40;  // active + stopped (ready clear via fault)
+  image.setFeedback(limit);
+  TEST_ASSERT_FALSE(axis.moveToMm(10.0f, 20.0f, 0.0f, 0.0f));
+}
+
 static void test_linear_feedback_and_alarm(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -447,6 +460,218 @@ static void test_kinetix_a603_warning_decode(void) {
   char summary[192];
   TEST_ASSERT_TRUE(axis.getDriveAlarmSummary(summary, sizeof(summary)));
   TEST_ASSERT_NOT_NULL(strstr(summary, "A603"));
+}
+
+static void test_kinetix_a014_a015_helpers(void) {
+  TEST_ASSERT_TRUE(eip::k5100::isWarningA014(0x0014));
+  TEST_ASSERT_TRUE(eip::k5100::isWarningA015(0x0015));
+  TEST_ASSERT_FALSE(eip::k5100::isWarningA014(0x0015));
+  TEST_ASSERT_FALSE(eip::k5100::isWarningA015(0x0014));
+  TEST_ASSERT_FALSE(eip::k5100::isWarningA014(0x0603));
+
+  char disp[8];
+  eip::k5100::DriveCodeInfo info{};
+  TEST_ASSERT_TRUE(
+      eip::k5100::lookupDriveCode(0x0015, 'A', disp, sizeof(disp), info));
+  TEST_ASSERT_EQUAL_STRING("A015", info.display);
+  TEST_ASSERT_NOT_NULL(strstr(info.name, "Reverse"));
+  TEST_ASSERT_TRUE(
+      eip::k5100::lookupDriveCode(0x0014, 'A', disp, sizeof(disp), info));
+  TEST_ASSERT_EQUAL_STRING("A014", info.display);
+  TEST_ASSERT_NOT_NULL(strstr(info.name, "Forward"));
+}
+
+static void test_linear_absolute_aborts_busy_on_a015(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(50.0f, 20.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Enter Run (StartMotion edge clears after one tick).
+  Bytes run_fb = makeK5100Input154(0, false, false, false);
+  run_fb[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(run_fb);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // A015 warning during Run must abort and clear busy (escape moves still OK).
+  Bytes a015 = makeK5100Input154(1000, false, false, false, 0, 0x0015, true);
+  a015[9] |= 0x04 | 0x08 | 0x20 | 0x40;  // active+ready+CIP + stopped
+  image.setFeedback(a015);
+  for (int i = 0; i < 40; ++i) {
+    image.setFeedback(a015);
+    axis.update();
+    if (!axis.isBusy()) break;
+  }
+  TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "A015 should clear Absolute busy");
+
+  // Escape move must not be rejected solely for A015 warning.
+  TEST_ASSERT_TRUE(axis.moveToMm(0.0f, 20.0f, 0.0f, 0.0f));
+
+  // While still on A015, Absolute must not re-abort (creep/escape path).
+  Bytes a015_run = makeK5100Input154(1000, false, false, false, 0, 0x0015, true);
+  a015_run[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(a015_run);
+  axis.update();  // StartMotion edge
+  TEST_ASSERT_TRUE(axis.isBusy());
+  for (int i = 0; i < 10; ++i) {
+    image.setFeedback(a015_run);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(),
+                           "escape while A015 still set must not re-abort");
+}
+
+static void test_cancel_absolute_to_feedback_retargets(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(100.0f, 20.0f, 0.0f, 0.0f));
+
+  Bytes run_fb = makeK5100Input154(25000, false, false, false);
+  run_fb[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(run_fb);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Mid-move cancel: Absolute StartMotion to live feedback (not OM=0 Hold).
+  image.setFeedback(run_fb);
+  TEST_ASSERT_TRUE(axis.cancelAbsoluteToFeedback());
+  TEST_ASSERT_TRUE(axis.isBusy());
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_EQUAL_INT8(1, static_cast<int8_t>(cmd[0]));  // OM=Position
+  TEST_ASSERT_EQUAL_INT32(25000, readLeI32(cmd, 16));       // position ref
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);                   // StartMotion bit4
+}
+
+static void test_stop_and_wait_returns_when_physically_stopped(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+
+  // Feedback: position held constant — the only trustworthy stop evidence.
+  Bytes fb = makeK5100Input154(0, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20 | 0x40;  // active + ready + HomedStatus + stopped
+  image.setFeedback(fb);
+
+  TEST_ASSERT_TRUE(axis.stopAndWaitForPhysicalStop());
+
+  // Advance the state machine through the remaining Stopping→Hold transition.
+  for (int i = 0; i < 30; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+    if (!axis.isBusy()) break;
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  // Hold must be the documented settle image (OM=0 TM=10). OM=1 here A603s on
+  // the drive, which then keeps running the previous Absolute profile.
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_EQUAL_INT8(0, static_cast<int8_t>(cmd[0]));  // OM=NotSpecified
+  TEST_ASSERT_EQUAL_UINT8(10, cmd[26]);                     // TM=10
+  TEST_ASSERT_TRUE((cmd[1] & 0x01) != 0);                   // servo_on
+  TEST_ASSERT_TRUE((cmd[1] & 0x04) == 0);                   // StopMotion cleared
+}
+
+// Bench regression: the drive A603s and ignores the abort if it changes anything
+// beyond the StopMotion bit. The settle image (OM=0 TM=10, zero decel) swapped
+// mode mid-profile and asked for a decel-to-stop with no decel ramp.
+static void test_abort_image_differs_from_move_only_by_stop_bit(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+
+  TEST_ASSERT_TRUE(axis.moveToMm(600.0f, 1.0f, 0.0f, 0.0f));
+
+  // Settle into Run and capture the accepted in-flight image.
+  Bytes run_fb = makeK5100Input154(1000, false, false, false);
+  run_fb[9] |= 0x04 | 0x08 | 0x20;
+  for (int i = 0; i < 5; ++i) {
+    image.setFeedback(run_fb);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(axis.isBusy());
+  Bytes run_cmd;
+  TEST_ASSERT_TRUE(image.getCommand(run_cmd));
+  TEST_ASSERT_TRUE((run_cmd[1] & 0x04) == 0);  // StopMotion clear while running
+
+  // Rising A014 aborts mid-profile — the case that ran forever on the bench.
+  Bytes a014 = makeK5100Input154(1100, false, false, false, 0, 0x0014, true);
+  a014[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(a014);
+  axis.update();
+
+  Bytes stop_cmd;
+  TEST_ASSERT_TRUE(image.getCommand(stop_cmd));
+  TEST_ASSERT_EQUAL_UINT32(run_cmd.size(), stop_cmd.size());
+  TEST_ASSERT_TRUE_MESSAGE((stop_cmd[1] & 0x04) != 0, "abort must set StopMotion");
+  for (size_t i = 0; i < run_cmd.size(); ++i) {
+    if (i == 1) continue;  // control bits carry the StopMotion edge
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(
+        run_cmd[i], stop_cmd[i],
+        "abort image must not change OM/TM/speed/accel/decel mid-profile");
+  }
+}
+
+// Bench regression: during a 1 mm/s creep the drive asserts its `stopped` bit
+// and reports near-zero speed, so the wait must not believe either one.
+static void test_stop_and_wait_rejects_creep_despite_stopped_bit(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+
+  // Creep the reported position by 1 mm/s (10 PUU per 10 ms poll) while the
+  // drive claims stopped, exactly as observed on the bench.
+  std::atomic<bool> running{true};
+  std::thread creeper([&] {
+    int32_t puu = 0;
+    while (running.load()) {
+      Bytes fb = makeK5100Input154(puu, false, false, false);
+      fb[9] |= 0x04 | 0x08 | 0x20 | 0x40;  // active + ready + Homed + stopped
+      image.setFeedback(fb);
+      puu += 10;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  });
+
+  const bool stopped = axis.stopAndWaitForPhysicalStop();
+  running.store(false);
+  creeper.join();
+
+  TEST_ASSERT_FALSE(stopped);  // must time out, not report a false stop
 }
 
 static void test_rotary_move_and_feedback(void) {
@@ -532,8 +757,15 @@ int main(void) {
   RUN_TEST(test_linear_absolute_keeps_target_on_overshoot_feedback);
   RUN_TEST(test_linear_move_does_not_stop_at_half_travel);
   RUN_TEST(test_linear_z_ballscrew_scaling);
+  RUN_TEST(test_linear_move_rejects_drive_limit_stop);
   RUN_TEST(test_linear_feedback_and_alarm);
   RUN_TEST(test_kinetix_a603_warning_decode);
+  RUN_TEST(test_kinetix_a014_a015_helpers);
+  RUN_TEST(test_linear_absolute_aborts_busy_on_a015);
+  RUN_TEST(test_cancel_absolute_to_feedback_retargets);
+  RUN_TEST(test_stop_and_wait_returns_when_physically_stopped);
+  RUN_TEST(test_abort_image_differs_from_move_only_by_stop_bit);
+  RUN_TEST(test_stop_and_wait_rejects_creep_despite_stopped_bit);
   RUN_TEST(test_rotary_move_and_feedback);
   RUN_TEST(test_rotary_alarm);
   RUN_TEST(test_scanner_process_image_exchange);

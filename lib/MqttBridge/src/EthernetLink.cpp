@@ -67,19 +67,20 @@ bool EthernetLink::configureNetwork() {
         return false;
     }
 
+    esp_ip4_addr_t ip = {};
+    esp_ip4_addr_t gw = {};
+    esp_ip4_addr_t mask = {};
+    if (esp_netif_str_to_ip4(ETH_STATIC_IP, &ip) != ESP_OK ||
+        esp_netif_str_to_ip4(ETH_STATIC_GATEWAY, &gw) != ESP_OK ||
+        esp_netif_str_to_ip4(ETH_STATIC_NETMASK, &mask) != ESP_OK) {
+        ESP_LOGE(TAG, "Invalid static IP/gw/netmask string (check menuconfig)");
+        return false;
+    }
+
     esp_netif_ip_info_t ip_info = {};
-    ip_info.ip.addr = ESP_IP4TOADDR(ETH_STATIC_IP_OCTET_1,
-                                    ETH_STATIC_IP_OCTET_2,
-                                    ETH_STATIC_IP_OCTET_3,
-                                    ETH_STATIC_IP_OCTET_4);
-    ip_info.gw.addr = ESP_IP4TOADDR(ETH_STATIC_GW_OCTET_1,
-                                    ETH_STATIC_GW_OCTET_2,
-                                    ETH_STATIC_GW_OCTET_3,
-                                    ETH_STATIC_GW_OCTET_4);
-    ip_info.netmask.addr = ESP_IP4TOADDR(ETH_STATIC_NETMASK_OCTET_1,
-                                         ETH_STATIC_NETMASK_OCTET_2,
-                                         ETH_STATIC_NETMASK_OCTET_3,
-                                         ETH_STATIC_NETMASK_OCTET_4);
+    ip_info.ip.addr = ip.addr;
+    ip_info.gw.addr = gw.addr;
+    ip_info.netmask.addr = mask.addr;
 
     err = esp_netif_set_ip_info(netif_, &ip_info);
     if (err != ESP_OK) {

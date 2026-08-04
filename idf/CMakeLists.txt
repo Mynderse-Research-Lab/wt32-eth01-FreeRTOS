@@ -13,6 +13,7 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/MqttBridge"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/EtherNetIP"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/W5500"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/I2cDisplay"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

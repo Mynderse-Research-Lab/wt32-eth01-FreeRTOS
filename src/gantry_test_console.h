@@ -37,6 +37,17 @@ struct GantryTestConsoleConfig {
   int theta_pulse_pin = -1;  // theta pulse STEP GPIO
 };
 
+/** Optional reply sink for Ethernet console (tees ESP_LOG during a command). */
+using GantryConsoleReplyFn = void (*)(void *ctx, const char *text);
+
+/**
+ * Run one console command line (shared by UART and TCP).
+ * When reply_fn is non-null, ESP_LOG output for this command is also forwarded.
+ */
+void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *line,
+                              GantryConsoleReplyFn reply_fn = nullptr,
+                              void *reply_ctx = nullptr);
+
 void gantryTestConsoleTask(void *param);
 void gantryTestPrintHelp();
 

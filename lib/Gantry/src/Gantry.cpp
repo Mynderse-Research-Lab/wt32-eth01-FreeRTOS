@@ -5,6 +5,8 @@
  */
 
 #include "Gantry.h"
+#include "GantryEipLinearAxis.h"
+#include "KinetixFaultCodes.h"
 #include <cmath>
 #include <cstring>
 #include "esp_log.h"
@@ -83,7 +85,10 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     gripperActuateDurationMs_(GRIPPER_ACTUATE_TIME_MS),
     lastXPositionCounts_(0),
     xPulsesPerMmOverride_(0.0f),
-    jointDirectMove_(false) {
+    jointDirectMove_(false),
+    eipLimitPhase_(EipLimitPhase::kIdle),
+    eipLimitPhaseStartMs_(0),
+    eipLimitSawBusy_(false) {
 }
 
 // ============================================================================
@@ -201,6 +206,29 @@ void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
     xMaxPin_ = xMaxPin;
     xMinSwitch_.configure(xMinPin_, true, true, 6);
     xMaxSwitch_.configure(xMaxPin_, true, true, 6);
+}
+
+void Gantry::configureDriveManagedLimits() {
+    xMinPin_ = -1;
+    xMaxPin_ = -1;
+    xMinSwitch_.configureExternal();
+    xMaxSwitch_.configureExternal();
+    auto* xEip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+    if (xEip != nullptr) {
+        xEip->attachLimitSwitches(&xMinSwitch_, &xMaxSwitch_);
+    }
+    auto* zEip = dynamic_cast<GantryEipLinearAxis*>(axisZ_.get());
+    if (zEip != nullptr) {
+        // Z has no dedicated Gantry switches; axis still gates moves on !ready
+        // and aborts on isLikelyLimitStop. Attach null for API symmetry.
+        zEip->attachLimitSwitches(nullptr, nullptr);
+    }
+    ESP_LOGI(TAG, "Drive-managed endstops enabled (EIP Fault/Stopped)");
+}
+
+bool Gantry::driveManagedLimitsEnabled() const {
+    return xMinSwitch_.isConfigured() &&
+           xMinSwitch_.source() == GantryLimitSwitch::Source::kDriveManaged;
 }
 
 void Gantry::setZAxisLimits(float minMm, float maxMm) {
@@ -383,6 +411,11 @@ void Gantry::homeX() {
     if (!axisX_) return;
     if (axisX_->isAlarmActive()) return;
 
+    if (driveManagedLimitsEnabled()) {
+        startEipPrecisionHome();
+        return;
+    }
+
     if (!xMinSwitch_.isConfigured() || !xMaxSwitch_.isConfigured()) {
         return;
     }
@@ -464,6 +497,58 @@ int Gantry::calibrateX() {
 
     if (!axisX_) return 0;
     if (axisX_->isAlarmActive()) return 0;
+
+    if (driveManagedLimitsEnabled()) {
+        calibrationInProgress_ = true;
+        axisLength_ = 0;
+        if (!homingInProgress_ && eipLimitPhase_ == EipLimitPhase::kIdle) {
+            startEipPrecisionHome();
+        }
+        unsigned long start_ms = gantry_millis();
+        while ((homingInProgress_ || eipLimitPhase_ == EipLimitPhase::kHomeSeekMin ||
+                eipLimitPhase_ == EipLimitPhase::kHomeCreepClear ||
+                eipLimitPhase_ == EipLimitPhase::kHomeSettle) &&
+               (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+            if (abortRequested_) {
+                stopAllMotion();
+                calibrationInProgress_ = false;
+                return 0;
+            }
+            gantry_delay(10);
+        }
+        if (homingInProgress_ ||
+            (eipLimitPhase_ != EipLimitPhase::kIdle &&
+             eipLimitPhase_ != EipLimitPhase::kCalSeekMax &&
+             eipLimitPhase_ != EipLimitPhase::kCalCreepClear &&
+             eipLimitPhase_ != EipLimitPhase::kCalReturnZero)) {
+            ESP_LOGE(TAG, "[CAL] EIP home did not complete before calibrate");
+            stopAllMotion();
+            calibrationInProgress_ = false;
+            return 0;
+        }
+        // Home→cal handoff: kHomeSettle already armed kCalSeekMax when cal was
+        // requested; only start calibrate if home was already done.
+        if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+            startEipPrecisionCalibrate();
+        }
+        start_ms = gantry_millis();
+        while (calibrationInProgress_ &&
+               (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+            if (abortRequested_) {
+                stopAllMotion();
+                calibrationInProgress_ = false;
+                return 0;
+            }
+            gantry_delay(10);
+        }
+        if (calibrationInProgress_) {
+            ESP_LOGE(TAG, "[CAL] EIP calibrate timed out");
+            stopAllMotion();
+            calibrationInProgress_ = false;
+            return 0;
+        }
+        return axisLength_;
+    }
 
     calibrationInProgress_ = true;
 
@@ -826,15 +911,19 @@ bool Gantry::moveZAxisTo(float targetZ, float speed, float accel, float decel) {
 }
 
 void Gantry::updateAxisPositions() {
-    xMinSwitch_.update();
-    xMaxSwitch_.update();
-
     if (!axisX_) {
         return;
     }
 
-    uint32_t currentXCounts = axisX_->getCurrentPulses();
-    if (axisX_->isMotionActive()) {
+    // Refresh drive warnings → external switches before limit decisions.
+    axisX_->update();
+    xMinSwitch_.update();
+    xMaxSwitch_.update();
+
+    if (eipLimitPhase_ != EipLimitPhase::kIdle) {
+        advanceEipLimitSequence();
+    } else if (axisX_->isMotionActive()) {
+        uint32_t currentXCounts = axisX_->getCurrentPulses();
         bool movingTowardMax = currentXCounts > lastXPositionCounts_;
         bool movingTowardMin = currentXCounts < lastXPositionCounts_;
 
@@ -847,20 +936,18 @@ void Gantry::updateAxisPositions() {
             axisX_->setCurrentPulses(0);
             homingInProgress_ = false;
         }
+        lastXPositionCounts_ = currentXCounts;
     } else if (homingInProgress_) {
         if (xMinSwitch_.isActive()) {
             axisX_->setCurrentPulses(0);
         }
         homingInProgress_ = false;
+        lastXPositionCounts_ = axisX_->getCurrentPulses();
+    } else {
+        lastXPositionCounts_ = axisX_->getCurrentPulses();
     }
-    lastXPositionCounts_ = currentXCounts;
 
-    currentX_mm_ = pulsesToMm((int32_t)currentXCounts);
-
-    // Tick the X axis so it can run its MOVE-log state machine. The driver
-    // itself runs on its own esp_timer, so update() is a logging-only hook
-    // here (mirrors what's done for Z and Theta below).
-    axisX_->update();
+    currentX_mm_ = axisX_->getCurrentMm();
 
     if (axisZ_) {
         axisZ_->update();
@@ -878,8 +965,324 @@ void Gantry::stopAllMotion() {
     if (axisTheta_) axisTheta_->stopMotion();
     homingInProgress_      = false;
     calibrationInProgress_ = false;
+    eipLimitPhase_         = EipLimitPhase::kIdle;
     motionState_           = MotionState::IDLE;
     jointDirectMove_       = false;
+}
+
+bool Gantry::eipA014Active() const {
+    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+    if (eip == nullptr) return false;
+    return eip->isA014WarningActive();
+}
+
+bool Gantry::eipA015Active() const {
+    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+    if (eip == nullptr) return false;
+    return eip->isA015WarningActive();
+}
+
+float Gantry::eipSeekSpeedMmS() const {
+    return 10.0f;
+}
+
+float Gantry::eipCreepSpeedMmS() const {
+    return 1.0f;
+}
+
+float Gantry::eipCalSeekSpeedMmS() const {
+    if (speed_mm_per_s_ > 0) {
+        return static_cast<float>(speed_mm_per_s_);
+    }
+    return eipSeekSpeedMmS();
+}
+
+bool Gantry::eipStartMoveDelta(float delta_mm, float speed_mm_s) {
+    if (!axisX_) return false;
+    const float accel =
+        (acceleration_mm_per_s2_ > 0)
+            ? static_cast<float>(acceleration_mm_per_s2_)
+            : 500.0f;
+    const float decel =
+        (deceleration_mm_per_s2_ > 0)
+            ? static_cast<float>(deceleration_mm_per_s2_)
+            : accel;
+    const float here = axisX_->getCurrentMm();
+    return axisX_->moveToMm(here + delta_mm, speed_mm_s, accel, decel);
+}
+
+void Gantry::startEipPrecisionHome() {
+    if (!axisX_) return;
+    abortRequested_ = false;
+    homingInProgress_ = true;
+    eipLimitSawBusy_ = false;
+    eipLimitPhaseStartMs_ = gantry_millis();
+
+    if (eipA014Active()) {
+        ESP_LOGI(TAG, "[HOME] EIP already on A014 — creep toward A015 until clear");
+        eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
+        // Absolute start deferred to advanceEipLimitSequence (avoids console/update race).
+        return;
+    }
+
+    ESP_LOGI(TAG, "[HOME] EIP seek A014 at %.1f mm/s (toward -X)",
+             eipSeekSpeedMmS());
+    eipLimitPhase_ = EipLimitPhase::kHomeSeekMin;
+}
+
+void Gantry::startEipPrecisionCalibrate() {
+    if (!axisX_) return;
+    abortRequested_ = false;
+    calibrationInProgress_ = true;
+    eipLimitSawBusy_ = false;
+    eipLimitPhaseStartMs_ = gantry_millis();
+
+    if (eipA015Active()) {
+        ESP_LOGI(TAG, "[CAL] EIP already on A015 — creep toward A014 until clear");
+        eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
+        return;
+    }
+
+    ESP_LOGI(TAG, "[CAL] EIP seek A015 at %.1f mm/s (toward +X)",
+             eipCalSeekSpeedMmS());
+    eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
+}
+
+void Gantry::finishEipHomeOk() {
+    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+    // Drive StopMotion bit cancels the in-flight creep (Absolute retarget-to-here
+    // was ignored while command_in_progress). Block until encoder position holds
+    // still, then let the settle hold command take over.
+    if (eip == nullptr || !eip->stopAndWaitForPhysicalStop()) {
+        axisX_->stopMotion();
+    }
+    eipLimitPhase_ = EipLimitPhase::kHomeSettle;
+    eipLimitPhaseStartMs_ = gantry_millis();
+    eipLimitSawBusy_ = false;
+    ESP_LOGI(TAG, "[HOME] EIP A014 cleared — StopMotion hold, then set joint zero");
+}
+
+void Gantry::finishEipCalOk() {
+    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+    if (eip == nullptr || !eip->stopAndWaitForPhysicalStop()) {
+        axisX_->stopMotion();
+    }
+    const float max_mm = axisX_->getCurrentMm();
+    axisLength_ = static_cast<int32_t>(llround(max_mm));
+    if (axisLength_ < 1) axisLength_ = 1;
+    currentX_mm_ = max_mm;
+    ESP_LOGI(TAG,
+             "[CAL] EIP A015 cleared — joint max ≈ %.3f mm (%ld); hold-here then return to 0",
+             max_mm, (long)axisLength_);
+    eipLimitPhase_ = EipLimitPhase::kCalReturnZero;
+    eipLimitPhaseStartMs_ = gantry_millis();
+    calibrationInProgress_ = true;
+    eipLimitSawBusy_ = false;
+}
+
+void Gantry::failEipLimitSequence(const char* why) {
+    ESP_LOGE(TAG, "[EIP-LIMIT] failed: %s", why ? why : "?");
+    if (axisX_) axisX_->stopMotion();
+    eipLimitPhase_ = EipLimitPhase::kIdle;
+    eipLimitSawBusy_ = false;
+    homingInProgress_ = false;
+    calibrationInProgress_ = false;
+}
+
+void Gantry::advanceEipLimitSequence() {
+    if (abortRequested_) {
+        failEipLimitSequence("abort requested");
+        return;
+    }
+    constexpr unsigned long kPhaseTimeoutMs = TRAVEL_MEASUREMENT_TIMEOUT_MS;
+    if ((gantry_millis() - eipLimitPhaseStartMs_) > kPhaseTimeoutMs) {
+        failEipLimitSequence("phase timeout");
+        return;
+    }
+
+    constexpr float kSeekMm = 600.0f;
+
+    switch (eipLimitPhase_) {
+        case EipLimitPhase::kHomeSeekMin:
+            if (eipA014Active()) {
+                // Absolute already aborts on rising A014; wait for !busy before creep.
+                ESP_LOGI(TAG,
+                         "[HOME] A014 tripped — will creep toward A015 @ %.1f mm/s",
+                         eipCreepSpeedMmS());
+                axisX_->stopMotion();
+                eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (axisX_->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (!eipLimitSawBusy_) {
+                if (!eipStartMoveDelta(-kSeekMm, eipSeekSpeedMmS())) {
+                    failEipLimitSequence("seek A014 start failed");
+                }
+            } else {
+                failEipLimitSequence("seek A014 ended without trip (check PL/A014)");
+            }
+            break;
+
+        case EipLimitPhase::kHomeCreepClear:
+            if (!eipA014Active()) {
+                finishEipHomeOk();
+            } else if (axisX_->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else {
+                // Start (or restart) slow escape; moveToMm ignores A014 abort until clear.
+                if (!eipStartMoveDelta(+kSeekMm, eipCreepSpeedMmS())) {
+                    failEipLimitSequence("home creep start failed");
+                }
+            }
+            break;
+
+        case EipLimitPhase::kHomeSettle: {
+            constexpr uint8_t kMaxSettleRetries = 3;
+            // After clear-edge StopMotion, wait idle before zero / next Absolute.
+            if (!axisX_->isBusy()) {
+                auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+                // Verify the axis is physically stopped, not just firmware-idle.
+                // Early hold-here can leave the drive coasting even with busy=0
+                // (see GantryEipLinearAxis.cpp kStopping comment).
+                if (eip && !eip->isAxisPhysicallyStopped()) {
+                    if (eipHomeSettleRetries_ < kMaxSettleRetries) {
+                        ++eipHomeSettleRetries_;
+                        ESP_LOGW(TAG,
+                                 "[HOME] Settle wait: axis still moving after "
+                                 "hold-here (retry %u/%u) — re-issuing hold",
+                                 (unsigned)eipHomeSettleRetries_,
+                                 (unsigned)kMaxSettleRetries);
+                        eip->cancelAbsoluteToFeedback();
+                        eipLimitPhaseStartMs_ = gantry_millis();
+                        break;
+                    }
+                    ESP_LOGW(TAG,
+                             "[HOME] Settle retries exhausted (%u) — forcing "
+                             "complete; drift possible",
+                             (unsigned)kMaxSettleRetries);
+                }
+                eipHomeSettleRetries_ = 0;
+                axisX_->setCurrentPulses(0);
+                currentX_mm_ = axisX_->getCurrentMm();
+                homingInProgress_ = false;
+                ESP_LOGI(TAG,
+                         "[HOME] EIP joint zero set here (%.3f mm reported)",
+                         currentX_mm_);
+                if (calibrationInProgress_) {
+                    ESP_LOGI(TAG, "[CAL] EIP seek A015 at %.1f mm/s (toward +X)",
+                             eipCalSeekSpeedMmS());
+                    eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
+                    eipLimitPhaseStartMs_ = gantry_millis();
+                    eipLimitSawBusy_ = false;
+                } else {
+                    eipLimitPhase_ = EipLimitPhase::kIdle;
+                    ESP_LOGI(TAG, "[HOME] EIP complete");
+                }
+            }
+            break;
+        }
+
+        case EipLimitPhase::kCalSeekMax:
+            if (eipA015Active()) {
+                ESP_LOGI(TAG,
+                         "[CAL] A015 tripped — will creep toward A014 @ %.1f mm/s",
+                         eipCreepSpeedMmS());
+                axisX_->stopMotion();
+                eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (axisX_->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (!eipLimitSawBusy_) {
+                if (!eipStartMoveDelta(+kSeekMm, eipCalSeekSpeedMmS())) {
+                    failEipLimitSequence("seek A015 start failed");
+                }
+            } else {
+                failEipLimitSequence("seek A015 ended without trip (check NL/A015)");
+            }
+            break;
+
+        case EipLimitPhase::kCalCreepClear:
+            if (!eipA015Active()) {
+                finishEipCalOk();
+            } else if (axisX_->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else {
+                if (!eipStartMoveDelta(-kSeekMm, eipCreepSpeedMmS())) {
+                    failEipLimitSequence("cal creep start failed");
+                }
+            }
+            break;
+
+        case EipLimitPhase::kCalReturnZero: {
+            constexpr uint8_t kMaxSettleRetries = 3;
+            if (!axisX_->isBusy()) {
+                auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+                // Verify physical stop — same root cause as kHomeSettle drift.
+                if (eip && !eip->isAxisPhysicallyStopped()) {
+                    if (eipCalSettleRetries_ < kMaxSettleRetries) {
+                        ++eipCalSettleRetries_;
+                        ESP_LOGW(TAG,
+                                 "[CAL] Settle wait: axis still moving after "
+                                 "hold-here (retry %u/%u) — re-issuing hold",
+                                 (unsigned)eipCalSettleRetries_,
+                                 (unsigned)kMaxSettleRetries);
+                        eip->cancelAbsoluteToFeedback();
+                        eipLimitPhaseStartMs_ = gantry_millis();
+                        break;
+                    }
+                    ESP_LOGW(TAG,
+                             "[CAL] Settle retries exhausted (%u) — forcing "
+                             "complete; drift possible",
+                             (unsigned)kMaxSettleRetries);
+                }
+                eipCalSettleRetries_ = 0;
+
+                if (!eipLimitSawBusy_) {
+                    // First !busy: hold-here from finishEipCalOk completed.
+                    // Now Absolute to joint 0 at profile speed if not already there.
+                    if (std::fabs(axisX_->getCurrentMm()) > 0.5f) {
+                        const float accel =
+                            (acceleration_mm_per_s2_ > 0)
+                                ? static_cast<float>(acceleration_mm_per_s2_)
+                                : 500.0f;
+                        const float decel =
+                            (deceleration_mm_per_s2_ > 0)
+                                ? static_cast<float>(deceleration_mm_per_s2_)
+                                : accel;
+                        if (!axisX_->moveToMm(0.0f, eipCalSeekSpeedMmS(), accel,
+                                              decel)) {
+                            failEipLimitSequence("return to 0 start failed");
+                            break;
+                        }
+                        eipLimitSawBusy_ = true;
+                        eipLimitPhaseStartMs_ = gantry_millis();
+                    } else {
+                        // Already at joint 0 — no return move needed.
+                        currentX_mm_ = axisX_->getCurrentMm();
+                        eipLimitPhase_ = EipLimitPhase::kIdle;
+                        calibrationInProgress_ = false;
+                        ESP_LOGI(TAG, "[CAL] EIP complete — at joint 0 (%.3f mm)",
+                                 currentX_mm_);
+                    }
+                } else {
+                    // Return-to-zero move completed.
+                    eipLimitSawBusy_ = false;
+                    currentX_mm_ = axisX_->getCurrentMm();
+                    eipLimitPhase_ = EipLimitPhase::kIdle;
+                    calibrationInProgress_ = false;
+                    ESP_LOGI(TAG, "[CAL] EIP complete — at joint 0 (%.3f mm)",
+                             currentX_mm_);
+                }
+            }
+            break;
+        }
+
+        case EipLimitPhase::kIdle:
+        default:
+            break;
+    }
 }
 
 // ============================================================================
@@ -965,9 +1368,11 @@ void Gantry::startSequentialMotion() {
     }
 
     if (axisTheta_) {
+#if !CONFIG_GANTRY_THETA_SEQUENTIAL
         if (!axisTheta_->moveToDeg(targetTheta_deg_,
                                    (float)speed_deg_per_s_,
-                                   0.0f, 0.0f)) {
+                                   (float)acceleration_mm_per_s2_,
+                                   (float)deceleration_mm_per_s2_)) {
             const float currentTheta = axisTheta_->getCurrentDeg();
             if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
                 ESP_LOGE(TAG,
@@ -980,6 +1385,7 @@ void Gantry::startSequentialMotion() {
                      "[THETA] moveToDeg no-op treated as success (current=%.2f target=%.2f)",
                      currentTheta, targetTheta_deg_);
         }
+#endif
         currentTheta_ = (int32_t)axisTheta_->getCurrentDeg();
     } else {
         currentTheta_ = (int32_t)targetTheta_deg_;
@@ -1031,12 +1437,33 @@ void Gantry::processSequentialMotion() {
 
         case MotionState::X_MOVING:
             if (!axisX_ || !axisX_->isMotionActive()) {
+#if CONFIG_GANTRY_THETA_SEQUENTIAL
+                if (axisTheta_) {
+                    motionState_ = MotionState::THETA_MOVING;
+                    if (!axisTheta_->moveToDeg(targetTheta_deg_,
+                                               (float)speed_deg_per_s_,
+                                               (float)acceleration_mm_per_s2_,
+                                               (float)deceleration_mm_per_s2_)) {
+                        const float currentTheta = axisTheta_->getCurrentDeg();
+                        if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
+                            ESP_LOGE(TAG,
+                                     "[THETA] moveToDeg failed (current=%.2f target=%.2f) - aborting sequence",
+                                     currentTheta, targetTheta_deg_);
+                            stopAllMotion();
+                            return;
+                        }
+                    }
+                } else {
+                    motionState_ = MotionState::IDLE;
+                }
+#else
                 motionState_ = MotionState::IDLE;
+#endif
             }
             break;
 
         case MotionState::THETA_MOVING:
-            if (!axisTheta_) {
+            if (!axisTheta_ || !axisTheta_->isMotionActive()) {
                 motionState_ = MotionState::IDLE;
             }
             break;

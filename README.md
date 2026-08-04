@@ -1,8 +1,8 @@
 # WT32-ETH01 Gantry Controller
 
 ESP-IDF firmware for a SCHUNK gantry pick-and-place controller on WT32-ETH01:
-EtherNet/IP originator (W5500) for Kinetix X/Z, MQTT over LAN8720, and a serial
-console for bring-up.
+EtherNet/IP originator (W5500) for Kinetix X/Z, MQTT over LAN8720, and a
+diagnostic console on UART plus TCP on the plant Ethernet.
 
 **Canonical docs:** see [`docs/INDEX.md`](docs/INDEX.md).
 
@@ -11,6 +11,25 @@ console for bring-up.
 | [Expected electro-mechanical assembly](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics / drives / networks |
 | [HV/LV schematics](docs/HV_LV_SCHEMATICS.md) | Electrical design basis (preliminary) |
 | [Low-level gantry control](docs/LOW_LEVEL_GANTRY_CONTROL.md) | Firmware / EIP / console |
+
+## Console
+
+- **UART0** — flash and pre-link logs (USB–TTL).
+- **TCP** on LAN8720 — after plant link is up, gantry listens at
+  **`192.168.1.100:2323`**. Password / remember TTL editable under menuconfig
+  **TCP gantry console (LAN8720)** (default password `LTU_1932`, 600 s / 4 IPs).
+
+```powershell
+ncat 192.168.1.100 2323
+# enter password if prompted
+# PuTTY: Raw → 192.168.1.100 port 2323
+```
+
+```bash
+nc 192.168.1.100 2323
+```
+
+Details: [LOW_LEVEL §9](docs/LOW_LEVEL_GANTRY_CONTROL.md).
 
 ## Build & flash (ESP-IDF)
 
