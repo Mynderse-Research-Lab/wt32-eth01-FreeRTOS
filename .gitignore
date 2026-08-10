@@ -2,7 +2,7 @@
 
 *.code-workspace
 
-# Cursor IDE / agent local state (rules, hooks, MCP, worklog, plans)
+# Cursor IDE / agent local state (rules, hooks, MCP, plans)
 .cursor/
 
 # IDE/tooling
@@ -24,6 +24,9 @@ idf/build_output.log
 
 # Secrets / local env
 .env
+
+# Local bring-up checklist (not part of the product docs)
+docs/DEV_TRACKER.md
 
 # Bench / tool scratch logs
 *.log

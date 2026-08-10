@@ -198,7 +198,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 | `GantryUpdate` 100 Hz + UART console | **Live** |
 | TCP console on LAN8720 (`:2323`) | **Live** (when plant ETH up) |
 | Soft-home / soft-calibrate (no GPIO limits) | **Live** (bench) |
-| Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover PASS**; **Z deferred** (motor not on screw) — see DEV_TRACKER #2 |
+| Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover PASS**; **Z deferred** (motor not on screw) |
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Deferred** (`nullptr`) |
 | Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |

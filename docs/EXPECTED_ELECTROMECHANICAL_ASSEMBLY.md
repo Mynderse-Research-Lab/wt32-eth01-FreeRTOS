@@ -150,7 +150,7 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel. Console on UART or TCP `
 | Item | Status |
 |------|--------|
 | X drive TBIO limits (KNX PL/NL on INPUT1/2) | **PASS** (trip/recover) — re-run after RPI=5000 flash as regression |
-| Z drive TBIO limits | **DEFERRED** — Z motor not mounted on screw; active item DEV_TRACKER #2 |
+| Z drive TBIO limits | **DEFERRED** — Z motor not mounted on screw |
 | Firmware drive-managed path | `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → `GantryLimitSwitch` + move gate |
 
 ### 4.3 X-only bench (until Z is mounted)
