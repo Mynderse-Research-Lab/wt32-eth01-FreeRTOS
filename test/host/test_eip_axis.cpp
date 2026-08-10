@@ -471,11 +471,11 @@ static void test_kinetix_a014_a015_helpers(void) {
   TEST_ASSERT_TRUE(
       eip::k5100::lookupDriveCode(0x0015, 'A', disp, sizeof(disp), info));
   TEST_ASSERT_EQUAL_STRING("A015", info.display);
-  TEST_ASSERT_NOT_NULL(strstr(info.name, "Reverse"));
+  TEST_ASSERT_NOT_NULL(strstr(info.name, "Negative"));
   TEST_ASSERT_TRUE(
       eip::k5100::lookupDriveCode(0x0014, 'A', disp, sizeof(disp), info));
   TEST_ASSERT_EQUAL_STRING("A014", info.display);
-  TEST_ASSERT_NOT_NULL(strstr(info.name, "Forward"));
+  TEST_ASSERT_NOT_NULL(strstr(info.name, "Positive"));
 }
 
 static void test_linear_absolute_aborts_busy_on_a015(void) {

@@ -2,7 +2,7 @@
 //
 // Drive keypad shows Axxx (minor/warning) and Exxx (major/fault). The Class 1
 // words are 16-bit; the low 12 bits are the hex display digits (A603 -> 0x0603).
-// Curated from 2198-RD001 codes + UM004D bench notes — not the full catalog.
+// Curated from 2198-RD001 codes + UM004D bench notes - not the full catalog.
 
 #ifndef ETHERNET_IP_KINETIX_FAULT_CODES_H
 #define ETHERNET_IP_KINETIX_FAULT_CODES_H
@@ -15,6 +15,11 @@ namespace eip {
 namespace k5100 {
 
 constexpr uint16_t kCodeMask12 = 0x0FFFu;
+// Drive frame (UM004D): PL = most positive travel, NL = most negative.
+// On this gantry X, motor sense is inverted vs joint +X: joint -X -> A014,
+// joint +X -> A015 (see EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md sec 4).
+constexpr uint16_t kWarningA014 = 0x0014;  // Positive/forward limit (PL)
+constexpr uint16_t kWarningA015 = 0x0015;  // Negative/reverse limit (NL)
 constexpr uint16_t kWarningA603 = 0x0603;  // Invalid I/O command data
 constexpr uint16_t kFaultE602 = 0x0602;    // Control connection lost (typical)
 
@@ -45,14 +50,18 @@ inline bool lookupDriveCode(uint16_t raw, char prefer_prefix, char* display_buf,
     const char* hint;
   };
   static constexpr Entry kTable[] = {
+      {0x014, 'A', "Positive limit (PL)",
+       "Overtravel at drive + / forward limit - move reverse only until switch closes"},
+      {0x015, 'A', "Negative limit (NL)",
+       "Overtravel at drive - / reverse limit - move forward only until switch closes"},
       {0x603, 'A', "Invalid I/O command data",
-       "Need Active (ServoOn 0→1 edge); moves use Speed + TravelMode=10 + "
+       "Need Active (ServoOn 0->1 edge); moves use Speed + TravelMode=10 + "
        "StartMotion preload (Position+TM=2 A603s on this bench)"},
       {0x237, 'E', "Indexing mode cannot start",
-       "Homing not defined — Position+TravelMode=10 needs a home; use Speed + "
+       "Homing not defined - Position+TravelMode=10 needs a home; use Speed + "
        "TravelMode=10 jog-to-target instead"},
       {0x602, 'E', "Control connection lost",
-       "Class 1 timeout — keep O->T within connection timeout; check W5500 link"},
+       "Class 1 timeout - keep O->T within connection timeout; check W5500 link"},
       {0x601, 'E', "Control power lost / STO",
        "Check STO wiring and control power"},
       {0x610, 'A', "Position error excessive",
@@ -145,6 +154,14 @@ inline bool formatDriveTripSummary(char* buf, size_t n, bool fault_bit,
 
 inline bool isWarningA603(uint16_t warning_code) {
   return codeDigits(warning_code) == kWarningA603;
+}
+
+inline bool isWarningA014(uint16_t warning_code) {
+  return codeDigits(warning_code) == kWarningA014;
+}
+
+inline bool isWarningA015(uint16_t warning_code) {
+  return codeDigits(warning_code) == kWarningA015;
 }
 
 }  // namespace k5100

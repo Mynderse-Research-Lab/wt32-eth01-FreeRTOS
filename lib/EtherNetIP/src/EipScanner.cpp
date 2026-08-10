@@ -228,7 +228,7 @@ bool EipScanner::exchangeOnce(uint32_t recv_timeout_ms, Bytes& out_to_assembly) 
 
   const Bytes frame = io_.buildOutputFrame(output);
   const ssize_t sent =
-      udp_.sendTo(frame.data(), frame.size(), config_.target_ip,
+      udp_.sendTo(frame.data(), frame.size(), parseIpv4Host(config_.target_ip),
                   EipIoConnection::kDefaultUdpPort);
   if (sent != static_cast<ssize_t>(frame.size())) {
 #ifdef ESP_PLATFORM

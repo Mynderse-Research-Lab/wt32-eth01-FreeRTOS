@@ -63,6 +63,8 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/EipScanner.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScanner.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipProcessImage.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipClass1TimingStats.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipReliabilityStats.cpp"
 )
 target_include_directories(ethernet_ip PUBLIC
     "${REPO_ROOT}/lib/EtherNetIP/src"

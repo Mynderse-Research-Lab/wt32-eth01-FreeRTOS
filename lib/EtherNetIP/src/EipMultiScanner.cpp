@@ -210,7 +210,7 @@ bool EipMultiScanner::sendAxisOutput(size_t i) {
 
   const Bytes frame = ax.io->buildOutputFrame(output);
   const ssize_t sent =
-      udp_.sendTo(frame.data(), frame.size(), ax.config.target_ip,
+      udp_.sendTo(frame.data(), frame.size(), parseIpv4Host(ax.config.target_ip),
                   EipIoConnection::kDefaultUdpPort);
   return sent == static_cast<ssize_t>(frame.size());
 }

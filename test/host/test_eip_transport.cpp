@@ -72,7 +72,7 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
   const Bytes& lastSent() const { return last_sent_; }
 
   bool bind(uint16_t, uint32_t = 0) override { return true; }
-  ssize_t sendTo(const uint8_t* data, size_t len, const char*, uint16_t) override {
+  ssize_t sendTo(const uint8_t* data, size_t len, uint32_t, uint16_t) override {
     last_sent_.assign(data, data + len);
     if (echo_) echo_frame_.assign(data, data + len);
     return static_cast<ssize_t>(len);
