@@ -19,6 +19,8 @@ public:
     bool start(const char* gantry_id);
     QueueHandle_t pickQueue() const;
     bool publishStatusJson(const char* json_payload);
+    /** True after MQTT_EVENT_CONNECTED until disconnect/destroy. */
+    bool isConnected() const;
 
 private:
     static void handleMqttEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
@@ -34,6 +36,7 @@ private:
     QueueHandle_t pick_queue_ = nullptr;
     char gantry_id_[16] = {0};
     char pick_topic_[64] = {0};
+    volatile bool connected_ = false;
 };
 
 }  // namespace MqttBridge

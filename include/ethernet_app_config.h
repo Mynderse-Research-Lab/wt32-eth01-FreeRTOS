@@ -45,6 +45,12 @@
 #define ETH_IP_WAIT_TIMEOUT_MS 3000
 #endif
 
+#if defined(CONFIG_MQTT_BRIDGE_ENABLE)
+#define MQTT_BRIDGE_ENABLE 1
+#else
+#define MQTT_BRIDGE_ENABLE 0
+#endif
+
 /* ---- TCP gantry console ------------------------------------------------- */
 
 #if defined(CONFIG_CONSOLE_TCP_ENABLE)

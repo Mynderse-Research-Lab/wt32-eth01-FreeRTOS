@@ -333,17 +333,23 @@ extern "C" void app_main(void) {
     // ------------------------------------------------------------------
     // MQTT bridge (non-fatal — eth may already be up; EIP/console already live)
     // ------------------------------------------------------------------
-    bool mqttReady = false;
+    const char* mqtt_state = "disabled";
+#if MQTT_BRIDGE_ENABLE
     if (mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
-        mqttReady = true;
+        mqtt_state = "started";
+        // Publish only lands after MQTT_EVENT_CONNECTED (see Bridge::isConnected).
         (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
     } else {
+        mqtt_state = "offline";
         ESP_LOGW(TAG, "MQTT bridge failed to start — EIP and console will still work; "
                  "pick scheduling unavailable until LAN8720 link is restored.");
     }
+#else
+    ESP_LOGI(TAG, "MQTT bridge disabled (CONFIG_MQTT_BRIDGE_ENABLE=n)");
+#endif
 
     ESP_LOGI(TAG, "All tasks created successfully (ETH %s, MQTT %s)",
-             ethUp ? "up" : "down", mqttReady ? "online" : "offline");
+             ethUp ? "up" : "down", mqtt_state);
 #if CONSOLE_UART_ENABLE
     ESP_LOGI(TAG, "System ready - type 'help' (UART and/or TCP %d)", CONSOLE_TCP_PORT);
     gantryTestPrintHelp();

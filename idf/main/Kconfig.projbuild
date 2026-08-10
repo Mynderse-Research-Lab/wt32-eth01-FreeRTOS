@@ -254,6 +254,14 @@ menu "LAN8720 plant Ethernet"
             How long Bridge / net-console bring-up waits for link+IP.
             Keep short so EIP continues when the plant cable is unplugged.
 
+    config MQTT_BRIDGE_ENABLE
+        bool "Start MQTT bridge on LAN8720"
+        default y
+        help
+            When disabled, skip esp_mqtt_client (no broker reconnect spam).
+            EIP Class 1 and TCP/UART console still run. Re-enable when the
+            plant broker at MQTT_BROKER_URI is reachable.
+
 endmenu
 
 menu "TCP gantry console (LAN8720)"

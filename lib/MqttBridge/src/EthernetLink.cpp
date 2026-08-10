@@ -228,7 +228,7 @@ bool EthernetLink::start() {
 
     started_ = true;
     link_up_ = false;
-    ESP_LOGI(TAG, "LAN8720 Ethernet started (PHY_ADDR=%d, RMII CLK out GPIO17 per sdkconfig)",
+    ESP_LOGI(TAG, "LAN8720 Ethernet started (PHY_ADDR=%d, RMII CLK_IN GPIO0 per sdkconfig)",
              ETH_PHY_ADDR);
     return true;
 }

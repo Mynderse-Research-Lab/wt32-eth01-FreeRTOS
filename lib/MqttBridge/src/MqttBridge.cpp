@@ -87,6 +87,7 @@ bool Bridge::start(const char* gantry_id) {
     }
 
     ESP_LOGI(TAG, "MQTT bridge started (id=%s, broker=%s)", gantry_id_, MQTT_BROKER_URI_DEFAULT);
+    connected_ = false;
     return true;
 }
 
@@ -94,8 +95,12 @@ QueueHandle_t Bridge::pickQueue() const {
     return pick_queue_;
 }
 
+bool Bridge::isConnected() const {
+    return connected_;
+}
+
 bool Bridge::publishStatusJson(const char* json_payload) {
-    if (mqtt_ == nullptr || json_payload == nullptr) {
+    if (mqtt_ == nullptr || json_payload == nullptr || !connected_) {
         return false;
     }
     int msg_id = esp_mqtt_client_publish(mqtt_, MQTT_TOPIC_GANTRY_STATUS, json_payload, 0, 0, 0);
@@ -116,6 +121,9 @@ void Bridge::onMqttEvent(esp_mqtt_event_handle_t event) {
         case MQTT_EVENT_CONNECTED:
             onConnected();
             break;
+        case MQTT_EVENT_DISCONNECTED:
+            connected_ = false;
+            break;
         case MQTT_EVENT_DATA:
             onData(event);
             break;
@@ -125,6 +133,7 @@ void Bridge::onMqttEvent(esp_mqtt_event_handle_t event) {
 }
 
 void Bridge::onConnected() {
+    connected_ = true;
     ESP_LOGI(TAG, "MQTT connected; subscribing to %s", pick_topic_);
     esp_mqtt_client_subscribe(mqtt_, pick_topic_, 1);
 }
