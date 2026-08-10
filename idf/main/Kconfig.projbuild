@@ -263,7 +263,17 @@ menu "TCP gantry console (LAN8720)"
         default y
         help
             Listen on LAN8720 for the same gantry commands as the UART
-            console. Does not use the W5500 EIP daisy-chain.
+            console, plus a session-long ESP_LOG stream. Does not use
+            the W5500 EIP daisy-chain.
+
+    config CONSOLE_UART_ENABLE
+        bool "Enable UART0 diagnostic console (GPIO1/3)"
+        default n
+        help
+            When disabled (recommended for plant bring-up), the SerialCmd
+            UART task is not started and sdkconfig should use
+            CONFIG_ESP_CONSOLE_NONE so GPIO1/TX and GPIO3/RX are free.
+            Use the TCP console / tools/lan_debug_ui.py instead.
 
     config CONSOLE_TCP_PORT
         int "TCP listen port"
@@ -304,5 +314,32 @@ menu "TCP gantry console (LAN8720)"
         default 4
         range 1 16
         depends on CONSOLE_TCP_AUTH_ENABLE
+
+    config CONSOLE_TCP_LOG_ENABLE
+        bool "Stream ESP_LOG over TCP (LAN logging)"
+        default y
+        depends on CONSOLE_TCP_ENABLE
+        help
+            When enabled, authenticated TCP sessions receive a filtered
+            ESP_LOG stream (same lines as UART). Command replies still
+            work when this is disabled.
+
+    choice CONSOLE_TCP_LOG_LEVEL
+        prompt "Minimum LAN log level"
+        default CONSOLE_TCP_LOG_LEVEL_INFO
+        depends on CONSOLE_TCP_LOG_ENABLE
+        help
+            Only lines at this severity or higher are forwarded to the
+            TCP client. ERR < WARN < INFO < DBUG.
+
+        config CONSOLE_TCP_LOG_LEVEL_ERR
+            bool "ERR (errors only)"
+        config CONSOLE_TCP_LOG_LEVEL_WARN
+            bool "WARN (errors + warnings)"
+        config CONSOLE_TCP_LOG_LEVEL_INFO
+            bool "INFO (errors + warnings + info)"
+        config CONSOLE_TCP_LOG_LEVEL_DBUG
+            bool "DBUG (all levels including debug/verbose)"
+    endchoice
 
 endmenu

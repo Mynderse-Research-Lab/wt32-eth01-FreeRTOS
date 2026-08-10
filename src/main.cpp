@@ -299,6 +299,7 @@ extern "C" void app_main(void) {
     consoleCfg.use_mcp23s17           = (gpio_expander_get_mcp_handle() != nullptr);
     consoleCfg.limit_switches_active  = false;
 
+#if CONSOLE_UART_ENABLE
     result = xTaskCreatePinnedToCore(
         gantryTestConsoleTask, "SerialCmd",
         CONSOLE_TASK_STACK, &consoleCfg,
@@ -306,6 +307,10 @@ extern "C" void app_main(void) {
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Serial task!");
     }
+#else
+    ESP_LOGI(TAG, "UART console disabled — GPIO1/3 free; use TCP :%d",
+             CONSOLE_TCP_PORT);
+#endif
 
     // ------------------------------------------------------------------
     // LAN8720 first so TCP console works even if MQTT broker is down.
@@ -318,7 +323,11 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "Net console listening on TCP %d (plant / LAN8720)",
                  CONSOLE_TCP_PORT);
     } else {
+#if CONSOLE_UART_ENABLE
         ESP_LOGW(TAG, "LAN8720 not up — UART console only; net console skipped");
+#else
+        ESP_LOGW(TAG, "LAN8720 not up — net console skipped (no UART fallback)");
+#endif
     }
 
     // ------------------------------------------------------------------
@@ -335,9 +344,13 @@ extern "C" void app_main(void) {
 
     ESP_LOGI(TAG, "All tasks created successfully (ETH %s, MQTT %s)",
              ethUp ? "up" : "down", mqttReady ? "online" : "offline");
-    ESP_LOGI(TAG, "System ready - type 'help' for commands (UART and/or TCP %d)",
-             CONSOLE_TCP_PORT);
+#if CONSOLE_UART_ENABLE
+    ESP_LOGI(TAG, "System ready - type 'help' (UART and/or TCP %d)", CONSOLE_TCP_PORT);
     gantryTestPrintHelp();
+#else
+    ESP_LOGI(TAG, "System ready - connect plant PC to TCP %d (e.g. tools/lan_debug_ui.py)",
+             CONSOLE_TCP_PORT);
+#endif
 
     vTaskDelete(nullptr);
 }

@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "ethernet_app_config.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
 // MCP23S17 and gpio_expander removed — all drive control is EtherNet/IP only.
@@ -38,7 +39,79 @@ SemaphoreHandle_t g_consoleCmdMutex = nullptr;
 
 GantryConsoleReplyFn g_replyFn = nullptr;
 void *g_replyCtx = nullptr;
+GantryConsoleReplyFn g_sessionFn = nullptr;
+void *g_sessionCtx = nullptr;
 vprintf_like_t g_prevVprintf = nullptr;
+bool g_teeInstalled = false;
+
+int consoleTeeVprintf(const char *fmt, va_list args);
+
+/** ESP-IDF log letter after optional ANSI color (E/W/I/D/V). */
+char espLogLetter(const char *s) {
+  while (*s == '\033') {
+    ++s;
+    if (*s == '[') {
+      ++s;
+      while (*s != '\0' && *s != 'm') {
+        ++s;
+      }
+      if (*s == 'm') {
+        ++s;
+      }
+    }
+  }
+  while (*s == ' ' || *s == '\t') {
+    ++s;
+  }
+  const char c = *s;
+  if (c == 'E' || c == 'W' || c == 'I' || c == 'D' || c == 'V') {
+    return c;
+  }
+  return 0;
+}
+
+int espLogSeverity(char letter) {
+  switch (letter) {
+    case 'E':
+      return CONSOLE_TCP_LOG_SEV_ERR;
+    case 'W':
+      return CONSOLE_TCP_LOG_SEV_WARN;
+    case 'I':
+      return CONSOLE_TCP_LOG_SEV_INFO;
+    case 'D':
+    case 'V':
+      return CONSOLE_TCP_LOG_SEV_DBUG;
+    default:
+      return CONSOLE_TCP_LOG_SEV_INFO;
+  }
+}
+
+bool lanLogAllowsLine(const char *line) {
+  if (!CONSOLE_TCP_LOG_ENABLE) {
+    return false;
+  }
+  return espLogSeverity(espLogLetter(line)) <= CONSOLE_TCP_LOG_LEVEL;
+}
+
+void installTeeIfNeeded() {
+  if (g_teeInstalled) {
+    return;
+  }
+  g_prevVprintf = esp_log_set_vprintf(consoleTeeVprintf);
+  g_teeInstalled = true;
+}
+
+void uninstallTeeIfIdle() {
+  if (!g_teeInstalled) {
+    return;
+  }
+  if (g_sessionFn != nullptr || g_replyFn != nullptr) {
+    return;
+  }
+  esp_log_set_vprintf(g_prevVprintf != nullptr ? g_prevVprintf : vprintf);
+  g_prevVprintf = nullptr;
+  g_teeInstalled = false;
+}
 
 int consoleTeeVprintf(const char *fmt, va_list args) {
   char buf[512];
@@ -46,9 +119,15 @@ int consoleTeeVprintf(const char *fmt, va_list args) {
   va_copy(copy, args);
   int n = vsnprintf(buf, sizeof(buf), fmt, copy);
   va_end(copy);
-  if (g_replyFn != nullptr && n > 0) {
+  if (n > 0) {
     buf[sizeof(buf) - 1] = '\0';
-    g_replyFn(g_replyCtx, buf);
+    if (g_sessionFn != nullptr) {
+      if (lanLogAllowsLine(buf)) {
+        g_sessionFn(g_sessionCtx, buf);
+      }
+    } else if (g_replyFn != nullptr) {
+      g_replyFn(g_replyCtx, buf);
+    }
   }
   if (g_prevVprintf != nullptr) {
     return g_prevVprintf(fmt, args);
@@ -1303,6 +1382,27 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 }
 }  // namespace
 
+void gantryConsoleAttachLogSink(GantryConsoleReplyFn fn, void *ctx) {
+  ensureConsoleMutex();
+  if (g_consoleCmdMutex != nullptr) {
+    xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
+  }
+  g_sessionFn = fn;
+  g_sessionCtx = ctx;
+  if (fn != nullptr) {
+    installTeeIfNeeded();
+  } else {
+    uninstallTeeIfIdle();
+  }
+  if (g_consoleCmdMutex != nullptr) {
+    xSemaphoreGive(g_consoleCmdMutex);
+  }
+}
+
+void gantryConsoleDetachLogSink(void) {
+  gantryConsoleAttachLogSink(nullptr, nullptr);
+}
+
 void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *line,
                               GantryConsoleReplyFn reply_fn, void *reply_ctx) {
   ensureConsoleMutex();
@@ -1310,20 +1410,23 @@ void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *li
     xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
   }
 
+  const bool use_temp_tee = (reply_fn != nullptr && g_sessionFn == nullptr);
   g_replyFn = reply_fn;
   g_replyCtx = reply_ctx;
-  if (reply_fn != nullptr) {
-    g_prevVprintf = esp_log_set_vprintf(consoleTeeVprintf);
+  if (use_temp_tee) {
+    installTeeIfNeeded();
   }
 
   processCommand(cfg, line);
 
-  if (reply_fn != nullptr) {
-    esp_log_set_vprintf(g_prevVprintf != nullptr ? g_prevVprintf : vprintf);
-    g_prevVprintf = nullptr;
+  if (use_temp_tee) {
+    g_replyFn = nullptr;
+    g_replyCtx = nullptr;
+    uninstallTeeIfIdle();
+  } else {
+    g_replyFn = nullptr;
+    g_replyCtx = nullptr;
   }
-  g_replyFn = nullptr;
-  g_replyCtx = nullptr;
 
   if (g_consoleCmdMutex != nullptr) {
     xSemaphoreGive(g_consoleCmdMutex);

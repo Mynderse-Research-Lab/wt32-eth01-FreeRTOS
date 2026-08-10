@@ -33,7 +33,8 @@ void sendAll(int fd, const char *text) {
   if (n == 0) {
     return;
   }
-  (void)send(fd, text, n, 0);
+  // Non-blocking: never stall Class 1 / motion behind a slow PC.
+  (void)send(fd, text, n, MSG_DONTWAIT);
 }
 
 void replyToSocket(void *ctx, const char *text) {
@@ -182,10 +183,23 @@ bool authenticateClient(int fd, uint32_t) {
 #endif
 
 void sendBanner(int fd) {
-  char buf[256];
+  const char *log_line;
+#if CONSOLE_TCP_LOG_ENABLE
+  static const char *const kLevelNames[] = {"?", "ERR", "WARN", "INFO", "DBUG"};
+  const int lvl = CONSOLE_TCP_LOG_LEVEL;
+  const char *name =
+      (lvl >= 1 && lvl <= 4) ? kLevelNames[lvl] : "?";
+  char log_buf[64];
+  std::snprintf(log_buf, sizeof(log_buf),
+                "LAN log ON (min %s). Same commands as UART.", name);
+  log_line = log_buf;
+#else
+  log_line = "LAN log OFF (commands only). Same commands as UART.";
+#endif
+  char buf[320];
   std::snprintf(buf, sizeof(buf),
                 "WT32 gantry console (TCP %d)%s\r\n"
-                "Same commands as UART. move requires home+calibrate this session.\r\n"
+                "%s\r\n"
                 "Type help (or logout to disconnect)\r\n> ",
                 CONSOLE_TCP_PORT,
 #if CONSOLE_TCP_AUTH_ENABLE
@@ -193,7 +207,8 @@ void sendBanner(int fd) {
 #else
                 " — auth disabled"
 #endif
-  );
+                ,
+                log_line);
   sendAll(fd, buf);
 }
 
@@ -205,6 +220,14 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
     return;
   }
 
+  // Hold a stable fd for the session log sink (replyToSocket expects int*).
+  int sink_fd = client_fd;
+  if (CONSOLE_TCP_LOG_ENABLE) {
+    gantryConsoleAttachLogSink(replyToSocket, &sink_fd);
+    ESP_LOGI(TAG, "TCP LAN log sink attached (min level=%d)", CONSOLE_TCP_LOG_LEVEL);
+  } else {
+    ESP_LOGI(TAG, "TCP LAN logging disabled (commands only)");
+  }
   sendBanner(client_fd);
 
   char line[kLineCap];
@@ -224,12 +247,13 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
           if (std::strcmp(line, "logout") == 0 || std::strcmp(line, "exit") == 0 ||
               std::strcmp(line, "quit") == 0) {
             sendAll(client_fd, "Bye\r\n");
+            gantryConsoleDetachLogSink();
             close(client_fd);
             ESP_LOGI(TAG, "TCP client logged out");
             return;
           }
           ESP_LOGI(TAG, "[TCP RX] %s", line);
-          gantryConsoleProcessLine(cfg, line, replyToSocket, &client_fd);
+          gantryConsoleProcessLine(cfg, line, replyToSocket, &sink_fd);
           sendAll(client_fd, "\r\n> ");
           len = 0;
         }
@@ -239,6 +263,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
     }
   }
 
+  gantryConsoleDetachLogSink();
   close(client_fd);
   ESP_LOGI(TAG, "TCP client disconnected");
 }

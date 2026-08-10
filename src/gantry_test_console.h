@@ -42,11 +42,19 @@ using GantryConsoleReplyFn = void (*)(void *ctx, const char *text);
 
 /**
  * Run one console command line (shared by UART and TCP).
- * When reply_fn is non-null, ESP_LOG output for this command is also forwarded.
+ * When reply_fn is non-null, ESP_LOG output for this command is also forwarded
+ * (unless a session log sink is already attached).
  */
 void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *line,
                               GantryConsoleReplyFn reply_fn = nullptr,
                               void *reply_ctx = nullptr);
+
+/**
+ * Attach a session-long ESP_LOG sink (e.g. TCP client). All logs are forwarded
+ * until gantryConsoleDetachLogSink(). Safe to call from NetConsole task.
+ */
+void gantryConsoleAttachLogSink(GantryConsoleReplyFn fn, void *ctx);
+void gantryConsoleDetachLogSink(void);
 
 void gantryTestConsoleTask(void *param);
 void gantryTestPrintHelp();
