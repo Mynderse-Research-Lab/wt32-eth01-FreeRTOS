@@ -551,7 +551,7 @@ Menuconfig: **Gantry kinematics** + EtherNet/IP originator (IPs, PUU/mm,
 |------|----------|
 | Soft-home (joint zero) | Only when **no** GPIO limits and **no** drive-managed endstops; `softHomeJointDatum()`; Home34 on arm |
 | Drive endstops (TBIO) | KNX Forward/Reverse Limit on INPUT1–4; `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → external `GantryLimitSwitch` |
-| Drive home / calibrate | Console `home`/`calibrate` use `Gantry::homeX` / `calibrateX` when drive-managed: **A014→min**, **A015→max** (bench: joint +X hits A015). Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
+| Drive home / calibrate | Console `home`/`calibrate` use `Gantry::homeX` / `calibrateX` when drive-managed: **A014 (PL) → joint min (−X)**, **A015 (NL) → joint max (+X)** (X motor sense inverted vs drive +). Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
 | Hard envelope | Measured stroke from calibrate, or SCHUNK `AXIS_*_HARD_LIMIT_*` via soft-calibrate |
 | Abort | See §3 abort matrix |
 
@@ -614,8 +614,8 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | Command | EIP-specific behavior |
 |---------|------------------------|
 | `enable` / `disable` | Arms / ServoOff via Gantry |
-| `home` | Drive-managed: X sweep to **A014** (min); else soft-home joint datum |
-| `calibrate` | Drive-managed: measure to **A015** (max); else SCHUNK hard envelope |
+| `home` | Drive-managed: X sweep to **A014 / PL** (joint −X / min); else soft-home joint datum |
+| `calibrate` | Drive-managed: measure to **A015 / NL** (joint +X / max); else SCHUNK hard envelope |
 | `move` | Requires **home + calibrate this session** |
 | `stop` | Abort + disable; clears session gates |
 | `alarmreset` / `arst` | EIP **FaultReset** bit (not ARST GPIO) |

@@ -15,17 +15,21 @@ Lawrence Tech battery pick project. Firmware mechanical constants live in
 Production motion control uses **EtherNet/IP Class 1 I/O** (W5500 → Kinetix /
 HCS01), **not** WT32 step/direction through an opto interface board.
 
-| Why EIP won | Why Pulse-Train was rejected |
-|-------------|------------------------------|
-| Drive-native Position Absolute profiles to target | Host Speed+TM10 + StopMotion undershoot/overshoot at speed |
-| Fault / Homed / AtReference over assembly 154 | Custom opto board, MCP23S17, and PTI wiring complexity |
-| Drive-side endstops (TBIO / X31) | MCP GPIO limit path removed in 2026-07 refactor |
-| One daisy-chain for X (+ deferred Z/theta peers) | Parallel pulse/dir/SON/ARST/ALM harness per axis |
 
-Legacy MCP23S17 / PTI / opto-interface documentation is **obsolete** and must
-not be used for new panel or harness work.
+| Why EIP won                                       | Why Pulse-Train was rejected                               |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Drive-native Position Absolute profiles to target | Host Speed+TM10 + StopMotion undershoot/overshoot at speed |
+| Fault / Homed / AtReference over assembly 154     | Custom opto board, MCP23S17, and PTI wiring complexity     |
+| Drive-side endstops (TBIO / X31)                  | MCP GPIO limit path removed in 2026-07 refactor            |
+| One daisy-chain for X (+ deferred Z/theta peers)  | Parallel pulse/dir/SON/ARST/ALM harness per axis           |
+
+
+Legacy MCP23S17 **as a motion / limit / PTI path** is obsolete. MCP23S17 on
+**SPI3 for Field 24 V I/O ×8 + TFT control** is current — see §5 and `pinout.csv`.
 
 ---
+
+
 
 ## 2. System overview
 
@@ -56,151 +60,147 @@ flowchart TB
   DX --> Xact
   DZ --> Zact
   DT --> Tact
-  WT32 -->|GPIO17| GripIO
-  WT32 -->|I2C| Disp
+  WT32 -->|SPI3 MCP PA0 DOUT0| GripIO
+  WT32 -->|SPI3 TFT| Disp
   GripIO -. pneumatic .-> Grip
   WT32 --> LAN
 ```
 
+
+
 **Coordinate frame (right-handed):**
 
-| Axis | Meaning | Actuator |
-|------|---------|----------|
-| X | Across belt | Beta 100-ZRS |
-| Y | Along belt, **−Y downstream** | None (conveyor) |
-| Z | Vertical, **+Z up** | Beta 80-SRS |
-| Theta | About Z | ERD 04-40 |
+
+| Axis  | Meaning                       | Actuator        |
+| ----- | ----------------------------- | --------------- |
+| X     | Across belt                   | Beta 100-ZRS    |
+| Y     | Along belt, **−Y downstream** | None (conveyor) |
+| Z     | Vertical, **+Z up**           | Beta 80-SRS     |
+| Theta | About Z                       | ERD 04-40       |
+
 
 Joint space is `(x, z, theta)`. Soft-home zeros the **firmware** joint frame;
 drive Absolute legality uses HomingMethod 34 (see software doc).
 
 ---
 
-## 3. Bill of expected hardware
+## 3. Networks
 
-### 3.1 Linear / rotary actuators (SCHUNK)
+| Interface | Role | Notes |
+|-----------|------|-------|
+| WIZ850io (W5500 SPI) | EtherNet/IP Class 1 to X/Z | SPI2: MOSI17 MISO35 SCLK5 **CS15** (VDM needs CS edges; not hardwireable); **RST=MCP PB7**; INT unused |
+| SPI3 MCP23S17 + TFT | Field I/O ×8 + operator display | SCLK14 MOSI4 MISO36; CS_MCP2; TFT CS=MCP PB2; BLK hardwired; KO=PB6 |
+| LAN8720 (RMII) | MQTT / plant / TCP console | Separate from EIP daisy-chain |
 
-| Axis | Order / datasheet identity | Lead / pitch | Stroke / envelope | Notes |
-|------|----------------------------|--------------|-------------------|-------|
-| X | Beta 100-ZRS-40AT10-200-550-… | 200 mm/rev | 550 mm | AT10 belt, 20-tooth pulley |
-| Z | Beta 80-SRS-M-2020-150-530-… | 20 mm pitch | 150 mm | Critical RPM 3000; **direct drive i=1** on bench |
-| Theta | ERD 04-40-D-H-N | Direct | Software ±180° | Unlimited hardware rotation; cable wind-up clamp |
-| Gripper | KGG 100-80 | — | Parallel | Open ~190 ms / close ~150 ms |
-
-Commercial records: OA 1693058, McMc order acknowledgement (under
-`driver_datasheets_and_calculations/`).
-
-### 3.2 Servo drives and motors
-
-| Axis | Drive | Motor (ordered) | Gear | Bench status |
-|------|-------|-----------------|------|--------------|
-| X | 2198-E1020-ERS | MPL-A320P-SK72AA | Neugart **5:1** | **Verified** EIP Position Absolute |
-| Z | 2198-E1004-ERS | MPL-A310F-SK72AA | **i=1 direct** (no holding brake) | **Verified** EIP Position Absolute |
-| Theta | HCS01.1E-W0005-A-03-B-ET-EC-NN-NN | ERD integrated | 1:1 | **Deferred** — 3-phase power / IndraWorks |
-
-I/O blocks: 2× `2198-TBIO` (X, Z). Factory motor/feedback cables per McMc /
-Youngblood POs (see wire schedule).
-
-### 3.3 Controller and networks
-
-| Item | Role | Address / pin |
-|------|------|---------------|
-| WT32-ETH01 | Gantry MCU | — |
-| WIZ850io (W5500 SPI) | EIP originator | SPI: MOSI12 MISO35 SCLK5 CS15 RST32 INT33 |
-| LAN8720 (on-module) | MQTT / plant Ethernet + TCP console `:2323` | Separate physical net from EIP; gantry `192.168.1.100` |
-| I2C display | Operator UI stub (`lib/I2cDisplay`) | SDA **GPIO4**, SCL **GPIO14** |
-| Gripper valve chain | 5 V relay → high-current 24 V relay → solenoid valve | ESP32 **GPIO17** |
-
-EIP daisy-chain (bench): `W5500 → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 → (PC)`.  
-IPs: WT32 `192.168.1.10`, X `.20`, Z `.21`, theta reserved `.30`.
-
-### 3.4 Panel power (expected — see schematics)
-
-Supply class: **200–240 VAC three-phase** (matches Kinetix E10xx 170–253 V),
-**not** 480Y/277 V feeder for the drives.
-
-| Tag | Function | Catalog (BOM) |
-|-----|----------|---------------|
-| DISC1 | Main disconnect | TBD lockable |
-| CB0 | Main MCCB ~40 A | 140UT-D7D3-C40 |
-| CB1 / CB2 / CB3 | X / Z / Theta branches | 1489-M2D400 / M2D100 / M2D020 |
-| CB4 | 24 V PSU feed | Size ≥2 A (BOM notes 1 A undersized) |
-| K1–K3 | Safety contactors | 100S-C43 / C16 / C09 |
-| LF1–LF3 | Line filters | 2198-DB127-F, DB111-F, NFD03.1… |
-| PS1 | 24 VDC ~240 W | 1606-XLE240E |
-| PS2 | 5 VDC for controller | Phoenix STEP3 5 V 3 A |
-
-Full panel BOM is generated from [`tools/generate_bom.py`](../tools/generate_bom.py)
-→ [`BOM.xlsx`](../driver_datasheets_and_calculations/BOM.xlsx).
+EIP daisy-chain: WIZ850io → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 (→ HCS01).
+Plant switch (LAN8720 + PC + MQTT): **never** add drive Port 2 / WIZ — same `192.168.1.x` as plant causes IP clash (see LOW_LEVEL § Dual Ethernet).
 
 ---
 
 ## 4. Endstops and sensors
 
 **Production intent:** wire NC limit switches to **drive digital inputs**, not
-to the ESP32.
+to the ESP32. Firmware does **not** dual-poll the same switches on GPIO.
 
-| Axis | Connector | Forward / + | Reverse / − | Config |
-|------|-----------|-------------|-------------|--------|
-| X | TBIO | INPUT1 pin 9 | INPUT2 pin 10 | KNX5100C Forward/Reverse Limit |
+| Axis | Connector | Drive PL (A014) | Drive NL (A015) | Config |
+|------|-----------|-----------------|-----------------|--------|
+| X | TBIO | INPUT1 pin 9 | INPUT2 pin 10 | KNX5100C **Positive/Forward Limit (PL)** / **Negative/Reverse Limit (NL)** |
 | Z | TBIO | INPUT3 pin 34 | INPUT4 pin 8 | Same on Z drive |
-| Theta | X31 | X31.5 (E3) | X31.6 (E4) | P-0-0222 if cable sensors used |
+| Theta | X31 | X31.5 (E3) | X31.6 (E4) | Deferred with HCS01 |
 
-Wiring (sinking NC): `+24 V → NC switch → INPUTx`; `DCOM / 0 V` common.
+**Drive vs joint frame (X bench, 2026-08):** UM004D defines PL as the drive’s
+most-**positive** travel and NL as most-**negative**. On X the motor sense is
+inverted relative to gantry joint +X, so:
 
-**Bench today:** soft-home (no physical limits on controller). Drive HomingMethod
-34 unlocks Absolute. When TBIO limits are installed, firmware reads Fault /
-Stopped via assembly feedback (`CONFIG_EIP_ENDSTOP_SOURCE`).
+| Joint end | Warning | Drive name | Home/cal role |
+|-----------|---------|------------|---------------|
+| **−X** (min) | A014 | PL / positive | `home` zero |
+| **+X** (max) | A015 | NL / negative | `calibrate` max |
 
-Actuator order codes include integrated switch options (2EO10 / 1ES10 on X/Z).
+Do not assume PL = joint +X. Z mapping is TBD after screw mount.
+
+**Wiring (sinking NC):** `+24 V → NC switch → INPUTx`; `DCOM / 0 V` common.
+Healthy travel: DI “on” (no overtravel). At limit: DI opens → A014/A015 →
+drive stops and allows motion only away from the trip.
+
+### 4.1 KNX5100C commissioning checklist
+
+On **each** of X and Z drives (KNX5100C):
+
+1. Assign TBIO inputs as **Positive/Forward Limit (PL)** / **Negative/Reverse Limit (NL)** (not generic DI).
+2. Confirm sinking input + DCOM common; match sensor (NC dry vs 3-wire).
+3. Trip magnet present/absent and confirm Status / overtravel polarity matches NC.
+4. On X, jog toward joint −X and +X and confirm A014 @ −X and A015 @ +X (see table above).
+5. Save parameters to non-volatile memory.
+
+### 4.2 Bench validation procedure
+
+Safe speeds only (≤50 mm/s); STO ready; clear travel. Console on UART or TCP `:2323`.
+
+1. `enable` → Class 1 online; `faults` clear; `status` ready.
+2. Trip each **X** end (manual magnet or slow jog) → drive stop/fault; EIP
+   `faults` / `status` show not ready; keypad A014/A015 as applicable.
+3. Release switch; `alarmreset` / clear; re-`enable` if needed.
+4. Repeat for both **Z** ends.
+5. Optional: `move` toward a limit under firmware — drive must stop; app must
+   not keep Absolute-commanding into a latched fault.
+
+**Acceptance:** all four ends trip + recover.
+
+| Item | Status |
+|------|--------|
+| X drive TBIO limits (KNX PL/NL on INPUT1/2) | **PASS** (trip/recover) — re-run after RPI=5000 flash as regression |
+| Z drive TBIO limits | **DEFERRED** — Z motor not mounted on screw; active item DEV_TRACKER #2 |
+| Firmware drive-managed path | `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → `GantryLimitSwitch` + move gate |
+
+### 4.3 X-only bench (until Z is mounted)
+
+Safe speeds only (≤50 mm/s); STO ready; clear X travel. Leave Z disabled / do not jog Z.
+
+1. `enable` → Class 1 online; focus on **X** `faults` / `status`.
+2. Trip **X−** (A014 / PL) and **X+** (A015 / NL) — manual magnet or slow jog.
+3. Confirm A014/A015 (or EIP fault/stopped); release; `alarmreset`; re-`enable` if needed.
+4. Optional: firmware `move` toward an X limit and confirm drive stop + app abort.
+
+When both X ends pass trip/recover, update the X row to **PASS** with date. Revisit Z after the ballscrew is mounted and Z KNX PL/NL is assigned.
 
 ---
 
-## 5. Scaling and kinematics (firmware-facing)
+## 5. Field 24 V I/O and SPI3 UI
 
-| Parameter | X | Z |
-|-----------|---|---|
-| Lead | 200 mm/rev | 20 mm/rev |
-| Motor reducer | **5** | **1** (direct) |
-| PUU / motor-rev | 2097152 | 2097152 |
-| PUU/mm (Kconfig) | **52428.8** | **104857.6** |
-| speed_ref per mm/s | 15 | 30 |
-| Hard stroke | 0…550 mm | 0…150 mm |
-| Position tol (datasheet) | ±0.08 mm | ±0.03 mm |
+ESP SPI3 (shared): SCLK14 MOSI4 MISO36; **CS_MCP=2** (default client);
+**TFT CS = MCP PB2** (software CS); **BLK hardwired ON**; KO = **MCP PB6**.
+W5500 RST = **MCP PB7** (external pull-up).
+Free ESP ADC: **12, 32, 33, 39**. ETH REFCLK = GPIO0_IN (not CLK-out on 17).
 
-Z drive electronic gear in KNX5100C must be **1:1** (firmware scale alone is
-not enough). Z motor: **no holding brake** — keep Servo On under load.
+| Channel | MCP pin | Role |
+|---------|---------|------|
+| DOUT0–3 | PA0–PA3 | Field 24 V outs (DOUT0 = gripper; boot LOW) |
+| DIN0–3 | PA4–PA7 | Field 24 V ins (isolator → 3.3 V) |
+| TFT DC / RES | PB0 / PB1 | Display control |
+| TFT CS | PB2 | Idle HIGH; assert only during display update |
+| Encoder A/B/PUSH | PB3–PB5 | Amazon TFT module UI |
+| KO | PB6 | Module key input |
+| W5500 RSTn | PB7 | Active-low; MCP-driven (not hardwired) |
 
-Geometry offsets in `axis_drivetrain_params.h` are **development-rig
-placeholders** until `GANTRY_GEOMETRY_FROZEN` is attested.
+IO0 reserved for boot/DTR + ETH REFCLK. UART0 on GPIO1/3. W5500 MOSI on GPIO17.
+Class 1 (SPI2) has priority over SPI3 (task prio + SPI3 deferral during exchange).
+See [`pinout.csv`](../pinout.csv).
 
-Reserved / missing: SCHUNK Trap Move inertia/torque attachments; full ERD
-datasheet beyond header macros.
+### Bench smoke (SPI3 + MCP)
 
----
-
-## 6. Verification status
-
-| Item | Status | Evidence |
-|------|--------|----------|
-| X/Z EIP Class 1 + Position Absolute @ 200 mm/s | **PASS** | Console: `move 150 150 0` / `move 0 0 0` within ±1 mm (2026-07-20) |
-| Soft-home joint datum | **PASS** | Console soft-home path |
-| Theta EIP on wire | **Deferred** | Power / IndraWorks / EDS |
-| Drive-wired endstops | **Planned** | Not installed on soft-home bench |
-| Geometry freeze | **Open** | Dev-rig offsets |
-| MQTT LAN8720 | **Open** | Link often down on bench; EIP unaffected |
-| TCP console `:2323` on LAN8720 | **When ETH up** | Password auth; same commands as UART; see LOW_LEVEL §9 |
-| Panel HV/LV construction | **Preliminary** | See schematics — not for construction |
+1. `mcp_dump a` / `mcp_dump b` — Port A DOUT outs / DIN ins; Port B TFT + encoder + RST.
+2. `field_dout 0 1` / `field_dout 0 0` — DOUT0 toggles; all DOUT boot LOW.
+3. `field_din` — DIN and encoder A/B/PUSH/KO respond; TFT_CS(PB2) high idle; W5500_RST high idle.
+4. Confirm TFT CS not stuck low after display stub; W5500 Class 1 still healthy.
+5. UART0 console + IO0 boot unchanged.
 
 ---
 
-## 7. Related artifacts
+## 6. Scaling (firmware-facing)
 
-| Artifact | Role |
-|----------|------|
-| [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | Electrical design basis + panel image; logic-board schematic pending |
-| [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware / console / EIP motion |
-| [`pinout.csv`](../pinout.csv) | Controller pin map |
-| [`BOM.xlsx`](../driver_datasheets_and_calculations/BOM.xlsx) | Panel BOM |
-| [`WIRE_SIZE_SELECTION.xlsx`](../driver_datasheets_and_calculations/WIRE_SIZE_SELECTION.xlsx) | Branch / cable schedule |
-| SCHUNK + Rockwell + Rexroth PDFs | Vendor authority |
+See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and
+[LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).
+
+---
+

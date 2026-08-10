@@ -23,7 +23,7 @@
 | Control power | 1606-XLE240E 24 VDC; Phoenix 5 V for WT32 box |
 | Motion control | **EtherNet/IP only** — no PTI/opto production harness |
 | Endstops | Drive TBIO / HCS01 X31 (NC sinking) |
-| Gripper | GPIO17 → 24 V interface relay → valve coil |
+| Gripper | MCP23S17 PA0 (Field DOUT0) → 24 V interface relay → valve coil |
 | Networks | W5500 EIP daisy-chain **separate** from LAN8720 MQTT |
 
 Authoritative BOM / wire sizes: regenerate from
@@ -82,7 +82,9 @@ the generated BOM / wire schedule and the electrical-review register below.
 | W5500 RJ45 | X PORT1 → … → Z PORT2 | Cat5e+ EIP |
 | WT32 LAN8720 | Plant MQTT switch | Separate from EIP |
 | Limit NC | TBIO INPUT1–4 / X31.5–.6 | 22 AWG STP |
-| GPIO17 | CR1 coil → SV1 | 18–22 AWG |
+| MCP23S17 PA0 (DOUT0) | CR1 coil → SV1 | 18–22 AWG |
+| WIZ850io RSTn | MCP23S17 PB7 | Active-low; external pull-up; not hardwired |
+| Free ADC 12/32/33/39 | Isolator → 0..3.3 V | Field analog (optional) |
 
 Full AWG / length / inventory: `WIRE_SIZE_SELECTION.xlsx`.
 
@@ -91,7 +93,7 @@ Full AWG / length / inventory: `WIRE_SIZE_SELECTION.xlsx`.
 ## 5. Logic-board schematic
 
 A separate logic-board schematic will be added when available. It should cover
-the WT32-ETH01, WIZ850io/W5500 SPI interface, power conditioning, GPIO17 gripper
+the WT32-ETH01, WIZ850io/W5500 SPI interface, power conditioning, MCP Field DOUT0 gripper
 interface and board-level connectors. That schematic may use KiCad; it does
 not replace or redraw the panel image.
 

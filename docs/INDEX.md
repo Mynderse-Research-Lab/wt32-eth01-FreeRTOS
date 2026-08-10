@@ -21,6 +21,8 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 | [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements |
 | [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design |
 | [MCP_SETUP.md](MCP_SETUP.md) | Cursor MCP server setup |
+| [DEV_TRACKER.md](DEV_TRACKER.md) | Temporary next-dev checklist (8 items + LAN debug) |
+| [SERIAL_OVER_LAN_PLAN.md](SERIAL_OVER_LAN_PLAN.md) | TCP ESP_LOG + console; free GPIO1/3; Python UI |
 | [../test/README](../test/README) | Host / on-target tests |
 | [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
 
