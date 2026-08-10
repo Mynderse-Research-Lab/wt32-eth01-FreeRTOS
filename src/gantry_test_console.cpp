@@ -3,25 +3,21 @@
 #if CONFIG_GANTRY_SELFTEST
 #include "basic_tests.h"
 #endif
+#include "EipScannerTask.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "ethernet_app_config.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
-// MCP23S17 and gpio_expander removed — all drive control is EtherNet/IP only.
-// Limit switch and MCP debug console commands are no-ops.
+#include "gpio_expander.h"
+#include "MCP23S17.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 
-// MCP23S17 stubs — all drive control is EtherNet/IP only (2026-07 refactor).
-static inline uint8_t gpio_expander_read(int) { return 1; }
-static inline void*   gpio_expander_get_mcp_handle() { return nullptr; }
-static inline esp_err_t gpio_expander_set_direction(int, bool) { return ESP_OK; }
-static inline esp_err_t gpio_expander_write(int, uint8_t) { return ESP_OK; }
-static inline esp_err_t gpio_expander_set_pullup(int, bool) { return ESP_OK; }
-typedef void* mcp23s17_handle_t;
-static inline int mcp23s17_debug_read_register(mcp23s17_handle_t, uint8_t, uint8_t*) { return -1; }
+#ifndef MCP_DEBUG_CMDS
+#define MCP_DEBUG_CMDS 1
+#endif
 
 #include <ctype.h>
 #include <cstdarg>
@@ -189,6 +185,13 @@ static bool g_liveMotionWasBusy = false;
 bool limitsWired(const GantryTestConsoleConfig *cfg) {
   return cfg != nullptr && cfg->limit_switches_active &&
          cfg->limit_min_pin >= 0 && cfg->limit_max_pin >= 0;
+}
+
+// GPIO pin limits or EIP drive-managed (A014/A015) external switches.
+bool physicalLimitsAvailable(const GantryTestConsoleConfig *cfg) {
+  if (limitsWired(cfg)) return true;
+  return cfg != nullptr && cfg->gantry != nullptr &&
+         cfg->gantry->driveManagedLimitsEnabled();
 }
 
 static constexpr float kMmPerInch = 25.4f;
@@ -833,6 +836,40 @@ void runMcpRegCommand(const char *cmd) {
 
   ESP_LOGE(TAG, "Invalid action '%s'. Use r or w", action);
 }
+
+void runFieldDoutCommand(const char *cmd) {
+  int ch = -1;
+  int level = -1;
+  if (sscanf(cmd, "field_dout %d %d", &ch, &level) < 2) {
+    ESP_LOGE(TAG, "Usage: field_dout <0..3> <0|1>");
+    return;
+  }
+  if (ch < 0 || ch >= FIELD_24V_DOUT_COUNT || (level != 0 && level != 1)) {
+    ESP_LOGE(TAG, "Usage: field_dout <0..3> <0|1>");
+    return;
+  }
+  if (field_dout_set(static_cast<unsigned>(ch), level != 0) != ESP_OK) {
+    ESP_LOGE(TAG, "field_dout failed (MCP not ready?)");
+    return;
+  }
+  ESP_LOGI(TAG, "FIELD_DOUT%d = %d (MCP PA%d)", ch, level, MCP_FIELD_DOUT0 + ch);
+}
+
+void runFieldDinCommand(const char *cmd) {
+  (void)cmd;
+  if (gpio_expander_get_mcp_handle() == nullptr) {
+    ESP_LOGE(TAG, "MCP not initialized");
+    return;
+  }
+  for (unsigned i = 0; i < FIELD_24V_DIN_COUNT; ++i) {
+    ESP_LOGI(TAG, "FIELD_DIN%d = %d (MCP PA%d)", i, field_din_get(i) ? 1 : 0,
+             MCP_FIELD_DIN0 + static_cast<int>(i));
+  }
+  ESP_LOGI(TAG, "ENC A/B/PUSH/KO = %d %d %d %d  TFT_CS(PB2)=%d  W5500_RST(PB7)=%d",
+           gpio_expander_read(MCP_UI_ENC_A), gpio_expander_read(MCP_UI_ENC_B),
+           gpio_expander_read(MCP_UI_ENC_PUSH), gpio_expander_read(MCP_UI_ENC_KO),
+           gpio_expander_read(MCP_TFT_CS), gpio_expander_read(MCP_W5500_RST));
+}
 #endif  // MCP_DEBUG_CMDS
 
 void runGpioDriveCommand(const char *cmd) {
@@ -861,9 +898,8 @@ void runGpioDriveCommand(const char *cmd) {
 }
 
 // ---- Per-axis homing / calibration dispatchers ---------------------------
-// Tokenize `home` / `calibrate` args (default X). EIP with
-// limit_switches_active=false uses soft-home / soft-calibrate; pulse-motor
-// builds with wired limits keep physical MIN/MAX sweeps.
+// Tokenize `home` / `calibrate` args (default X). Soft-home / soft-calibrate
+// only when neither GPIO limits nor EIP drive-managed switches are available.
 
 enum class AxisToken { X, Z, THETA };
 
@@ -892,7 +928,7 @@ void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG,
            "OK soft-home (X+Z). Joint datum = current drive positions "
            "(X %.3f mm / %d PUU joint, Z %.3f mm). "
-           "`move` targets are relative to this datum — not absolute drive PUU.",
+           "`move` targets are relative to this datum - not absolute drive PUU.",
            cfg->gantry->getXEncoderMm(), cfg->gantry->getXEncoderRaw(),
            cfg->gantry->getCurrentZ());
 }
@@ -916,31 +952,54 @@ void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
     return;
   }
 
-  if (!limitsWired(cfg)) {
-    ESP_LOGI(TAG, "Starting soft-home (X) — limit switches not wired (EIP mode)");
+  if (!physicalLimitsAvailable(cfg)) {
+    ESP_LOGI(TAG, "Starting soft-home (X) - limit switches not wired (EIP mode)");
     runSoftHomeX(cfg);
     return;
   }
 
-  ESP_LOGI(TAG, "Starting homing sequence (X)...");
+  const bool driveManaged = cfg->gantry->driveManagedLimitsEnabled();
+  ESP_LOGI(TAG, "Starting homing sequence (X)%s...",
+           driveManaged
+               ? " (EIP: seek -X A014/PL -> creep clear -> joint zero)"
+               : "");
 
-  bool minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+  bool minWasActive = false;
+  if (limitsWired(cfg)) {
+    minWasActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+  }
   cfg->gantry->homeX();
   vTaskDelay(pdMS_TO_TICKS(20));
 
   if (!cfg->gantry->isBusy()) {
-    bool minIsActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
-    bool maxIsActive = (gpio_expander_read(cfg->limit_max_pin) == 0);
+    bool minIsActive = false;
+    bool maxIsActive = false;
+    if (limitsWired(cfg)) {
+      minIsActive = (gpio_expander_read(cfg->limit_min_pin) == 0);
+      maxIsActive = (gpio_expander_read(cfg->limit_max_pin) == 0);
+    }
     bool alarmActive = cfg->gantry->isAlarmActive();
-    if (minWasActive || minIsActive) {
+    if (minWasActive || minIsActive ||
+        (driveManaged && !alarmActive)) {
+      // Drive-managed: homeX may finish immediately if already on A014, or
+      // the Absolute sweep may not yet show busy within 20 ms - accept and
+      // let the operator watch status / calibrate.
       g_homeCompletedThisSession = true;
-      ESP_LOGI(TAG, "OK X homing skipped: already at MIN/home switch");
-      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
-               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
+      if (driveManaged && !minWasActive && !minIsActive) {
+        ESP_LOGI(TAG,
+                 "OK X drive-managed home accepted (sweep or already at A014); "
+                 "wait for busy=0 / status");
+      } else {
+        ESP_LOGI(TAG, "OK X homing skipped: already at MIN/home switch");
+      }
+      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d drive_managed=%d",
+               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0,
+               driveManaged ? 1 : 0);
     } else {
       ESP_LOGE(TAG, "ERROR: X homing did not start");
-      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d",
-               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0);
+      ESP_LOGI(TAG, "Home gate state: alarm=%d min=%d max=%d drive_managed=%d",
+               alarmActive ? 1 : 0, minIsActive ? 1 : 0, maxIsActive ? 1 : 0,
+               driveManaged ? 1 : 0);
       ESP_LOGI(TAG, "Check motor enable, alarm status, and limit switch wiring");
     }
     return;
@@ -972,7 +1031,7 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
         ESP_LOGE(TAG, "ERROR: Run 'home x' first after startup");
         return;
       }
-      if (!limitsWired(cfg)) {
+      if (!physicalLimitsAvailable(cfg)) {
         runSoftCalibrateX(cfg);
         break;
       }
@@ -989,7 +1048,10 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
         g_calibrationInProgress = false;
         ESP_LOGE(TAG, "ERROR: Failed to start X calibration task");
       } else {
-        ESP_LOGI(TAG, "X calibration started (use 'stop' to abort)");
+        ESP_LOGI(TAG, "X calibration started%s (use 'stop' to abort)",
+                 cfg->gantry->driveManagedLimitsEnabled()
+                     ? " (EIP: seek +X A015/NL -> creep clear -> joint max)"
+                     : "");
       }
       break;
     }
@@ -1086,6 +1148,10 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     runMcpDumpCommand(cmd);
   } else if (strncmp(cmdLower, "mcp_reg", 7) == 0) {
     runMcpRegCommand(cmd);
+  } else if (strncmp(cmdLower, "field_dout", 10) == 0) {
+    runFieldDoutCommand(cmd);
+  } else if (strncmp(cmdLower, "field_din", 9) == 0) {
+    runFieldDinCommand(cmd);
 #endif  // MCP_DEBUG_CMDS
   } else if (strncmp(cmdLower, "gpio_drive", 10) == 0) {
     runGpioDriveCommand(cmd);
@@ -1117,7 +1183,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   } else if (strcmp(cmdLower, "enable") == 0) {
     cfg->gantry->enable();
     if (cfg->gantry->isEnabled()) {
-      ESP_LOGI(TAG, "OK Motors enabled (settling for Active — wait for 'Servo arm complete')");
+      ESP_LOGI(TAG, "OK Motors enabled (settling for Active - wait for 'Servo arm complete')");
     } else {
       ESP_LOGE(TAG, "ERROR: Motor enable failed (check alarm/driver state)");
     }
@@ -1293,7 +1359,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     if (!g_homeCompletedThisSession || !g_calibratedThisSession) {
       ESP_LOGE(TAG,
                "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup "
-               "(EIP without limit switches uses soft-home + SCHUNK envelope).");
+               "(EIP with drive endstops uses A014/A015 sweep; otherwise soft-home + "
+               "SCHUNK envelope).");
       return;
     }
     float x = 0.0f;
@@ -1336,7 +1403,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       }
       ESP_LOGE(TAG, "ERROR: Move failed: %d (%s)", (int)result, errName);
       if (result == Gantry::GantryError::ALREADY_MOVING) {
-        ESP_LOGI(TAG, "Gantry reports busy — wait for motion to finish, or 'stop' then 'enable'");
+        ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
     }
   } else if (strncmp(cmdLower, "grip", 4) == 0) {
@@ -1348,6 +1415,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     cfg->gantry->grip(value != 0);
     ESP_LOGI(TAG, "OK Gripper %s", value ? "closed" : "opened");
+  } else if (strcmp(cmdLower, "eiptiming") == 0) {
+    eip::dumpClass1TimingStats();
   } else if (strcmp(cmdLower, "stop") == 0) {
     // Stop motion while servos stay enabled, then disable. Do not reverse
     // that order: disable-only left sticky CIP; re-enable ClearCip StopMotion
@@ -1365,7 +1434,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       char zSum[192] = {};
       (void)cfg->gantry->getXDriveAlarmSummary(xSum, sizeof(xSum));
       (void)cfg->gantry->getZDriveAlarmSummary(zSum, sizeof(zSum));
-      ESP_LOGI(TAG, "After reset — X: %s | Z: %s",
+      ESP_LOGI(TAG, "After reset - X: %s | Z: %s",
                xSum[0] ? xSum : "?", zSum[0] ? zSum : "?");
     } else {
       ESP_LOGE(TAG, "ERROR: Alarm reset failed (ARST pin may be disabled)");
@@ -1441,6 +1510,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  status               - print gantry status");
   ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix FaultCode/WarningCode (e.g. A603)");
   ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm scale and positions");
+  ESP_LOGI(TAG, "  eiptiming            - dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)");
   ESP_LOGI(TAG, "  puucal <x|z> c m     - suggest new PUU/mm from commanded vs measured mm");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
@@ -1448,12 +1518,14 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  mcp_pin_mode p m     - force MCP pin mode (m=inpu|in|out0|out1)");
   ESP_LOGI(TAG, "  mcp_dump <a|b>       - dump MCP IOCON/dir/pullup/olat/gpio");
   ESP_LOGI(TAG, "  mcp_reg <r|w> r [v]  - raw MCP register read/write (hex/dec)");
+  ESP_LOGI(TAG, "  field_dout <0..3> v  - set Field 24 V DOUT (0=gripper PA0)");
+  ESP_LOGI(TAG, "  field_din            - read Field DIN + encoder + W5500 INT");
 #endif  // MCP_DEBUG_CMDS
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: soft-home if limits unwired; else X sweep)");
-  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate (EIP: SCHUNK envelope if limits unwired)");
+  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: -X A014/PL sweep; else soft-home)");
+  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate (EIP: +X A015/NL measure; else SCHUNK envelope)");
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
   ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
   ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");
