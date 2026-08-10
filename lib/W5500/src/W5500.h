@@ -104,13 +104,16 @@ constexpr uint8_t Sn_IR_CON        = 0x01;
 
 struct W5500Config {
     int spi_host;       // e.g. SPI2_HOST (HSPI) or SPI3_HOST (VSPI)
-    int cs_gpio;        // Chip select GPIO
+    int cs_gpio;        // Chip select GPIO (required for VDM; -1 only if using FDM)
     int int_gpio;       // Interrupt GPIO (-1 for polled mode)
-    int rst_gpio;       // Hardware reset GPIO
+    int rst_gpio;       // Hardware reset GPIO (-1 if using rst_set_level or soft reset)
     int sclk_hz;        // SPI clock frequency (e.g. 20'000'000 for 20 MHz)
     int mosi_gpio;      // MOSI GPIO
     int miso_gpio;      // MISO GPIO
     int sclk_gpio;      // SCLK GPIO
+    /// Optional external RST (e.g. MCP23S17). Called with level 0 then 1.
+    void (*rst_set_level)(void* ctx, int level) = nullptr;
+    void* rst_ctx = nullptr;
 };
 
 // ==========================================================================

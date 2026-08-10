@@ -41,6 +41,15 @@ W5500::~W5500() {
 // ==========================================================================
 
 void W5500::hardReset() {
+    if (cfg_.rst_set_level != nullptr) {
+        cfg_.rst_set_level(cfg_.rst_ctx, 0);
+        vTaskDelay(pdMS_TO_TICKS(1));
+        cfg_.rst_set_level(cfg_.rst_ctx, 1);
+        vTaskDelay(pdMS_TO_TICKS(55));
+        ESP_LOGI(TAG, "Hardware reset complete (external RST callback)");
+        return;
+    }
+
     if (cfg_.rst_gpio < 0) {
         // Use software reset
         writeReg(kBlockCommon(), REG_MR, MR_RST);

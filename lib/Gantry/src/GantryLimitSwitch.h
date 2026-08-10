@@ -18,10 +18,6 @@ public:
     void configure(int pin, bool activeLow = true, bool enablePullup = true,
                    uint8_t debounceCycles = 6);
 
-    // Drive-managed: firmware does not read a GPIO; the axis adapter calls
-    // setExternalActive() each cycle from the EIP assembly feedback.
-    void configureExternal();
-
     bool begin();
     void update(bool force = false);
 
@@ -33,7 +29,18 @@ public:
 
     // Set the limit state from an external source (EIP assembly feedback).
     // Only meaningful when source_ == kDriveManaged.
-    void setExternalActive(bool active);
+    void setExternalActive(bool active) {
+        if (source_ == Source::kDriveManaged) {
+            externalActive_ = active;
+        }
+    }
+
+    void configureExternal() {
+        source_ = Source::kDriveManaged;
+        pin_ = -1;
+        externalActive_ = false;
+        initialized_ = true;
+    }
 
 private:
     Source source_ = Source::kGpio;

@@ -5,12 +5,7 @@
  */
 
 #include "GantryEndEffector.h"
-// MCP23S17 removed (2026-07 refactor). gpio_expander symbols provided
-// by GantryLimitSwitch.cpp extern "C" stubs. Constants defined locally.
-
-#define GPIO_DIRECT_PIN_BASE        0x10
-#define GPIO_EXPANDER_DIRECT_FLAG   0x100
-#define GPIO_EXPANDER_DIRECT_MASK   0x0FF
+#include "gpio_expander.h"
 #include "driver/gpio.h"
 
 namespace Gantry {
@@ -20,11 +15,9 @@ bool isEncodedDirectPin(int pin) {
     return (pin & GPIO_EXPANDER_DIRECT_FLAG) != 0;
 }
 
-#ifdef GANTRY_USE_MCP23S17
 bool isMcpLogicalPin(int pin) {
     return pin >= 0 && pin < GPIO_DIRECT_PIN_BASE && !isEncodedDirectPin(pin);
 }
-#endif
 
 int resolveDirectGpioPin(int pin) {
     if (pin < 0) {
@@ -53,14 +46,11 @@ bool GantryEndEffector::begin() {
     if (!configured_) {
         return false;
     }
-#ifdef GANTRY_USE_MCP23S17
     if (isMcpLogicalPin(pin_)) {
         if (gpio_expander_set_direction(pin_, true) != ESP_OK) {
             return false;
         }
-    } else
-#endif
-    {
+    } else {
         const int gpioPin = resolveDirectGpioPin(pin_);
         if (gpioPin < 0) {
             return false;
@@ -84,12 +74,9 @@ void GantryEndEffector::setActive(bool active) {
         return;
     }
     const uint8_t level = (active == activeHigh_) ? 1 : 0;
-#ifdef GANTRY_USE_MCP23S17
     if (isMcpLogicalPin(pin_)) {
         gpio_expander_write(pin_, level);
-    } else
-#endif
-    {
+    } else {
         const int gpioPin = resolveDirectGpioPin(pin_);
         if (gpioPin < 0) {
             return;

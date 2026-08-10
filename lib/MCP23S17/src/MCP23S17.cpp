@@ -37,15 +37,16 @@
 
 struct mcp23s17_handle {
     spi_device_handle_t spi_device;
-    spi_host_device_t spi_host;  // Stored for proper cleanup in deinit
-    SemaphoreHandle_t spi_mutex; // Serialize SPI device access across tasks
+    spi_host_device_t spi_host;
+    SemaphoreHandle_t spi_mutex;
     uint8_t device_address;
-    uint8_t port_a_dir;      // Cached direction register
+    uint8_t port_a_dir;
     uint8_t port_b_dir;
-    uint8_t port_a_output;   // Cached output latch
+    uint8_t port_a_output;
     uint8_t port_b_output;
-    uint8_t port_a_pullup;   // Cached pull-up register
+    uint8_t port_a_pullup;
     uint8_t port_b_pullup;
+    bool owns_bus;
 };
 
 static const char *TAG = "MCP23S17";
@@ -128,8 +129,9 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
     memset(handle, 0, sizeof(struct mcp23s17_handle));
-    handle->device_address = config->device_address & 0x07;  // Lower 3 bits only
+    handle->device_address = config->device_address & 0x07;
     handle->spi_host = config->spi_host;
+    handle->owns_bus = !config->skip_bus_init;
     handle->spi_mutex = xSemaphoreCreateMutex();
     if (handle->spi_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create SPI mutex");
@@ -137,45 +139,43 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Configure SPI bus
-    spi_bus_config_t bus_cfg = {};
-    bus_cfg.miso_io_num = config->miso_pin;
-    bus_cfg.mosi_io_num = config->mosi_pin;
-    bus_cfg.sclk_io_num = config->sclk_pin;
-    bus_cfg.quadwp_io_num = -1;
-    bus_cfg.quadhd_io_num = -1;
-    bus_cfg.max_transfer_sz = 32;
+    if (handle->owns_bus) {
+        spi_bus_config_t bus_cfg = {};
+        bus_cfg.miso_io_num = config->miso_pin;
+        bus_cfg.mosi_io_num = config->mosi_pin;
+        bus_cfg.sclk_io_num = config->sclk_pin;
+        bus_cfg.quadwp_io_num = -1;
+        bus_cfg.quadhd_io_num = -1;
+        bus_cfg.max_transfer_sz = 32;
 
-    esp_err_t ret = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(ret));
-        vSemaphoreDelete(handle->spi_mutex);
-        free(handle);
-        return NULL;
+        esp_err_t bus_ret = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
+        if (bus_ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(bus_ret));
+            vSemaphoreDelete(handle->spi_mutex);
+            free(handle);
+            return NULL;
+        }
     }
 
-    // Configure SPI device
     spi_device_interface_config_t dev_cfg = {};
-    dev_cfg.clock_speed_hz = config->clock_speed_hz;
-    dev_cfg.mode = 0;  // SPI mode 0
+    dev_cfg.clock_speed_hz = config->clock_speed_hz > 0 ? config->clock_speed_hz : 10000000;
+    dev_cfg.mode = 0;
     dev_cfg.spics_io_num = config->cs_pin;
     dev_cfg.queue_size = 1;
     dev_cfg.flags = 0;
     dev_cfg.pre_cb = NULL;
 
-    ret = spi_bus_add_device(config->spi_host, &dev_cfg, &handle->spi_device);
+    esp_err_t ret = spi_bus_add_device(config->spi_host, &dev_cfg, &handle->spi_device);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI device add failed: %s", esp_err_to_name(ret));
-        spi_bus_free(config->spi_host);
+        if (handle->owns_bus) {
+            spi_bus_free(config->spi_host);
+        }
         vSemaphoreDelete(handle->spi_mutex);
         free(handle);
         return NULL;
     }
 
-    // Note: CS pin is managed automatically by the SPI driver (spics_io_num).
-    // No manual gpio_set_direction/gpio_set_level needed.
-
-    // Initialize IOCON register (sequential mode, hardware addressing)
     ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x00);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "IOCON init failed");
@@ -183,7 +183,6 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Initialize all pins as inputs with pull-ups disabled
     handle->port_a_dir = 0xFF;
     handle->port_b_dir = 0xFF;
     mcp23s17_write_register(handle, MCP23S17_IODIRA, 0xFF);
@@ -196,7 +195,8 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     handle->port_a_pullup = 0x00;
     handle->port_b_pullup = 0x00;
 
-    ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X)", 0x20 | handle->device_address);
+    ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X, shared_bus=%d)",
+             0x20 | handle->device_address, config->skip_bus_init ? 1 : 0);
     return handle;
 }
 
@@ -205,8 +205,11 @@ void mcp23s17_deinit(mcp23s17_handle_t handle) {
 
     if (handle->spi_device) {
         spi_bus_remove_device(handle->spi_device);
+        handle->spi_device = NULL;
     }
-    spi_bus_free(handle->spi_host);
+    if (handle->owns_bus) {
+        spi_bus_free(handle->spi_host);
+    }
     if (handle->spi_mutex) {
         vSemaphoreDelete(handle->spi_mutex);
         handle->spi_mutex = NULL;

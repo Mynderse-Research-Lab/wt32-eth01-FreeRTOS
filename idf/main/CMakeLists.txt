@@ -10,6 +10,7 @@ set(APP_SRCS
     "${APP_ROOT}/src/pick_scheduler.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
     "${APP_ROOT}/src/gantry_net_console.cpp"
+    "${APP_ROOT}/src/gpio_expander.c"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -29,7 +30,11 @@ idf_component_register(
         Gantry
         MqttBridge
         EtherNetIP
-        I2cDisplay
+        MCP23S17
+        Spi3Bus
+        SpiDisplay
+        esp_driver_spi
+        esp_driver_gpio
         esp_timer
         log
         freertos

@@ -10,13 +10,13 @@
  * FreeRTOS application with:
  * - W5500 SPI Ethernet for EtherNet/IP drive control (X, Z)
  * - LAN8720 RMII for MQTT bridge
- * - End-effector: SCHUNK KGG 100-80 pneumatic gripper (direct GPIO)
- * - I2C operator display stub (lib/I2cDisplay; panel I/O not implemented)
+ * - SPI3: MCP (Field, TFT CS/DC/RES/BLK, W5500 RST, encoder) + TFT stub
+ * - End-effector: SCHUNK gripper on Field DOUT0 (MCP PA0)
+ * - Free ESP ADC GPIOs 12/32/33/39; Class 1 priority over SPI3
  * - Interactive serial console (gantry_test_console)
  * - Periodic gantry update task at 100 Hz
  *
- * All drive control is EtherNet/IP only. MCP23S17 and step/direction removed.
- * Pin assignments live in gantry_app_constants.h.
+ * Pin assignments live in gantry_app_constants.h / pinout.csv.
  */
 
 // Ask axis_drivetrain_params.h to emit its deployment-time reminders in this
@@ -34,7 +34,12 @@
 #include "ethernet_app_config.h"
 #include "MqttBridge.h"
 #include "pick_scheduler.h"
-#include "I2cDisplay.h"
+#include "Spi3Bus.h"
+#include "SpiDisplay.h"
+#include "MCP23S17.h"
+#include "gpio_expander.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
 
 #if CONFIG_EIP_SCANNER_ENABLED
 #include "W5500.h"
@@ -83,16 +88,37 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z (Theta unpowered; PC uplink exclusive)");
     ESP_LOGI(TAG, "========================================\n");
 
-    // I2C display stub (non-fatal). Pins SDA4/SCL14; panel bring-up TBD.
-    static display::I2cDisplay i2cDisplay;
-    {
-        display::I2cDisplayConfig dispCfg = {};
-        dispCfg.sda_gpio = I2C_DISPLAY_SDA_GPIO;
-        dispCfg.scl_gpio = I2C_DISPLAY_SCL_GPIO;
-        dispCfg.i2c_addr = I2C_DISPLAY_ADDR;
-        dispCfg.scl_hz = I2C_DISPLAY_SCL_HZ;
-        if (!i2cDisplay.begin(dispCfg)) {
-            ESP_LOGW(TAG, "I2C display stub begin failed — continuing without UI");
+    // SPI3 shared bus (MCP default client) + MCP23S17 Field/UI + TFT stub
+    static display::SpiDisplay spiDisplay;
+    if (!spi3::init()) {
+        ESP_LOGW(TAG, "SPI3 bus init failed — continuing without MCP/TFT");
+    } else {
+        mcp23s17_config_t mcpCfg = {};
+        mcpCfg.spi_host = spi3::host();
+        mcpCfg.cs_pin = static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO);
+        mcpCfg.miso_pin = static_cast<gpio_num_t>(SPI3_MISO_GPIO);
+        mcpCfg.mosi_pin = static_cast<gpio_num_t>(SPI3_MOSI_GPIO);
+        mcpCfg.sclk_pin = static_cast<gpio_num_t>(SPI3_SCLK_GPIO);
+        mcpCfg.device_address = MCP23S17_HW_ADDR;
+        mcpCfg.clock_speed_hz = SPI3_MCP_CLOCK_HZ;
+        mcpCfg.skip_bus_init = true;
+        if (!gpio_expander_init(&mcpCfg)) {
+            ESP_LOGW(TAG, "MCP23S17 init failed — Field I/O unavailable");
+        } else if (gpio_expander_configure_field_and_ui() != ESP_OK) {
+            ESP_LOGW(TAG, "MCP Field/UI pin configure failed");
+        } else {
+            display::SpiDisplayConfig dispCfg = {};
+            dispCfg.mcp = gpio_expander_get_mcp_handle();
+            dispCfg.mcp_cs_pin = MCP_TFT_CS;
+            dispCfg.mcp_dc_pin = MCP_TFT_DC;
+            dispCfg.mcp_res_pin = MCP_TFT_RES;
+            dispCfg.mcp_blk_pin = MCP_TFT_BLK;
+            dispCfg.clock_hz = SPI3_TFT_CLOCK_HZ;
+            if (!spiDisplay.begin(dispCfg)) {
+                ESP_LOGW(TAG, "SpiDisplay stub begin failed — MCP Field I/O still live");
+            } else {
+                (void)spiDisplay.refreshStub();
+            }
         }
     }
 
@@ -103,13 +129,18 @@ extern "C" void app_main(void) {
     w5500Cfg.spi_host  = W5500_SPI_HOST;
     w5500Cfg.cs_gpio   = W5500_CS_GPIO;
     w5500Cfg.int_gpio  = W5500_INT_GPIO;
-    w5500Cfg.rst_gpio  = W5500_RST_GPIO;
+    w5500Cfg.rst_gpio  = W5500_RST_GPIO;  // -1; hardware RST via MCP PB7
+    w5500Cfg.rst_set_level = gpio_expander_w5500_rst_set_level;
+    w5500Cfg.rst_ctx   = nullptr;
     w5500Cfg.mosi_gpio = W5500_MOSI_GPIO;
     w5500Cfg.miso_gpio = W5500_MISO_GPIO;
     w5500Cfg.sclk_gpio = W5500_SCLK_GPIO;
     w5500Cfg.sclk_hz   = W5500_SCLK_HZ;
+    ESP_LOGI(TAG, "W5500 pins: MOSI=%d MISO=%d SCLK=%d CS=%d RST=MCP_PB7 @ %d Hz",
+             w5500Cfg.mosi_gpio, w5500Cfg.miso_gpio, w5500Cfg.sclk_gpio,
+             w5500Cfg.cs_gpio, w5500Cfg.sclk_hz);
     if (!w5500.init(w5500Cfg)) {
-        ESP_LOGE(TAG, "FATAL: W5500 init failed");
+        ESP_LOGE(TAG, "FATAL: W5500 init failed (check MOSI17/SCLK5/CS15/MISO35 + RST MCP PB7)");
         return;
     }
     ESP_LOGI(TAG, "W5500 initialized (version 0x%02X)", w5500.getVersion());
@@ -236,9 +267,9 @@ extern "C" void app_main(void) {
 
     static GantryTestConsoleConfig consoleCfg = {};
     consoleCfg.gantry                 = &gantry;
-    consoleCfg.limit_min_pin          = -1;   // MCP removed, limits deferred
+    consoleCfg.limit_min_pin          = -1;   // Endstops drive-managed (EIP)
     consoleCfg.limit_max_pin          = -1;
-    consoleCfg.use_mcp23s17           = false;
+    consoleCfg.use_mcp23s17           = (gpio_expander_get_mcp_handle() != nullptr);
     consoleCfg.limit_switches_active  = false;
 
     result = xTaskCreatePinnedToCore(

@@ -2,50 +2,58 @@
 
 ESP-IDF driver for MCP23S17 16-bit SPI GPIO expander.
 
-## Features
+On WT32-ETH01 this part shares **SPI3** with the Amazon SPI TFT. Prefer
+`skip_bus_init=true` after `spi3::init()` so the bus is owned by `lib/Spi3Bus`.
 
-- SPI communication interface
-- 16 GPIO pins (Port A: 0-7, Port B: 8-15)
-- Input/output configuration
-- Pull-up resistor control
-- Port-level read/write operations
-- Interrupt support (configured but not fully implemented)
+## WT32 pin map (SPI3)
 
-## Pin Mapping
+| Signal | GPIO | Notes |
+|--------|------|--------|
+| SCLK | 14 | Shared with TFT |
+| MOSI | 4 | Shared with TFT |
+| MISO | 36 | MCP readback; TFT ignore |
+| CS_MCP | 2 | Idle HIGH; default SPI3 client |
+| TFT CS | MCP PB2 | Software CS (not ESP GPIO) |
+| KO | MCP PB6 | Module key input |
+| W5500 RST | MCP PB7 | Active-low; external pull-up |
 
-- **Port A (Pins 0-7)**: General purpose I/O
-- **Port B (Pins 8-15)**: General purpose I/O
+Do **not** use GPIO 18/19/23 — those are LAN8720 RMII.
 
-## Usage
+## Channel map (`device_address=0`, A0–A2=GND → 0x20)
+
+| MCP | Function |
+|-----|----------|
+| PA0–PA3 | Field 24 V DOUT0–3 (DOUT0 = gripper) |
+| PA4–PA7 | Field 24 V DIN0–3 |
+| PB0 / PB1 | TFT DC / RES |
+| PB2 | TFT CS (software CS on SPI3; idle HIGH) |
+| PB3–PB5 | Encoder A / B / PUSH |
+| PB6 | KO (module key input) |
+| PB7 | W5500 RSTn (active-low; external pull-up) |
+
+TFT BLK is hardwired ON (+5V); not MCP-driven.
+
+## Usage (shared SPI3)
 
 ```c
+#include "Spi3Bus.h"
 #include "MCP23S17.h"
+#include "gpio_expander.h"
+#include "gantry_app_constants.h"
 
-// Configure MCP23S17
+spi3::init();
+
 mcp23s17_config_t config = {};
-config.spi_host = SPI2_HOST;
-config.cs_pin = GPIO_NUM_5;
-config.miso_pin = GPIO_NUM_19;
-config.mosi_pin = GPIO_NUM_23;
-config.sclk_pin = GPIO_NUM_18;
-config.device_address = 0x00;  // A0=A1=A2=GND
-config.clock_speed_hz = 10000000;
+config.spi_host = spi3::host();
+config.cs_pin = (gpio_num_t)SPI3_CS_MCP_GPIO;
+config.device_address = MCP23S17_HW_ADDR;
+config.clock_speed_hz = SPI3_MCP_CLOCK_HZ;
+config.skip_bus_init = true;
 
-// Initialize
-mcp23s17_handle_t handle = mcp23s17_init(&config);
-
-// Configure pin as output
-mcp23s17_set_pin_direction(handle, 0, true);  // Pin 0 = output
-
-// Write pin
-mcp23s17_write_pin(handle, 0, 1);  // Set pin 0 HIGH
-
-// Configure pin as input with pull-up
-mcp23s17_set_pin_direction(handle, 3, false);  // Pin 3 = input
-mcp23s17_set_pin_pullup(handle, 3, true);
-
-// Read pin
-uint8_t level = mcp23s17_read_pin(handle, 3);
+gpio_expander_init(&config);
+gpio_expander_configure_field_and_ui();
+field_dout_set(0, true);
+bool din0 = field_din_get(0);
 ```
 
 ## Hardware Connections
@@ -55,18 +63,8 @@ uint8_t level = mcp23s17_read_pin(handle, 3);
 | VDD | 3.3V | Power supply |
 | VSS | GND | Ground |
 | RESET | 3.3V | Reset (tie high) |
-| CS | GPIO 5 | Chip select |
-| SCK | GPIO 18 | SPI clock |
-| SI (MOSI) | GPIO 23 | SPI data in |
-| SO (MISO) | GPIO 19 | SPI data out |
-| A0, A1, A2 | GND | Address pins (device address 0x20) |
-| INTA, INTB | (Optional) | Interrupt outputs |
-
-## Device Address
-
-Device address is determined by A0, A1, A2 pins:
-- All GND: 0x20 (default)
-- A0=VDD, A1=A2=GND: 0x21
-- etc.
-
-Set `device_address` in config to match hardware (0x00-0x07, representing lower 3 bits).
+| CS | GPIO 2 | Chip select |
+| SCK | GPIO 14 | SPI clock |
+| SI (MOSI) | GPIO 4 | SPI data in |
+| SO (MISO) | GPIO 36 | SPI data out |
+| A0, A1, A2 | GND | Address 0x20 |
