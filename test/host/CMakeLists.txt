@@ -69,6 +69,7 @@ add_library(ethernet_ip STATIC
 target_include_directories(ethernet_ip PUBLIC
     "${REPO_ROOT}/lib/EtherNetIP/src"
 )
+# Reliability + timing helpers are header/cpp already in ethernet_ip SRCS via EipReliabilityStats
 
 # --- Test executables ---------------------------------------------------------
 # Each test file is its own Unity runner registered with CTest.
@@ -125,5 +126,14 @@ target_include_directories(test_w5500_socket_fastpath PRIVATE
 )
 target_link_libraries(test_w5500_socket_fastpath PRIVATE unity)
 add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
+
+# W5500 poll helper + soft-miss gate + reliability counters
+add_executable(test_w5500_poll "test_w5500_poll.cpp")
+target_include_directories(test_w5500_poll PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src"
+)
+target_link_libraries(test_w5500_poll PRIVATE ethernet_ip unity)
+add_test(NAME test_w5500_poll COMMAND test_w5500_poll)
 
 

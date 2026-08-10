@@ -31,6 +31,8 @@ class EipIoConnection {
   void resetSequences();
 
   // Build the raw CPF UDP payload for O->T assembly data.
+  // Hot-path: encode into `out` (reuses capacity; no per-cycle malloc).
+  void buildOutputFrameInto(Bytes& out, const Bytes& assembly);
   Bytes buildOutputFrame(const Bytes& assembly);
 
   // Parse a received T->O raw CPF UDP payload; returns assembly bytes.

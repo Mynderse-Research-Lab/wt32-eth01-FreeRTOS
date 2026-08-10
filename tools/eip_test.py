@@ -1116,6 +1116,7 @@ def extended_status_description(ext_status: int) -> str:
         0x0109: "Invalid connection size",
         0x0110: "Target for connection not configured",
         0x0111: "RPI not supported",
+        0x0112: "RPI value(s) not acceptable (often too fast; try 2000-5000 us)",
         0x0113: "Out of connections",
         0x0114: "Vendor ID or product code mismatch / Invalid segment type",
         0x0115: "Device type mismatch",

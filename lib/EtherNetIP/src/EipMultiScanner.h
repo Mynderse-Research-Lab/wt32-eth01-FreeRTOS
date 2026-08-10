@@ -29,6 +29,8 @@ struct MultiAxisSlot {
 class EipMultiScanner {
  public:
   static constexpr size_t kMaxAxes = 2;
+  // Cap T->O drains per cycle so a flood cannot stall the Class 1 loop.
+  static constexpr size_t kMaxDrainPerCycle = 8;
 
   EipMultiScanner(ITcpClient** tcp, size_t axis_count, IUdpEndpoint& udp,
                   const MultiAxisSlot* slots);
@@ -49,10 +51,22 @@ class EipMultiScanner {
   // Send O->T for every connected axis (no recv). Used as FO keepalive.
   bool sendKeepaliveAll();
 
-  // Send O->T to all axes, then drain T->O until each axis has a fresh
-  // feedback or recv_timeout_ms elapses. Re-sends O->T on the granted API
-  // while waiting so Class 1 does not starve behind T->O. Demux by CID.
-  ExchangeStatus exchangeOnce(uint32_t recv_timeout_ms);
+  // Seed feedback clocks for all connected axes. Call when the Class 1 cyclic
+  // loop actually starts — not at ForwardOpen (FO→first-exchange gap is not
+  // starvation). Also invoked automatically on the first exchangeOnce.
+  void beginCyclicExchange();
+
+  // Send O->T to all axes, then drain whatever T->O is already buffered
+  // (non-blocking). Does not wait for drive phase. Returns kInputMiss when
+  // any axis feedback is older than 3x granted RPI *after* cyclic start
+  // (FO time is never treated as fresh feedback).
+  ExchangeStatus exchangeOnce(uint32_t recv_timeout_ms = 0);
+
+  /// True if axis i received T->O in the last exchangeOnce drain.
+  bool axisReceivedLastCycle(size_t i) const;
+
+  /// Microseconds since axis i last applied fresh T->O (UINT32_MAX if never).
+  uint32_t axisFeedbackAgeUs(size_t i) const;
 
   void disconnect();
 
@@ -74,14 +88,21 @@ class EipMultiScanner {
     ForwardOpenParams open_params{};
     ForwardOpenReply open_reply{};
     Bytes idle_output;
+    Bytes ot_cmd_scratch;    // reused each cycle (avoid vector alloc)
+    Bytes ot_frame_scratch;  // reused CPF frame buffer
     AxisState state = AxisState::kIdle;
     uint32_t to_connection_id = 0;
+    uint32_t target_ip_host = 0;  // cached at openAxis; Class 1 send path only
+    // 0 = never seeded / never received. Set by beginCyclicExchange or
+    // applyFeedback — never by ForwardOpen success.
+    int64_t last_feedback_us = 0;
+    bool received_to_since_cyclic_ = false;
   };
 
   bool forwardOpenAxis(size_t i);
   bool forwardCloseAxis(size_t i);
   bool sendAxisOutput(size_t i);
-  bool applyFeedback(size_t i, const Bytes& assembly);
+  bool applyFeedback(size_t i, const uint8_t* assembly, size_t len);
   size_t matchAxisByConnectionId(uint32_t connection_id) const;
   Bytes buildIdleOutput(const ScannerConfig& cfg) const;
   void configureIo(size_t i);
@@ -90,6 +111,12 @@ class EipMultiScanner {
   size_t axis_count_ = 0;
   AxisRuntime axes_[kMaxAxes];
   bool udp_bound_ = false;
+  size_t ot_rotate_ = 0;
+  bool last_got_[kMaxAxes] = {};
+  int64_t cyclic_started_us_ = 0;
+  bool ot_sent_since_cyclic_ = false;
+  // True after grace ends and feedback clocks were reseeded for the stale window.
+  bool stale_gate_latched_ = false;
 };
 
 }  // namespace eip

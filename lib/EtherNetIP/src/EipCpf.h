@@ -60,12 +60,23 @@ bool decodeSendUnitDataAssembly(const Bytes& connected_data, bool skip_run_idle,
                                 Bytes& out_assembly);
 
 // Build Class 1 O->T CPF: sequenced address (0x8002) + connected data (0x00B1).
+// Hot-path: write into `out` (clear + reserve; no intermediate heap growth).
+void buildClass1OutputCpfInto(Bytes& out, uint32_t connection_id,
+                              uint32_t encap_sequence, uint16_t cip_sequence,
+                              const Bytes& assembly,
+                              bool include_run_idle_header);
 Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
                            uint16_t cip_sequence, const Bytes& assembly,
                            bool include_run_idle_header);
 
-// Parse Class 1 T->O CPF: extract sequenced-address connection ID + assembly.
-// Used by multi-axis demux (match frame to axis by T->O connection ID).
+// Parse Class 1 T->O CPF without allocating: out_assembly points into `frame`.
+// Used by the Class 1 drain hot path (multi-axis demux by T->O connection ID).
+bool parseClass1InputCpfView(const uint8_t* frame, size_t len,
+                             uint32_t& out_connection_id,
+                             const uint8_t*& out_assembly, size_t& out_len,
+                             bool skip_run_idle = false);
+
+// Allocating wrapper around parseClass1InputCpfView (host tests / rare paths).
 bool parseClass1InputCpf(const Bytes& frame, uint32_t& out_connection_id,
                          Bytes& out_assembly, bool skip_run_idle = false);
 

@@ -22,6 +22,8 @@ struct ScannerConfig {
   enum class DriveFamily { kKinetix5100, kHcs01 };
 
   const char* target_ip = nullptr;
+  /// Cached host-order IPv4 for Class 1 sendTo (0 = parse target_ip once at FO).
+  uint32_t target_ip_host = 0;
   DriveFamily drive_family = DriveFamily::kKinetix5100;
   // Kinetix 5100 EDS: config assembly instance 0xBF (191) is a dummy placeholder.
   // Confirmed working via PC-side iterative testing.
@@ -87,6 +89,7 @@ class EipScanner {
   ForwardOpenParams open_params_{};
   ForwardOpenReply open_reply_{};
   Bytes idle_output_;
+  Bytes ot_frame_scratch_;
   State state_ = State::kIdle;
   EipProcessImage* process_image_ = nullptr;
 };

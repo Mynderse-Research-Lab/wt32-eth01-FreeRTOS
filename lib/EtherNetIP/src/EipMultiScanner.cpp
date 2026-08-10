@@ -1,10 +1,12 @@
 #include "EipMultiScanner.h"
 
-#include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#include <climits>
 
 #include "CipMessageRouter.h"
+#include "EipClass1TimingStats.h"
 #include "EipCpf.h"
 #include "Hcs01Assembly.h"
 #include "Kinetix5100Assembly.h"
@@ -120,6 +122,34 @@ bool EipMultiScanner::forwardOpenAxis(size_t i) {
 #ifdef ESP_PLATFORM
     ESP_LOGW(kTag, "axis%u ForwardOpen rejected status=0x%02X",
              static_cast<unsigned>(i), mr.general_status);
+    if (!mr.additional_status.empty()) {
+      uint16_t ext = 0;
+      if (mr.additional_status.size() >= 2) {
+        ext = static_cast<uint16_t>(mr.additional_status[0]) |
+              (static_cast<uint16_t>(mr.additional_status[1]) << 8);
+      }
+      ESP_LOGW(kTag,
+               "axis%u FO extended=0x%04X (0x0106=ownership, 0x0111/112=RPI, "
+               "0x0127/128=size)",
+               static_cast<unsigned>(i), ext);
+      // 0x0112 often appends acceptable O->T / T->O RPI (µs) after type bytes.
+      if (ext == 0x0112 && mr.additional_status.size() >= 12) {
+        const uint8_t* p = mr.additional_status.data();
+        const uint32_t ot =
+            static_cast<uint32_t>(p[4]) | (static_cast<uint32_t>(p[5]) << 8) |
+            (static_cast<uint32_t>(p[6]) << 16) |
+            (static_cast<uint32_t>(p[7]) << 24);
+        const uint32_t to =
+            static_cast<uint32_t>(p[8]) | (static_cast<uint32_t>(p[9]) << 8) |
+            (static_cast<uint32_t>(p[10]) << 16) |
+            (static_cast<uint32_t>(p[11]) << 24);
+        ESP_LOGW(kTag,
+                 "axis%u FO 0x0112 hint OT_RPI~%lu us TO_RPI~%lu us "
+                 "(raise CONFIG_EIP_X_RPI_US)",
+                 static_cast<unsigned>(i), static_cast<unsigned long>(ot),
+                 static_cast<unsigned long>(to));
+      }
+    }
 #endif
     return false;
   }
@@ -174,6 +204,13 @@ bool EipMultiScanner::openAxis(size_t i) {
   AxisRuntime& ax = axes_[i];
   if (ax.tcp == nullptr || ax.config.target_ip == nullptr) return false;
 
+  // Cache IPv4 once at FO — Class 1 sendTo must never re-parse strings.
+  ax.target_ip_host = ax.config.target_ip_host;
+  if (ax.target_ip_host == 0) {
+    ax.target_ip_host = parseIpv4Host(ax.config.target_ip);
+  }
+  if (ax.target_ip_host == 0) return false;
+
   ax.session = std::make_unique<EipSession>(*ax.tcp);
   ax.io = std::make_unique<EipIoConnection>(udp_);
 
@@ -195,24 +232,43 @@ bool EipMultiScanner::openAxis(size_t i) {
 
   configureIo(i);
   ax.state = AxisState::kConnected;
+  // Do not stamp last_feedback_us here — FO→peer-open gap is not T->O age.
   return true;
+}
+
+void EipMultiScanner::beginCyclicExchange() {
+  const int64_t now = class1NowUs();
+  cyclic_started_us_ = now;
+  ot_sent_since_cyclic_ = false;
+  stale_gate_latched_ = false;
+  for (size_t i = 0; i < axis_count_; ++i) {
+    if (axes_[i].state != AxisState::kConnected) continue;
+    axes_[i].last_feedback_us = now;
+    axes_[i].received_to_since_cyclic_ = false;
+  }
 }
 
 bool EipMultiScanner::sendAxisOutput(size_t i) {
   AxisRuntime& ax = axes_[i];
   if (ax.state != AxisState::kConnected || ax.io == nullptr) return false;
 
-  Bytes output = ax.idle_output;
-  if (ax.image != nullptr) {
-    Bytes cmd;
-    if (ax.image->getCommand(cmd)) output = std::move(cmd);
+  // Reuse per-axis scratch to avoid std::vector churn every RPI.
+  Bytes& output = ax.ot_cmd_scratch;
+  if (ax.image == nullptr || !ax.image->getCommand(output)) {
+    output = ax.idle_output;
   }
 
-  const Bytes frame = ax.io->buildOutputFrame(output);
+  ax.io->buildOutputFrameInto(ax.ot_frame_scratch, output);
+  const Bytes& frame = ax.ot_frame_scratch;
   const ssize_t sent =
-      udp_.sendTo(frame.data(), frame.size(), parseIpv4Host(ax.config.target_ip),
+      udp_.sendTo(frame.data(), frame.size(), ax.target_ip_host,
                   EipIoConnection::kDefaultUdpPort);
-  return sent == static_cast<ssize_t>(frame.size());
+  if (sent == static_cast<ssize_t>(frame.size())) {
+    class1TimingStats().noteOtAssemblySent(output.data(), output.size(),
+                                           class1NowUs());
+    return true;
+  }
+  return false;
 }
 
 bool EipMultiScanner::sendKeepaliveAll() {
@@ -226,11 +282,14 @@ bool EipMultiScanner::sendKeepaliveAll() {
   return any;
 }
 
-bool EipMultiScanner::applyFeedback(size_t i, const Bytes& assembly) {
+bool EipMultiScanner::applyFeedback(size_t i, const uint8_t* assembly,
+                                    size_t len) {
   if (axes_[i].image != nullptr) {
-    axes_[i].image->setFeedback(assembly);
+    axes_[i].image->setFeedback(assembly, len);
     axes_[i].image->setOnline(true);
   }
+  axes_[i].last_feedback_us = class1NowUs();
+  axes_[i].received_to_since_cyclic_ = true;
   return true;
 }
 
@@ -244,82 +303,120 @@ size_t EipMultiScanner::matchAxisByConnectionId(uint32_t connection_id) const {
   return kMaxAxes;
 }
 
-ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t recv_timeout_ms) {
+ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
   size_t connected = 0;
   for (size_t i = 0; i < axis_count_; ++i) {
+    last_got_[i] = false;
     if (axes_[i].state == AxisState::kConnected) ++connected;
   }
   if (connected == 0) return ExchangeStatus::kOutputSendFailed;
 
-  for (size_t i = 0; i < axis_count_; ++i) {
+  // Seed clocks when cyclic pumping begins (not at FO).
+  if (cyclic_started_us_ <= 0) {
+    beginCyclicExchange();
+  }
+
+  const int64_t t_ot0 = class1NowUs();
+  for (size_t n = 0; n < axis_count_; ++n) {
+    const size_t i = (ot_rotate_ + n) % axis_count_;
     if (axes_[i].state != AxisState::kConnected) continue;
     if (!sendAxisOutput(i)) return ExchangeStatus::kOutputSendFailed;
   }
-
-  uint32_t api_ms = 0;
-  for (size_t i = 0; i < axis_count_; ++i) {
-    if (axes_[i].state != AxisState::kConnected) continue;
-    if (axes_[i].open_reply.to_api_us == 0) continue;
-    const uint32_t ms = (axes_[i].open_reply.to_api_us + 999) / 1000;
-    if (ms > 0 && (api_ms == 0 || ms < api_ms)) api_ms = ms;
+  ot_sent_since_cyclic_ = true;
+  if (axis_count_ > 0) {
+    ot_rotate_ = (ot_rotate_ + 1) % axis_count_;
   }
-  if (api_ms == 0) api_ms = 5;
-
-  bool got[kMaxAxes] = {};
-  size_t remaining = connected;
-  const auto cycle_start = std::chrono::steady_clock::now();
-  const auto deadline =
-      cycle_start +
-      std::chrono::milliseconds(recv_timeout_ms > 0 ? recv_timeout_ms : 1);
-  auto last_ot = cycle_start;
-
-  while (remaining > 0) {
-    const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline) break;
-
-    const auto since_ot_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ot)
-            .count();
-    if (since_ot_ms >= static_cast<std::chrono::milliseconds::rep>(api_ms)) {
-      if (!sendKeepaliveAll()) return ExchangeStatus::kOutputSendFailed;
-      last_ot = now;
+  {
+    const int64_t dt = class1NowUs() - t_ot0;
+    if (dt >= 0 && dt <= static_cast<int64_t>(UINT32_MAX)) {
+      class1TimingStats().recordOtSendUs(static_cast<uint32_t>(dt));
     }
+  }
 
-    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          deadline - now)
-                          .count();
-    const auto until_ot =
-        static_cast<std::chrono::milliseconds::rep>(api_ms) - since_ot_ms;
-    uint32_t slice_ms = left > 0 ? static_cast<uint32_t>(left) : 1u;
-    if (until_ot > 0 &&
-        static_cast<uint32_t>(until_ot) < slice_ms) {
-      slice_ms = static_cast<uint32_t>(until_ot);
-      if (slice_ms == 0) slice_ms = 1;
-    }
+  // Drain every complete datagram already buffered — no wait for drive phase.
+  uint8_t buf[EipSession::kMaxFrameSize];
+  for (size_t drained = 0; drained < kMaxDrainPerCycle; ++drained) {
+    const ssize_t n = udp_.recvFrom(buf, sizeof(buf), 0);
+    if (n <= 0) break;
 
-    uint8_t buf[EipSession::kMaxFrameSize];
-    const ssize_t n = udp_.recvFrom(buf, sizeof(buf), slice_ms);
-    if (n <= 0) continue;
-
-    const Bytes rx(buf, buf + n);
     uint32_t cid = 0;
-    Bytes assembly;
-    if (!parseClass1InputCpf(rx, cid, assembly, false)) continue;
+    const uint8_t* assy = nullptr;
+    size_t assy_len = 0;
+    if (!parseClass1InputCpfView(buf, static_cast<size_t>(n), cid, assy,
+                                 assy_len, false)) {
+      continue;
+    }
 
     const size_t idx = matchAxisByConnectionId(cid);
     if (idx >= kMaxAxes) continue;
-    if (got[idx]) continue;
-    got[idx] = true;
-    --remaining;
-    (void)applyFeedback(idx, assembly);
+    if (last_got_[idx]) continue;
+    last_got_[idx] = true;
+    (void)applyFeedback(idx, assy, assy_len);
+  }
+
+  uint32_t rpi_us = 0;
+  for (size_t i = 0; i < axis_count_; ++i) {
+    if (axes_[i].state != AxisState::kConnected) continue;
+    const uint32_t api = axes_[i].open_reply.to_api_us;
+    if (api > 0 && (rpi_us == 0 || api < rpi_us)) rpi_us = api;
+  }
+  if (rpi_us == 0) rpi_us = 2000;
+
+  const int64_t now = class1NowUs();
+  const uint32_t since_cyclic_us =
+      (cyclic_started_us_ > 0 && now >= cyclic_started_us_)
+          ? static_cast<uint32_t>(now - cyclic_started_us_)
+          : 0u;
+  // First T->O may lag several RPIs after the first O->T; do not tear down
+  // during the initial grace window (N * RPI after cyclic start).
+  if (!stale_gate_latched_) {
+    if (!class1StaleGateArmed(since_cyclic_us, rpi_us, ot_sent_since_cyclic_)) {
+      return ExchangeStatus::kOk;
+    }
+    // Grace just ended: reseed axes that never got T->O so the stale window
+    // starts *after* grace (otherwise age-from-cyclic-start == grace and
+    // soft-miss fires on the same cycle the gate arms).
+    stale_gate_latched_ = true;
+    for (size_t i = 0; i < axis_count_; ++i) {
+      if (axes_[i].state != AxisState::kConnected) continue;
+      if (!axes_[i].received_to_since_cyclic_) {
+        axes_[i].last_feedback_us = now;
+      }
+    }
+    return ExchangeStatus::kOk;
   }
 
   for (size_t i = 0; i < axis_count_; ++i) {
-    if (axes_[i].state == AxisState::kConnected && !got[i]) {
+    if (axes_[i].state != AxisState::kConnected) continue;
+    const int64_t last = axes_[i].last_feedback_us;
+    const uint32_t age =
+        (last > 0 && now >= last)
+            ? static_cast<uint32_t>(now - last)
+            : UINT32_MAX;
+    if (shouldTeardownAfterStaleUs(age, rpi_us)) {
       return ExchangeStatus::kInputMiss;
     }
   }
-  return connected > 0 ? ExchangeStatus::kOk : ExchangeStatus::kInputMiss;
+  return ExchangeStatus::kOk;
+}
+
+bool EipMultiScanner::axisReceivedLastCycle(size_t i) const {
+  if (i >= axis_count_) return false;
+  return last_got_[i];
+}
+
+uint32_t EipMultiScanner::axisFeedbackAgeUs(size_t i) const {
+  if (i >= axis_count_ || axes_[i].state != AxisState::kConnected) {
+    return UINT32_MAX;
+  }
+  const int64_t last = axes_[i].last_feedback_us;
+  if (last <= 0) return UINT32_MAX;
+  const int64_t now = class1NowUs();
+  if (now < last) return 0;
+  const int64_t age = now - last;
+  return (age > static_cast<int64_t>(UINT32_MAX))
+             ? UINT32_MAX
+             : static_cast<uint32_t>(age);
 }
 
 bool EipMultiScanner::forwardCloseAxis(size_t i) {
@@ -354,7 +451,15 @@ void EipMultiScanner::disconnect() {
     ax.state = AxisState::kIdle;
     ax.open_reply = ForwardOpenReply{};
     ax.to_connection_id = 0;
+    ax.last_feedback_us = 0;
+    ax.target_ip_host = 0;
+    ax.received_to_since_cyclic_ = false;
+    ax.ot_cmd_scratch.clear();
+    ax.ot_frame_scratch.clear();
   }
+  cyclic_started_us_ = 0;
+  ot_sent_since_cyclic_ = false;
+  stale_gate_latched_ = false;
   if (udp_bound_) {
     udp_.close();
     udp_bound_ = false;

@@ -80,6 +80,16 @@ menu "EtherNet/IP originator"
             even for local-subnet traffic (set to 0.0.0.0 only if no
             gateway is needed).
 
+    config EIP_W5500_SPI_HZ
+        int "W5500 SPI clock (Hz)"
+        default 20000000
+        depends on EIP_SCANNER_ENABLED
+        range 1000000 80000000
+        help
+            SPI clock for WIZ850io / W5500. Default 20 MHz — ESP-IDF v6
+            full-duplex on GPIO-matrix pins rejects >~26.67 MHz. Chip max
+            is 80 MHz; raise only with IOMUX pins or SPI_DEVICE_NO_DUMMY
+            and SI validation.
     config EIP_AXIS_X_PUU_PER_MM
         float "X-axis PUU/mm scaling (Kinetix 5100)"
         default 52428.8
@@ -112,11 +122,15 @@ menu "EtherNet/IP originator"
 
     config EIP_X_RPI_US
         int "X/Z axis RPI (microseconds)"
-        default 5000
+        default 2000
         depends on EIP_AXIS_X || EIP_AXIS_Z
         help
             Requested packet interval for the Kinetix 5100 Class 1
-            implicit I/O connection, in microseconds.
+            implicit I/O connection, in microseconds. Default 2000 us —
+            Kinetix rejects 1000 us with FO extended 0x0112 (RPI not
+            acceptable). Dual-axis exchange must complete under this
+            budget (polling SPI + produce-then-drain). Raise toward
+            5000 only if FO still returns 0x0112.
 
     config EIP_THETA_RPI_US
         int "Theta axis RPI (microseconds)"

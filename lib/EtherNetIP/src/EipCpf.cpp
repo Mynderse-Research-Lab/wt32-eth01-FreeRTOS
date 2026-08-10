@@ -90,51 +90,95 @@ bool decodeSendUnitDataAssembly(const Bytes& connected_data, bool skip_run_idle,
   return r.bytes(out_assembly, r.remaining());
 }
 
+void buildClass1OutputCpfInto(Bytes& out, uint32_t connection_id,
+                              uint32_t encap_sequence, uint16_t cip_sequence,
+                              const Bytes& assembly,
+                              bool include_run_idle_header) {
+  // Flat CPF: item_count + sequenced address (8) + connected data
+  // (cip_seq + optional Run/Idle + assembly). One reserve — no push_back growth.
+  const size_t connected_len =
+      2u + (include_run_idle_header ? 4u : 0u) + assembly.size();
+  const size_t total = 2u + (2u + 2u + 8u) + (2u + 2u + connected_len);
+  out.clear();
+  out.reserve(total);
+  ByteWriter w(out);
+  w.u16(2);  // item count
+  w.u16(static_cast<uint16_t>(CpfItemType::kSequencedAddress));
+  w.u16(8);
+  w.u32(connection_id);
+  w.u32(encap_sequence);
+  w.u16(static_cast<uint16_t>(CpfItemType::kConnectedData));
+  w.u16(static_cast<uint16_t>(connected_len));
+  w.u16(cip_sequence);
+  if (include_run_idle_header) {
+    // Run state (0x00000001). Confirmed for Kinetix 5100 via PC testing.
+    w.u32(0x00000001);
+  }
+  w.bytes(assembly);
+}
+
 Bytes buildClass1OutputCpf(uint32_t connection_id, uint32_t encap_sequence,
                            uint16_t cip_sequence, const Bytes& assembly,
                            bool include_run_idle_header) {
-  Bytes addr;
-  ByteWriter aw(addr);
-  aw.u32(connection_id);
-  aw.u32(encap_sequence);
-
-  Bytes data;
-  ByteWriter dw(data);
-  dw.u16(cip_sequence);
-  if (include_run_idle_header) {
-    // Run state (0x00000001). Confirmed for Kinetix 5100 via PC testing.
-    dw.u32(0x00000001);
-  }
-  dw.bytes(assembly);
-
-  std::vector<CpfItem> items;
-  items.emplace_back(CpfItemType::kSequencedAddress, std::move(addr));
-  items.emplace_back(CpfItemType::kConnectedData, std::move(data));
-  return encodeCpf(items);
+  Bytes out;
+  buildClass1OutputCpfInto(out, connection_id, encap_sequence, cip_sequence,
+                           assembly, include_run_idle_header);
+  return out;
 }
 
-bool parseClass1InputCpf(const Bytes& frame, uint32_t& out_connection_id,
-                         Bytes& out_assembly, bool skip_run_idle) {
-  std::vector<CpfItem> items;
-  if (!decodeCpf(frame, items)) return false;
+bool parseClass1InputCpfView(const uint8_t* frame, size_t len,
+                             uint32_t& out_connection_id,
+                             const uint8_t*& out_assembly, size_t& out_len,
+                             bool skip_run_idle) {
+  out_assembly = nullptr;
+  out_len = 0;
+  if (frame == nullptr) return false;
+
+  ByteReader r(frame, len);
+  uint16_t count = 0;
+  if (!r.u16(count)) return false;
 
   bool have_id = false;
   bool have_data = false;
-  for (const CpfItem& item : items) {
-    if (item.type_id == static_cast<uint16_t>(CpfItemType::kSequencedAddress)) {
-      if (item.data.size() < 4) return false;
-      ByteReader r(item.data);
-      if (!r.u32(out_connection_id)) return false;
+  for (uint16_t i = 0; i < count; ++i) {
+    uint16_t type_id = 0;
+    uint16_t item_len = 0;
+    if (!r.u16(type_id) || !r.u16(item_len)) return false;
+    if (r.remaining() < item_len) return false;
+    const uint8_t* item_data = r.cursor();
+    if (!r.skip(item_len)) return false;
+
+    if (type_id == static_cast<uint16_t>(CpfItemType::kSequencedAddress)) {
+      if (item_len < 4) return false;
+      ByteReader ar(item_data, item_len);
+      if (!ar.u32(out_connection_id)) return false;
       have_id = true;
-    } else if (item.type_id ==
+    } else if (type_id ==
                static_cast<uint16_t>(CpfItemType::kConnectedData)) {
-      if (!decodeSendUnitDataAssembly(item.data, skip_run_idle, out_assembly)) {
-        return false;
+      ByteReader dr(item_data, item_len);
+      uint16_t cip_seq = 0;
+      if (!dr.u16(cip_seq)) return false;
+      if (skip_run_idle) {
+        if (!dr.skip(4)) return false;
       }
+      out_assembly = dr.cursor();
+      out_len = dr.remaining();
       have_data = true;
     }
   }
   return have_id && have_data;
+}
+
+bool parseClass1InputCpf(const Bytes& frame, uint32_t& out_connection_id,
+                         Bytes& out_assembly, bool skip_run_idle) {
+  const uint8_t* assy = nullptr;
+  size_t assy_len = 0;
+  if (!parseClass1InputCpfView(frame.data(), frame.size(), out_connection_id,
+                               assy, assy_len, skip_run_idle)) {
+    return false;
+  }
+  out_assembly.assign(assy, assy + assy_len);
+  return true;
 }
 
 }  // namespace eip

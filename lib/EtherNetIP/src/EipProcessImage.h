@@ -16,6 +16,7 @@ class EipProcessImage {
   bool getCommand(Bytes& out_command) const;
   bool hasCommand() const;
 
+  void setFeedback(const uint8_t* data, size_t len);
   void setFeedback(const Bytes& feedback);
   bool getFeedback(Bytes& out_feedback) const;
 

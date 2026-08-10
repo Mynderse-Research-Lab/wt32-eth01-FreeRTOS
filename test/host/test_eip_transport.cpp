@@ -1,11 +1,16 @@
 #include "unity.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <thread>
 #include <vector>
 
 #include "CipMessageRouter.h"
+#include "EipClass1Timing.h"
+#include "EipClass1TimingStats.h"
 #include "EipConnectionManager.h"
 #include "EipCpf.h"
 #include "EipEncapsulation.h"
@@ -69,22 +74,38 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
     responses_.push_back(std::move(response));
   }
   void setEcho(bool echo) { echo_ = echo; }
+  void setEmptyReturnsZero(bool v) { empty_returns_zero_ = v; }
+  void setFailSend(bool v) { fail_send_ = v; }
+  void setFloodFrame(Bytes frame) {
+    flood_ = true;
+    flood_frame_ = std::move(frame);
+  }
   const Bytes& lastSent() const { return last_sent_; }
+  size_t recvCallCount() const { return recv_calls_; }
 
   bool bind(uint16_t, uint32_t = 0) override { return true; }
   ssize_t sendTo(const uint8_t* data, size_t len, uint32_t, uint16_t) override {
+    if (fail_send_) return -1;
     last_sent_.assign(data, data + len);
     if (echo_) echo_frame_.assign(data, data + len);
     return static_cast<ssize_t>(len);
   }
   ssize_t recvFrom(uint8_t* buf, size_t max_len, uint32_t) override {
+    ++recv_calls_;
+    if (flood_) {
+      const size_t n = std::min(max_len, flood_frame_.size());
+      std::memcpy(buf, flood_frame_.data(), n);
+      return static_cast<ssize_t>(n);
+    }
     if (echo_ && !echo_frame_.empty()) {
       const size_t n = std::min(max_len, echo_frame_.size());
       std::memcpy(buf, echo_frame_.data(), n);
       echo_frame_.clear();
       return static_cast<ssize_t>(n);
     }
-    if (response_index_ >= responses_.size()) return -1;
+    if (response_index_ >= responses_.size()) {
+      return empty_returns_zero_ ? 0 : -1;
+    }
     const Bytes& r = responses_[response_index_++];
     const size_t n = std::min(max_len, r.size());
     std::memcpy(buf, r.data(), n);
@@ -95,9 +116,14 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
  private:
   std::vector<Bytes> responses_;
   size_t response_index_ = 0;
+  size_t recv_calls_ = 0;
   Bytes last_sent_;
   bool echo_ = false;
+  bool empty_returns_zero_ = false;
+  bool fail_send_ = false;
+  bool flood_ = false;
   Bytes echo_frame_;
+  Bytes flood_frame_;
 };
 
 Bytes makeRegisterSessionReply(uint32_t handle) {
@@ -412,6 +438,55 @@ static void test_parse_class1_input_cpf_demux_id(void) {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(assembly.data(), out.data(), out.size());
 }
 
+static void test_parse_class1_input_cpf_view(void) {
+  const Bytes assembly = {0x11, 0x22, 0x33, 0x44, 0x55};
+  const Bytes frame =
+      eip::buildClass1OutputCpf(0xDEADBEEF, 5, 7, assembly, false);
+
+  uint32_t cid_copy = 0;
+  Bytes out_copy;
+  TEST_ASSERT_TRUE(
+      eip::parseClass1InputCpf(frame, cid_copy, out_copy, false));
+
+  uint32_t cid_view = 0;
+  const uint8_t* assy = nullptr;
+  size_t assy_len = 0;
+  TEST_ASSERT_TRUE(eip::parseClass1InputCpfView(
+      frame.data(), frame.size(), cid_view, assy, assy_len, false));
+  TEST_ASSERT_EQUAL_HEX32(cid_copy, cid_view);
+  TEST_ASSERT_EQUAL_UINT32(out_copy.size(), assy_len);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(out_copy.data(), assy, assy_len);
+  // View pointer must lie inside the input frame buffer.
+  TEST_ASSERT_TRUE(assy >= frame.data());
+  TEST_ASSERT_TRUE(assy + assy_len <= frame.data() + frame.size());
+
+  // Truncated frame
+  TEST_ASSERT_FALSE(eip::parseClass1InputCpfView(frame.data(), 3, cid_view,
+                                                 assy, assy_len, false));
+
+  // Bad item length (claims more bytes than remain)
+  Bytes bad = frame;
+  // Sequenced-address item length at bytes 4-5; inflate past end.
+  bad[4] = 0xFF;
+  bad[5] = 0x00;
+  TEST_ASSERT_FALSE(eip::parseClass1InputCpfView(bad.data(), bad.size(),
+                                                 cid_view, assy, assy_len,
+                                                 false));
+
+  // No connected-data item: only sequenced address
+  Bytes addr_only;
+  {
+    eip::ByteWriter w(addr_only);
+    w.u16(1);  // one item
+    w.u16(0x8002);
+    w.u16(8);
+    w.u32(0x12345678);
+    w.u32(1);
+  }
+  TEST_ASSERT_FALSE(eip::parseClass1InputCpfView(
+      addr_only.data(), addr_only.size(), cid_view, assy, assy_len, false));
+}
+
 static void test_multi_scanner_dual_demux(void) {
   FakeTcpClient tcp0;
   FakeTcpClient tcp1;
@@ -494,10 +569,89 @@ static void test_class1_rpi_remainder_and_miss_policy(void) {
   TEST_ASSERT_EQUAL_UINT32(3, eip::rpiRemainderMs(5, 2));
   TEST_ASSERT_EQUAL_UINT32(1, eip::rpiRemainderMs(0, 0));
 
+  TEST_ASSERT_EQUAL_UINT32(0, eip::rpiRemainderUs(1000, 1000));
+  TEST_ASSERT_EQUAL_UINT32(0, eip::rpiRemainderUs(1000, 1500));
+  TEST_ASSERT_EQUAL_UINT32(250, eip::rpiRemainderUs(1000, 750));
+  TEST_ASSERT_EQUAL_UINT32(1000, eip::rpiRemainderUs(0, 0));
+
+  // Tick-aligned Class 1 pacing helpers (FreeRTOS 1 ms tick).
+  TEST_ASSERT_EQUAL_UINT32(2, eip::class1PaceTicks(2000, 1000));
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1RpiFractionUs(2000, 1000));
+  TEST_ASSERT_EQUAL_UINT32(1, eip::class1PaceTicks(1500, 1000));
+  TEST_ASSERT_EQUAL_UINT32(500, eip::class1RpiFractionUs(1500, 1000));
+  TEST_ASSERT_EQUAL_UINT32(1, eip::class1PaceTicks(500, 1000));  // clamped
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1RpiFractionUs(500, 1000));
+  TEST_ASSERT_EQUAL_UINT32(1, eip::class1PaceTicks(0, 1000));
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1RpiFractionUs(0, 1000));
+
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(0));
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(2));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(3));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(4));
+
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(0, 2000));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(1999, 2000));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(5999, 2000));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(6000, 2000));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(1, 0));
+
+  // Stale gate stays disarmed until O->T has been sent and N*RPI elapsed.
+  TEST_ASSERT_FALSE(eip::class1StaleGateArmed(0, 2000, false));
+  TEST_ASSERT_FALSE(eip::class1StaleGateArmed(10000, 2000, false));
+  TEST_ASSERT_FALSE(eip::class1StaleGateArmed(5999, 2000, true));
+  TEST_ASSERT_TRUE(eip::class1StaleGateArmed(6000, 2000, true));
+  TEST_ASSERT_TRUE(eip::class1StaleGateArmed(1, 0, true));
+
+  TEST_ASSERT_EQUAL_UINT32(0xC0A80114u, eip::parseIpv4Host("192.168.1.20"));
+  TEST_ASSERT_EQUAL_UINT32(0u, eip::parseIpv4Host(""));
+  TEST_ASSERT_EQUAL_UINT32(0u, eip::parseIpv4Host("192.168.1"));
+  TEST_ASSERT_EQUAL_UINT32(0u, eip::parseIpv4Host(nullptr));
+
+  uint32_t last_warn = 0;
+  TEST_ASSERT_TRUE(eip::shouldWarnSoftMiss(last_warn, 100, 1000));
+  TEST_ASSERT_FALSE(eip::shouldWarnSoftMiss(last_warn, 500, 1000));
+  TEST_ASSERT_TRUE(eip::shouldWarnSoftMiss(last_warn, 1200, 1000));
+}
+
+// Exact boundary / rpi_us==0 / 32-bit overflow cases for the stale gate.
+static void test_stale_teardown_boundary(void) {
+  // Boundary: age == 3 * RPI tears down; one less does not.
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(5999, 2000, 3));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(6000, 2000, 3));
+
+  // rpi_us == 0: any positive age is stale; age 0 is not.
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(0, 0));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(1, 0));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(UINT32_MAX, 0));
+
+  // Large RPI that would wrap a 32-bit product (0x60000000 * 3).
+  const uint32_t big_rpi = 0x60000000u;
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(0, big_rpi, 3));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(UINT32_MAX, big_rpi, 3));
+}
+
+static void test_class1_timing_stats_ring_and_cmd_to_start(void) {
+  eip::class1TimingStats().reset();
+  for (uint32_t i = 1; i <= 10; ++i) {
+    eip::class1TimingStats().recordExchangeUs(i * 100);
+  }
+  const eip::Class1TimingSnapshot ex = eip::class1TimingStats().exchange();
+  TEST_ASSERT_EQUAL_UINT32(10, ex.count);
+  TEST_ASSERT_EQUAL_UINT32(100, ex.min_us);
+  TEST_ASSERT_EQUAL_UINT32(1000, ex.max_us);
+  TEST_ASSERT_TRUE(ex.p50_us >= 100 && ex.p50_us <= 1000);
+  TEST_ASSERT_TRUE(ex.p99_us >= ex.p50_us);
+
+  eip::class1TimingStats().reset();
+  const int64_t t0 = eip::class1NowUs();
+  eip::class1TimingStats().noteAbsoluteStartMotionPublished(t0);
+  uint8_t assy[40] = {};
+  assy[1] = 0x10;  // StartMotion
+  eip::class1TimingStats().noteOtAssemblySent(assy, sizeof(assy), t0 + 250);
+  const eip::Class1TimingSnapshot cs = eip::class1TimingStats().cmdToStart();
+  TEST_ASSERT_EQUAL_UINT32(1, cs.count);
+  TEST_ASSERT_EQUAL_UINT32(250, cs.min_us);
+  TEST_ASSERT_EQUAL_UINT32(250, cs.p50_us);
 }
 
 static void test_multi_scanner_input_miss_status(void) {
@@ -509,13 +663,13 @@ static void test_multi_scanner_input_miss_status(void) {
   fo0.ot_connection_id = 0x10000001;
   fo0.to_connection_id = 0x20000001;
   fo0.connection_serial = 0x0001;
-  fo0.to_api_us = 5000;
+  fo0.to_api_us = 1000;
 
   eip::ForwardOpenReply fo1 = makeSampleForwardOpenReply();
   fo1.ot_connection_id = 0x10000002;
   fo1.to_connection_id = 0x20000002;
   fo1.connection_serial = 0x0002;
-  fo1.to_api_us = 5000;
+  fo1.to_api_us = 1000;
 
   const uint32_t h0 = 0x11110001;
   const uint32_t h1 = 0x11110002;
@@ -551,11 +705,289 @@ static void test_multi_scanner_input_miss_status(void) {
   TEST_ASSERT_TRUE(scanner.bindSharedUdp());
   TEST_ASSERT_TRUE(scanner.openAxis(1));
 
-  // No T->O enqueued → input miss (O->T send still succeeds on FakeUdp).
+  // FO does not stamp feedback — age is unknown until cyclic start.
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, scanner.axisFeedbackAgeUs(0));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, scanner.axisFeedbackAgeUs(1));
+
+  // Produce-then-drain: empty RX is OK during the post-cyclic grace window.
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+  TEST_ASSERT_FALSE(scanner.axisReceivedLastCycle(0));
+  TEST_ASSERT_FALSE(scanner.axisReceivedLastCycle(1));
+
+  // Grace ends at 3x RPI (@1000 us = 3 ms) and reseeds the stale clock.
+  // Real starvation needs another 3x RPI after that → miss.
+  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+  std::this_thread::sleep_for(std::chrono::milliseconds(4));
   TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kInputMiss),
-                        static_cast<int>(scanner.exchangeOnce(5)));
+                        static_cast<int>(scanner.exchangeOnce(0)));
 
   scanner.disconnect();
+}
+
+// Regression: axis0 FO→axis1 FO gap must not look like T->O starvation on the
+// first cyclic exchange (bench: ~70 ms FO gap vs 3x2000 us = 6 ms).
+static void test_fo_delay_before_first_exchange_not_stale(void) {
+  FakeTcpClient tcp0;
+  FakeTcpClient tcp1;
+  FakeUdpEndpoint udp;
+
+  eip::ForwardOpenReply fo0 = makeSampleForwardOpenReply();
+  fo0.ot_connection_id = 0x10000001;
+  fo0.to_connection_id = 0x20000001;
+  fo0.connection_serial = 0x0001;
+  fo0.to_api_us = 2000;
+
+  eip::ForwardOpenReply fo1 = makeSampleForwardOpenReply();
+  fo1.ot_connection_id = 0x10000002;
+  fo1.to_connection_id = 0x20000002;
+  fo1.connection_serial = 0x0002;
+  fo1.to_api_us = 2000;
+
+  const uint32_t h0 = 0x11110001;
+  const uint32_t h1 = 0x11110002;
+  tcp0.enqueueResponse(makeRegisterSessionReply(h0));
+  tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardOpenMrReply(fo0)));
+  tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardCloseMrReply()));
+  tcp0.enqueueResponse(makeRegisterSessionReply(0));
+
+  tcp1.enqueueResponse(makeRegisterSessionReply(h1));
+  tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardOpenMrReply(fo1)));
+  tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardCloseMrReply()));
+  tcp1.enqueueResponse(makeRegisterSessionReply(0));
+
+  eip::ScannerConfig cfg0 = makeTestScannerConfig();
+  cfg0.target_ip = "192.168.1.20";
+  cfg0.connection_serial = 0x0001;
+  cfg0.ot_connection_id = 0x10000001;
+  cfg0.to_connection_id = 0x20000001;
+  cfg0.connection_timeout_multiplier = 7;
+
+  eip::ScannerConfig cfg1 = makeTestScannerConfig();
+  cfg1.target_ip = "192.168.1.21";
+  cfg1.connection_serial = 0x0002;
+  cfg1.ot_connection_id = 0x10000002;
+  cfg1.to_connection_id = 0x20000002;
+  cfg1.connection_timeout_multiplier = 7;
+
+  eip::MultiAxisSlot slots[2] = {{cfg0, nullptr}, {cfg1, nullptr}};
+  eip::ITcpClient* tcps[2] = {&tcp0, &tcp1};
+
+  eip::EipMultiScanner scanner(tcps, 2, udp, slots);
+  TEST_ASSERT_TRUE(scanner.openAxis(0));
+  TEST_ASSERT_TRUE(scanner.bindSharedUdp());
+  // Simulate peer FO / bind cost that previously aged axis0 past 3x RPI.
+  std::this_thread::sleep_for(std::chrono::milliseconds(15));
+  TEST_ASSERT_TRUE(scanner.openAxis(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(15));
+
+  // First cyclic exchange must not spuriously return kInputMiss.
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+
+  scanner.disconnect();
+}
+
+namespace {
+
+struct DualConnected {
+  FakeTcpClient tcp0;
+  FakeTcpClient tcp1;
+  FakeUdpEndpoint udp;
+  eip::EipProcessImage img0;
+  eip::EipProcessImage img1;
+  eip::ForwardOpenReply fo0;
+  eip::ForwardOpenReply fo1;
+  eip::ScannerConfig cfg0;
+  eip::ScannerConfig cfg1;
+  eip::MultiAxisSlot slots[2];
+  eip::ITcpClient* tcps[2];
+  std::unique_ptr<eip::EipMultiScanner> scanner;
+
+  DualConnected(uint32_t to_api_us = 20000, bool with_images = true) {
+    fo0 = makeSampleForwardOpenReply();
+    fo0.ot_connection_id = 0x10000001;
+    fo0.to_connection_id = 0x20000001;
+    fo0.connection_serial = 0x0001;
+    fo0.to_api_us = to_api_us;
+
+    fo1 = makeSampleForwardOpenReply();
+    fo1.ot_connection_id = 0x10000002;
+    fo1.to_connection_id = 0x20000002;
+    fo1.connection_serial = 0x0002;
+    fo1.to_api_us = to_api_us;
+
+    const uint32_t h0 = 0x11110001;
+    const uint32_t h1 = 0x11110002;
+    tcp0.enqueueResponse(makeRegisterSessionReply(h0));
+    tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardOpenMrReply(fo0)));
+    tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardCloseMrReply()));
+    tcp0.enqueueResponse(makeRegisterSessionReply(0));
+
+    tcp1.enqueueResponse(makeRegisterSessionReply(h1));
+    tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardOpenMrReply(fo1)));
+    tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardCloseMrReply()));
+    tcp1.enqueueResponse(makeRegisterSessionReply(0));
+
+    cfg0 = makeTestScannerConfig();
+    cfg0.target_ip = "192.168.1.20";
+    cfg0.connection_serial = 0x0001;
+    cfg0.ot_connection_id = 0x10000001;
+    cfg0.to_connection_id = 0x20000001;
+    cfg0.connection_timeout_multiplier = 7;
+
+    cfg1 = makeTestScannerConfig();
+    cfg1.target_ip = "192.168.1.21";
+    cfg1.connection_serial = 0x0002;
+    cfg1.ot_connection_id = 0x10000002;
+    cfg1.to_connection_id = 0x20000002;
+    cfg1.connection_timeout_multiplier = 7;
+
+    slots[0] = {cfg0, with_images ? &img0 : nullptr};
+    slots[1] = {cfg1, with_images ? &img1 : nullptr};
+    tcps[0] = &tcp0;
+    tcps[1] = &tcp1;
+    scanner = std::make_unique<eip::EipMultiScanner>(tcps, 2, udp, slots);
+    TEST_ASSERT_TRUE(scanner->openAxis(0));
+    TEST_ASSERT_TRUE(scanner->bindSharedUdp());
+    TEST_ASSERT_TRUE(scanner->openAxis(1));
+  }
+};
+
+}  // namespace
+
+static void test_drain_applies_multiple_datagrams_one_cycle(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+
+  const Bytes assy0(52, 0xA0);
+  const Bytes assy1(52, 0xB1);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy0, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo1.to_connection_id, 1, 1, assy1, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(1));
+  TEST_ASSERT_TRUE(d.img0.isOnline());
+  TEST_ASSERT_TRUE(d.img1.isOnline());
+
+  Bytes fb0;
+  Bytes fb1;
+  TEST_ASSERT_TRUE(d.img0.getFeedback(fb0));
+  TEST_ASSERT_TRUE(d.img1.getFeedback(fb1));
+  TEST_ASSERT_EQUAL_HEX8(0xA0, fb0[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xB1, fb1[0]);
+
+  d.scanner->disconnect();
+}
+
+static void test_drain_ignores_duplicate_cid(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+
+  const Bytes first(52, 0x11);
+  const Bytes second(52, 0x22);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, first, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 2, 2, second, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_FALSE(d.scanner->axisReceivedLastCycle(1));
+
+  Bytes fb0;
+  TEST_ASSERT_TRUE(d.img0.getFeedback(fb0));
+  // First matching CID wins; duplicate in the same cycle is ignored.
+  TEST_ASSERT_EQUAL_HEX8(0x11, fb0[0]);
+
+  d.scanner->disconnect();
+}
+
+static void test_drain_ignores_unknown_cid(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+
+  const Bytes foreign(52, 0xEE);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(0xDEADBEEF, 1, 1, foreign, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_FALSE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_FALSE(d.scanner->axisReceivedLastCycle(1));
+  TEST_ASSERT_FALSE(d.img0.isOnline());
+  TEST_ASSERT_FALSE(d.img1.isOnline());
+
+  d.scanner->disconnect();
+}
+
+static void test_drain_is_bounded(void) {
+  DualConnected d(20000, false);
+  const Bytes assy(52, 0x55);
+  d.udp.setFloodFrame(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(
+      static_cast<uint32_t>(eip::EipMultiScanner::kMaxDrainPerCycle),
+      static_cast<uint32_t>(d.udp.recvCallCount()));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+
+  d.scanner->disconnect();
+}
+
+static void test_feedback_age_resets_on_fresh_data(void) {
+  DualConnected d(20000, false);
+  d.udp.setEmptyReturnsZero(true);
+
+  // FO must not invent a feedback timestamp.
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, d.scanner->axisFeedbackAgeUs(0));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  const uint32_t age_seeded = d.scanner->axisFeedbackAgeUs(0);
+  TEST_ASSERT_TRUE(age_seeded < 5000);
+
+  const Bytes assy(52, 0x42);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy, false));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  const uint32_t age_fresh = d.scanner->axisFeedbackAgeUs(0);
+  TEST_ASSERT_TRUE(age_fresh < age_seeded || age_fresh < 2000);
+  TEST_ASSERT_TRUE(age_fresh < 5000);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(3));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  const uint32_t age_starved = d.scanner->axisFeedbackAgeUs(0);
+  TEST_ASSERT_TRUE(age_starved > age_fresh);
+  TEST_ASSERT_TRUE(age_starved >= 2000);
+
+  d.scanner->disconnect();
+}
+
+static void test_exchange_reports_send_failure(void) {
+  DualConnected d(20000, false);
+  d.udp.setEmptyReturnsZero(true);
+  d.udp.setFailSend(true);
+
+  const size_t recv_before = d.udp.recvCallCount();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOutputSendFailed),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(recv_before),
+                           static_cast<uint32_t>(d.udp.recvCallCount()));
+
+  d.udp.setFailSend(false);
+  d.scanner->disconnect();
 }
 
 int main(void) {
@@ -570,8 +1002,18 @@ int main(void) {
   RUN_TEST(test_scanner_full_lifecycle);
   RUN_TEST(test_scanner_recv_timeout);
   RUN_TEST(test_parse_class1_input_cpf_demux_id);
+  RUN_TEST(test_parse_class1_input_cpf_view);
   RUN_TEST(test_multi_scanner_dual_demux);
   RUN_TEST(test_class1_rpi_remainder_and_miss_policy);
+  RUN_TEST(test_stale_teardown_boundary);
+  RUN_TEST(test_class1_timing_stats_ring_and_cmd_to_start);
   RUN_TEST(test_multi_scanner_input_miss_status);
+  RUN_TEST(test_fo_delay_before_first_exchange_not_stale);
+  RUN_TEST(test_drain_applies_multiple_datagrams_one_cycle);
+  RUN_TEST(test_drain_ignores_duplicate_cid);
+  RUN_TEST(test_drain_ignores_unknown_cid);
+  RUN_TEST(test_drain_is_bounded);
+  RUN_TEST(test_feedback_age_resets_on_fresh_data);
+  RUN_TEST(test_exchange_reports_send_failure);
   return UNITY_END();
 }

@@ -23,7 +23,11 @@ class EipProcessImage;
 // Pass nullptr for an unused axis image. `chip` is used for runtime recover().
 void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
                       EipProcessImage* image_x = nullptr,
-                      EipProcessImage* image_z = nullptr);
+                      EipProcessImage* image_z = nullptr,
+                      EipProcessImage* image_theta = nullptr);
+
+// Dump Class 1 latency ring stats (exchange / O->T / cycle / cmd-to-StartMotion).
+void dumpClass1TimingStats();
 
 }  // namespace eip
 

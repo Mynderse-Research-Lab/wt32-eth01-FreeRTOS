@@ -20,10 +20,18 @@ bool EipProcessImage::hasCommand() const {
   return command_valid_ && !command_.empty();
 }
 
-void EipProcessImage::setFeedback(const Bytes& feedback) {
+void EipProcessImage::setFeedback(const uint8_t* data, size_t len) {
   std::lock_guard<std::mutex> lock(mutex_);
-  feedback_ = feedback;
+  if (data == nullptr || len == 0) {
+    feedback_.clear();
+  } else {
+    feedback_.assign(data, data + len);
+  }
   feedback_fresh_ = true;
+}
+
+void EipProcessImage::setFeedback(const Bytes& feedback) {
+  setFeedback(feedback.data(), feedback.size());
 }
 
 bool EipProcessImage::getFeedback(Bytes& out_feedback) const {

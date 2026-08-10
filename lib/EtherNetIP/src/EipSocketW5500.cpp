@@ -13,27 +13,8 @@
 #endif
 
 #include <cstring>
-#include <cstdio>
 
 namespace eip {
-
-namespace {
-
-// Parse dotted-decimal IPv4 string to uint32_t in network byte order.
-// Returns 0 on parse failure.
-uint32_t parseIp4(const char* host) {
-    if (host == nullptr) return 0;
-    unsigned int a = 0, b = 0, c = 0, d = 0;
-    if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return 0;
-    if (a > 255 || b > 255 || c > 255 || d > 255) return 0;
-    // Network byte order = big-endian
-    return (static_cast<uint32_t>(a) << 24) |
-           (static_cast<uint32_t>(b) << 16) |
-           (static_cast<uint32_t>(c) << 8) |
-           static_cast<uint32_t>(d);
-}
-
-}  // namespace
 
 // ==========================================================================
 // EipSocketW5500Tcp
@@ -45,7 +26,7 @@ EipSocketW5500Tcp::EipSocketW5500Tcp(w5500::W5500Hal& hal)
 bool EipSocketW5500Tcp::connect(const char* host, uint16_t port) {
     close();
 
-    uint32_t ip = parseIp4(host);
+    uint32_t ip = parseIpv4Host(host);
     if (ip == 0) return false;
 
     int sock = w5500::socketOpen(hal_, w5500::SocketMode::kTcp);
@@ -186,19 +167,22 @@ void EipSocketW5500Udp::close() {
 }
 
 ssize_t EipSocketW5500Udp::sendTo(const uint8_t* data, size_t len,
-                                   const char* host, uint16_t port) {
+                                   uint32_t dest_ip_host, uint16_t port) {
     if (tx_sock_ < 0 || !bound_) return -1;
-
-    uint32_t ip = parseIp4(host);
-    if (ip == 0) return -1;
+    if (dest_ip_host == 0) return -1;
 
     const ssize_t sent = static_cast<ssize_t>(
         w5500::socketSendTo(hal_, static_cast<uint8_t>(tx_sock_),
-                             data, len, ip, port));
+                             data, len, dest_ip_host, port));
 #ifdef ESP_PLATFORM
     if (sent != static_cast<ssize_t>(len)) {
-        ESP_LOGW("EipW5500", "UDP sendTo %s:%u failed (%d of %u bytes) tx_sock=%d",
-                 host, port, static_cast<int>(sent), static_cast<unsigned>(len),
+        ESP_LOGW("EipW5500",
+                 "UDP sendTo %u.%u.%u.%u:%u failed (%d of %u bytes) tx_sock=%d",
+                 static_cast<unsigned>((dest_ip_host >> 24) & 0xFF),
+                 static_cast<unsigned>((dest_ip_host >> 16) & 0xFF),
+                 static_cast<unsigned>((dest_ip_host >> 8) & 0xFF),
+                 static_cast<unsigned>(dest_ip_host & 0xFF),
+                 port, static_cast<int>(sent), static_cast<unsigned>(len),
                  tx_sock_);
     }
 #endif
@@ -209,18 +193,24 @@ ssize_t EipSocketW5500Udp::recvFrom(uint8_t* buf, size_t max_len,
                                      uint32_t timeout_ms) {
     if (rx_sock_ < 0) return -1;
 
-    int n = w5500::socketRecvFrom(hal_, static_cast<uint8_t>(rx_sock_),
-                                   buf, max_len, timeout_ms);
+    int n;
+    if (timeout_ms == 0) {
+        n = w5500::socketRecvFromNonBlocking(hal_, static_cast<uint8_t>(rx_sock_),
+                                             buf, max_len);
+    } else {
+        n = w5500::socketRecvFrom(hal_, static_cast<uint8_t>(rx_sock_), buf,
+                                  max_len, timeout_ms);
 #ifdef ESP_PLATFORM
-    if (n <= 0) {
-        const int avail =
-            w5500::socketRxAvailable(hal_, static_cast<uint8_t>(rx_sock_));
-        if (avail > 0) {
-            ESP_LOGW("EipW5500", "recvFrom timeout rx_sock=%d RX_RSR=%d",
-                     rx_sock_, avail);
+        if (n <= 0) {
+            const int avail =
+                w5500::socketRxAvailable(hal_, static_cast<uint8_t>(rx_sock_));
+            if (avail > 0) {
+                ESP_LOGW("EipW5500", "recvFrom timeout rx_sock=%d RX_RSR=%d",
+                         rx_sock_, avail);
+            }
         }
-    }
 #endif
+    }
     return static_cast<ssize_t>(n);
 }
 

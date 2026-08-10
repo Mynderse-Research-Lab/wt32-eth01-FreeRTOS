@@ -16,7 +16,7 @@ void EipIoConnection::resetSequences() {
   cip_sequence_ = 0;
 }
 
-Bytes EipIoConnection::buildOutputFrame(const Bytes& assembly) {
+void EipIoConnection::buildOutputFrameInto(Bytes& out, const Bytes& assembly) {
   ++encap_sequence_;
   ++cip_sequence_;
 
@@ -24,9 +24,15 @@ Bytes EipIoConnection::buildOutputFrame(const Bytes& assembly) {
   // EtherNet/IP encapsulation header. The CPF contains a sequenced address
   // item (connection ID + encapsulation sequence) and a connected data item
   // (CIP sequence count + optional Run/Idle header + assembly data).
-  return buildClass1OutputCpf(config_.connection_id, encap_sequence_,
-                              cip_sequence_, assembly,
-                              config_.ot_include_run_idle_header);
+  buildClass1OutputCpfInto(out, config_.connection_id, encap_sequence_,
+                           cip_sequence_, assembly,
+                           config_.ot_include_run_idle_header);
+}
+
+Bytes EipIoConnection::buildOutputFrame(const Bytes& assembly) {
+  Bytes out;
+  buildOutputFrameInto(out, assembly);
+  return out;
 }
 
 bool EipIoConnection::parseInputFrame(const Bytes& frame, Bytes& out_assembly) {
