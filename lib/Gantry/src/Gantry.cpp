@@ -40,12 +40,12 @@ static const char* TAG = "Gantry";
 #endif
 
 // ============================================================================
-// PulseMotor constructor, factory methods, and preparePinsForBoot — REMOVED
+// PulseMotor constructor, factory methods, and preparePinsForBoot - REMOVED
 // All drive control is EtherNet/IP over W5500. The DI constructor is the
 // only remaining path. See Gantry.h for the updated constructor signature.
 // ============================================================================
 
-// Dependency-injection constructor — axisX_, axisZ_, axisTheta_ supplied.
+// Dependency-injection constructor - axisX_, axisZ_, axisTheta_ supplied.
 Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
                std::unique_ptr<GantryLinearAxis> zAxis,
                std::unique_ptr<GantryRotaryAxis> thetaAxis,
@@ -174,7 +174,7 @@ bool Gantry::begin() {
 void Gantry::enable() {
     GANTRY_CHECK_INITIALIZED();
     abortRequested_ = false;
-    // Always re-issue axis enable so ServoOn gets a fresh 0→1 edge. Skipping
+    // Always re-issue axis enable so ServoOn gets a fresh 0->1 edge. Skipping
     // when isEnabled() was already true left Active=0 after boot enable
     // (Class 1 was not up yet when ServoOn was first asserted).
     bool xOk = true;
@@ -526,7 +526,7 @@ int Gantry::calibrateX() {
             calibrationInProgress_ = false;
             return 0;
         }
-        // Home→cal handoff: kHomeSettle already armed kCalSeekMax when cal was
+        // Home->cal handoff: kHomeSettle already armed kCalSeekMax when cal was
         // requested; only start calibrate if home was already done.
         if (eipLimitPhase_ == EipLimitPhase::kIdle) {
             startEipPrecisionCalibrate();
@@ -625,14 +625,14 @@ int Gantry::calibrateX() {
     // movingTowardMax + xMaxSwitch_.isActive() guard, which is also what
     // sets calibrationInProgress_=false. So a non-active stableState here
     // genuinely means we exited for a different reason (timeout, abort,
-    // alarm) — those branches have already returned. Reaching this point
+    // alarm) - those branches have already returned. Reaching this point
     // with stableState=true is the success signal.
     //
     // DO NOT call xMaxSwitch_.update(true) here. Force-overwriting the
     // debounced stableState with the raw level at this instant races
     // against the carriage's residual deceleration overshooting the
     // inductive sensor's detection zone. The debounce that already
-    // committed during the inner loop is the correct truth — the carriage
+    // committed during the inner loop is the correct truth - the carriage
     // really did pass over the MAX sensor for >=60ms of stable sampling.
     // (Confirmed by runtime evidence: every "Calibration failed" event is
     // preceded by max_limit transitioning 0->1 ~25ms earlier.)
@@ -649,7 +649,7 @@ int Gantry::calibrateX() {
     // axisX_->getCurrentMm(). The latter routes through the encoder
     // accumulator when enable_encoder_feedback=true, and the X-axis
     // encoder is currently not returning pulses (see
-    // docs/LOW_LEVEL_GANTRY_CONTROL.md — wiring TODO). We measured the
+    // docs/LOW_LEVEL_GANTRY_CONTROL.md - wiring TODO). We measured the
     // physical travel by commanding pulses from MIN to MAX, so the
     // pulse count between those two events is the authoritative travel
     // distance regardless of encoder availability.
@@ -915,7 +915,7 @@ void Gantry::updateAxisPositions() {
         return;
     }
 
-    // Refresh drive warnings → external switches before limit decisions.
+    // Refresh drive warnings -> external switches before limit decisions.
     axisX_->update();
     xMinSwitch_.update();
     xMaxSwitch_.update();
@@ -1019,13 +1019,14 @@ void Gantry::startEipPrecisionHome() {
     eipLimitPhaseStartMs_ = gantry_millis();
 
     if (eipA014Active()) {
-        ESP_LOGI(TAG, "[HOME] EIP already on A014 — creep toward A015 until clear");
+        ESP_LOGI(TAG,
+                 "[HOME] EIP already on -X limit A014/PL - creep toward +X until clear");
         eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
         // Absolute start deferred to advanceEipLimitSequence (avoids console/update race).
         return;
     }
 
-    ESP_LOGI(TAG, "[HOME] EIP seek A014 at %.1f mm/s (toward -X)",
+    ESP_LOGI(TAG, "[HOME] EIP seek -X limit A014/PL at %.1f mm/s",
              eipSeekSpeedMmS());
     eipLimitPhase_ = EipLimitPhase::kHomeSeekMin;
 }
@@ -1038,12 +1039,13 @@ void Gantry::startEipPrecisionCalibrate() {
     eipLimitPhaseStartMs_ = gantry_millis();
 
     if (eipA015Active()) {
-        ESP_LOGI(TAG, "[CAL] EIP already on A015 — creep toward A014 until clear");
+        ESP_LOGI(TAG,
+                 "[CAL] EIP already on +X limit A015/NL - creep toward -X until clear");
         eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
         return;
     }
 
-    ESP_LOGI(TAG, "[CAL] EIP seek A015 at %.1f mm/s (toward +X)",
+    ESP_LOGI(TAG, "[CAL] EIP seek +X limit A015/NL at %.1f mm/s",
              eipCalSeekSpeedMmS());
     eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
 }
@@ -1055,7 +1057,8 @@ void Gantry::finishEipHomeOk() {
     eipLimitPhase_ = EipLimitPhase::kHomeSettle;
     eipLimitPhaseStartMs_ = gantry_millis();
     eipLimitSawBusy_ = false;
-    ESP_LOGI(TAG, "[HOME] EIP A014 cleared — StopMotion hold, then set joint zero");
+    ESP_LOGI(TAG,
+             "[HOME] EIP -X limit A014/PL cleared - StopMotion hold, then set joint zero");
 }
 
 void Gantry::finishEipCalOk() {
@@ -1065,7 +1068,8 @@ void Gantry::finishEipCalOk() {
     if (axisLength_ < 1) axisLength_ = 1;
     currentX_mm_ = max_mm;
     ESP_LOGI(TAG,
-             "[CAL] EIP A015 cleared — joint max ≈ %.3f mm (%ld); hold-here then return to 0",
+             "[CAL] EIP +X limit A015/NL cleared - joint max ~ %.3f mm (%ld); "
+             "hold-here then return to 0",
              max_mm, (long)axisLength_);
     eipLimitPhase_ = EipLimitPhase::kCalReturnZero;
     eipLimitPhaseStartMs_ = gantry_millis();
@@ -1100,7 +1104,7 @@ void Gantry::advanceEipLimitSequence() {
             if (eipA014Active()) {
                 // Absolute already aborts on rising A014; wait for !busy before creep.
                 ESP_LOGI(TAG,
-                         "[HOME] A014 tripped — will creep toward A015 @ %.1f mm/s",
+                         "[HOME] -X limit A014/PL tripped - will creep toward +X @ %.1f mm/s",
                          eipCreepSpeedMmS());
                 eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
@@ -1109,10 +1113,11 @@ void Gantry::advanceEipLimitSequence() {
                 eipLimitSawBusy_ = true;
             } else if (!eipLimitSawBusy_) {
                 if (!eipStartMoveDelta(-kSeekMm, eipSeekSpeedMmS())) {
-                    failEipLimitSequence("seek A014 start failed");
+                    failEipLimitSequence("seek -X limit A014/PL start failed");
                 }
             } else {
-                failEipLimitSequence("seek A014 ended without trip (check PL/A014)");
+                failEipLimitSequence(
+                    "seek -X ended without trip (check A014/PL at joint -X)");
             }
             break;
 
@@ -1131,7 +1136,7 @@ void Gantry::advanceEipLimitSequence() {
 
         case EipLimitPhase::kHomeSettle: {
             // After clear-edge StopMotion, kStopping holds busy until position
-            // is stable — then set joint zero / hand off to calibrate.
+            // is stable - then set joint zero / hand off to calibrate.
             if (!axisX_->isBusy()) {
                 axisX_->setCurrentPulses(0);
                 currentX_mm_ = axisX_->getCurrentMm();
@@ -1140,7 +1145,7 @@ void Gantry::advanceEipLimitSequence() {
                          "[HOME] EIP joint zero set here (%.3f mm reported)",
                          currentX_mm_);
                 if (calibrationInProgress_) {
-                    ESP_LOGI(TAG, "[CAL] EIP seek A015 at %.1f mm/s (toward +X)",
+                    ESP_LOGI(TAG, "[CAL] EIP seek +X limit A015/NL at %.1f mm/s",
                              eipCalSeekSpeedMmS());
                     eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
                     eipLimitPhaseStartMs_ = gantry_millis();
@@ -1156,7 +1161,7 @@ void Gantry::advanceEipLimitSequence() {
         case EipLimitPhase::kCalSeekMax:
             if (eipA015Active()) {
                 ESP_LOGI(TAG,
-                         "[CAL] A015 tripped — will creep toward A014 @ %.1f mm/s",
+                         "[CAL] +X limit A015/NL tripped - will creep toward -X @ %.1f mm/s",
                          eipCreepSpeedMmS());
                 eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
@@ -1165,10 +1170,11 @@ void Gantry::advanceEipLimitSequence() {
                 eipLimitSawBusy_ = true;
             } else if (!eipLimitSawBusy_) {
                 if (!eipStartMoveDelta(+kSeekMm, eipCalSeekSpeedMmS())) {
-                    failEipLimitSequence("seek A015 start failed");
+                    failEipLimitSequence("seek +X limit A015/NL start failed");
                 }
             } else {
-                failEipLimitSequence("seek A015 ended without trip (check NL/A015)");
+                failEipLimitSequence(
+                    "seek +X ended without trip (check A015/NL at joint +X)");
             }
             break;
 
@@ -1206,11 +1212,11 @@ void Gantry::advanceEipLimitSequence() {
                         eipLimitSawBusy_ = true;
                         eipLimitPhaseStartMs_ = gantry_millis();
                     } else {
-                        // Already at joint 0 — no return move needed.
+                        // Already at joint 0 - no return move needed.
                         currentX_mm_ = axisX_->getCurrentMm();
                         eipLimitPhase_ = EipLimitPhase::kIdle;
                         calibrationInProgress_ = false;
-                        ESP_LOGI(TAG, "[CAL] EIP complete — at joint 0 (%.3f mm)",
+                        ESP_LOGI(TAG, "[CAL] EIP complete - at joint 0 (%.3f mm)",
                                  currentX_mm_);
                     }
                 } else {
@@ -1219,7 +1225,7 @@ void Gantry::advanceEipLimitSequence() {
                     currentX_mm_ = axisX_->getCurrentMm();
                     eipLimitPhase_ = EipLimitPhase::kIdle;
                     calibrationInProgress_ = false;
-                    ESP_LOGI(TAG, "[CAL] EIP complete — at joint 0 (%.3f mm)",
+                    ESP_LOGI(TAG, "[CAL] EIP complete - at joint 0 (%.3f mm)",
                              currentX_mm_);
                 }
             }
@@ -1252,7 +1258,7 @@ void Gantry::startSequentialMotion() {
 
     // Start the axis move BEFORE publishing motionState_. Otherwise the gantry
     // update task can preempt between "Z_RETRACTING" and moveZAxisTo() and see
-    // !isBusy(), advancing to X_MOVING while Z is still being armed — dual
+    // !isBusy(), advancing to X_MOVING while Z is still being armed - dual
     // StartMotion edges and A603 on both drives.
     if (jointDirectMove_) {
         // Soft bring-up / console: Z to joint target, then X (skip SAFE_Z=150).

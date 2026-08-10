@@ -96,7 +96,7 @@ struct GantryStatus {
 class Gantry {
 public:
     /**
-     * @brief Dependency-injection constructor — accepts pre-built axis objects.
+     * @brief Dependency-injection constructor - accepts pre-built axis objects.
      *
      * Callers build GantryEipLinearAxis/GantryEipRotaryAxis externally.
      * The Gantry takes ownership of all unique_ptrs.
@@ -110,7 +110,7 @@ public:
     /**
      * @brief Seed MCP23S17 pin directions and safe-low levels before begin().
      *
-     * REMOVED — MCP23S17 removed per 2026-07 refactor.
+     * REMOVED - MCP23S17 removed per 2026-07 refactor.
      */
 
     // ---------- Lifecycle ----------
@@ -150,7 +150,7 @@ public:
 
     /// @brief EIP soft-home: set joint zero to the drive's current absolute PUU
     ///        on X and Z (no limit-switch sweep). After this, move(100) means
-    ///        +100 mm from here — not absolute drive PUU for 100 mm.
+    ///        +100 mm from here - not absolute drive PUU for 100 mm.
     void softHomeJointDatum();
 
     /// @brief Set the periodic-while-busy MOVE log rate (Hz) for all axes.
@@ -274,18 +274,19 @@ private:
     uint32_t    gripperActuateDurationMs_;
     uint32_t    lastXPositionCounts_;
     float       xPulsesPerMmOverride_;
-    // Console/joint moves: Z→target then X→target (no SAFE_Z retract / gripper).
+    // Console/joint moves: Z->target then X->target (no SAFE_Z retract / gripper).
     // Pose/pick moves keep the PnP sequence.
     bool        jointDirectMove_;
 
-    // EIP drive-managed precision home/calibrate (A014/A015 clear-edge).
+    // EIP drive-managed precision home/calibrate (clear-edge).
+    // X bench: A014/PL = joint -X (min), A015/NL = joint +X (max).
     enum class EipLimitPhase : uint8_t {
         kIdle = 0,
-        kHomeSeekMin,     // toward A014 at seek speed
-        kHomeCreepClear,  // creep toward A015 until A014 clears → joint zero
+        kHomeSeekMin,     // toward joint -X / A014(PL) at seek speed
+        kHomeCreepClear,  // creep toward +X until A014 clears -> joint zero
         kHomeSettle,      // wait for stop after clear-edge zero before next Absolute
-        kCalSeekMax,      // toward A015 at profile speed
-        kCalCreepClear,   // creep toward A014 until A015 clears → joint max
+        kCalSeekMax,      // toward joint +X / A015(NL) at profile speed
+        kCalCreepClear,   // creep toward -X until A015 clears -> joint max
         kCalReturnZero,   // after max set, Absolute move back to joint 0
     };
     EipLimitPhase eipLimitPhase_ = EipLimitPhase::kIdle;

@@ -724,7 +724,7 @@ void GantryEipLinearAxis::update() {
   if (!readFeedback(fb)) return;
   logAlarmEdge(fb);
 
-  // Drive-managed endstops: A014→min, A015→max (bench: +X joint hits A015).
+  // Drive-managed endstops: A014/PL -> joint min (-X), A015/NL -> joint max (+X).
   // Fault∧Stopped without a limit code still mirrors both switches.
   const bool a014 =
       fb.warning_present && eip::k5100::isWarningA014(fb.warning_code);
