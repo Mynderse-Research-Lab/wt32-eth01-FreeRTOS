@@ -69,6 +69,10 @@ int socketSendTo(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len,
 int socketRecvFrom(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
                    uint32_t timeoutMs);
 
+// Non-blocking UDP recv: return 0 immediately when RX_RSR has no full header.
+int socketRecvFromNonBlocking(W5500Hal& hal, uint8_t sock, uint8_t* buf,
+                              size_t maxLen);
+
 // UDP socket bind.
 bool socketBind(W5500Hal& hal, uint8_t sock, uint16_t port);
 

@@ -114,4 +114,16 @@ target_include_directories(test_w5500_spi PRIVATE
 target_link_libraries(test_w5500_spi PRIVATE unity)
 add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
 
+# W5500 Class 1 UDP send fast-path (dest cache / transaction diet)
+add_executable(test_w5500_socket_fastpath
+    "test_w5500_socket_fastpath.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+)
+target_include_directories(test_w5500_socket_fastpath PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+)
+target_link_libraries(test_w5500_socket_fastpath PRIVATE unity)
+add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
+
 

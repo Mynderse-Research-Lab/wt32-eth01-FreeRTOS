@@ -161,6 +161,11 @@ public:
     // Check if the PHY link is up.
     bool isLinkUp();
 
+    // Hold the SPI2 device lock across a Class 1 exchange so each register
+    // access skips per-transaction bus arbitration (polling transmit path).
+    bool acquireBus();
+    void releaseBus();
+
 private:
     // SPI register access
     uint8_t  readReg(uint8_t blockSelect, uint16_t addr);
@@ -190,6 +195,7 @@ private:
 
     W5500Config cfg_;
     bool initialized_ = false;
+    bool bus_acquired_ = false;
 
 #ifdef ESP_PLATFORM
     void* spiHandle_ = nullptr;   // spi_device_handle_t

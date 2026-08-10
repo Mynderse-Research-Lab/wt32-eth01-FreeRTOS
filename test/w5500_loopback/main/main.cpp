@@ -6,10 +6,10 @@
 //   ───────────          ──────────
 //   Pin 1  GND    →      GND
 //   Pin 2  GND    →      GND
-//   Pin 3  MOSI   →      GPIO12
+//   Pin 3  MOSI   →      GPIO17
 //   Pin 4  SCLK   →      GPIO5
-//   Pin 5  SCSn   →      GPIO15
-//   Pin 6  INTn   →      GPIO33  (optional; poll mode works without it)
+//   Pin 5  SCSn   →      GPIO15  (VDM: must toggle per SPI frame)
+//   Pin 6  INTn   →      (unused; poll mode)
 //
 //   WIZ850io J2          WT32-ETH01
 //   ───────────          ──────────
@@ -17,7 +17,7 @@
 //   Pin 2  3V3D   →      3V3
 //   Pin 3  3V3D   →      3V3
 //   Pin 4  NC     →      (unconnected)
-//   Pin 5  RSTn   →      GPIO17
+//   Pin 5  RSTn   →      MCP23S17 PB7 (via firmware rst_set_level)
 //   Pin 6  MISO   →      GPIO35
 //
 // Connect WIZ850io RJ45 to a PC running Wireshark to verify the EtherCAT
@@ -37,14 +37,15 @@ static const char* TAG = "loopback";
 
 // --- Pin map (WT32-ETH01 with MCP23S17 removed, W5500 on VSPI) ---
 
-static constexpr int W5500_SPI_HOST  = 3;       // VSPI_HOST
-static constexpr int W5500_CS_GPIO   = 15;
-static constexpr int W5500_INT_GPIO  = 33;       // -1 if not connected
-static constexpr int W5500_RST_GPIO  = 32;       // matches production gantry_app_constants.h
-static constexpr int W5500_MOSI_GPIO = 12;
+static constexpr int W5500_SPI_HOST  = 1;       // SPI2_HOST
+static constexpr int W5500_CS_GPIO   = 15;      // VDM requires CS frame edges
+static constexpr int W5500_INT_GPIO  = -1;       // polled; INT unused in production
+static constexpr int W5500_MOSI_GPIO = 17;      // matches production gantry_app_constants.h
+static constexpr int W5500_RST_GPIO  = -1;       // production: MCP PB7 via rst_set_level
+
 static constexpr int W5500_MISO_GPIO = 35;
 static constexpr int W5500_SCLK_GPIO = 5;
-static constexpr int W5500_SCLK_HZ   = 20000000; // 20 MHz (conservative; W5500 supports up to 80 MHz)
+static constexpr int W5500_SCLK_HZ   = 20000000; // matches production default
 
 // --- EtherCAT broadcast frame ---
 // Ethernet header: dst=ff:ff:ff:ff:ff:ff, src=00:11:22:33:44:55, EtherType=0x88A4

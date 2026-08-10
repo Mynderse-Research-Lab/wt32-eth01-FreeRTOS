@@ -1,9 +1,11 @@
 #include "W5500.h"
+#include "W5500BusMutex.h"
 
 #include "sdkconfig.h"
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -12,21 +14,23 @@
 
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 static const char* TAG = "W5500";
 
-// ==========================================================================
-// Internal helpers
-// ==========================================================================
-
-// Max frame sizes
 static constexpr uint16_t kMaxFrameSize = 1536;
-static constexpr uint16_t kHeaderSize   = 3;    // 16-bit addr + 8-bit ctrl
+static constexpr uint16_t kHeaderSize   = 3;
+static constexpr uint16_t kMaxBurstPayload = 2048;
+static constexpr uint16_t kSpiScratchSize = kHeaderSize + kMaxBurstPayload;
 
-// --- SPI transfer ---
-// VDM frame: [addr_MSB, addr_LSB, ctrl_byte] [+ data bytes].
-// For reads: tx sends the header + dummy bytes; rx captures the response.
-// For writes: tx sends the header + data bytes; rx is discarded.
+// Static DMA-capable SPI burst scratch (no per-call heap under Class 1 RPI).
+#ifdef ESP_PLATFORM
+DMA_ATTR static uint8_t g_spi_tx_scratch[kSpiScratchSize];
+DMA_ATTR static uint8_t g_spi_rx_scratch[kSpiScratchSize];
+#else
+static uint8_t g_spi_tx_scratch[kSpiScratchSize];
+static uint8_t g_spi_rx_scratch[kSpiScratchSize];
+#endif
 
 // ==========================================================================
 // Constructor / Destructor
@@ -103,18 +107,30 @@ bool W5500::init(const W5500Config& cfg) {
     }
 
     // --- SPI device ---
+    // Cap: ESP-IDF v6 full-duplex GPIO-matrix limit is < 80/3 Hz (~26.67 MHz).
+    static constexpr int kMaxFullDuplexHz = 20000000;
+    int sclkHz = cfg_.sclk_hz;
+    if (sclkHz > kMaxFullDuplexHz) {
+        ESP_LOGW(TAG, "SPI clock %d Hz capped to %d Hz (GPIO-matrix full-duplex)",
+                 sclkHz, kMaxFullDuplexHz);
+        sclkHz = kMaxFullDuplexHz;
+        cfg_.sclk_hz = sclkHz;
+    }
+
     spi_device_interface_config_t devCfg = {};
-    devCfg.mode          = 0;          // SPI Mode 0 (CPOL=0, CPHA=0)
-    devCfg.clock_speed_hz = cfg_.sclk_hz;
-    devCfg.spics_io_num  = cfg_.cs_gpio;
-    devCfg.queue_size    = 1;
-    devCfg.flags         = 0;
+    devCfg.mode           = 0;          // SPI Mode 0 (CPOL=0, CPHA=0)
+    devCfg.clock_speed_hz = sclkHz;
+    // VDM (OM=00) needs CS edges per frame; cs_gpio < 0 is only for FDM experiments.
+    devCfg.spics_io_num   = (cfg_.cs_gpio >= 0) ? cfg_.cs_gpio : -1;
+    devCfg.queue_size     = 1;
+    devCfg.flags          = 0;
 
     err = spi_bus_add_device(static_cast<spi_host_device_t>(cfg_.spi_host),
                              &devCfg, reinterpret_cast<spi_device_handle_t*>(&spiHandle_));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI device add failed: %s", esp_err_to_name(err));
-        spi_bus_free(static_cast<spi_host_device_t>(cfg_.spi_host));
+        // Do not spi_bus_free here: a failed add can leave the bus lock
+        // inconsistent and assert in spi_bus_deinit_lock (IDF v6).
         return false;
     }
 
@@ -127,8 +143,13 @@ bool W5500::init(const W5500Config& cfg) {
     }
 
     initialized_ = true;
-    ESP_LOGI(TAG, "W5500 initialized (SPI%d, CS=GPIO%d, %d Hz)",
-             cfg_.spi_host, cfg_.cs_gpio, cfg_.sclk_hz);
+    if (cfg_.cs_gpio >= 0) {
+        ESP_LOGI(TAG, "W5500 initialized (SPI%d, CS=GPIO%d, %d Hz)",
+                 cfg_.spi_host, cfg_.cs_gpio, cfg_.sclk_hz);
+    } else {
+        ESP_LOGI(TAG, "W5500 initialized (SPI%d, CS=hardwired, %d Hz)",
+                 cfg_.spi_host, cfg_.sclk_hz);
+    }
     return true;
 }
 
@@ -173,11 +194,13 @@ bool W5500::configureAfterReset() {
     }
 #endif
 
-    // W5500 has 16 KB TX + 16 KB RX total. Give every socket 2 KB / 2 KB so a
-    // reconnect that lands on sock 4+ still has TX space.
+    // Bias buffers toward Class 1 UDP (prefer sock0 after reset): 4 KB RX/TX.
+    // FO TCP peers get 2 KB; remaining sockets 1 KB. Sum RX=4+2+2+2+1+1+1+1=14.
+    static const uint8_t kRxKb[8] = {4, 2, 2, 2, 1, 1, 1, 1};
+    static const uint8_t kTxKb[8] = {4, 2, 2, 2, 1, 1, 1, 1};
     for (uint8_t sock = 0; sock < 8; ++sock) {
-        writeReg(kBlockSocketReg(sock), Sn_RXBUF_SIZE, 2);
-        writeReg(kBlockSocketReg(sock), Sn_TXBUF_SIZE, 2);
+        writeReg(kBlockSocketReg(sock), Sn_RXBUF_SIZE, kRxKb[sock]);
+        writeReg(kBlockSocketReg(sock), Sn_TXBUF_SIZE, kTxKb[sock]);
     }
 
     for (uint8_t sock = 0; sock < 8; ++sock) {
@@ -191,6 +214,8 @@ bool W5500::recover() {
         ESP_LOGE(TAG, "recover: not initialized");
         return false;
     }
+
+    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
 
     ESP_LOGW(TAG, "W5500 recover: closing sockets + hard reset");
     for (uint8_t sock = 0; sock < 8; ++sock) {
@@ -213,6 +238,7 @@ void W5500::deinit() {
         return;
     }
 
+    releaseBus();
     closeSocket(0);
 
     if (spiHandle_ != nullptr) {
@@ -276,34 +302,32 @@ void W5500::writeReg16(uint8_t blockSelect, uint16_t addr, uint16_t value) {
 }
 
 void W5500::readBuf(uint8_t blockSelect, uint16_t addr, uint8_t* buf, uint16_t len) {
-    // Build header + dummy bytes for read
-    const uint16_t totalLen = kHeaderSize + len;
-    uint8_t* txBuf = new uint8_t[totalLen];
-    uint8_t* rxBuf = new uint8_t[totalLen];
+    if (len > kMaxBurstPayload) {
+        ESP_LOGE(TAG, "readBuf: len %u > %u", (unsigned)len, (unsigned)kMaxBurstPayload);
+        return;
+    }
+    const uint16_t totalLen = static_cast<uint16_t>(kHeaderSize + len);
+    g_spi_tx_scratch[0] = static_cast<uint8_t>(addr >> 8);
+    g_spi_tx_scratch[1] = static_cast<uint8_t>(addr & 0xFF);
+    g_spi_tx_scratch[2] = makeCtrlByte(blockSelect, kRwRead);
+    std::memset(g_spi_tx_scratch + kHeaderSize, 0x00, len);
 
-    txBuf[0] = static_cast<uint8_t>(addr >> 8);
-    txBuf[1] = static_cast<uint8_t>(addr & 0xFF);
-    txBuf[2] = makeCtrlByte(blockSelect, kRwRead);
-    std::memset(txBuf + kHeaderSize, 0x00, len);
-
-    spiTransfer(txBuf, rxBuf, totalLen);
-    std::memcpy(buf, rxBuf + kHeaderSize, len);
-
-    delete[] txBuf;
-    delete[] rxBuf;
+    spiTransfer(g_spi_tx_scratch, g_spi_rx_scratch, totalLen);
+    std::memcpy(buf, g_spi_rx_scratch + kHeaderSize, len);
 }
 
 void W5500::writeBuf(uint8_t blockSelect, uint16_t addr, const uint8_t* buf, uint16_t len) {
-    const uint16_t totalLen = kHeaderSize + len;
-    uint8_t* txBuf = new uint8_t[totalLen];
+    if (len > kMaxBurstPayload) {
+        ESP_LOGE(TAG, "writeBuf: len %u > %u", (unsigned)len, (unsigned)kMaxBurstPayload);
+        return;
+    }
+    const uint16_t totalLen = static_cast<uint16_t>(kHeaderSize + len);
+    g_spi_tx_scratch[0] = static_cast<uint8_t>(addr >> 8);
+    g_spi_tx_scratch[1] = static_cast<uint8_t>(addr & 0xFF);
+    g_spi_tx_scratch[2] = makeCtrlByte(blockSelect, kRwWrite);
+    std::memcpy(g_spi_tx_scratch + kHeaderSize, buf, len);
 
-    txBuf[0] = static_cast<uint8_t>(addr >> 8);
-    txBuf[1] = static_cast<uint8_t>(addr & 0xFF);
-    txBuf[2] = makeCtrlByte(blockSelect, kRwWrite);
-    std::memcpy(txBuf + kHeaderSize, buf, len);
-
-    spiTransfer(txBuf, nullptr, totalLen);
-    delete[] txBuf;
+    spiTransfer(g_spi_tx_scratch, nullptr, totalLen);
 }
 
 // ==========================================================================
@@ -502,15 +526,103 @@ bool W5500::waitForCommand(uint8_t sock, uint32_t timeoutMs) {
     return false;
 }
 
-void W5500::spiTransfer(const uint8_t* txData, uint8_t* rxData, size_t len) {
-    spi_transaction_t trans = {};
-    trans.length    = len * 8;   // in bits
-    trans.rxlength  = (rxData != nullptr) ? len * 8 : 0;
-    trans.tx_buffer = txData;
-    trans.rx_buffer = rxData;
+bool W5500::acquireBus() {
+#ifdef ESP_PLATFORM
+    if (spiHandle_ == nullptr || !initialized_) {
+        return false;
+    }
+    if (bus_acquired_) {
+        return true;
+    }
+    const esp_err_t err = spi_device_acquire_bus(
+        reinterpret_cast<spi_device_handle_t>(spiHandle_), portMAX_DELAY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPI acquire_bus failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    bus_acquired_ = true;
+    return true;
+#else
+    bus_acquired_ = true;
+    return true;
+#endif
+}
 
-    esp_err_t err = spi_device_transmit(reinterpret_cast<spi_device_handle_t>(spiHandle_), &trans);
+void W5500::releaseBus() {
+#ifdef ESP_PLATFORM
+    if (spiHandle_ == nullptr || !bus_acquired_) {
+        bus_acquired_ = false;
+        return;
+    }
+    spi_device_release_bus(reinterpret_cast<spi_device_handle_t>(spiHandle_));
+#endif
+    bus_acquired_ = false;
+}
+
+void W5500::spiTransfer(const uint8_t* txData, uint8_t* rxData, size_t len) {
+#ifdef ESP_PLATFORM
+    if (len == 0 || txData == nullptr) {
+        return;
+    }
+
+    spi_transaction_t trans = {};
+    trans.length = len * 8;  // in bits
+    trans.rxlength = (rxData != nullptr) ? (len * 8) : 0;
+
+    // ≤4 bytes: use TXDATA/RXDATA — no DMA priv-buffer malloc (Class 1 hot path).
+    if (len <= 4) {
+        trans.flags = SPI_TRANS_USE_TXDATA;
+        std::memcpy(trans.tx_data, txData, len);
+        if (rxData != nullptr) {
+            trans.flags |= SPI_TRANS_USE_RXDATA;
+        }
+        const esp_err_t err = spi_device_polling_transmit(
+            reinterpret_cast<spi_device_handle_t>(spiHandle_), &trans);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SPI transfer failed: %s", esp_err_to_name(err));
+            return;
+        }
+        if (rxData != nullptr) {
+            std::memcpy(rxData, trans.rx_data, len);
+        }
+        return;
+    }
+
+    // Larger transfers: ensure DMA-capable buffers (scratch is DMA_ATTR).
+    const uint8_t* tx = txData;
+    uint8_t* rx = rxData;
+    if (tx != g_spi_tx_scratch) {
+        if (len > kSpiScratchSize) {
+            ESP_LOGE(TAG, "SPI TX len %u > scratch", static_cast<unsigned>(len));
+            return;
+        }
+        std::memcpy(g_spi_tx_scratch, txData, len);
+        tx = g_spi_tx_scratch;
+    }
+    if (rx != nullptr && rx != g_spi_rx_scratch) {
+        if (len > kSpiScratchSize) {
+            ESP_LOGE(TAG, "SPI RX len %u > scratch", static_cast<unsigned>(len));
+            return;
+        }
+        rx = g_spi_rx_scratch;
+    }
+    trans.tx_buffer = tx;
+    trans.rx_buffer = rx;
+
+    // Polling transmit: Class 1 already busy-waits on SENDOK/CR; the interrupt
+    // path (queue + ISR + semaphore) cost ~40-60 us per tiny register access.
+    const esp_err_t err = spi_device_polling_transmit(
+        reinterpret_cast<spi_device_handle_t>(spiHandle_), &trans);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI transfer failed: %s", esp_err_to_name(err));
+        return;
     }
+    if (rxData != nullptr && rxData != g_spi_rx_scratch && rx == g_spi_rx_scratch) {
+        std::memcpy(rxData, g_spi_rx_scratch, len);
+    }
+#else
+    (void)txData;
+    (void)rxData;
+    (void)len;
+#endif
 }
