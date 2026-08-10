@@ -10,6 +10,8 @@ Bytes Hcs01PositioningCommand::serialize() const {
   w.u16(control.encode());
   w.i32(positioning_command_value);
   w.i32(positioning_velocity);
+  w.i32(positioning_acceleration);
+  w.i32(positioning_deceleration);
   return out;
 }
 

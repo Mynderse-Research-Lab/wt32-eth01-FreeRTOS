@@ -29,11 +29,9 @@ menu "EtherNet/IP originator"
     config EIP_AXIS_THETA
         bool "Theta axis over EtherNet/IP (HCS01)"
         depends on EIP_SCANNER_ENABLED
-        depends on !EIP_AXIS_X && !EIP_AXIS_Z
         default n
         help
-            HCS01 theta over EtherNet/IP. Mutually exclusive with X/Z for
-            now (separate assembly map). Deferred until 3-phase bench power.
+            HCS01 theta over EtherNet/IP. Deferred until 3-phase bench power.
 
     config EIP_TARGET_IP_X
         string "X-axis drive IP address"

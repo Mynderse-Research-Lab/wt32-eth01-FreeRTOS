@@ -24,15 +24,17 @@ namespace hcs01 {
 
 constexpr uint16_t kOutputInstance101 = 101;
 constexpr uint16_t kInputInstance102 = 102;
-constexpr size_t kOutput101Size = 10;
+constexpr size_t kOutput101Size = 18;
 constexpr size_t kInput102Size = 14;
 
-// Command assembly (instance 101): P-0-4077 + S-0-0282 + S-0-0259.
+// Command assembly (instance 101): P-0-4077 + S-0-0282 + S-0-0259 + S-0-0260 + S-0-0359.
 struct Hcs01PositioningCommand {
   Hcs01ControlWord control{};
 
   int32_t positioning_command_value = 0;  // S-0-0282 (PUU / user units)
   int32_t positioning_velocity = 0;         // S-0-0259
+  int32_t positioning_acceleration = 0;     // S-0-0260
+  int32_t positioning_deceleration = 0;     // S-0-0359
 
   Bytes serialize() const;
 };

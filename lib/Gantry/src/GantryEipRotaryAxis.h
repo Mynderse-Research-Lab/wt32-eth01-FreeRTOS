@@ -18,6 +18,8 @@ namespace Gantry {
 struct EipRotaryAxisConfig {
   double puu_per_deg = 100.0;
   int32_t default_velocity_puu = 1000;
+  int32_t default_accel_puu = 10000;
+  int32_t default_decel_puu = 10000;
 };
 
 class GantryEipRotaryAxis : public GantryRotaryAxis {

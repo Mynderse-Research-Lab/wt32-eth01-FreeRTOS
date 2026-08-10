@@ -48,6 +48,9 @@
 #include "EipProcessImage.h"
 #include "EipSocketW5500.h"
 #include "GantryEipLinearAxis.h"
+#if defined(CONFIG_EIP_AXIS_THETA)
+#include "GantryEipRotaryAxis.h"
+#endif
 #endif
 
 static const char* TAG = "GantryApp";
@@ -148,6 +151,9 @@ extern "C" void app_main(void) {
     // --- EIP process images (one per drive) ---
     static eip::EipProcessImage eipImageX;
     static eip::EipProcessImage eipImageZ;
+#if defined(CONFIG_EIP_AXIS_THETA)
+    static eip::EipProcessImage eipImageTheta;
+#endif
 
     // Kinetix assembly 104 speed/accel/decel refs are 0.1 RPM (or 0.1 RPM/s).
     // Linear mm/s -> motor RPM: rpm = mm_s * i / lead * 60;
@@ -180,8 +186,21 @@ extern "C" void app_main(void) {
     auto zAxis = std::unique_ptr<Gantry::GantryLinearAxis>(nullptr);
 #endif
 
+#if defined(CONFIG_EIP_AXIS_THETA)
+    auto thetaAxis = std::make_unique<Gantry::GantryEipRotaryAxis>(
+        eipImageTheta, Gantry::EipRotaryAxisConfig{
+            (double)AXIS_THETA_ENCODER_PPR / 360.0,
+            (int32_t)AXIS_THETA_MAX_SPEED_DEG_PER_S * (int32_t)(AXIS_THETA_ENCODER_PPR / 360),
+            (int32_t)AXIS_THETA_ACCEL_DEG_PER_S2 * (int32_t)(AXIS_THETA_ENCODER_PPR / 360),
+            (int32_t)AXIS_THETA_DECEL_DEG_PER_S2 * (int32_t)(AXIS_THETA_ENCODER_PPR / 360)
+        });
+    ESP_LOGI(TAG, "Theta axis over EIP (HCS01, %.1f PUU/deg)", (double)AXIS_THETA_ENCODER_PPR / 360.0);
+#else
+    auto thetaAxis = std::unique_ptr<Gantry::GantryRotaryAxis>(nullptr);
+#endif
+
     static Gantry::Gantry gantry(std::move(xAxis), std::move(zAxis),
-        /*theta*/ nullptr, PIN_GRIPPER);
+        std::move(thetaAxis), PIN_GRIPPER);
 
     // Seed joint-limit envelope with mechanical hard limits.
     gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM,     AXIS_X_HARD_LIMIT_MAX_MM,
@@ -231,7 +250,12 @@ extern "C" void app_main(void) {
                           nullptr,
 #endif
 #if defined(CONFIG_EIP_AXIS_Z)
-                          &eipImageZ
+                          &eipImageZ,
+#else
+                          nullptr,
+#endif
+#if defined(CONFIG_EIP_AXIS_THETA)
+                          &eipImageTheta
 #else
                           nullptr
 #endif

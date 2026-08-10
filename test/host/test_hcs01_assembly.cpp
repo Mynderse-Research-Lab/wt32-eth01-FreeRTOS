@@ -84,6 +84,8 @@ static void test_positioning_command_serialize(void) {
   cmd.control.command_value_accept = true;
   cmd.positioning_command_value = 0x00010000;
   cmd.positioning_velocity = 5000;
+  cmd.positioning_acceleration = 3000;
+  cmd.positioning_deceleration = 4000;
 
   Bytes bytes = cmd.serialize();
   TEST_ASSERT_EQUAL_UINT32(eip::hcs01::kOutput101Size, bytes.size());
@@ -98,6 +100,12 @@ static void test_positioning_command_serialize(void) {
   // velocity 5000 -> 0x1388
   TEST_ASSERT_EQUAL_HEX8(0x88, bytes[6]);
   TEST_ASSERT_EQUAL_HEX8(0x13, bytes[7]);
+  // accel 3000 -> 0x0BB8 (S-0-0260)
+  TEST_ASSERT_EQUAL_HEX8(0xB8, bytes[10]);
+  TEST_ASSERT_EQUAL_HEX8(0x0B, bytes[11]);
+  // decel 4000 -> 0x0FA0 (S-0-0359)
+  TEST_ASSERT_EQUAL_HEX8(0xA0, bytes[14]);
+  TEST_ASSERT_EQUAL_HEX8(0x0F, bytes[15]);
 }
 
 static void test_positioning_actual_deserialize(void) {

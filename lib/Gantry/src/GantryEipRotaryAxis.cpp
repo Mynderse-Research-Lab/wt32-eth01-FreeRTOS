@@ -75,8 +75,6 @@ bool GantryEipRotaryAxis::readFeedback(
 bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
                                     float accel_deg_per_s2,
                                     float decel_deg_per_s2) {
-  (void)accel_deg_per_s2;
-  (void)decel_deg_per_s2;
   if (!initialized_ || !enabled_ || config_.puu_per_deg <= 0.0) return false;
   if (!image_.isOnline()) return false;
 
@@ -96,6 +94,21 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
   } else {
     cmd.positioning_velocity = config_.default_velocity_puu;
   }
+
+  if (accel_deg_per_s2 > 0.0f) {
+    cmd.positioning_acceleration =
+        static_cast<int32_t>(llround(accel_deg_per_s2 * config_.puu_per_deg));
+  } else {
+    cmd.positioning_acceleration = config_.default_accel_puu;
+  }
+
+  if (decel_deg_per_s2 > 0.0f) {
+    cmd.positioning_deceleration =
+        static_cast<int32_t>(llround(decel_deg_per_s2 * config_.puu_per_deg));
+  } else {
+    cmd.positioning_deceleration = config_.default_decel_puu;
+  }
+
   return publishCommand(cmd);
 }
 

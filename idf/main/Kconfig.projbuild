@@ -157,6 +157,13 @@ menu "Gantry kinematics"
     endmenu
 
     menu "Theta axis (rotary)"
+        config GANTRY_THETA_SEQUENTIAL
+            bool "Sequential Theta choreography"
+            default n
+            depends on EIP_AXIS_THETA
+            help
+                If enabled, Theta moves sequentially after the X-axis completes its move.
+                If disabled, Theta moves simultaneously with the X-axis.
         config AXIS_THETA_OUTPUT_GEAR_RATIO
             float "Output gear ratio (output_rev/motor_rev)"
             default 1.0
