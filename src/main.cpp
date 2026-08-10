@@ -216,6 +216,9 @@ extern "C" void app_main(void) {
         return;
     }
     ESP_LOGI(TAG, "OK Gantry initialized");
+#if defined(CONFIG_EIP_ENDSTOP_FROM_DRIVE)
+    gantry.configureDriveManagedLimits();
+#endif
     // Defer gantry.enable() until Class 1 + GantryUpdate are running.
     // Boot enable before the scanner wastes the ServoOn edge (A603 on first move).
     ESP_LOGI(TAG, "Motors idle — run 'enable' after Class 1 is online");
