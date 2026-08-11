@@ -12,9 +12,11 @@
  *        the -Y direction. Battery positions on the belt carry y values;
  *        the motion layer does not consume them.
  *   - Z: vertical (gantry descent). +Z = up; joint Z=0 is homing datum; physical
- *        belt/bed vs datum: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM. Safe-retracted /
- *        top-home = Z_max. The vertical actuator was called "Y" in
- *        pre-2026-05 firmware - it is the same hardware, just renamed.
+ *        coordinated X+Z only within GANTRY_SAFE_Z_HEIGHT_MM of Z−/A015 (band
+ *        ceiling = z_min + margin). Z limits: A015=min (−Z), A014=max (+Z);
+ *        X: A014=min, A015=max. Z Absolute joint sense inverted so − seeks A015.
+ *        The vertical actuator was called "Y" in pre-2026-05 firmware - it is
+ *        the same hardware, just renamed.
  *   - Theta: rotation about Z.
  *
  * Verified hardware layout:
@@ -34,6 +36,8 @@
 #include "GantryRotaryAxis.h"
 #include "GantryEndEffector.h"
 #include "GantryLimitSwitch.h"
+#include "GantryEipLimitSequence.h"
+#include "GantryPathProfile.h"
 #include "GantryUtils.h"
 #include <memory>
 #include <cstdint>
@@ -120,11 +124,18 @@ public:
 
     // ---------- Configuration ----------
     void setLimitPins(int xMinPin, int xMaxPin);
-    /// Drive-managed endstops: X min/max switches take state from EIP assembly
+    /// Drive-managed endstops: X/Z min/max switches take state from EIP assembly
     /// feedback (A014/A015 + Fault+Stopped heuristic), not GPIO.
     void configureDriveManagedLimits();
-    /// True after configureDriveManagedLimits() (external X limit switches).
+    /// True after configureDriveManagedLimits() (external drive-managed switches).
     bool driveManagedLimitsEnabled() const;
+    /// Drive-managed Z min switch (A015/NL), if configured.
+    const GantryLimitSwitch& zMinLimitSwitch() const { return zMinSwitch_; }
+    const GantryLimitSwitch& zMaxLimitSwitch() const { return zMaxSwitch_; }
+    /// Measured X soft max after successful EIP calibrateX (mm); 0 if unset.
+    int32_t xAxisLengthMm() const { return axisLength_; }
+    /// Measured Z soft max after successful EIP calibrateZ (mm); 0 if unset.
+    int32_t zAxisLengthMm() const { return zAxisLength_; }
     void setZAxisLimits(float minMm, float maxMm);
     void setThetaLimits(float minDeg, float maxDeg);
     void setJointLimits(float xMin, float xMax,
@@ -132,15 +143,26 @@ public:
                         float thetaMin, float thetaMax);
     void setEndEffectorPin(int pin, bool activeHigh = true);
     void setSafeZHeight(float safeHeight_mm);
+    /// Absolute joint-Z band ceiling for X traverse / coordinated X+Z
+    /// (= z_min + Z− margin).
+    float traverseClearanceZMm() const;
+    /// True when current joint Z is in the SAFE_Z bottom band (X Absolute allowed).
+    bool zInTraverseBand() const;
 
     // ---------- Motion ----------
-    /// @brief Home all supported axes (currently X only; Z/Theta are stubs).
+    /// @brief Home X (Z/Theta: call homeZ / homeTheta separately; console `all` sequences).
     void home();
-    /// @brief Calibrate all supported axes (currently X only; Z/Theta are stubs).
+    /// @brief Calibrate X (Z/Theta: call calibrateZ / calibrateTheta separately).
     int  calibrate();
 
-    // Per-axis homing / calibration. X is real; Z and Theta are stubs that
-    // emit a warning until their limit switches are wired up.
+    /// @brief Full EIP bring-up: Z- (A015) → X home/cal → X=park →
+    ///        Z+ stroke (A014) → return to SAFE_Z ceiling (z_min + margin).
+    ///        Preferred over separate home/calibrate when both axes are present.
+    bool startEipBringUp();
+    bool eipBringUpInProgress() const;
+
+    // Per-axis homing / calibration. X and Z use EIP drive-managed clear-edge
+    // when configureDriveManagedLimits() is active. Theta remains a stub.
     void homeX();
     void homeZ();
     void homeTheta();
@@ -229,6 +251,8 @@ private:
     int  xMaxPin_;
     GantryLimitSwitch xMinSwitch_;
     GantryLimitSwitch xMaxSwitch_;
+    GantryLimitSwitch zMinSwitch_;
+    GantryLimitSwitch zMaxSwitch_;
 
     bool initialized_;
     bool enabled_;
@@ -244,27 +268,33 @@ private:
     int32_t targetZ_;
     int32_t targetTheta_;
     int32_t axisLength_;
+    int32_t zAxisLength_;
 
     GantryConfig         config_;
     KinematicParameters  kinematicParams_;
     float                stepsPerRev_;
 
-    // Sequential motion state machine. Naming follows +Z = up:
-    //   Z_DESCENDING  - lowering toward the belt (Z decreasing).
-    //   Z_RETRACTING  - rising toward the safe top height (Z increasing).
+    // Sequential / path motion state machine. Naming follows +Z = up:
+    //   Z_DESCENDING  - Z-alone lowering toward the belt.
+    //   Z_RETRACTING  - Z-alone rising toward clearance / higher Z.
+    //   X_MOVING      - X-alone traverse (Z held at/above clearance).
+    //   XZ_MOVING     - coordinated X+Z Absolute (both endpoints >= clearance).
     enum class MotionState {
         IDLE,
         Z_DESCENDING,
         GRIPPER_ACTUATING,
         Z_RETRACTING,
         X_MOVING,
+        XZ_MOVING,
         THETA_MOVING
     };
     MotionState motionState_;
     float       targetX_mm_;
     float       targetZ_mm_;
     float       targetTheta_deg_;
-    float       safeZHeight_mm_;
+    // Margin above Z−/A015 (mm) for coordinated X+Z / X traverse bottom band.
+    // Band ceiling = traverseClearanceZMm() = z_min + this (from Z−/A015).
+    float       safeZMarginFromMaxMm_;
     uint32_t    speed_mm_per_s_;
     uint32_t    speed_deg_per_s_;
     uint32_t    acceleration_mm_per_s2_;
@@ -274,25 +304,52 @@ private:
     uint32_t    gripperActuateDurationMs_;
     uint32_t    lastXPositionCounts_;
     float       xPulsesPerMmOverride_;
-    // Console/joint moves: Z->target then X->target (no SAFE_Z retract / gripper).
-    // Pose/pick moves keep the PnP sequence.
+    // Console/joint moves: path to joint target (no gripper). Pose/pick keeps gripper.
     bool        jointDirectMove_;
 
+    // Planned 2-D path Absolute segments (max 3).
+    static constexpr size_t kMaxPathSegments = 3;
+    Path::PathSegment pathSegments_[kMaxPathSegments]{};
+    size_t pathSegmentCount_ = 0;
+    size_t pathSegmentIndex_ = 0;
+    float pathSegStartX_mm_ = 0.0f;
+    float pathSegStartZ_mm_ = 0.0f;
+    // PnP: after path to pick completes, run gripper then retract to clearance.
+    bool pathDoGripperAfter_ = false;
+
     // EIP drive-managed precision home/calibrate (clear-edge).
-    // X bench: A014/PL = joint -X (min), A015/NL = joint +X (max).
-    enum class EipLimitPhase : uint8_t {
-        kIdle = 0,
-        kHomeSeekMin,     // toward joint -X / A014(PL) at seek speed
-        kHomeCreepClear,  // creep toward +X until A014 clears -> joint zero
-        kHomeSettle,      // wait for stop after clear-edge zero before next Absolute
-        kCalSeekMax,      // toward joint +X / A015(NL) at profile speed
-        kCalCreepClear,   // creep toward -X until A015 clears -> joint max
-        kCalReturnZero,   // after max set, Absolute move back to joint 0
-    };
+    // X: A014=min / A015=max. Z: A015=min (−Z) / A014=max (+Z).
+    using EipLimitPhase = EipLimit::Phase;
+    using EipLimitAxisRole = EipLimit::AxisRole;
     EipLimitPhase eipLimitPhase_ = EipLimitPhase::kIdle;
+    EipLimitAxisRole eipLimitAxis_ = EipLimitAxisRole::kNone;
     unsigned long eipLimitPhaseStartMs_ = 0;
     // True once Absolute seek/creep has been observed busy (guards preempt race).
     bool eipLimitSawBusy_ = false;
+
+    // Full bring-up SM (Z- datum → enter Z+ band → X home/cal → X park →
+    // Z+ stroke → return to band floor). When active, single-axis eipLimitPhase_
+    // is not used.
+    enum class BringUpPhase : uint8_t {
+        kIdle = 0,
+        kZMinusSeek,
+        kZMinusCreep,
+        kZMinusSettle,
+        kZEnterBand,
+        kXHomeSeek,
+        kXHomeCreep,
+        kXHomeSettle,
+        kXCalSeek,
+        kXCalCreep,
+        kXCalSettle,
+        kXPark,
+        kZPlusSeek,
+        kZPlusCreep,
+        kZPlusSettle,
+        kZReturnBand,
+    };
+    BringUpPhase bringUpPhase_ = BringUpPhase::kIdle;
+    float calXParkMm_ = GANTRY_CAL_X_PARK_MM;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;
@@ -300,25 +357,44 @@ private:
 
     void startSequentialMotion();
     void processSequentialMotion();
-    void startXAxisMotion();
+    /// Arm X Absolute with explicit path-component profile (mm units).
+    bool startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_s2,
+                          float decel_mm_s2);
+
+    bool planPathTo(float x0, float z0, float x1, float z1);
+    bool armCurrentPathSegment();
+    bool pathSegmentAxesIdle() const;
+    /// Current joints within tolerance of the armed segment endpoint.
+    bool pathSegmentAtTarget() const;
+    void finishPathOrAdvance();
+    void failPath(const char* why);
+    void startThetaOrIdle();
 
     uint32_t getHomingSpeed() const;
     bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
     void     updateAxisPositions();
     void     stopAllMotion();
 
-    bool eipA014Active() const;
-    bool eipA015Active() const;
+    GantryLinearAxis* eipLimitActiveAxis();
+    const GantryLinearAxis* eipLimitActiveAxis() const;
+    bool eipMinWarningActive() const;  // joint min (X:A014, Z:A015)
+    bool eipMaxWarningActive() const;  // joint max (X:A015, Z:A014)
     float eipSeekSpeedMmS() const;
     float eipCreepSpeedMmS() const;
     float eipCalSeekSpeedMmS() const;
     bool eipStartMoveDelta(float delta_mm, float speed_mm_s);
-    void startEipPrecisionHome();
-    void startEipPrecisionCalibrate();
+    /// Refuse X Absolute unless Z is in the SAFE_Z bottom band.
+    bool requireXTraverseInterlock(const char* what);
+    void startEipPrecisionHome(EipLimitAxisRole role);
+    void startEipPrecisionCalibrate(EipLimitAxisRole role);
     void advanceEipLimitSequence();
     void finishEipHomeOk();
     void finishEipCalOk();
     void failEipLimitSequence(const char* why);
+
+    void advanceEipBringUp();
+    void failEipBringUp(const char* why);
+    void finishEipBringUpOk();
 };
 
 // ============================================================================

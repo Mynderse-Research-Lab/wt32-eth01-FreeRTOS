@@ -107,6 +107,22 @@ target_include_directories(test_eip_axis PRIVATE
 target_link_libraries(test_eip_axis PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_axis COMMAND test_eip_axis)
 
+# EIP home/cal phase helpers (header-only policy shared with Gantry.cpp)
+add_executable(test_eip_limit_sequence "test_eip_limit_sequence.cpp")
+target_include_directories(test_eip_limit_sequence PRIVATE
+    "${REPO_ROOT}/lib/Gantry/src"
+)
+target_link_libraries(test_eip_limit_sequence PRIVATE unity)
+add_test(NAME test_eip_limit_sequence COMMAND test_eip_limit_sequence)
+
+# 2-D X-Z path profile (header-only decompose + segment planner)
+add_executable(test_path_profile "test_path_profile.cpp")
+target_include_directories(test_path_profile PRIVATE
+    "${REPO_ROOT}/lib/Gantry/src"
+)
+target_link_libraries(test_path_profile PRIVATE unity)
+add_test(NAME test_path_profile COMMAND test_path_profile)
+
 # W5500 SPI frame encoding test (pure C++ constexpr logic, no ESP-IDF)
 add_executable(test_w5500_spi "test_w5500_spi.cpp")
 target_include_directories(test_w5500_spi PRIVATE

@@ -21,6 +21,7 @@
 
 #include <ctype.h>
 #include <cstdarg>
+#include <cmath>
 #include <cstdio>
 #include <stddef.h>
 #include <stdlib.h>
@@ -165,6 +166,8 @@ static ControlDebounceState g_controlDebounce = {
     0, 0, 0, 0, 0, 0};
 static bool g_homeCompletedThisSession = false;
 static bool g_calibratedThisSession = false;
+static bool g_homeZCompletedThisSession = false;
+static bool g_calibratedZThisSession = false;
 static bool g_calibrationInProgress = false;
 enum class LinearUnitMode { MM = 0, INCH = 1 };
 static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
@@ -198,22 +201,19 @@ static constexpr float kMmPerInch = 25.4f;
 static constexpr uint32_t kMinSpeedMmPerS = 1;
 static constexpr uint32_t kMinAccelMmPerS2 = 100;
 
-// SCHUNK hard caps (shared linear profile): never exceed the tighter of X/Z,
-// and never exceed Z ballscrew critical-RPM derived linear speed.
+// Shared 2-D path envelope: console speed/accel/decel are the RESULTANT along
+// the X-Z path. Protective clamp: never exceed Z ballscrew critical-RPM speed.
 uint32_t maxLinearSpeedMmPerS() {
-  uint32_t xCap = static_cast<uint32_t>(AXIS_X_MAX_SPEED_MM_PER_S);
-  uint32_t zCap = static_cast<uint32_t>(AXIS_Z_MAX_SPEED_MM_PER_S);
+  uint32_t pathCap = GANTRY_PATH_MAX_SPEED_MM_PER_S;
   const double crit = AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S;
-  if (crit > 0.0 && crit < static_cast<double>(zCap)) {
-    zCap = static_cast<uint32_t>(crit);
+  if (crit > 0.0 && crit < static_cast<double>(pathCap)) {
+    pathCap = static_cast<uint32_t>(crit);
   }
-  return (xCap < zCap) ? xCap : zCap;
+  return pathCap;
 }
 
 uint32_t maxLinearAccelMmPerS2() {
-  const uint32_t xCap = static_cast<uint32_t>(AXIS_X_ACCEL_MM_PER_S2);
-  const uint32_t zCap = static_cast<uint32_t>(AXIS_Z_ACCEL_MM_PER_S2);
-  return (xCap < zCap) ? xCap : zCap;
+  return GANTRY_PATH_MAX_ACCEL_MM_PER_S2;
 }
 
 uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
@@ -295,8 +295,12 @@ void calibrationTask(void *param) {
   ESP_LOGI(TAG, "Calibration task: started");
   int len = cfg->gantry->calibrate();
   if (len > 0) {
+    const float zMax =
+        cfg->gantry->zAxisLengthMm() > 0
+            ? static_cast<float>(cfg->gantry->zAxisLengthMm())
+            : AXIS_Z_HARD_LIMIT_MAX_MM;
     cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)len,
-                                AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
+                                AXIS_Z_HARD_LIMIT_MIN_MM, zMax,
                                 AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
@@ -309,6 +313,36 @@ void calibrationTask(void *param) {
     ESP_LOGE(TAG, "Calibration failed");
     if (hadCalibration) {
       ESP_LOGI(TAG, "Keeping previous calibrated X max (no successful recalibration)");
+    }
+  }
+
+  g_calibrationInProgress = false;
+  vTaskDelete(nullptr);
+}
+
+void zCalibrationTask(void *param) {
+  auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
+  if (cfg == nullptr || cfg->gantry == nullptr) {
+    g_calibrationInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  const bool hadCalibration = g_calibratedZThisSession;
+  ESP_LOGI(TAG, "Z calibration task: started");
+  int len = cfg->gantry->calibrateZ();
+  if (len > 0) {
+    g_calibratedZThisSession = true;
+    ESP_LOGI(TAG, "OK Z Calibrated length: %d mm", len);
+    ESP_LOGI(TAG, "OK Z joint max updated from calibration: %.1f mm", (float)len);
+  } else if (cfg->gantry->isAbortRequested()) {
+    g_calibratedZThisSession = hadCalibration;
+    ESP_LOGI(TAG, "Z calibration aborted by stop request");
+  } else {
+    g_calibratedZThisSession = hadCalibration;
+    ESP_LOGE(TAG, "Z calibration failed");
+    if (hadCalibration) {
+      ESP_LOGI(TAG, "Keeping previous calibrated Z max (no successful recalibration)");
     }
   }
 
@@ -442,12 +476,12 @@ void printStatus(Gantry::Gantry *gantry) {
       ESP_LOGW(TAG, "Z drive: %s", zSum);
     }
   }
-  ESP_LOGI(TAG, "Motion Profile: speed=%.3f %s/s, theta=%lu deg/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
+  ESP_LOGI(TAG, "2-D Path Profile: speed=%.3f %s/s, theta=%lu deg/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
            convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
            (unsigned long)g_moveSpeedDegPerS,
            convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
            convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
-  ESP_LOGI(TAG, "Range Limits: %s (speed:%.3f-%.3f %s/s, accel/decel:%.3f-%.3f %s/s2)",
+  ESP_LOGI(TAG, "Path Range Limits: %s (speed:%.3f-%.3f %s/s, accel/decel:%.3f-%.3f %s/s2)",
            g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED",
            convertMmToSelected((float)kMinSpeedMmPerS),
            convertMmToSelected((float)maxLinearSpeedMmPerS()),
@@ -925,6 +959,7 @@ bool parseAxisToken(const char *tok, AxisToken &out) {
 void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
   cfg->gantry->softHomeJointDatum();
   g_homeCompletedThisSession = true;
+  g_homeZCompletedThisSession = true;
   ESP_LOGI(TAG,
            "OK soft-home (X+Z). Joint datum = current drive positions "
            "(X %.3f mm / %d PUU joint, Z %.3f mm). "
@@ -949,6 +984,15 @@ void runSoftCalibrateX(const GantryTestConsoleConfig *cfg) {
 void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
   if (!cfg->gantry->isEnabled()) {
     ESP_LOGE(TAG, "ERROR: Motors not enabled");
+    return;
+  }
+
+  if (cfg->gantry->driveManagedLimitsEnabled() &&
+      !cfg->gantry->zInTraverseBand()) {
+    ESP_LOGE(TAG,
+             "ERROR: home x blocked — Z above SAFE_Z band ceiling (%.1f mm). "
+             "Lower Z into the band from Z-/A015 first, or run 'calibrate all'.",
+             (double)cfg->gantry->traverseClearanceZMm());
     return;
   }
 
@@ -1008,14 +1052,129 @@ void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
   ESP_LOGI(TAG, "OK X homing started (use 'stop' to abort, 'status' to monitor)");
 }
 
+void runHomeZSequence(const GantryTestConsoleConfig *cfg) {
+  if (!cfg->gantry->isEnabled()) {
+    ESP_LOGE(TAG, "ERROR: Motors not enabled");
+    return;
+  }
+
+  if (!cfg->gantry->driveManagedLimitsEnabled()) {
+    ESP_LOGE(TAG,
+             "ERROR: Z home requires EIP drive-managed limits "
+             "(GPIO Z switches not integrated)");
+    return;
+  }
+
+  if (cfg->gantry->isBusy()) {
+    ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before 'home z'");
+    return;
+  }
+
+  ESP_LOGI(TAG,
+           "Starting homing sequence (Z) (EIP: seek -Z A015/NL -> creep clear -> "
+           "joint zero)...");
+
+  cfg->gantry->homeZ();
+  vTaskDelay(pdMS_TO_TICKS(20));
+
+  if (!cfg->gantry->isBusy()) {
+    const bool alarmActive = cfg->gantry->isAlarmActive();
+    if (!alarmActive) {
+      g_homeZCompletedThisSession = true;
+      ESP_LOGI(TAG,
+               "OK Z drive-managed home accepted (sweep or already at A015); "
+               "wait for busy=0 / status");
+    } else {
+      ESP_LOGE(TAG, "ERROR: Z homing did not start (alarm active)");
+    }
+    return;
+  }
+  g_homeZCompletedThisSession = true;
+  ESP_LOGI(TAG, "OK Z homing started (use 'stop' to abort, 'status' to monitor)");
+}
+
+void waitGantryIdle(const GantryTestConsoleConfig *cfg, uint32_t timeout_ms) {
+  const TickType_t start = xTaskGetTickCount();
+  while (cfg->gantry->isBusy()) {
+    if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) {
+      ESP_LOGW(TAG, "wait for idle timed out after %lu ms",
+               (unsigned long)timeout_ms);
+      return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+void runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
+  if (!cfg->gantry->isEnabled()) {
+    ESP_LOGE(TAG, "ERROR: Motors not enabled");
+    return;
+  }
+  if (!cfg->gantry->driveManagedLimitsEnabled()) {
+    ESP_LOGE(TAG, "ERROR: Bring-up requires EIP drive-managed limits");
+    return;
+  }
+  if (cfg->gantry->isBusy() || g_calibrationInProgress) {
+    ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before bring-up");
+    return;
+  }
+  g_calibrationInProgress = true;
+  g_calibratedThisSession = false;
+  g_calibratedZThisSession = false;
+  g_homeCompletedThisSession = false;
+  g_homeZCompletedThisSession = false;
+
+  if (!cfg->gantry->startEipBringUp()) {
+    g_calibrationInProgress = false;
+    ESP_LOGE(TAG, "ERROR: Bring-up did not start");
+    return;
+  }
+
+  ESP_LOGI(TAG,
+           "EIP bring-up started: Z- (A015) -> X home/cal -> X=%.1f -> Z+ (A014) "
+           "-> SAFE_Z ceiling (use 'stop' to abort, 'status' to monitor)",
+           (double)GANTRY_CAL_X_PARK_MM);
+
+  const TickType_t start = xTaskGetTickCount();
+  while (cfg->gantry->eipBringUpInProgress() || cfg->gantry->isBusy()) {
+    if ((xTaskGetTickCount() - start) >
+        pdMS_TO_TICKS(Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS * 4)) {
+      ESP_LOGE(TAG, "ERROR: Bring-up timed out");
+      cfg->gantry->requestAbort();
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  g_calibrationInProgress = false;
+
+  const int xLen = static_cast<int>(cfg->gantry->xAxisLengthMm());
+  const int zLen = static_cast<int>(cfg->gantry->zAxisLengthMm());
+  if (xLen > 0 && zLen > 0) {
+    g_homeCompletedThisSession = true;
+    g_homeZCompletedThisSession = true;
+    g_calibratedThisSession = true;
+    g_calibratedZThisSession = true;
+    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)xLen,
+                                AXIS_Z_HARD_LIMIT_MIN_MM, (float)zLen,
+                                AXIS_THETA_HARD_LIMIT_MIN_DEG,
+                                AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    ESP_LOGI(TAG,
+             "OK Bring-up complete: X stroke=%d mm, Z stroke=%d mm, "
+             "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
+             xLen, zLen, (double)cfg->gantry->traverseClearanceZMm(),
+             (double)GANTRY_SAFE_Z_HEIGHT_MM);
+  } else {
+    ESP_LOGE(TAG, "ERROR: Bring-up finished without valid X/Z stroke");
+  }
+}
+
 void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
   switch (axis) {
     case AxisToken::X:
       runHomeXSequence(cfg);
       break;
     case AxisToken::Z:
-      cfg->gantry->homeZ();
-      ESP_LOGI(TAG, "OK Z home accepted (stub - not yet wired)");
+      runHomeZSequence(cfg);
       break;
     case AxisToken::THETA:
       cfg->gantry->homeTheta();
@@ -1029,6 +1188,15 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
     case AxisToken::X: {
       if (!g_homeCompletedThisSession) {
         ESP_LOGE(TAG, "ERROR: Run 'home x' first after startup");
+        return;
+      }
+      if (cfg->gantry->driveManagedLimitsEnabled() &&
+          !cfg->gantry->zInTraverseBand()) {
+        ESP_LOGE(TAG,
+                 "ERROR: calibrate x blocked — Z above SAFE_Z band ceiling "
+                 "(%.1f mm). Lower Z into the band from Z-/A015 first, or run "
+                 "'calibrate all'.",
+                 (double)cfg->gantry->traverseClearanceZMm());
         return;
       }
       if (!physicalLimitsAvailable(cfg)) {
@@ -1055,10 +1223,39 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
       }
       break;
     }
-    case AxisToken::Z:
-      cfg->gantry->calibrateZ();
-      ESP_LOGI(TAG, "OK Z calibrate accepted (stub - not yet wired)");
+    case AxisToken::Z: {
+      if (!g_homeZCompletedThisSession) {
+        ESP_LOGE(TAG, "ERROR: Run 'home z' first after startup");
+        return;
+      }
+      if (!cfg->gantry->driveManagedLimitsEnabled()) {
+        ESP_LOGE(TAG,
+                 "ERROR: Z calibrate requires EIP drive-managed limits");
+        return;
+      }
+      if (g_calibrationInProgress) {
+        ESP_LOGI(TAG, "Calibration is already in progress");
+        return;
+      }
+      if (cfg->gantry->isBusy()) {
+        ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before 'calibrate z'");
+        return;
+      }
+      g_calibrationInProgress = true;
+      g_calibratedZThisSession = false;
+      BaseType_t taskOk = xTaskCreatePinnedToCore(
+          zCalibrationTask, "ZCalibrateTask", 4096, (void *)cfg, 2, nullptr,
+          CONSOLE_TASK_CORE);
+      if (taskOk != pdPASS) {
+        g_calibrationInProgress = false;
+        ESP_LOGE(TAG, "ERROR: Failed to start Z calibration task");
+      } else {
+        ESP_LOGI(TAG,
+                 "Z calibration started (EIP: seek +Z A014/PL -> creep clear -> "
+                 "joint max) (use 'stop' to abort)");
+      }
       break;
+    }
     case AxisToken::THETA:
       cfg->gantry->calibrateTheta();
       ESP_LOGI(TAG, "OK Theta calibrate accepted (stub - not yet wired)");
@@ -1094,9 +1291,46 @@ void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
        tok = strtok_r(nullptr, " \t", &saveptr)) {
     sawAnyToken = true;
     if (strcmp(tok, "all") == 0) {
-      if (!ranX) { runFn(cfg, AxisToken::X);     ranX = true; }
-      if (!ranZ) { runFn(cfg, AxisToken::Z);     ranZ = true; }
-      if (!ranT) { runFn(cfg, AxisToken::THETA); ranT = true; }
+      if (strcmp(leading, "calibrate") == 0 &&
+          cfg->gantry->driveManagedLimitsEnabled()) {
+        // Preferred full sequence: Z- -> X home/cal -> X park -> Z+ -> SAFE_Z.
+        runEipBringUpSequence(cfg);
+        ranX = true;
+        ranZ = true;
+        ranT = true;
+        continue;
+      }
+      // home all / non-EIP calibrate all: Z before X so SAFE_Z interlock can pass.
+      if (!ranZ) {
+        runFn(cfg, AxisToken::Z);
+        ranZ = true;
+        waitGantryIdle(cfg, Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS);
+        while (g_calibrationInProgress) {
+          vTaskDelay(pdMS_TO_TICKS(50));
+        }
+      }
+      if (!ranX) {
+        if (strcmp(leading, "home") == 0 &&
+            cfg->gantry->driveManagedLimitsEnabled() &&
+            !cfg->gantry->zInTraverseBand()) {
+          ESP_LOGE(TAG,
+                   "ERROR: home all — Z is above SAFE_Z band ceiling (%.1f mm); "
+                   "X home skipped. Lower Z into the band from Z-/A015, or run "
+                   "'calibrate all'.",
+                   (double)cfg->gantry->traverseClearanceZMm());
+        } else {
+          runFn(cfg, AxisToken::X);
+        }
+        ranX = true;
+        waitGantryIdle(cfg, Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS);
+        while (g_calibrationInProgress) {
+          vTaskDelay(pdMS_TO_TICKS(50));
+        }
+      }
+      if (!ranT) {
+        runFn(cfg, AxisToken::THETA);
+        ranT = true;
+      }
       continue;
     }
     AxisToken axis;
@@ -1217,7 +1451,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                convertMmToSelected((float)requestedSpeedMm), getLinearUnitLabel(),
                convertMmToSelected((float)clampedSpeedMm), getLinearUnitLabel());
     }
-    ESP_LOGI(TAG, "OK Speed updated: %.3f %s/s, theta=%lu deg/s",
+    ESP_LOGI(TAG, "OK Path speed updated: %.3f %s/s (resultant), theta=%lu deg/s",
              convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
              (unsigned long)g_moveSpeedDegPerS);
   } else if (strncmp(cmdLower, "accel", 5) == 0) {
@@ -1257,7 +1491,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                convertMmToSelected((float)clampedAccel), convertMmToSelected((float)clampedDecel),
                getLinearUnitLabel());
     }
-    ESP_LOGI(TAG, "OK Accel updated: accel=%.3f %s/s2, decel=%.3f %s/s2",
+    ESP_LOGI(TAG, "OK Path accel updated: accel=%.3f %s/s2, decel=%.3f %s/s2 (resultant)",
              convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
              convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
   } else if (strncmp(cmdLower, "units", 5) == 0) {
@@ -1288,7 +1522,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     g_motionProfileRangeLimitEnabled = (enabled == 1);
     ESP_LOGI(TAG, "OK Range limits %s", g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED");
-    ESP_LOGI(TAG, "Configured ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
+    ESP_LOGI(TAG, "Configured path ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
              (unsigned long)kMinSpeedMmPerS, (unsigned long)maxLinearSpeedMmPerS(),
              (unsigned long)kMinAccelMmPerS2, (unsigned long)maxLinearAccelMmPerS2());
   } else if (strncmp(cmdLower, "livepos", 7) == 0) {
@@ -1356,13 +1590,6 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                (unsigned long)g_axisLogFrequencyHz, (unsigned long)periodMs);
     }
   } else if (strncmp(cmdLower, "move", 4) == 0) {
-    if (!g_homeCompletedThisSession || !g_calibratedThisSession) {
-      ESP_LOGE(TAG,
-               "ERROR: Move blocked. Run 'home' then 'calibrate' after every startup "
-               "(EIP with drive endstops uses A014/A015 sweep; otherwise soft-home + "
-               "SCHUNK envelope).");
-      return;
-    }
     float x = 0.0f;
     float z = 0.0f;
     float theta = 0.0f;
@@ -1377,6 +1604,36 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     target.x = convertSelectedToMm(x);
     target.z = convertSelectedToMm(z);
     target.theta = theta;
+
+    // Per-axis session gates: only require home/cal for axes that move.
+    // Lets Z-only jog after home z / calibrate z before X is brought up
+    // (SAFE_Z band is enforced in Gantry path planning, not here).
+    constexpr float kHoldEpsMm = 0.5f;
+    const Gantry::JointConfig cur = cfg->gantry->getCurrentJointConfig();
+    const bool moveX = fabsf(target.x - cur.x) > kHoldEpsMm;
+    const bool moveZ = fabsf(target.z - cur.z) > kHoldEpsMm;
+    if (moveX && (!g_homeCompletedThisSession || !g_calibratedThisSession)) {
+      ESP_LOGE(TAG,
+               "ERROR: X move blocked. Run 'home x' then 'calibrate x' "
+               "(or 'calibrate all'). Z-only: stay at current X.");
+      return;
+    }
+    if (moveZ && (!g_homeZCompletedThisSession || !g_calibratedZThisSession)) {
+      ESP_LOGE(TAG,
+               "ERROR: Z move blocked. Run 'home z' then 'calibrate z' "
+               "(or 'calibrate all').");
+      return;
+    }
+    if (!moveX && !moveZ) {
+      // Theta-only or no-op still needs at least one axis brought up once.
+      if ((!g_homeCompletedThisSession || !g_calibratedThisSession) &&
+          (!g_homeZCompletedThisSession || !g_calibratedZThisSession)) {
+        ESP_LOGE(TAG,
+                 "ERROR: Move blocked. Run home+calibrate for X and/or Z "
+                 "after startup (or 'calibrate all').");
+        return;
+      }
+    }
 
     ESP_LOGI(TAG, "Moving to: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
              x, getLinearUnitLabel(), z, getLinearUnitLabel(), theta);
@@ -1524,12 +1781,15 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: -X A014/PL sweep; else soft-home)");
-  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate (EIP: +X A015/NL measure; else SCHUNK envelope)");
+  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: seek A014/PL; all=Z then X; "
+                "X needs SAFE_Z band)");
+  ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate; 'all' = EIP bring-up "
+                "(Z-/A015 -> X home/cal -> X=%.0f -> Z+/A014 -> SAFE_Z)",
+           (double)GANTRY_CAL_X_PARK_MM);
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
-  ESP_LOGI(TAG, "  speed <v> [deg/s]    - set move speed (v in selected linear units/s)");
-  ESP_LOGI(TAG, "  accel <a> [d]        - set accel/decel (>0, selected linear units/s2)");
-  ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable speed+accel/decel range clamps");
+  ESP_LOGI(TAG, "  speed <v> [deg/s]    - set 2-D path speed (resultant; v in selected linear units/s)");
+  ESP_LOGI(TAG, "  accel <a> [d]        - set 2-D path accel/decel (resultant; >0, selected linear units/s2)");
+  ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable path speed+accel/decel range clamps");
   ESP_LOGI(TAG, "  livepos <hz>         - set LIVE POS periodic rate (0=off, default off)");
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
   ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=up, z=joint datum");

@@ -100,6 +100,9 @@
 #else
 #define AXIS_X_HARD_LIMIT_MAX_MM           550.0f
 #endif
+/* Commissioning documentation only — not motion-tuning knobs. Console /
+ * Gantry use GANTRY_PATH_MAX_* for the shared 2-D path envelope; per-axis
+ * Absolute components are derived from the path resultant. */
 #if defined(CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #define AXIS_X_MAX_SPEED_MM_PER_S          ((float)CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #else
@@ -108,12 +111,12 @@
 #if defined(CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #define AXIS_X_ACCEL_MM_PER_S2             ((float)CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #else
-#define AXIS_X_ACCEL_MM_PER_S2             3000.0f  /* placeholder */
+#define AXIS_X_ACCEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
 #endif
 #if defined(CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #define AXIS_X_DECEL_MM_PER_S2             ((float)CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #else
-#define AXIS_X_DECEL_MM_PER_S2             3000.0f  /* placeholder */
+#define AXIS_X_DECEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
 #endif
 #if defined(CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
 #define AXIS_X_POSITION_TOLERANCE_MM       ((float)CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
@@ -158,6 +161,9 @@
 #else
 #define AXIS_Z_HARD_LIMIT_MAX_MM           150.0f
 #endif
+/* Commissioning documentation only — not motion-tuning knobs. See
+ * GANTRY_PATH_MAX_* for the shared 2-D path envelope. Z critical-RPM
+ * derived speed cap is still applied as a protective clamp. */
 #if defined(CONFIG_AXIS_Z_MAX_SPEED_MM_PER_S)
 #define AXIS_Z_MAX_SPEED_MM_PER_S          ((float)CONFIG_AXIS_Z_MAX_SPEED_MM_PER_S)
 #else
@@ -166,12 +172,12 @@
 #if defined(CONFIG_AXIS_Z_ACCEL_MM_PER_S2)
 #define AXIS_Z_ACCEL_MM_PER_S2             ((float)CONFIG_AXIS_Z_ACCEL_MM_PER_S2)
 #else
-#define AXIS_Z_ACCEL_MM_PER_S2             5000.0f  /* placeholder */
+#define AXIS_Z_ACCEL_MM_PER_S2             5000.0f  /* placeholder; not a console ceiling */
 #endif
 #if defined(CONFIG_AXIS_Z_DECEL_MM_PER_S2)
 #define AXIS_Z_DECEL_MM_PER_S2             ((float)CONFIG_AXIS_Z_DECEL_MM_PER_S2)
 #else
-#define AXIS_Z_DECEL_MM_PER_S2             5000.0f  /* placeholder */
+#define AXIS_Z_DECEL_MM_PER_S2             5000.0f  /* placeholder; not a console ceiling */
 #endif
 #if defined(CONFIG_AXIS_Z_POSITION_TOLERANCE_MM)
 #define AXIS_Z_POSITION_TOLERANCE_MM       ((float)CONFIG_AXIS_Z_POSITION_TOLERANCE_MM)
@@ -273,8 +279,9 @@
  *                                   theta module (formerly GRIPPER_Y_OFFSET).
  *   GANTRY_GRIPPER_Z_OFFSET_MM    - Z offset of the gripper TCP from the
  *                                   theta module mounting flange.
- *   GANTRY_SAFE_Z_HEIGHT_MM       - safe retracted Z height (high; +Z = up).
- *                                   Was GANTRY_SAFE_Y_HEIGHT_MM. */
+ *   GANTRY_SAFE_Z_HEIGHT_MM       - margin below Z+ (mm) for coordinated X+Z
+ *                                   (band floor = z_max - this).
+ *   GANTRY_CAL_X_PARK_MM          - X park before Z+ seek during bring-up. */
 #if defined(CONFIG_GANTRY_Z_AXIS_Y_OFFSET_MM)
 #define GANTRY_Z_AXIS_Y_OFFSET_MM          ((float)CONFIG_GANTRY_Z_AXIS_Y_OFFSET_MM)
 #else
@@ -295,10 +302,22 @@
 #else
 #define GANTRY_GRIPPER_Z_OFFSET_MM         80.0f
 #endif
+/* Traverse clearance margin above the Z− endstop / A015 (joint mm).
+ * Coordinated X+Z Absolute is allowed only while Z is within this margin of
+ * Z− (joint Z <= z_min + this). Above that bottom band Z moves alone with X
+ * held. Limit codes: X A014=min/A015=max; Z A015=min (−Z)/A014=max (+Z).
+ * Z Absolute joint sense is inverted so joint − seeks A015. */
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #define GANTRY_SAFE_Z_HEIGHT_MM            ((float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #else
-#define GANTRY_SAFE_Z_HEIGHT_MM            150.0f
+#define GANTRY_SAFE_Z_HEIGHT_MM            30.0f
+#endif
+
+/* After X home/cal during bring-up, park here before seeking Z+ (joint mm). */
+#if defined(CONFIG_GANTRY_CAL_X_PARK_MM)
+#define GANTRY_CAL_X_PARK_MM               ((float)CONFIG_GANTRY_CAL_X_PARK_MM)
+#else
+#define GANTRY_CAL_X_PARK_MM               35.0f
 #endif
 
 /* Pneumatic gripper (SCHUNK KGG 100-80). Open/close times from datasheet. */
@@ -314,7 +333,9 @@
 #endif
 
 
-/* Default motion profile (console / Gantry boot). Menuconfig: Gantry kinematics. */
+/* Default 2-D path motion profile (console / Gantry boot).
+ * speed / accel / decel are the RESULTANT along the X-Z path; per-axis
+ * Absolute components are derived from path direction. Menuconfig: Gantry kinematics. */
 #if defined(CONFIG_GANTRY_DEFAULT_SPEED_MM_PER_S)
 #define GANTRY_DEFAULT_SPEED_MM_PER_S          ((uint32_t)CONFIG_GANTRY_DEFAULT_SPEED_MM_PER_S)
 #else
@@ -339,6 +360,23 @@
 #define GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2    ((double)CONFIG_GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2)
 #else
 #define GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2    300.0
+#endif
+
+/* Shared 2-D path envelope ceilings (console rangelimit). Not per-axis. */
+#if defined(CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
+#define GANTRY_PATH_MAX_SPEED_MM_PER_S         ((uint32_t)CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
+#else
+#define GANTRY_PATH_MAX_SPEED_MM_PER_S         500u
+#endif
+#if defined(CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
+#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
+#else
+#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        3000u
+#endif
+#if defined(CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
+#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
+#else
+#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        3000u
 #endif
 
 /* ---------------------------------------------------------------------------

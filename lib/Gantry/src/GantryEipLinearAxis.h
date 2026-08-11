@@ -26,6 +26,8 @@ struct EipLinearAxisConfig {
   double accel_ref_per_mm_s2 = 10.0;
   double decel_ref_per_mm_s2 = 10.0;
   double lead_mm_per_rev = 20.0;
+  /// When true, joint +mm commands Absolute −PUU (Z: joint − toward A015).
+  bool invert_direction = false;
 };
 
 class GantryEipLinearAxis : public GantryLinearAxis {
@@ -73,12 +75,16 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
   void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw);
+  /// When true, A015 maps to joint-min soft switch and A014 to joint-max (Z).
+  void setJointMinWarningA015(bool enable);
 
  private:
   bool publishCommand(const eip::k5100::OutputAssembly104& cmd);
   bool readFeedback(eip::k5100::InputAssembly154& out) const;
   int32_t mmToPuu(float mm) const;
   float puuToMm(int32_t puu) const;
+  double signedPuuPerMm() const;
+  double absPuuPerMm() const;
   int32_t toJointPuu(int32_t abs_puu) const;
   int32_t toAbsPuu(int32_t joint_puu) const;
   void logAlarmEdge(const eip::k5100::InputAssembly154& fb);
@@ -132,11 +138,14 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   int32_t move_speed_ref_;  // unsigned cruise magnitude (0.1 RPM)
   uint16_t run_ticks_;
   uint8_t stop_stable_ticks_;
+  uint8_t arrival_stable_ticks_;
   int32_t last_stop_sample_puu_;
   bool stop_sample_valid_;
 
   GantryLimitSwitch* limit_min_sw_ = nullptr;
   GantryLimitSwitch* limit_max_sw_ = nullptr;
+  // Z: joint min = A015/NL, joint max = A014/PL. X keeps A014=min / A015=max.
+  bool joint_min_warning_a015_ = false;
   // When starting a move already on A014/A015 (escape/creep), do not abort on
   // that same warning until it clears — otherwise back-off never runs.
   bool ignore_a014_abort_ = false;

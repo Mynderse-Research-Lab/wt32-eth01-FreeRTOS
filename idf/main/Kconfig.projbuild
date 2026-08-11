@@ -33,11 +33,13 @@ menu "Gantry kinematics"
 
     menu "Default motion profile (console / Gantry)"
         config GANTRY_DEFAULT_SPEED_MM_PER_S
-            int "Default linear speed (mm/s)"
+            int "Default 2-D path speed (mm/s)"
             default 50
             range 1 2000
             help
                 Boot default for console `speed` / Gantry moves until overridden.
+                Value is the RESULTANT along the X-Z path; per-axis Absolute
+                components are derived from path direction.
 
         config GANTRY_DEFAULT_SPEED_DEG_PER_S
             int "Default theta speed (deg/s)"
@@ -45,15 +47,36 @@ menu "Gantry kinematics"
             range 1 7200
 
         config GANTRY_DEFAULT_ACCEL_MM_PER_S2
-            int "Default linear accel (mm/s^2)"
+            int "Default 2-D path accel (mm/s^2)"
             default 3000
             range 1 50000
             help
                 Boot default for console `accel`. Also used as decel when
-                `accel` is given without a separate decel argument.
+                `accel` is given without a separate decel argument. Resultant
+                along the X-Z path.
 
         config GANTRY_DEFAULT_DECEL_MM_PER_S2
-            int "Default linear decel (mm/s^2)"
+            int "Default 2-D path decel (mm/s^2)"
+            default 3000
+            range 1 50000
+
+        config GANTRY_PATH_MAX_SPEED_MM_PER_S
+            int "2-D path speed ceiling (mm/s)"
+            default 500
+            range 1 2000
+            help
+                Console rangelimit ceiling for path speed. Z ballscrew
+                critical-RPM derived cap is still applied as a protective clamp.
+
+        config GANTRY_PATH_MAX_ACCEL_MM_PER_S2
+            int "2-D path accel ceiling (mm/s^2)"
+            default 3000
+            range 1 50000
+            help
+                Console rangelimit ceiling for path accel/decel.
+
+        config GANTRY_PATH_MAX_DECEL_MM_PER_S2
+            int "2-D path decel ceiling (mm/s^2)"
             default 3000
             range 1 50000
 
@@ -78,14 +101,21 @@ menu "Gantry kinematics"
             float "Hard limit max (mm)"
             default 550.0
         config AXIS_X_MAX_SPEED_MM_PER_S
-            float "Max speed clamp (mm/s)"
+            float "Max speed clamp (mm/s) [docs only]"
             default 500.0
+            help
+                Commissioning documentation. Console envelope uses
+                GANTRY_PATH_MAX_SPEED_MM_PER_S.
         config AXIS_X_ACCEL_MM_PER_S2
-            float "Axis accel envelope (mm/s^2)"
+            float "Axis accel envelope (mm/s^2) [docs only]"
             default 3000.0
+            help
+                Commissioning documentation. Not a console ceiling.
         config AXIS_X_DECEL_MM_PER_S2
-            float "Axis decel envelope (mm/s^2)"
+            float "Axis decel envelope (mm/s^2) [docs only]"
             default 3000.0
+            help
+                Commissioning documentation. Not a console ceiling.
         config AXIS_X_POSITION_TOLERANCE_MM
             float "Position tolerance (mm)"
             default 0.08
@@ -116,14 +146,21 @@ menu "Gantry kinematics"
             float "Hard limit max (mm)"
             default 150.0
         config AXIS_Z_MAX_SPEED_MM_PER_S
-            float "Max speed clamp (mm/s)"
+            float "Max speed clamp (mm/s) [docs only]"
             default 500.0
+            help
+                Commissioning documentation. Critical-RPM derived cap still
+                protects the ballscrew; console envelope uses GANTRY_PATH_MAX_*.
         config AXIS_Z_ACCEL_MM_PER_S2
-            float "Axis accel envelope (mm/s^2)"
+            float "Axis accel envelope (mm/s^2) [docs only]"
             default 5000.0
+            help
+                Commissioning documentation. Not a console ceiling.
         config AXIS_Z_DECEL_MM_PER_S2
-            float "Axis decel envelope (mm/s^2)"
+            float "Axis decel envelope (mm/s^2) [docs only]"
             default 5000.0
+            help
+                Commissioning documentation. Not a console ceiling.
         config AXIS_Z_POSITION_TOLERANCE_MM
             float "Position tolerance (mm)"
             default 0.03
@@ -210,8 +247,19 @@ menu "Gantry kinematics"
             float "Gripper TCP Z offset from theta (mm)"
             default 80.0
         config GANTRY_SAFE_Z_HEIGHT_MM
-            float "Safe retracted Z height (mm)"
-            default 150.0
+            float "Z+ clearance margin (mm below Z+)"
+            default 30.0
+            help
+                Coordinated X+Z Absolute only while joint Z is within this
+                margin of Z+ (band floor = z_max - this). Below that band,
+                Z moves alone with X held. Limit codes match X (A014/A015).
+
+        config GANTRY_CAL_X_PARK_MM
+            float "X park before Z+ seek (mm)"
+            default 35.0
+            help
+                During EIP bring-up calibrate-all: after X stroke is measured,
+                move to this X before seeking Z+ (stroke).
         config GANTRY_GRIPPER_OPEN_TIME_MS
             int "Gripper open time (ms)"
             default 190

@@ -16,8 +16,8 @@ namespace k5100 {
 
 constexpr uint16_t kCodeMask12 = 0x0FFFu;
 // Drive frame (UM004D): PL = most positive travel, NL = most negative.
-// On this gantry X, motor sense is inverted vs joint +X: joint -X -> A014,
-// joint +X -> A015 (see EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md sec 4).
+// X: joint -X -> A014, joint +X -> A015.
+// Z: joint -Z -> A015, joint +Z -> A014 (see EXPECTED sec 4).
 constexpr uint16_t kWarningA014 = 0x0014;  // Positive/forward limit (PL)
 constexpr uint16_t kWarningA015 = 0x0015;  // Negative/reverse limit (NL)
 constexpr uint16_t kWarningA603 = 0x0603;  // Invalid I/O command data

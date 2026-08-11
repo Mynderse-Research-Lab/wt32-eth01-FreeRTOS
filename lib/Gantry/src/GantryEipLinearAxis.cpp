@@ -42,6 +42,7 @@ constexpr int32_t kNearStopSpeedRef = 8;
 constexpr double kStopStableMmPerTick = 0.005;
 constexpr int8_t kHomingMethodDefineCurrent = 34;
 constexpr double kArrivalBandMm = 0.5;
+constexpr uint8_t kArrivalStableTicks = 3;  // ~30 ms @ 100 Hz before finishMoveHold
 constexpr uint16_t kMoveTimeoutTicks = 6000;  // ~60 s @ 100 Hz
 }  // namespace
 
@@ -75,6 +76,7 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       move_speed_ref_(0),
       run_ticks_(0),
       stop_stable_ticks_(0),
+      arrival_stable_ticks_(0),
       last_stop_sample_puu_(0),
       stop_sample_valid_(false),
       limit_min_sw_(nullptr),
@@ -129,12 +131,22 @@ bool GantryEipLinearAxis::disable() {
 bool GantryEipLinearAxis::isEnabled() const { return enabled_; }
 
 int32_t GantryEipLinearAxis::mmToPuu(float mm) const {
-  return static_cast<int32_t>(llround(static_cast<double>(mm) * config_.puu_per_mm));
+  return static_cast<int32_t>(
+      llround(static_cast<double>(mm) * signedPuuPerMm()));
 }
 
 float GantryEipLinearAxis::puuToMm(int32_t puu) const {
-  if (config_.puu_per_mm <= 0.0) return 0.0f;
-  return static_cast<float>(static_cast<double>(puu) / config_.puu_per_mm);
+  const double spp = signedPuuPerMm();
+  if (std::fabs(spp) < 1e-9) return 0.0f;
+  return static_cast<float>(static_cast<double>(puu) / spp);
+}
+
+double GantryEipLinearAxis::signedPuuPerMm() const {
+  return config_.invert_direction ? -config_.puu_per_mm : config_.puu_per_mm;
+}
+
+double GantryEipLinearAxis::absPuuPerMm() const {
+  return std::fabs(config_.puu_per_mm);
 }
 
 int32_t GantryEipLinearAxis::toJointPuu(int32_t abs_puu) const {
@@ -247,8 +259,8 @@ bool GantryEipLinearAxis::inPositionBand(
     const eip::k5100::InputAssembly154& fb) const {
   const int32_t err = fb.actual_position - command_position_puu_;
   const double rem_mm =
-      (config_.puu_per_mm > 0.0)
-          ? (std::fabs(static_cast<double>(err)) / config_.puu_per_mm)
+      (absPuuPerMm() > 0.0)
+          ? (std::fabs(static_cast<double>(err)) / absPuuPerMm())
           : 1e9;
   return rem_mm <= kArrivalBandMm;
 }
@@ -260,6 +272,7 @@ void GantryEipLinearAxis::finishMoveHold() {
   move_phase_ticks_ = 0;
   run_ticks_ = 0;
   stop_stable_ticks_ = 0;
+  arrival_stable_ticks_ = 0;
   stop_sample_valid_ = false;
   // Keep command_position at the Absolute target (do not snap — preserves
   // puuinfo target vs actual for calibration).
@@ -398,7 +411,7 @@ void GantryEipLinearAxis::advanceMovePhase(
     const eip::k5100::InputAssembly154& fb) {
   if (move_phase_ == MovePhase::kStopping) {
     const int32_t pos_lim = static_cast<int32_t>(
-        llround(config_.puu_per_mm * kStopStableMmPerTick));
+        llround(absPuuPerMm() * kStopStableMmPerTick));
     const int32_t lim = (pos_lim < 1) ? 1 : pos_lim;
     if (!stop_sample_valid_) {
       last_stop_sample_puu_ = fb.actual_position;
@@ -477,8 +490,13 @@ void GantryEipLinearAxis::advanceMovePhase(
          (fb.actual_speed <= kNearStopSpeedRef &&
           fb.actual_speed >= -kNearStopSpeedRef));
     if (at_ref || band_stopped) {
-      finishMoveHold();
-      return;
+      if (arrival_stable_ticks_ < 255) ++arrival_stable_ticks_;
+      if (arrival_stable_ticks_ >= kArrivalStableTicks) {
+        finishMoveHold();
+        return;
+      }
+    } else {
+      arrival_stable_ticks_ = 0;
     }
     if (run_ticks_ >= kMoveTimeoutTicks) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
@@ -490,7 +508,7 @@ void GantryEipLinearAxis::advanceMovePhase(
 
 bool GantryEipLinearAxis::moveToMm(float target_mm, float speed_mm_per_s,
                                    float accel_mm_per_s2, float decel_mm_per_s2) {
-  if (!initialized_ || !enabled_ || config_.puu_per_mm <= 0.0) return false;
+  if (!initialized_ || !enabled_ || absPuuPerMm() <= 0.0) return false;
   if (!image_.isOnline()) return false;
   if (arm_phase_ != ArmPhase::kIdle && arm_phase_ != ArmPhase::kHolding) {
     const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
@@ -540,6 +558,7 @@ bool GantryEipLinearAxis::moveToMm(float target_mm, float speed_mm_per_s,
   move_phase_ = MovePhase::kStart;
   move_phase_ticks_ = kMoveStartMotionTicks;
   run_ticks_ = 0;
+  arrival_stable_ticks_ = 0;
   eip::class1TimingStats().noteAbsoluteStartMotionPublished(eip::class1NowUs());
   return publishCommand(buildMoveCommand(/*start_motion_edge=*/true));
 }
@@ -575,15 +594,15 @@ bool GantryEipLinearAxis::isBusy() const { return motion_commanded_; }
 
 bool GantryEipLinearAxis::moveToPulses(uint32_t target_pulses, uint32_t speed_pps,
                                        uint32_t accel_pps2, uint32_t decel_pps2) {
-  if (config_.puu_per_mm <= 0.0) return false;
+  if (absPuuPerMm() <= 0.0) return false;
   const float target_mm =
-      static_cast<float>(static_cast<double>(target_pulses) / config_.puu_per_mm);
+      static_cast<float>(static_cast<double>(target_pulses) / absPuuPerMm());
   const float speed_mm_s =
-      static_cast<float>(static_cast<double>(speed_pps) / config_.puu_per_mm);
+      static_cast<float>(static_cast<double>(speed_pps) / absPuuPerMm());
   const float accel_mm_s2 =
-      static_cast<float>(static_cast<double>(accel_pps2) / config_.puu_per_mm);
+      static_cast<float>(static_cast<double>(accel_pps2) / absPuuPerMm());
   const float decel_mm_s2 =
-      static_cast<float>(static_cast<double>(decel_pps2) / config_.puu_per_mm);
+      static_cast<float>(static_cast<double>(decel_pps2) / absPuuPerMm());
   return moveToMm(target_mm, speed_mm_s, accel_mm_s2, decel_mm_s2);
 }
 
@@ -712,7 +731,7 @@ void GantryEipLinearAxis::logAlarmEdge(const eip::k5100::InputAssembly154& fb) {
   }
 }
 
-double GantryEipLinearAxis::pulsesPerMm() const { return config_.puu_per_mm; }
+double GantryEipLinearAxis::pulsesPerMm() const { return absPuuPerMm(); }
 
 bool GantryEipLinearAxis::isEncoderFeedbackEnabled() const { return true; }
 
@@ -724,18 +743,21 @@ void GantryEipLinearAxis::update() {
   if (!readFeedback(fb)) return;
   logAlarmEdge(fb);
 
-  // Drive-managed endstops: A014/PL -> joint min (-X), A015/NL -> joint max (+X).
-  // Fault∧Stopped without a limit code still mirrors both switches.
+  // Drive-managed endstops mirrored onto soft switches.
+  // Default (X): A014/PL -> joint min, A015/NL -> joint max.
+  // Z (joint_min_warning_a015_): A015 -> min, A014 -> max.
   const bool a014 =
       fb.warning_present && eip::k5100::isWarningA014(fb.warning_code);
   const bool a015 =
       fb.warning_present && eip::k5100::isWarningA015(fb.warning_code);
   const bool overtravel = fb.isLikelyLimitStop() || a014 || a015;
+  const bool at_min = joint_min_warning_a015_ ? a015 : a014;
+  const bool at_max = joint_min_warning_a015_ ? a014 : a015;
   if (limit_min_sw_ != nullptr) {
-    limit_min_sw_->setExternalActive(a014 || (overtravel && !a015));
+    limit_min_sw_->setExternalActive(at_min || (overtravel && !at_max));
   }
   if (limit_max_sw_ != nullptr) {
-    limit_max_sw_->setExternalActive(a015 || (overtravel && !a014));
+    limit_max_sw_->setExternalActive(at_max || (overtravel && !at_min));
   }
 
   advanceArmPhase();
@@ -760,12 +782,16 @@ void GantryEipLinearAxis::attachLimitSwitches(GantryLimitSwitch* min_sw,
   limit_max_sw_ = max_sw;
 }
 
+void GantryEipLinearAxis::setJointMinWarningA015(bool enable) {
+  joint_min_warning_a015_ = enable;
+}
+
 uint32_t GantryEipLinearAxis::homingSpeedPps() const {
   constexpr double kSafeHomingRpm = 120.0;
   constexpr double kRpmToRps = 1.0 / 60.0;
   const double linearSpeedMmPerS =
       config_.lead_mm_per_rev * kSafeHomingRpm * kRpmToRps;
-  return static_cast<uint32_t>(linearSpeedMmPerS * config_.puu_per_mm);
+  return static_cast<uint32_t>(linearSpeedMmPerS * absPuuPerMm());
 }
 
 void GantryEipLinearAxis::setLogTag(const char* tag) { log_tag_ = tag ? tag : ""; }

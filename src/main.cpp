@@ -179,8 +179,11 @@ extern "C" void app_main(void) {
     auto zAxis = std::make_unique<Gantry::GantryEipLinearAxis>(
         eipImageZ, Gantry::EipLinearAxisConfig{
             CONFIG_EIP_AXIS_Z_PUU_PER_MM, zSpeedRefPerMmS, zSpeedRefPerMmS,
-            zSpeedRefPerMmS, AXIS_Z_LEAD_MM_PER_REV});
-    ESP_LOGI(TAG, "Z axis over EIP (Kinetix 5100, %.1f PUU/mm, speed_ref/mm_s=%.3f), target %s",
+            zSpeedRefPerMmS, AXIS_Z_LEAD_MM_PER_REV,
+            /*invert_direction=*/true});
+    ESP_LOGI(TAG,
+             "Z axis over EIP (Kinetix 5100, %.1f PUU/mm, invert_dir=1, "
+             "speed_ref/mm_s=%.3f), target %s",
              CONFIG_EIP_AXIS_Z_PUU_PER_MM, zSpeedRefPerMmS, CONFIG_EIP_TARGET_IP_Z);
 #else
     auto zAxis = std::unique_ptr<Gantry::GantryLinearAxis>(nullptr);

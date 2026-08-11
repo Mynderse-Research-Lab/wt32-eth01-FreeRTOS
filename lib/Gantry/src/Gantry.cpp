@@ -68,6 +68,7 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     targetZ_(0),
     targetTheta_(0),
     axisLength_(0),
+    zAxisLength_(0),
     config_(),
     kinematicParams_(),
     stepsPerRev_(DEFAULT_STEPS_PER_REV),
@@ -75,7 +76,7 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     targetX_mm_(0.0f),
     targetZ_mm_(0.0f),
     targetTheta_deg_(0.0f),
-    safeZHeight_mm_(DEFAULT_SAFE_Z_HEIGHT_MM),
+    safeZMarginFromMaxMm_(DEFAULT_SAFE_Z_HEIGHT_MM),
     speed_mm_per_s_(DEFAULT_SPEED_MM_PER_S),
     speed_deg_per_s_(DEFAULT_SPEED_DEG_PER_S),
     acceleration_mm_per_s2_(0),
@@ -87,8 +88,11 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     xPulsesPerMmOverride_(0.0f),
     jointDirectMove_(false),
     eipLimitPhase_(EipLimitPhase::kIdle),
+    eipLimitAxis_(EipLimitAxisRole::kNone),
     eipLimitPhaseStartMs_(0),
-    eipLimitSawBusy_(false) {
+    eipLimitSawBusy_(false),
+    bringUpPhase_(BringUpPhase::kIdle),
+    calXParkMm_(GANTRY_CAL_X_PARK_MM) {
 }
 
 // ============================================================================
@@ -111,6 +115,8 @@ bool Gantry::begin() {
 
     xMinSwitch_.begin();
     xMaxSwitch_.begin();
+    zMinSwitch_.begin();
+    zMaxSwitch_.begin();
     ESP_LOGI(TAG, "[BEGIN] Limit switch objects initialized");
 
     if (GANTRY_DIAG_SKIP_AXIS_X_INIT) {
@@ -213,17 +219,21 @@ void Gantry::configureDriveManagedLimits() {
     xMaxPin_ = -1;
     xMinSwitch_.configureExternal();
     xMaxSwitch_.configureExternal();
+    zMinSwitch_.configureExternal();
+    zMaxSwitch_.configureExternal();
     auto* xEip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
     if (xEip != nullptr) {
         xEip->attachLimitSwitches(&xMinSwitch_, &xMaxSwitch_);
     }
     auto* zEip = dynamic_cast<GantryEipLinearAxis*>(axisZ_.get());
     if (zEip != nullptr) {
-        // Z has no dedicated Gantry switches; axis still gates moves on !ready
-        // and aborts on isLikelyLimitStop. Attach null for API symmetry.
-        zEip->attachLimitSwitches(nullptr, nullptr);
+        // Bench: joint −Z trips A015/NL; joint +Z trips A014/PL.
+        zEip->setJointMinWarningA015(true);
+        zEip->attachLimitSwitches(&zMinSwitch_, &zMaxSwitch_);
     }
-    ESP_LOGI(TAG, "Drive-managed endstops enabled (EIP Fault/Stopped)");
+    ESP_LOGI(TAG,
+             "Drive-managed endstops enabled (EIP; X: A014=min/A015=max; "
+             "Z: A015=min/A014=max)");
 }
 
 bool Gantry::driveManagedLimitsEnabled() const {
@@ -267,9 +277,34 @@ void Gantry::setEndEffectorPin(int pin, bool activeHigh) {
 }
 
 void Gantry::setSafeZHeight(float safeHeight_mm) {
-    if (safeHeight_mm > 0.0f) {
-        safeZHeight_mm_ = safeHeight_mm;
+    // Argument is the margin above Z− / A015 (not an absolute joint plane).
+    if (safeHeight_mm <= 0.0f) {
+        return;
     }
+    safeZMarginFromMaxMm_ = safeHeight_mm;
+}
+
+float Gantry::traverseClearanceZMm() const {
+    // Bottom-band ceiling: coordinated X+Z only while Z <= z_min + margin.
+    return Path::bandCeilingFromZMinus(config_.limits.z_min, safeZMarginFromMaxMm_);
+}
+
+bool Gantry::zInTraverseBand() const {
+    const float z = axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_);
+    return Path::zInTraverseBand(z, traverseClearanceZMm());
+}
+
+bool Gantry::requireXTraverseInterlock(const char* what) {
+    if (zInTraverseBand()) {
+        return true;
+    }
+    const float z = axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_);
+    const float band = traverseClearanceZMm();
+    ESP_LOGE(TAG,
+             "[INTERLOCK] X blocked (%s): Z=%.3f above band ceiling %.3f "
+             "(SAFE_Z=%.1f mm from Z-/A015; lower Z first or use 'calibrate all')",
+             what ? what : "X move", z, band, safeZMarginFromMaxMm_);
+    return false;
 }
 
 // ============================================================================
@@ -411,8 +446,12 @@ void Gantry::homeX() {
     if (!axisX_) return;
     if (axisX_->isAlarmActive()) return;
 
+    if (!requireXTraverseInterlock("home x")) {
+        return;
+    }
+
     if (driveManagedLimitsEnabled()) {
-        startEipPrecisionHome();
+        startEipPrecisionHome(EipLimitAxisRole::kX);
         return;
     }
 
@@ -451,10 +490,22 @@ void Gantry::homeX() {
 }
 
 void Gantry::homeZ() {
-    // Z limit switches are defined in the pinout (PIN_Z_LIMIT_MIN/MAX) but the
-    // Gantry class does not yet wire them up. Surface this as a warning so
-    // operators know the command was received but did not act on hardware.
-    ESP_LOGW(TAG, "[HOME] Z axis home not yet wired (Z limit switches not integrated)");
+    GANTRY_CHECK_INITIALIZED();
+    GANTRY_CHECK_ENABLED();
+    abortRequested_ = false;
+    homingInProgress_ = false;
+
+    if (!axisZ_) return;
+    if (axisZ_->isAlarmActive()) return;
+
+    if (driveManagedLimitsEnabled()) {
+        startEipPrecisionHome(EipLimitAxisRole::kZ);
+        return;
+    }
+
+    ESP_LOGW(TAG,
+             "[HOME] Z axis home requires drive-managed EIP limits "
+             "(GPIO Z switches not integrated)");
 }
 
 void Gantry::homeTheta() {
@@ -481,8 +532,45 @@ int Gantry::calibrate() {
 }
 
 int Gantry::calibrateZ() {
-    ESP_LOGW(TAG, "[CAL] Z axis calibrate not yet wired (Z limit switches not integrated)");
-    return 0;
+    GANTRY_CHECK_INITIALIZED_RET(0);
+    GANTRY_CHECK_ENABLED_RET(0);
+    abortRequested_ = false;
+
+    if (!axisZ_) return 0;
+    if (axisZ_->isAlarmActive()) return 0;
+
+    if (!driveManagedLimitsEnabled()) {
+        ESP_LOGW(TAG,
+                 "[CAL] Z axis calibrate requires drive-managed EIP limits "
+                 "(GPIO Z switches not integrated)");
+        return 0;
+    }
+
+    // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
+    // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
+    // after a failed home (that left active=0 / rejected Absolute).
+    calibrationInProgress_ = true;
+    zAxisLength_ = 0;
+    if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+        startEipPrecisionHome(EipLimitAxisRole::kZ);
+    }
+    unsigned long start_ms = gantry_millis();
+    while (calibrationInProgress_ &&
+           (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+        if (abortRequested_) {
+            stopAllMotion();
+            calibrationInProgress_ = false;
+            return 0;
+        }
+        gantry_delay(10);
+    }
+    if (calibrationInProgress_) {
+        ESP_LOGE(TAG, "[CAL] EIP Z calibrate timed out");
+        stopAllMotion();
+        calibrationInProgress_ = false;
+        return 0;
+    }
+    return zAxisLength_;
 }
 
 int Gantry::calibrateTheta() {
@@ -498,40 +586,25 @@ int Gantry::calibrateX() {
     if (!axisX_) return 0;
     if (axisX_->isAlarmActive()) return 0;
 
+    if (!requireXTraverseInterlock("calibrate x")) {
+        return 0;
+    }
+
     if (driveManagedLimitsEnabled()) {
+        // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
+        // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
+        // after a failed home.
         calibrationInProgress_ = true;
         axisLength_ = 0;
-        if (!homingInProgress_ && eipLimitPhase_ == EipLimitPhase::kIdle) {
-            startEipPrecisionHome();
-        }
-        unsigned long start_ms = gantry_millis();
-        while ((homingInProgress_ || eipLimitPhase_ == EipLimitPhase::kHomeSeekMin ||
-                eipLimitPhase_ == EipLimitPhase::kHomeCreepClear ||
-                eipLimitPhase_ == EipLimitPhase::kHomeSettle) &&
-               (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
-            if (abortRequested_) {
-                stopAllMotion();
+        if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+            startEipPrecisionHome(EipLimitAxisRole::kX);
+            if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+                // Interlock or missing axis aborted before arming.
                 calibrationInProgress_ = false;
                 return 0;
             }
-            gantry_delay(10);
         }
-        if (homingInProgress_ ||
-            (eipLimitPhase_ != EipLimitPhase::kIdle &&
-             eipLimitPhase_ != EipLimitPhase::kCalSeekMax &&
-             eipLimitPhase_ != EipLimitPhase::kCalCreepClear &&
-             eipLimitPhase_ != EipLimitPhase::kCalReturnZero)) {
-            ESP_LOGE(TAG, "[CAL] EIP home did not complete before calibrate");
-            stopAllMotion();
-            calibrationInProgress_ = false;
-            return 0;
-        }
-        // Home->cal handoff: kHomeSettle already armed kCalSeekMax when cal was
-        // requested; only start calibrate if home was already done.
-        if (eipLimitPhase_ == EipLimitPhase::kIdle) {
-            startEipPrecisionCalibrate();
-        }
-        start_ms = gantry_millis();
+        unsigned long start_ms = gantry_millis();
         while (calibrationInProgress_ &&
                (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
             if (abortRequested_) {
@@ -919,8 +992,16 @@ void Gantry::updateAxisPositions() {
     axisX_->update();
     xMinSwitch_.update();
     xMaxSwitch_.update();
+    if (axisZ_) {
+        axisZ_->update();
+        zMinSwitch_.update();
+        zMaxSwitch_.update();
+        currentZ_ = (int32_t)axisZ_->getCurrentMm();
+    }
 
-    if (eipLimitPhase_ != EipLimitPhase::kIdle) {
+    if (bringUpPhase_ != BringUpPhase::kIdle) {
+        advanceEipBringUp();
+    } else if (eipLimitPhase_ != EipLimitPhase::kIdle) {
         advanceEipLimitSequence();
     } else if (axisX_->isMotionActive()) {
         uint32_t currentXCounts = axisX_->getCurrentPulses();
@@ -949,10 +1030,6 @@ void Gantry::updateAxisPositions() {
 
     currentX_mm_ = axisX_->getCurrentMm();
 
-    if (axisZ_) {
-        axisZ_->update();
-        currentZ_ = (int32_t)axisZ_->getCurrentMm();
-    }
     if (axisTheta_) {
         axisTheta_->update();
         currentTheta_ = (int32_t)axisTheta_->getCurrentDeg();
@@ -966,19 +1043,46 @@ void Gantry::stopAllMotion() {
     homingInProgress_      = false;
     calibrationInProgress_ = false;
     eipLimitPhase_         = EipLimitPhase::kIdle;
+    eipLimitAxis_          = EipLimitAxisRole::kNone;
+    bringUpPhase_          = BringUpPhase::kIdle;
     motionState_           = MotionState::IDLE;
     jointDirectMove_       = false;
+    pathSegmentCount_      = 0;
+    pathSegmentIndex_      = 0;
+    pathDoGripperAfter_    = false;
 }
 
-bool Gantry::eipA014Active() const {
-    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+GantryLinearAxis* Gantry::eipLimitActiveAxis() {
+    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+        return axisZ_.get();
+    }
+    return axisX_.get();
+}
+
+const GantryLinearAxis* Gantry::eipLimitActiveAxis() const {
+    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+        return axisZ_.get();
+    }
+    return axisX_.get();
+}
+
+bool Gantry::eipMinWarningActive() const {
+    auto* eip = dynamic_cast<const GantryEipLinearAxis*>(eipLimitActiveAxis());
     if (eip == nullptr) return false;
+    // X: A014 = joint min. Z: A015 = joint min (−Z).
+    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+        return eip->isA015WarningActive();
+    }
     return eip->isA014WarningActive();
 }
 
-bool Gantry::eipA015Active() const {
-    auto* eip = dynamic_cast<GantryEipLinearAxis*>(axisX_.get());
+bool Gantry::eipMaxWarningActive() const {
+    auto* eip = dynamic_cast<const GantryEipLinearAxis*>(eipLimitActiveAxis());
     if (eip == nullptr) return false;
+    // X: A015 = joint max. Z: A014 = joint max (+Z).
+    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+        return eip->isA014WarningActive();
+    }
     return eip->isA015WarningActive();
 }
 
@@ -998,7 +1102,12 @@ float Gantry::eipCalSeekSpeedMmS() const {
 }
 
 bool Gantry::eipStartMoveDelta(float delta_mm, float speed_mm_s) {
-    if (!axisX_) return false;
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) return false;
+    if (eipLimitAxis_ == EipLimitAxisRole::kX &&
+        !requireXTraverseInterlock("EIP X Absolute")) {
+        return false;
+    }
     const float accel =
         (acceleration_mm_per_s2_ > 0)
             ? static_cast<float>(acceleration_mm_per_s2_)
@@ -1007,80 +1116,140 @@ bool Gantry::eipStartMoveDelta(float delta_mm, float speed_mm_s) {
         (deceleration_mm_per_s2_ > 0)
             ? static_cast<float>(deceleration_mm_per_s2_)
             : accel;
-    const float here = axisX_->getCurrentMm();
-    return axisX_->moveToMm(here + delta_mm, speed_mm_s, accel, decel);
+    const float here = axis->getCurrentMm();
+    return axis->moveToMm(here + delta_mm, speed_mm_s, accel, decel);
 }
 
-void Gantry::startEipPrecisionHome() {
-    if (!axisX_) return;
+void Gantry::startEipPrecisionHome(EipLimitAxisRole role) {
+    if (role == EipLimitAxisRole::kX &&
+        !requireXTraverseInterlock("EIP home X")) {
+        homingInProgress_ = false;
+        eipLimitPhase_ = EipLimitPhase::kIdle;
+        eipLimitAxis_ = EipLimitAxisRole::kNone;
+        return;
+    }
+    eipLimitAxis_ = role;
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) {
+        eipLimitAxis_ = EipLimitAxisRole::kNone;
+        return;
+    }
     abortRequested_ = false;
     homingInProgress_ = true;
     eipLimitSawBusy_ = false;
     eipLimitPhaseStartMs_ = gantry_millis();
+    const char* ax = EipLimit::axisLetter(role);
+    const char* minCode = EipLimit::minWarningLabel(role);
 
-    if (eipA014Active()) {
+    if (eipMinWarningActive()) {
         ESP_LOGI(TAG,
-                 "[HOME] EIP already on -X limit A014/PL - creep toward +X until clear");
+                 "[HOME] EIP already on -%s limit %s - creep toward +%s until clear",
+                 ax, minCode, ax);
         eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
-        // Absolute start deferred to advanceEipLimitSequence (avoids console/update race).
         return;
     }
 
-    ESP_LOGI(TAG, "[HOME] EIP seek -X limit A014/PL at %.1f mm/s",
-             eipSeekSpeedMmS());
+    ESP_LOGI(TAG, "[HOME] EIP seek -%s limit %s at %.1f mm/s",
+             ax, minCode, eipSeekSpeedMmS());
     eipLimitPhase_ = EipLimitPhase::kHomeSeekMin;
 }
 
-void Gantry::startEipPrecisionCalibrate() {
-    if (!axisX_) return;
+void Gantry::startEipPrecisionCalibrate(EipLimitAxisRole role) {
+    if (role == EipLimitAxisRole::kX &&
+        !requireXTraverseInterlock("EIP calibrate X")) {
+        calibrationInProgress_ = false;
+        eipLimitPhase_ = EipLimitPhase::kIdle;
+        eipLimitAxis_ = EipLimitAxisRole::kNone;
+        return;
+    }
+    eipLimitAxis_ = role;
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) {
+        eipLimitAxis_ = EipLimitAxisRole::kNone;
+        return;
+    }
     abortRequested_ = false;
     calibrationInProgress_ = true;
     eipLimitSawBusy_ = false;
     eipLimitPhaseStartMs_ = gantry_millis();
+    const char* ax = EipLimit::axisLetter(role);
+    const char* maxCode = EipLimit::maxWarningLabel(role);
 
-    if (eipA015Active()) {
+    if (eipMaxWarningActive()) {
         ESP_LOGI(TAG,
-                 "[CAL] EIP already on +X limit A015/NL - creep toward -X until clear");
+                 "[CAL] EIP already on +%s limit %s - creep toward -%s until clear",
+                 ax, maxCode, ax);
         eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
         return;
     }
 
-    ESP_LOGI(TAG, "[CAL] EIP seek +X limit A015/NL at %.1f mm/s",
-             eipCalSeekSpeedMmS());
+    ESP_LOGI(TAG, "[CAL] EIP seek +%s limit %s at %.1f mm/s",
+             ax, maxCode, eipCalSeekSpeedMmS());
     eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
 }
 
 void Gantry::finishEipHomeOk() {
-    // StopMotion aborts the in-flight creep; kStopping holds isBusy() until
-    // encoder position is stable, then kHomeSettle sets joint zero.
-    axisX_->stopMotion();
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) {
+        failEipLimitSequence("no active axis");
+        return;
+    }
+    axis->stopMotion();
     eipLimitPhase_ = EipLimitPhase::kHomeSettle;
     eipLimitPhaseStartMs_ = gantry_millis();
     eipLimitSawBusy_ = false;
+    const char* ax = EipLimit::axisLetter(eipLimitAxis_);
     ESP_LOGI(TAG,
-             "[HOME] EIP -X limit A014/PL cleared - StopMotion hold, then set joint zero");
+             "[HOME] EIP -%s limit cleared - StopMotion hold, then set joint zero",
+             ax);
 }
 
 void Gantry::finishEipCalOk() {
-    axisX_->stopMotion();
-    const float max_mm = axisX_->getCurrentMm();
-    axisLength_ = static_cast<int32_t>(llround(max_mm));
-    if (axisLength_ < 1) axisLength_ = 1;
-    currentX_mm_ = max_mm;
-    ESP_LOGI(TAG,
-             "[CAL] EIP +X limit A015/NL cleared - joint max ~ %.3f mm (%ld); "
-             "hold-here then return to 0",
-             max_mm, (long)axisLength_);
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) {
+        failEipLimitSequence("no active axis");
+        return;
+    }
+    axis->stopMotion();
+    const float max_mm = axis->getCurrentMm();
+    const int32_t length = static_cast<int32_t>(llround(max_mm));
+    const char* ax = EipLimit::axisLetter(eipLimitAxis_);
+
+    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+        zAxisLength_ = length < 1 ? 1 : length;
+        config_.limits.z_max = static_cast<float>(zAxisLength_);
+        if (config_.limits.z_max < config_.limits.z_min + 1.0f) {
+            config_.limits.z_max = config_.limits.z_min + 1.0f;
+        }
+        currentZ_ = (int32_t)max_mm;
+        ESP_LOGI(TAG,
+                 "[CAL] EIP +Z limit %s cleared - joint max ~ %.3f mm (%ld); "
+                 "hold-here then return to 0",
+                 EipLimit::maxWarningLabel(EipLimitAxisRole::kZ), max_mm,
+                 (long)zAxisLength_);
+    } else {
+        axisLength_ = length < 1 ? 1 : length;
+        currentX_mm_ = max_mm;
+        ESP_LOGI(TAG,
+                 "[CAL] EIP +X limit %s cleared - joint max ~ %.3f mm (%ld); "
+                 "hold-here then return to 0",
+                 EipLimit::maxWarningLabel(EipLimitAxisRole::kX), max_mm,
+                 (long)axisLength_);
+    }
     eipLimitPhase_ = EipLimitPhase::kCalReturnZero;
     eipLimitPhaseStartMs_ = gantry_millis();
     calibrationInProgress_ = true;
     eipLimitSawBusy_ = false;
+    (void)ax;
 }
 
 void Gantry::failEipLimitSequence(const char* why) {
     ESP_LOGE(TAG, "[EIP-LIMIT] failed: %s", why ? why : "?");
-    if (axisX_) axisX_->stopMotion();
+    if (GantryLinearAxis* axis = eipLimitActiveAxis()) {
+        axis->stopMotion();
+    }
     eipLimitPhase_ = EipLimitPhase::kIdle;
+    eipLimitAxis_ = EipLimitAxisRole::kNone;
     eipLimitSawBusy_ = false;
     homingInProgress_ = false;
     calibrationInProgress_ = false;
@@ -1097,105 +1266,133 @@ void Gantry::advanceEipLimitSequence() {
         return;
     }
 
-    constexpr float kSeekMm = 600.0f;
+    GantryLinearAxis* axis = eipLimitActiveAxis();
+    if (!axis) {
+        failEipLimitSequence("no active axis");
+        return;
+    }
+    const char* ax = EipLimit::axisLetter(eipLimitAxis_);
 
     switch (eipLimitPhase_) {
-        case EipLimitPhase::kHomeSeekMin:
-            if (eipA014Active()) {
-                // Absolute already aborts on rising A014; wait for !busy before creep.
+        case EipLimitPhase::kHomeSeekMin: {
+            using EipLimit::SeekOutcome;
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMinWarningActive(), axis->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
                 ESP_LOGI(TAG,
-                         "[HOME] -X limit A014/PL tripped - will creep toward +X @ %.1f mm/s",
-                         eipCreepSpeedMmS());
+                         "[HOME] -%s limit tripped - will creep toward +%s @ %.1f mm/s",
+                         ax, ax, eipCreepSpeedMmS());
                 eipLimitPhase_ = EipLimitPhase::kHomeCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
                 eipLimitSawBusy_ = false;
-            } else if (axisX_->isBusy()) {
+            } else if (o == SeekOutcome::kWait && axis->isBusy()) {
                 eipLimitSawBusy_ = true;
-            } else if (!eipLimitSawBusy_) {
-                if (!eipStartMoveDelta(-kSeekMm, eipSeekSpeedMmS())) {
-                    failEipLimitSequence("seek -X limit A014/PL start failed");
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!eipStartMoveDelta(EipLimit::homeSeekDeltaMm(),
+                                       eipSeekSpeedMmS())) {
+                    failEipLimitSequence("seek min limit start failed");
                 }
-            } else {
+            } else if (o == SeekOutcome::kFailNoTrip) {
                 failEipLimitSequence(
-                    "seek -X ended without trip (check A014/PL at joint -X)");
+                    eipLimitAxis_ == EipLimitAxisRole::kZ
+                        ? "seek -Z ended without trip (check A015/NL at joint -Z)"
+                        : "seek -X ended without trip (check A014/PL at joint -X)");
             }
             break;
+        }
 
-        case EipLimitPhase::kHomeCreepClear:
-            if (!eipA014Active()) {
+        case EipLimitPhase::kHomeCreepClear: {
+            using EipLimit::CreepOutcome;
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMinWarningActive(), axis->isBusy());
+            if (o == CreepOutcome::kCleared) {
                 finishEipHomeOk();
-            } else if (axisX_->isBusy()) {
+            } else if (o == CreepOutcome::kWait) {
                 eipLimitSawBusy_ = true;
-            } else {
-                // Start (or restart) slow escape; moveToMm ignores A014 abort until clear.
-                if (!eipStartMoveDelta(+kSeekMm, eipCreepSpeedMmS())) {
-                    failEipLimitSequence("home creep start failed");
-                }
+            } else if (!eipStartMoveDelta(EipLimit::homeCreepDeltaMm(),
+                                          eipCreepSpeedMmS())) {
+                failEipLimitSequence("home creep start failed");
             }
             break;
+        }
 
         case EipLimitPhase::kHomeSettle: {
-            // After clear-edge StopMotion, kStopping holds busy until position
-            // is stable - then set joint zero / hand off to calibrate.
-            if (!axisX_->isBusy()) {
-                axisX_->setCurrentPulses(0);
-                currentX_mm_ = axisX_->getCurrentMm();
+            if (!axis->isBusy()) {
+                axis->setCurrentPulses(0);
+                if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+                    currentZ_ = (int32_t)axis->getCurrentMm();
+                    ESP_LOGI(TAG,
+                             "[HOME] EIP joint zero set here (Z=%.3f mm reported)",
+                             (float)currentZ_);
+                } else {
+                    currentX_mm_ = axis->getCurrentMm();
+                    ESP_LOGI(TAG,
+                             "[HOME] EIP joint zero set here (%.3f mm reported)",
+                             currentX_mm_);
+                }
                 homingInProgress_ = false;
-                ESP_LOGI(TAG,
-                         "[HOME] EIP joint zero set here (%.3f mm reported)",
-                         currentX_mm_);
                 if (calibrationInProgress_) {
-                    ESP_LOGI(TAG, "[CAL] EIP seek +X limit A015/NL at %.1f mm/s",
-                             eipCalSeekSpeedMmS());
+                    const char* maxCode = EipLimit::maxWarningLabel(eipLimitAxis_);
+                    ESP_LOGI(TAG, "[CAL] EIP seek +%s limit %s at %.1f mm/s",
+                             ax, maxCode, eipCalSeekSpeedMmS());
                     eipLimitPhase_ = EipLimitPhase::kCalSeekMax;
                     eipLimitPhaseStartMs_ = gantry_millis();
                     eipLimitSawBusy_ = false;
                 } else {
                     eipLimitPhase_ = EipLimitPhase::kIdle;
+                    eipLimitAxis_ = EipLimitAxisRole::kNone;
                     ESP_LOGI(TAG, "[HOME] EIP complete");
                 }
             }
             break;
         }
 
-        case EipLimitPhase::kCalSeekMax:
-            if (eipA015Active()) {
+        case EipLimitPhase::kCalSeekMax: {
+            using EipLimit::SeekOutcome;
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMaxWarningActive(), axis->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
                 ESP_LOGI(TAG,
-                         "[CAL] +X limit A015/NL tripped - will creep toward -X @ %.1f mm/s",
-                         eipCreepSpeedMmS());
+                         "[CAL] +%s limit tripped - will creep toward -%s @ %.1f mm/s",
+                         ax, ax, eipCreepSpeedMmS());
                 eipLimitPhase_ = EipLimitPhase::kCalCreepClear;
                 eipLimitPhaseStartMs_ = gantry_millis();
                 eipLimitSawBusy_ = false;
-            } else if (axisX_->isBusy()) {
+            } else if (o == SeekOutcome::kWait && axis->isBusy()) {
                 eipLimitSawBusy_ = true;
-            } else if (!eipLimitSawBusy_) {
-                if (!eipStartMoveDelta(+kSeekMm, eipCalSeekSpeedMmS())) {
-                    failEipLimitSequence("seek +X limit A015/NL start failed");
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!eipStartMoveDelta(EipLimit::calSeekDeltaMm(),
+                                       eipCalSeekSpeedMmS())) {
+                    failEipLimitSequence("seek max limit start failed");
                 }
-            } else {
+            } else if (o == SeekOutcome::kFailNoTrip) {
                 failEipLimitSequence(
-                    "seek +X ended without trip (check A015/NL at joint +X)");
+                    eipLimitAxis_ == EipLimitAxisRole::kZ
+                        ? "seek +Z ended without trip (check A014/PL at joint +Z)"
+                        : "seek +X ended without trip (check A015/NL at joint +X)");
             }
             break;
+        }
 
-        case EipLimitPhase::kCalCreepClear:
-            if (!eipA015Active()) {
+        case EipLimitPhase::kCalCreepClear: {
+            using EipLimit::CreepOutcome;
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMaxWarningActive(), axis->isBusy());
+            if (o == CreepOutcome::kCleared) {
                 finishEipCalOk();
-            } else if (axisX_->isBusy()) {
+            } else if (o == CreepOutcome::kWait) {
                 eipLimitSawBusy_ = true;
-            } else {
-                if (!eipStartMoveDelta(-kSeekMm, eipCreepSpeedMmS())) {
-                    failEipLimitSequence("cal creep start failed");
-                }
+            } else if (!eipStartMoveDelta(EipLimit::calCreepDeltaMm(),
+                                          eipCreepSpeedMmS())) {
+                failEipLimitSequence("cal creep start failed");
             }
             break;
+        }
 
         case EipLimitPhase::kCalReturnZero: {
-            if (!axisX_->isBusy()) {
+            if (!axis->isBusy()) {
                 if (!eipLimitSawBusy_) {
-                    // First !busy: hold-here from finishEipCalOk completed.
-                    // Now Absolute to joint 0 at profile speed if not already there.
-                    if (std::fabs(axisX_->getCurrentMm()) > 0.5f) {
+                    if (std::fabs(axis->getCurrentMm()) > 0.5f) {
                         const float accel =
                             (acceleration_mm_per_s2_ > 0)
                                 ? static_cast<float>(acceleration_mm_per_s2_)
@@ -1204,29 +1401,45 @@ void Gantry::advanceEipLimitSequence() {
                             (deceleration_mm_per_s2_ > 0)
                                 ? static_cast<float>(deceleration_mm_per_s2_)
                                 : accel;
-                        if (!axisX_->moveToMm(0.0f, eipCalSeekSpeedMmS(), accel,
-                                              decel)) {
+                        if (!axis->moveToMm(0.0f, eipCalSeekSpeedMmS(), accel,
+                                            decel)) {
                             failEipLimitSequence("return to 0 start failed");
                             break;
                         }
                         eipLimitSawBusy_ = true;
                         eipLimitPhaseStartMs_ = gantry_millis();
                     } else {
-                        // Already at joint 0 - no return move needed.
-                        currentX_mm_ = axisX_->getCurrentMm();
+                        if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+                            currentZ_ = (int32_t)axis->getCurrentMm();
+                            ESP_LOGI(TAG,
+                                     "[CAL] EIP complete - at joint 0 (Z=%.3f mm)",
+                                     (float)currentZ_);
+                        } else {
+                            currentX_mm_ = axis->getCurrentMm();
+                            ESP_LOGI(TAG,
+                                     "[CAL] EIP complete - at joint 0 (%.3f mm)",
+                                     currentX_mm_);
+                        }
                         eipLimitPhase_ = EipLimitPhase::kIdle;
+                        eipLimitAxis_ = EipLimitAxisRole::kNone;
                         calibrationInProgress_ = false;
-                        ESP_LOGI(TAG, "[CAL] EIP complete - at joint 0 (%.3f mm)",
-                                 currentX_mm_);
                     }
                 } else {
-                    // Return-to-zero move completed.
                     eipLimitSawBusy_ = false;
-                    currentX_mm_ = axisX_->getCurrentMm();
+                    if (eipLimitAxis_ == EipLimitAxisRole::kZ) {
+                        currentZ_ = (int32_t)axis->getCurrentMm();
+                        ESP_LOGI(TAG,
+                                 "[CAL] EIP complete - at joint 0 (Z=%.3f mm)",
+                                 (float)currentZ_);
+                    } else {
+                        currentX_mm_ = axis->getCurrentMm();
+                        ESP_LOGI(TAG,
+                                 "[CAL] EIP complete - at joint 0 (%.3f mm)",
+                                 currentX_mm_);
+                    }
                     eipLimitPhase_ = EipLimitPhase::kIdle;
+                    eipLimitAxis_ = EipLimitAxisRole::kNone;
                     calibrationInProgress_ = false;
-                    ESP_LOGI(TAG, "[CAL] EIP complete - at joint 0 (%.3f mm)",
-                             currentX_mm_);
                 }
             }
             break;
@@ -1239,85 +1452,648 @@ void Gantry::advanceEipLimitSequence() {
 }
 
 // ============================================================================
-// SEQUENTIAL MOTION
+// EIP BRING-UP (Z- → X home/cal → X park → Z+ stroke → return 0)
 // ============================================================================
+
+bool Gantry::eipBringUpInProgress() const {
+    return bringUpPhase_ != BringUpPhase::kIdle;
+}
+
+bool Gantry::startEipBringUp() {
+    GANTRY_CHECK_INITIALIZED_RET(false);
+    GANTRY_CHECK_ENABLED_RET(false);
+    if (!driveManagedLimitsEnabled()) {
+        ESP_LOGE(TAG, "[BRINGUP] requires drive-managed EIP limits");
+        return false;
+    }
+    if (!axisX_ || !axisZ_) {
+        ESP_LOGE(TAG, "[BRINGUP] needs both X and Z axes");
+        return false;
+    }
+    if (bringUpPhase_ != BringUpPhase::kIdle ||
+        eipLimitPhase_ != EipLimitPhase::kIdle ||
+        motionState_ != MotionState::IDLE) {
+        ESP_LOGE(TAG, "[BRINGUP] busy — finish or stop first");
+        return false;
+    }
+    if (axisX_->isAlarmActive() || axisZ_->isAlarmActive()) {
+        ESP_LOGE(TAG, "[BRINGUP] alarm active");
+        return false;
+    }
+
+    abortRequested_ = false;
+    homingInProgress_ = true;
+    calibrationInProgress_ = true;
+    axisLength_ = 0;
+    zAxisLength_ = 0;
+    eipLimitSawBusy_ = false;
+    eipLimitPhaseStartMs_ = gantry_millis();
+    eipLimitAxis_ = EipLimitAxisRole::kZ;
+    eipLimitPhase_ = EipLimitPhase::kIdle;
+
+    ESP_LOGI(TAG,
+             "[BRINGUP] start: Z- datum (A015) -> X home/cal -> X=%.1f "
+             "-> Z+ stroke (A014) -> SAFE_Z band ceiling "
+             "(SAFE_Z=%.1f mm from Z-/A015; Z invert_dir; "
+             "X-:A014/PL, X+:A015/NL)",
+             calXParkMm_, safeZMarginFromMaxMm_);
+
+    if (eipMinWarningActive()) {
+        ESP_LOGI(TAG, "[BRINGUP] already on -Z A015 — creep clear");
+        bringUpPhase_ = BringUpPhase::kZMinusCreep;
+    } else {
+        ESP_LOGI(TAG, "[BRINGUP] seek -Z A015 at %.1f mm/s", eipSeekSpeedMmS());
+        bringUpPhase_ = BringUpPhase::kZMinusSeek;
+    }
+    return true;
+}
+
+void Gantry::failEipBringUp(const char* why) {
+    ESP_LOGE(TAG, "[BRINGUP] failed: %s", why ? why : "?");
+    if (axisX_) axisX_->stopMotion();
+    if (axisZ_) axisZ_->stopMotion();
+    bringUpPhase_ = BringUpPhase::kIdle;
+    eipLimitPhase_ = EipLimitPhase::kIdle;
+    eipLimitAxis_ = EipLimitAxisRole::kNone;
+    eipLimitSawBusy_ = false;
+    homingInProgress_ = false;
+    calibrationInProgress_ = false;
+}
+
+void Gantry::finishEipBringUpOk() {
+    ESP_LOGI(TAG,
+             "[BRINGUP] complete: X stroke=%ld mm, Z stroke=%ld mm, "
+             "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
+             (long)axisLength_, (long)zAxisLength_,
+             traverseClearanceZMm(), safeZMarginFromMaxMm_);
+    bringUpPhase_ = BringUpPhase::kIdle;
+    eipLimitPhase_ = EipLimitPhase::kIdle;
+    eipLimitAxis_ = EipLimitAxisRole::kNone;
+    eipLimitSawBusy_ = false;
+    homingInProgress_ = false;
+    calibrationInProgress_ = false;
+}
+
+void Gantry::advanceEipBringUp() {
+    if (abortRequested_) {
+        failEipBringUp("abort requested");
+        return;
+    }
+    constexpr unsigned long kPhaseTimeoutMs = TRAVEL_MEASUREMENT_TIMEOUT_MS;
+    if ((gantry_millis() - eipLimitPhaseStartMs_) > kPhaseTimeoutMs) {
+        failEipBringUp("phase timeout");
+        return;
+    }
+
+    using EipLimit::CreepOutcome;
+    using EipLimit::SeekOutcome;
+
+    auto startDelta = [this](float delta, float speed) -> bool {
+        return eipStartMoveDelta(delta, speed);
+    };
+
+    switch (bringUpPhase_) {
+        case BringUpPhase::kZMinusSeek: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMinWarningActive(), z->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
+                ESP_LOGI(TAG, "[BRINGUP] -Z A015 tripped — creep clear");
+                bringUpPhase_ = BringUpPhase::kZMinusCreep;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == SeekOutcome::kWait && z->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!startDelta(EipLimit::homeSeekDeltaMm(), eipSeekSpeedMmS())) {
+                    failEipBringUp("Z- seek start failed");
+                }
+            } else if (o == SeekOutcome::kFailNoTrip) {
+                failEipBringUp("Z- seek ended without A015");
+            }
+            break;
+        }
+
+        case BringUpPhase::kZMinusCreep: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMinWarningActive(), z->isBusy());
+            if (o == CreepOutcome::kCleared) {
+                z->stopMotion();
+                bringUpPhase_ = BringUpPhase::kZMinusSettle;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+                ESP_LOGI(TAG, "[BRINGUP] -Z cleared — set joint Z=0");
+            } else if (o == CreepOutcome::kWait) {
+                eipLimitSawBusy_ = true;
+            } else if (!startDelta(EipLimit::homeCreepDeltaMm(), eipCreepSpeedMmS())) {
+                failEipBringUp("Z- creep start failed");
+            }
+            break;
+        }
+
+        case BringUpPhase::kZMinusSettle: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            if (!z->isBusy()) {
+                z->setCurrentPulses(0);
+                currentZ_ = (int32_t)z->getCurrentMm();
+                // SAFE_Z is bottom band from Z−/A015 — already in band at Z≈0.
+                ESP_LOGI(TAG,
+                         "[BRINGUP] Z=0 at -Z/A015 clear (SAFE_Z ceiling=%.1f); "
+                         "starting X home",
+                         traverseClearanceZMm());
+                eipLimitAxis_ = EipLimitAxisRole::kX;
+                eipLimitSawBusy_ = false;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                if (eipMinWarningActive()) {
+                    bringUpPhase_ = BringUpPhase::kXHomeCreep;
+                } else {
+                    bringUpPhase_ = BringUpPhase::kXHomeSeek;
+                    ESP_LOGI(TAG, "[BRINGUP] seek -X A014 at %.1f mm/s",
+                             eipSeekSpeedMmS());
+                }
+            }
+            break;
+        }
+
+        case BringUpPhase::kZEnterBand: {
+            // Legacy top-band lift phase; unused with Z− SAFE_Z. Fall through to X.
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            eipLimitSawBusy_ = false;
+            eipLimitPhaseStartMs_ = gantry_millis();
+            if (eipMinWarningActive()) {
+                bringUpPhase_ = BringUpPhase::kXHomeCreep;
+            } else {
+                bringUpPhase_ = BringUpPhase::kXHomeSeek;
+            }
+            break;
+        }
+
+        case BringUpPhase::kXHomeSeek: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMinWarningActive(), x->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
+                bringUpPhase_ = BringUpPhase::kXHomeCreep;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == SeekOutcome::kWait && x->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!startDelta(EipLimit::homeSeekDeltaMm(), eipSeekSpeedMmS())) {
+                    failEipBringUp("X- seek start failed");
+                }
+            } else if (o == SeekOutcome::kFailNoTrip) {
+                failEipBringUp("X- seek ended without A014");
+            }
+            break;
+        }
+
+        case BringUpPhase::kXHomeCreep: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMinWarningActive(), x->isBusy());
+            if (o == CreepOutcome::kCleared) {
+                x->stopMotion();
+                bringUpPhase_ = BringUpPhase::kXHomeSettle;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == CreepOutcome::kWait) {
+                eipLimitSawBusy_ = true;
+            } else if (!startDelta(EipLimit::homeCreepDeltaMm(), eipCreepSpeedMmS())) {
+                failEipBringUp("X- creep start failed");
+            }
+            break;
+        }
+
+        case BringUpPhase::kXHomeSettle: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            if (!x->isBusy()) {
+                x->setCurrentPulses(0);
+                currentX_mm_ = x->getCurrentMm();
+                ESP_LOGI(TAG, "[BRINGUP] X=0 at -X clear; seek +X A015");
+                eipLimitSawBusy_ = false;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                if (eipMaxWarningActive()) {
+                    bringUpPhase_ = BringUpPhase::kXCalCreep;
+                } else {
+                    bringUpPhase_ = BringUpPhase::kXCalSeek;
+                }
+            }
+            break;
+        }
+
+        case BringUpPhase::kXCalSeek: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMaxWarningActive(), x->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
+                bringUpPhase_ = BringUpPhase::kXCalCreep;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == SeekOutcome::kWait && x->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!startDelta(EipLimit::calSeekDeltaMm(), eipCalSeekSpeedMmS())) {
+                    failEipBringUp("X+ seek start failed");
+                }
+            } else if (o == SeekOutcome::kFailNoTrip) {
+                failEipBringUp("X+ seek ended without A015");
+            }
+            break;
+        }
+
+        case BringUpPhase::kXCalCreep: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMaxWarningActive(), x->isBusy());
+            if (o == CreepOutcome::kCleared) {
+                x->stopMotion();
+                bringUpPhase_ = BringUpPhase::kXCalSettle;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == CreepOutcome::kWait) {
+                eipLimitSawBusy_ = true;
+            } else if (!startDelta(EipLimit::calCreepDeltaMm(), eipCreepSpeedMmS())) {
+                failEipBringUp("X+ creep start failed");
+            }
+            break;
+        }
+
+        case BringUpPhase::kXCalSettle: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            if (!x->isBusy()) {
+                const float max_mm = x->getCurrentMm();
+                axisLength_ = static_cast<int32_t>(llround(max_mm));
+                if (axisLength_ < 1) axisLength_ = 1;
+                config_.limits.x_max = static_cast<float>(axisLength_);
+                currentX_mm_ = max_mm;
+                ESP_LOGI(TAG,
+                         "[BRINGUP] X stroke=%ld mm; park X=%.1f before Z+",
+                         (long)axisLength_, calXParkMm_);
+                if (!requireXTraverseInterlock("bringup X park")) {
+                    failEipBringUp("X park blocked (Z out of SAFE_Z band)");
+                    break;
+                }
+                const float accel =
+                    (acceleration_mm_per_s2_ > 0)
+                        ? static_cast<float>(acceleration_mm_per_s2_)
+                        : 500.0f;
+                const float decel =
+                    (deceleration_mm_per_s2_ > 0)
+                        ? static_cast<float>(deceleration_mm_per_s2_)
+                        : accel;
+                if (!x->moveToMm(calXParkMm_, eipCalSeekSpeedMmS(), accel, decel)) {
+                    failEipBringUp("X park start failed");
+                    break;
+                }
+                bringUpPhase_ = BringUpPhase::kXPark;
+                eipLimitSawBusy_ = true;
+                eipLimitPhaseStartMs_ = gantry_millis();
+            }
+            break;
+        }
+
+        case BringUpPhase::kXPark: {
+            eipLimitAxis_ = EipLimitAxisRole::kX;
+            GantryLinearAxis* x = axisX_.get();
+            if (!x) { failEipBringUp("no X"); return; }
+            if (!x->isBusy()) {
+                currentX_mm_ = x->getCurrentMm();
+                ESP_LOGI(TAG, "[BRINGUP] at X=%.3f; seek +Z A014 for stroke",
+                         currentX_mm_);
+                eipLimitAxis_ = EipLimitAxisRole::kZ;
+                eipLimitSawBusy_ = false;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                if (eipMaxWarningActive()) {
+                    bringUpPhase_ = BringUpPhase::kZPlusCreep;
+                } else {
+                    bringUpPhase_ = BringUpPhase::kZPlusSeek;
+                }
+            }
+            break;
+        }
+
+        case BringUpPhase::kZPlusSeek: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            const SeekOutcome o = EipLimit::evaluateSeek(
+                eipMaxWarningActive(), z->isBusy(), eipLimitSawBusy_);
+            if (o == SeekOutcome::kTripped) {
+                ESP_LOGI(TAG, "[BRINGUP] +Z A014 tripped — creep clear");
+                bringUpPhase_ = BringUpPhase::kZPlusCreep;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == SeekOutcome::kWait && z->isBusy()) {
+                eipLimitSawBusy_ = true;
+            } else if (o == SeekOutcome::kStartMove) {
+                if (!startDelta(EipLimit::calSeekDeltaMm(), eipCalSeekSpeedMmS())) {
+                    failEipBringUp("Z+ seek start failed");
+                }
+            } else if (o == SeekOutcome::kFailNoTrip) {
+                failEipBringUp("Z+ seek ended without A014");
+            }
+            break;
+        }
+
+        case BringUpPhase::kZPlusCreep: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            const CreepOutcome o =
+                EipLimit::evaluateCreep(eipMaxWarningActive(), z->isBusy());
+            if (o == CreepOutcome::kCleared) {
+                z->stopMotion();
+                bringUpPhase_ = BringUpPhase::kZPlusSettle;
+                eipLimitPhaseStartMs_ = gantry_millis();
+                eipLimitSawBusy_ = false;
+            } else if (o == CreepOutcome::kWait) {
+                eipLimitSawBusy_ = true;
+            } else if (!startDelta(EipLimit::calCreepDeltaMm(), eipCreepSpeedMmS())) {
+                failEipBringUp("Z+ creep start failed");
+            }
+            break;
+        }
+
+        case BringUpPhase::kZPlusSettle: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            if (!z->isBusy()) {
+                const float max_mm = z->getCurrentMm();
+                zAxisLength_ = static_cast<int32_t>(llround(max_mm));
+                if (zAxisLength_ < 1) zAxisLength_ = 1;
+                config_.limits.z_min = 0.0f;
+                config_.limits.z_max = static_cast<float>(zAxisLength_);
+                currentZ_ = (int32_t)max_mm;
+                ESP_LOGI(TAG,
+                         "[BRINGUP] Z stroke=%.3f mm (%ld); return to SAFE_Z "
+                         "ceiling %.1f",
+                         max_mm, (long)zAxisLength_, traverseClearanceZMm());
+                const float accel =
+                    (acceleration_mm_per_s2_ > 0)
+                        ? static_cast<float>(acceleration_mm_per_s2_)
+                        : 500.0f;
+                const float decel =
+                    (deceleration_mm_per_s2_ > 0)
+                        ? static_cast<float>(deceleration_mm_per_s2_)
+                        : accel;
+                const float band = traverseClearanceZMm();
+                if (std::fabs(max_mm - band) > 0.5f) {
+                    if (!z->moveToMm(band, eipCalSeekSpeedMmS(), accel, decel)) {
+                        failEipBringUp("Z return-to-band start failed");
+                        break;
+                    }
+                    bringUpPhase_ = BringUpPhase::kZReturnBand;
+                    eipLimitSawBusy_ = true;
+                    eipLimitPhaseStartMs_ = gantry_millis();
+                } else {
+                    finishEipBringUpOk();
+                }
+            }
+            break;
+        }
+
+        case BringUpPhase::kZReturnBand: {
+            eipLimitAxis_ = EipLimitAxisRole::kZ;
+            GantryLinearAxis* z = axisZ_.get();
+            if (!z) { failEipBringUp("no Z"); return; }
+            if (!z->isBusy()) {
+                currentZ_ = (int32_t)z->getCurrentMm();
+                finishEipBringUpOk();
+            }
+            break;
+        }
+
+        case BringUpPhase::kIdle:
+        default:
+            break;
+    }
+}
+
+// ============================================================================
+// PATH / SEQUENTIAL MOTION
+// ============================================================================
+
+bool Gantry::planPathTo(float x0, float z0, float x1, float z1) {
+    const float clearance = traverseClearanceZMm();
+    pathSegmentCount_ = Path::planSegments(x0, z0, x1, z1, clearance,
+                                           pathSegments_);
+    pathSegmentIndex_ = 0;
+    pathSegStartX_mm_ = x0;
+    pathSegStartZ_mm_ = z0;
+    return pathSegmentCount_ > 0;
+}
+
+bool Gantry::pathSegmentAxesIdle() const {
+    if (pathSegmentIndex_ >= pathSegmentCount_) {
+        return true;
+    }
+    const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
+    if (seg.move_x && axisX_ && axisX_->isMotionActive()) {
+        return false;
+    }
+    if (seg.move_z && axisZ_ && axisZ_->isBusy()) {
+        return false;
+    }
+    return true;
+}
+
+bool Gantry::pathSegmentAtTarget() const {
+    if (pathSegmentIndex_ >= pathSegmentCount_) {
+        return true;
+    }
+    const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
+    const float x = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
+    const float z = axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_);
+    // Wider than drive arrival band (0.5 mm): catch timeout/abort that
+    // clears busy far from the commanded endpoint (e.g. X never moved).
+    constexpr float kPathArriveEpsMm = 1.0f;
+    return Path::segmentEndpointsReached(x, z, seg, kPathArriveEpsMm);
+}
+
+void Gantry::failPath(const char* why) {
+    ESP_LOGE(TAG, "[PATH] abort: %s", why ? why : "?");
+    stopAllMotion();
+}
+
+bool Gantry::armCurrentPathSegment() {
+    if (pathSegmentIndex_ >= pathSegmentCount_) {
+        return false;
+    }
+
+    const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
+    const float dx = seg.x_mm - pathSegStartX_mm_;
+    const float dz = seg.z_mm - pathSegStartZ_mm_;
+    const Path::PathProfile profile{
+        static_cast<float>(speed_mm_per_s_),
+        static_cast<float>(acceleration_mm_per_s2_),
+        static_cast<float>(deceleration_mm_per_s2_),
+    };
+    const Path::AxisComponents c = Path::decompose(dx, dz, profile);
+
+    ESP_LOGI(TAG,
+             "[PATH] seg %u/%u -> (%.3f, %.3f) move_x=%d move_z=%d "
+             "vx=%.1f vz=%.1f ax=%.1f az=%.1f",
+             (unsigned)(pathSegmentIndex_ + 1), (unsigned)pathSegmentCount_,
+             seg.x_mm, seg.z_mm, (int)seg.move_x, (int)seg.move_z,
+             c.x_speed, c.z_speed, c.x_accel, c.z_accel);
+
+    // Arm both axes BEFORE publishing motionState_ (A603 race guard).
+    if (seg.move_z) {
+        if (!moveZAxisTo(seg.z_mm, c.z_speed, c.z_accel, c.z_decel)) {
+            ESP_LOGE(TAG, "[PATH] Z arm failed");
+            stopAllMotion();
+            return false;
+        }
+    }
+    if (seg.move_x) {
+        if (!startXAxisMotion(seg.x_mm, c.x_speed, c.x_accel, c.x_decel)) {
+            ESP_LOGE(TAG, "[PATH] X arm failed");
+            stopAllMotion();
+            return false;
+        }
+    }
+
+    if (seg.move_x && seg.move_z) {
+        motionState_ = MotionState::XZ_MOVING;
+    } else if (seg.move_x) {
+        motionState_ = MotionState::X_MOVING;
+    } else if (seg.move_z) {
+        motionState_ = (seg.z_mm < pathSegStartZ_mm_)
+                           ? MotionState::Z_DESCENDING
+                           : MotionState::Z_RETRACTING;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+void Gantry::startThetaOrIdle() {
+#if CONFIG_GANTRY_THETA_SEQUENTIAL
+    if (axisTheta_) {
+        motionState_ = MotionState::THETA_MOVING;
+        if (!axisTheta_->moveToDeg(targetTheta_deg_,
+                                   (float)speed_deg_per_s_,
+                                   (float)acceleration_mm_per_s2_,
+                                   (float)deceleration_mm_per_s2_)) {
+            const float currentTheta = axisTheta_->getCurrentDeg();
+            if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
+                ESP_LOGE(TAG,
+                         "[THETA] moveToDeg failed (current=%.2f target=%.2f) - aborting sequence",
+                         currentTheta, targetTheta_deg_);
+                stopAllMotion();
+                return;
+            }
+        }
+        return;
+    }
+#endif
+    motionState_ = MotionState::IDLE;
+    pathSegmentCount_ = 0;
+    pathSegmentIndex_ = 0;
+}
+
+void Gantry::finishPathOrAdvance() {
+    if (pathSegmentIndex_ < pathSegmentCount_) {
+        const Path::PathSegment& done = pathSegments_[pathSegmentIndex_];
+        pathSegStartX_mm_ = done.x_mm;
+        pathSegStartZ_mm_ = done.z_mm;
+        ++pathSegmentIndex_;
+    }
+
+    if (pathSegmentIndex_ < pathSegmentCount_) {
+        if (!armCurrentPathSegment()) {
+            return;
+        }
+        return;
+    }
+
+    // Path complete.
+    pathSegmentCount_ = 0;
+    pathSegmentIndex_ = 0;
+
+    if (pathDoGripperAfter_) {
+        pathDoGripperAfter_ = false;
+        motionState_ = MotionState::GRIPPER_ACTUATING;
+        grip(gripperTargetState_);
+        gripperActuateStart_ms_ = gantry_millis();
+        return;
+    }
+
+    startThetaOrIdle();
+}
 
 void Gantry::startSequentialMotion() {
     if (!enabled_ || motionState_ != MotionState::IDLE) {
         return;
     }
 
+    const float currentX = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
     const float currentZ = axisZ_ ? axisZ_->getCurrentMm() : (float)currentZ_;
 
     // Descending (Z decreasing, toward belt) = picking (grip close).
     // Ascending (Z increasing, away from belt) = placing (grip open).
     gripperTargetState_ = (targetZ_mm_ < currentZ);
     gripperActuateDurationMs_ = gripperTargetState_
-        ? GRIPPER_ACTUATE_TIME_MS   // close; see docs (Constants)
-        : GRIPPER_ACTUATE_TIME_MS;  // open;  see docs (Constants)
+        ? GRIPPER_ACTUATE_TIME_MS
+        : GRIPPER_ACTUATE_TIME_MS;
 
-    // Start the axis move BEFORE publishing motionState_. Otherwise the gantry
-    // update task can preempt between "Z_RETRACTING" and moveZAxisTo() and see
-    // !isBusy(), advancing to X_MOVING while Z is still being armed - dual
-    // StartMotion edges and A603 on both drives.
+    pathDoGripperAfter_ = false;
+
     if (jointDirectMove_) {
-        // Soft bring-up / console: Z to joint target, then X (skip SAFE_Z=150).
-        constexpr float kZEpsMm = 0.05f;
-        if (std::fabs(targetZ_mm_ - currentZ) > kZEpsMm) {
-            ESP_LOGI(TAG,
-                     "[JOINT_DIRECT] Z %.3f -> %.3f mm, then X=%.3f",
-                     currentZ, targetZ_mm_, targetX_mm_);
-            if (!moveZAxisTo(targetZ_mm_, (float)speed_mm_per_s_,
-                             (float)acceleration_mm_per_s2_,
-                             (float)deceleration_mm_per_s2_)) {
-                stopAllMotion();
-                return;
-            }
-            motionState_ = (targetZ_mm_ < currentZ)
-                               ? MotionState::Z_DESCENDING
-                               : MotionState::Z_RETRACTING;
-            if (!axisZ_) {
-                motionState_ = MotionState::X_MOVING;
-                startXAxisMotion();
-            }
-        } else {
-            ESP_LOGI(TAG, "[JOINT_DIRECT] X=%.3f (Z already at target)",
-                     targetX_mm_);
-            motionState_ = MotionState::X_MOVING;
-            startXAxisMotion();
-        }
-    } else if (currentZ < safeZHeight_mm_) {
-        ESP_LOGI(TAG, "[PnP] Z retract %.3f -> SAFE_Z=%.3f mm", currentZ,
-                 safeZHeight_mm_);
-        if (!moveZAxisTo(safeZHeight_mm_, (float)speed_mm_per_s_,
-                         (float)acceleration_mm_per_s2_,
-                         (float)deceleration_mm_per_s2_)) {
-            stopAllMotion();
+        ESP_LOGI(TAG,
+                 "[JOINT_DIRECT] path (%.3f,%.3f) -> (%.3f,%.3f) SAFE_Z "
+                 "ceiling=%.1f (z_min=%.1f margin=%.1f)",
+                 currentX, currentZ, targetX_mm_, targetZ_mm_,
+                 traverseClearanceZMm(), config_.limits.z_min,
+                 safeZMarginFromMaxMm_);
+        if (!planPathTo(currentX, currentZ, targetX_mm_, targetZ_mm_)) {
+            ESP_LOGI(TAG, "[JOINT_DIRECT] already at target");
+            startThetaOrIdle();
+        } else if (!armCurrentPathSegment()) {
             return;
-        }
-        motionState_ = MotionState::Z_RETRACTING;
-        if (!axisZ_) {
-            motionState_ = MotionState::X_MOVING;
-            startXAxisMotion();
-        }
-    } else if (targetZ_mm_ < currentZ) {
-        ESP_LOGI(TAG, "[PnP] Z descend %.3f -> %.3f mm", currentZ, targetZ_mm_);
-        if (!moveZAxisTo(targetZ_mm_, (float)speed_mm_per_s_,
-                         (float)acceleration_mm_per_s2_,
-                         (float)deceleration_mm_per_s2_)) {
-            stopAllMotion();
-            return;
-        }
-        motionState_ = MotionState::Z_DESCENDING;
-        if (!axisZ_) {
-            motionState_ = MotionState::GRIPPER_ACTUATING;
-            grip(gripperTargetState_);
-            gripperActuateStart_ms_ = gantry_millis();
         }
     } else {
-        ESP_LOGI(TAG, "[PnP] X direct (Z=%.3f >= SAFE_Z)", currentZ);
-        motionState_ = MotionState::X_MOVING;
-        startXAxisMotion();
+        // PnP / pose: path to pick/place target; gripper after descend if needed.
+        pathDoGripperAfter_ = gripperTargetState_;
+        ESP_LOGI(TAG,
+                 "[PnP] path (%.3f,%.3f) -> (%.3f,%.3f) SAFE_Z ceiling=%.1f "
+                 "(z_min=%.1f margin=%.1f) gripper_after=%d",
+                 currentX, currentZ, targetX_mm_, targetZ_mm_,
+                 traverseClearanceZMm(), config_.limits.z_min,
+                 safeZMarginFromMaxMm_, (int)pathDoGripperAfter_);
+        if (!planPathTo(currentX, currentZ, targetX_mm_, targetZ_mm_)) {
+            if (pathDoGripperAfter_) {
+                pathDoGripperAfter_ = false;
+                motionState_ = MotionState::GRIPPER_ACTUATING;
+                grip(gripperTargetState_);
+                gripperActuateStart_ms_ = gantry_millis();
+            } else {
+                startThetaOrIdle();
+            }
+        } else if (!armCurrentPathSegment()) {
+            return;
+        }
     }
 
     if (axisTheta_) {
@@ -1353,65 +2129,45 @@ void Gantry::processSequentialMotion() {
 
     switch (motionState_) {
         case MotionState::Z_DESCENDING:
-            if (!axisZ_ || !axisZ_->isBusy()) {
-                if (jointDirectMove_) {
-                    motionState_ = MotionState::X_MOVING;
-                    startXAxisMotion();
-                } else {
-                    motionState_ = MotionState::GRIPPER_ACTUATING;
-                    grip(gripperTargetState_);
-                    gripperActuateStart_ms_ = gantry_millis();
+        case MotionState::Z_RETRACTING:
+        case MotionState::X_MOVING:
+        case MotionState::XZ_MOVING:
+            if (pathSegmentAxesIdle()) {
+                if (!pathSegmentAtTarget()) {
+                    const Path::PathSegment& seg =
+                        pathSegments_[pathSegmentIndex_];
+                    const float x =
+                        axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
+                    const float z = axisZ_ ? axisZ_->getCurrentMm()
+                                           : static_cast<float>(currentZ_);
+                    ESP_LOGE(TAG,
+                             "[PATH] seg %u ended off-target "
+                             "(at %.3f,%.3f want %.3f,%.3f move_x=%d move_z=%d) "
+                             "— refusing further segments",
+                             (unsigned)(pathSegmentIndex_ + 1), x, z,
+                             seg.x_mm, seg.z_mm, (int)seg.move_x,
+                             (int)seg.move_z);
+                    failPath("segment ended without reaching target");
+                    return;
                 }
+                finishPathOrAdvance();
             }
             break;
 
         case MotionState::GRIPPER_ACTUATING:
             if (gantry_millis() - gripperActuateStart_ms_ >= gripperActuateDurationMs_) {
-                if (!moveZAxisTo(safeZHeight_mm_, (float)speed_mm_per_s_,
-                                 (float)acceleration_mm_per_s2_,
-                                 (float)deceleration_mm_per_s2_)) {
-                    stopAllMotion();
+                const float currentX = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
+                const float currentZ = axisZ_ ? axisZ_->getCurrentMm() : (float)currentZ_;
+                // Retract to clearance at current X (planner yields Z-alone lift).
+                const float clearance = traverseClearanceZMm();
+                ESP_LOGI(TAG, "[PnP] post-grip to SAFE_Z ceiling Z=%.1f",
+                         clearance);
+                pathDoGripperAfter_ = false;
+                if (!planPathTo(currentX, currentZ, currentX, clearance)) {
+                    startThetaOrIdle();
+                } else if (!armCurrentPathSegment()) {
                     return;
                 }
-                motionState_ = MotionState::Z_RETRACTING;
-                if (!axisZ_) {
-                    motionState_ = MotionState::X_MOVING;
-                    startXAxisMotion();
-                }
-            }
-            break;
-
-        case MotionState::Z_RETRACTING:
-            if (!axisZ_ || !axisZ_->isBusy()) {
-                motionState_ = MotionState::X_MOVING;
-                startXAxisMotion();
-            }
-            break;
-
-        case MotionState::X_MOVING:
-            if (!axisX_ || !axisX_->isMotionActive()) {
-#if CONFIG_GANTRY_THETA_SEQUENTIAL
-                if (axisTheta_) {
-                    motionState_ = MotionState::THETA_MOVING;
-                    if (!axisTheta_->moveToDeg(targetTheta_deg_,
-                                               (float)speed_deg_per_s_,
-                                               (float)acceleration_mm_per_s2_,
-                                               (float)deceleration_mm_per_s2_)) {
-                        const float currentTheta = axisTheta_->getCurrentDeg();
-                        if (std::fabs(currentTheta - targetTheta_deg_) > 0.5f) {
-                            ESP_LOGE(TAG,
-                                     "[THETA] moveToDeg failed (current=%.2f target=%.2f) - aborting sequence",
-                                     currentTheta, targetTheta_deg_);
-                            stopAllMotion();
-                            return;
-                        }
-                    }
-                } else {
-                    motionState_ = MotionState::IDLE;
-                }
-#else
-                motionState_ = MotionState::IDLE;
-#endif
             }
             break;
 
@@ -1427,10 +2183,13 @@ void Gantry::processSequentialMotion() {
     }
 }
 
-void Gantry::startXAxisMotion() {
+bool Gantry::startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_s2,
+                              float decel_mm_s2) {
     if (!axisX_) {
-        motionState_ = MotionState::IDLE;
-        return;
+        return false;
+    }
+    if (!requireXTraverseInterlock("path X Absolute")) {
+        return false;
     }
 
     const float xPpm = getPulsesPerMm();
@@ -1438,7 +2197,7 @@ void Gantry::startXAxisMotion() {
     const int32_t driverReportedPulses = (int32_t)axisX_->getCurrentPulses();
     const int32_t trackedPulses        = (int32_t)(currentX_mm_ * xPpm);
     const int32_t encoderPulses        = axisX_->getEncoderPulses();
-    const int32_t targetPulses         = (int32_t)(targetX_mm_ * xPpm);
+    const int32_t targetPulses         = (int32_t)(target_mm * xPpm);
 
     if (axisX_->isEncoderFeedbackEnabled()) {
         const int32_t encDrvMismatch = encoderPulses - driverReportedPulses;
@@ -1460,22 +2219,21 @@ void Gantry::startXAxisMotion() {
     const int32_t deltaX = targetPulses - driverReportedPulses;
 
     ESP_LOGI(TAG,
-             "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld speed=%lu accel=%lu decel=%lu",
+             "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld "
+             "speed=%.1f accel=%.1f decel=%.1f",
              (long)driverReportedPulses, (long)trackedPulses, (long)driverReportedPulses,
              (long)encoderPulses, (long)targetPulses, (long)deltaX,
-             (unsigned long)speed_mm_per_s_, (unsigned long)acceleration_mm_per_s2_,
-             (unsigned long)deceleration_mm_per_s2_);
+             speed_mm_s, accel_mm_s2, decel_mm_s2);
 
     if (deltaX == 0) {
-        motionState_ = MotionState::IDLE;
-        return;
+        return true;  // already there; caller still owns motionState_
     }
 
-    const uint32_t speed_pps = (uint32_t)(speed_mm_per_s_ * xPpm);
-    uint32_t accel_pps = (acceleration_mm_per_s2_ > 0)
-        ? (uint32_t)(acceleration_mm_per_s2_ * xPpm) : 0;
-    uint32_t decel_pps = (deceleration_mm_per_s2_ > 0)
-        ? (uint32_t)(deceleration_mm_per_s2_ * xPpm) : 0;
+    const uint32_t speed_pps = (uint32_t)(speed_mm_s * xPpm);
+    uint32_t accel_pps = (accel_mm_s2 > 0.0f)
+        ? (uint32_t)(accel_mm_s2 * xPpm) : 0;
+    uint32_t decel_pps = (decel_mm_s2 > 0.0f)
+        ? (uint32_t)(decel_mm_s2 * xPpm) : 0;
     if (accel_pps == 0) accel_pps = speed_pps / 2;
     if (decel_pps == 0) decel_pps = speed_pps / 2;
 
@@ -1485,8 +2243,9 @@ void Gantry::startXAxisMotion() {
                  "[X_MOVE] moveToPulses rejected (delta=%ld, speed_pps=%lu, accel_pps=%lu, decel_pps=%lu)",
                  (long)deltaX, (unsigned long)speed_pps,
                  (unsigned long)accel_pps, (unsigned long)decel_pps);
-        stopAllMotion();
+        return false;
     }
+    return true;
 }
 
 } // namespace Gantry

@@ -108,16 +108,31 @@ to the ESP32. Firmware does **not** dual-poll the same switches on GPIO.
 | Z | TBIO | INPUT3 pin 34 | INPUT4 pin 8 | Same on Z drive |
 | Theta | X31 | X31.5 (E3) | X31.6 (E4) | Deferred with HCS01 |
 
-**Drive vs joint frame (X bench, 2026-08):** UM004D defines PL as the drive’s
-most-**positive** travel and NL as most-**negative**. On X the motor sense is
-inverted relative to gantry joint +X, so:
+**Drive vs joint frame (X + Z bench, 2026-08):** UM004D defines PL as the drive’s
+most-**positive** travel and NL as most-**negative**. On **X**, motor sense vs
+joint is inverted so joint −X → A014 and joint +X → A015. On **Z**, the live
+assignment is the opposite polarity vs that X map:
 
 | Joint end | Warning | Drive name | Home/cal role |
 |-----------|---------|------------|---------------|
-| **−X** (min) | A014 | PL / positive | `home` zero |
-| **+X** (max) | A015 | NL / negative | `calibrate` max |
+| **−X** (min) | A014 | PL / positive | `home x` zero |
+| **+X** (max) | A015 | NL / negative | `calibrate x` max |
+| **−Z** (min / toward belt) | A015 | NL / negative | `home z` zero |
+| **+Z** (max / away from belt) | A014 | PL / positive | `calibrate z` max |
 
-Do not assume PL = joint +X. Z mapping is TBD after screw mount.
+Do not assume PL = joint +X/+Z. Firmware maps Z min→A015 / max→A014; if a
+physical end raises the wrong warning, reassign PL/NL on that drive (do not
+invert seek signs in firmware).
+
+**Z TBIO limits (2026-08-10):** the two Z sensors are **axis travel dead-centers**
+(screw / actuator stroke ends). They are **not** conveyor or pick height. They are
+adjusted so the end-effector cannot crash into the belt — measured Z home/cal
+length is a **safe envelope**, not product Z zero at the conveyor. Live
+precision home/cal (2026-08-10): joint max ≈ **147 mm**.
+
+**Future:** a dedicated **conveyor-height / belt-presence sensor** is present on the
+machine but **not yet wired** into Field I/O or either drive. Wire it (MCP Field DIN
+or spare TBIO) before relying on Z for production picks.
 
 **Wiring (sinking NC):** `+24 V → NC switch → INPUTx`; `DCOM / 0 V` common.
 Healthy travel: DI “on” (no overtravel). At limit: DI opens → A014/A015 →
@@ -130,7 +145,9 @@ On **each** of X and Z drives (KNX5100C):
 1. Assign TBIO inputs as **Positive/Forward Limit (PL)** / **Negative/Reverse Limit (NL)** (not generic DI).
 2. Confirm sinking input + DCOM common; match sensor (NC dry vs 3-wire).
 3. Trip magnet present/absent and confirm Status / overtravel polarity matches NC.
-4. On X, jog toward joint −X and +X and confirm A014 @ −X and A015 @ +X (see table above).
+4. Jog toward joint min/max on X and Z: confirm **X** A014@min / A015@max and
+   **Z** A015@min / A014@max (or reassign drive PL/NL).
+   (same map both axes — see table above).
 5. Save parameters to non-volatile memory.
 
 ### 4.2 Bench validation procedure
@@ -149,20 +166,21 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel. Console on UART or TCP `
 
 | Item | Status |
 |------|--------|
-| X drive TBIO limits (KNX PL/NL on INPUT1/2) | **PASS** (trip/recover) — re-run after RPI=5000 flash as regression |
-| Z drive TBIO limits | **DEFERRED** — Z motor not mounted on screw |
-| Firmware drive-managed path | `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → `GantryLimitSwitch` + move gate |
+| X drive TBIO limits (KNX PL/NL on INPUT1/2) | **PASS** (2026-08-10 reconfirm after PL/NL swap; home/cal length ≈420 mm) |
+| Z drive TBIO limits | **PASS** (2026-08-10; A015 @ −Z, A014 @ +Z; Z Absolute invert; SAFE_Z = 30 mm from Z−) |
+| Firmware drive-managed path | `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → `GantryLimitSwitch` + move gate (X and Z) |
 
-### 4.3 X-only bench (until Z is mounted)
+### 4.3 Bench validation (X + Z complete)
 
-Safe speeds only (≤50 mm/s); STO ready; clear X travel. Leave Z disabled / do not jog Z.
+Safe speeds only (≤50 mm/s); STO ready; clear travel.
 
-1. `enable` → Class 1 online; focus on **X** `faults` / `status`.
-2. Trip **X−** (A014 / PL) and **X+** (A015 / NL) — manual magnet or slow jog.
-3. Confirm A014/A015 (or EIP fault/stopped); release; `alarmreset`; re-`enable` if needed.
-4. Optional: firmware `move` toward an X limit and confirm drive stop + app abort.
+**X** — complete. A014 @ joint −X, A015 @ joint +X, home/cal length ≈420 mm.
 
-When both X ends pass trip/recover, update the X row to **PASS** with date. Revisit Z after the ballscrew is mounted and Z KNX PL/NL is assigned.
+**Z** — complete (2026-08-10; map updated same day). **A015 @ joint −Z**,
+**A014 @ joint +Z** (swapped vs X). Z Absolute invert so − seeks A015.
+SAFE_Z = 30 mm from Z− (bottom band). Bring-up: `calibrate all`.
+Measured soft max ≈ **147 mm** (axis dead-center stroke — not conveyor height).
+Conveyor-height sensor remains **unwired** (future Field DIN / TBIO).
 
 ---
 

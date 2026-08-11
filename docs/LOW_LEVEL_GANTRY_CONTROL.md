@@ -198,7 +198,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 | `GantryUpdate` 100 Hz + UART console | **Live** |
 | TCP console on LAN8720 (`:2323`) | **Live** (when plant ETH up) |
 | Soft-home / soft-calibrate (no GPIO limits) | **Live** (bench) |
-| Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover PASS**; **Z deferred** (motor not on screw) |
+| Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover + home/cal PASS** (2026-08-10); **Z ready** (motor mounted; TBIO = axis stroke only, not conveyor height; conveyor sensor unwired) |
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Deferred** (`nullptr`) |
 | Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |
@@ -247,8 +247,8 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 |------|----------|
 | `begin()` / `enable()` / `disable()` | Lifecycle; enable arms EIP axes (settle → Home34 if needed → hold) |
 | `isBusy()` | True while `motionState_ != IDLE`, any axis busy, or homing/calibration flags |
-| `moveTo(EndEffectorPose)` | PnP path: safe-Z retract before X when below safe Z |
-| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: Z then X; skips full PnP choreography |
+| `moveTo(EndEffectorPose)` | PnP path: 2-D path planner + gripper staging; post-grip retract to clearance |
+| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: 2-D path to joint target (no gripper) |
 | `softHomeJointDatum()` | Zeros firmware `zero_puu_` on X+Z (not drive Homed) |
 | `requestAbort()` | Abort motion only — does **not** disable servos |
 | Console `stop` | `requestAbort()` + `disable()`; requires home+calibrate again |
@@ -259,6 +259,30 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 1. `updateAxisPositions()` — each axis `update()` + X limit polling.
 2. `processSequentialMotion()` — so `isBusy()` sees StartMotion preload/pulse before sequencing advances.
 
+### 2-D path motion profile (X-Z)
+
+Console / Gantry `speed`, `accel`, and `decel` are the **resultant** along the
+X-Z path (defaults 50 mm/s, 3000 / 3000 mm/s²; ceiling `GANTRY_PATH_MAX_*` =
+3000 mm/s²). There are no per-axis motion-tuning knobs — Absolute components
+are derived from path direction:
+
+`v_i = V · |d_i| / L`, `a_i = A · |d_i| / L`, with `L = hypot(dx, dz)`.
+
+Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
+(`decompose`, `planSegments`). Protective clamp: Z ballscrew critical-RPM
+derived speed cap still applies to the path speed ceiling.
+
+**Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **30 mm**): margin
+above Z− / A015 (joint min). Coordinated X+Z Absolute **and any X Absolute**
+(home/cal/path/EIP seek) are allowed only while joint Z is in that bottom band
+(`z <= z_min + margin`). Above it, Z moves alone with X held; console
+`home x` / `calibrate x` refuse. Limit warning codes: **X** A014/PL = joint
+min, A015/NL = joint max; **Z** A015/NL = joint min (−Z), A014/PL = joint max
+(+Z). Z Absolute joint sense is **inverted** so joint − seeks A015.
+
+**EIP bring-up** (`calibrate all`): Z- datum (A015) → X home/cal → park X at
+`GANTRY_CAL_X_PARK_MM` (35) → Z+ stroke (A014) → return to SAFE_Z ceiling.
+
 ### Orchestration state machine
 
 Private `MotionState` in [`Gantry.cpp`](../lib/Gantry/src/Gantry.cpp):
@@ -266,14 +290,17 @@ Private `MotionState` in [`Gantry.cpp`](../lib/Gantry/src/Gantry.cpp):
 | State | Role |
 |-------|------|
 | `IDLE` | No sequenced motion |
-| `Z_DESCENDING` / `Z_RETRACTING` | PnP Z legs |
-| `GRIPPER_ACTUATING` | Timed open/close |
-| `X_MOVING` | X leg after safe Z |
+| `Z_DESCENDING` / `Z_RETRACTING` | Z-alone path segment |
+| `GRIPPER_ACTUATING` | Timed open/close (PnP only) |
+| `X_MOVING` | X-alone path segment (Z held ≥ clearance) |
+| `XZ_MOVING` | Coordinated X+Z Absolute segment |
 | `THETA_MOVING` | Present; unused while theta is `nullptr` |
 
-JOINT_DIRECT skips SAFE_Z retract and gripper choreography (Z then X only).
+JOINT_DIRECT skips gripper choreography; both joint and pose moves use the
+same path planner / clearance rule.
 
-Start each axis move **before** publishing the next `motionState_` (avoids dual StartMotion / A603 races) — see comment in `startSequentialMotion()`.
+Arm **both** axes of a coordinated segment **before** publishing `motionState_`
+(avoids dual StartMotion / A603 races).
 
 ### Abort matrix
 
@@ -551,7 +578,7 @@ Menuconfig: **Gantry kinematics** + EtherNet/IP originator (IPs, PUU/mm,
 |------|----------|
 | Soft-home (joint zero) | Only when **no** GPIO limits and **no** drive-managed endstops; `softHomeJointDatum()`; Home34 on arm |
 | Drive endstops (TBIO) | KNX Forward/Reverse Limit on INPUT1–4; `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → external `GantryLimitSwitch` |
-| Drive home / calibrate | Console `home`/`calibrate` use `Gantry::homeX` / `calibrateX` when drive-managed: **A014 (PL) → joint min (−X)**, **A015 (NL) → joint max (+X)** (X motor sense inverted vs drive +). Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
+| Drive home / calibrate | Console `home`/`calibrate` (`x`/`z`/`all`) when drive-managed: **X** A014→min / A015→max; **Z** A015→min (−Z) / A014→max (+Z). `calibrate all` = full bring-up. Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
 | Hard envelope | Measured stroke from calibrate, or SCHUNK `AXIS_*_HARD_LIMIT_*` via soft-calibrate |
 | Abort | See §3 abort matrix |
 
@@ -614,10 +641,10 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | Command | EIP-specific behavior |
 |---------|------------------------|
 | `enable` / `disable` | Arms / ServoOff via Gantry |
-| `home` | Drive-managed: X sweep to **A014 / PL** (joint −X / min); else soft-home joint datum |
-| `calibrate` | Drive-managed: measure to **A015 / NL** (joint +X / max); else SCHUNK hard envelope |
-| `move` | Requires **home + calibrate this session** |
-| `stop` | Abort + disable; clears session gates |
+| `home` | Drive-managed: seek joint min per axis (`home x` A014; `home z` A015; `all` = Z then X); else soft-home |
+| `calibrate` | Drive-managed: seek joint max (`calibrate x` A015; `calibrate z` A014); **`calibrate all`** = bring-up Z−→band→X→Z+→band; else SCHUNK hard envelope (X soft-cal) |
+| `move` | Requires **home + calibrate this session** (X gates) |
+| `stop` | Abort + disable; does **not** clear session home/cal gates |
 | `alarmreset` / `arst` | EIP **FaultReset** bit (not ARST GPIO) |
 | `faults` / `alarms` | Decode FaultCode/WarningCode (e.g. A603) |
 | `puuinfo` / `puucal` | Scale / suggest PUU/mm from commanded vs measured |
@@ -664,7 +691,8 @@ ctest --test-dir build/host --output-on-failure
 |-------|-------|
 | [`test_eip_encoding.cpp`](../test/host/test_eip_encoding.cpp) | Encap, CPF, FO, Kinetix 104/154 wire bytes |
 | [`test_eip_transport.cpp`](../test/host/test_eip_transport.cpp) | Session, Class 1 frames, multi-scanner demux, RPI miss policy |
-| [`test_eip_axis.cpp`](../test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, A603, scanner↔image |
+| [`test_eip_axis.cpp`](../test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, stable arrival, A603, scanner↔image |
+| [`test_path_profile.cpp`](../test/host/test_path_profile.cpp) | 2-D path decompose + clearance segment planner |
 | W5500 / SOEM / kinematics suites | SPI HAL, OSAL, trajectory math |
 
 **Bench acceptance (2026-07-20):** `speed 200` / `accel 3000`;

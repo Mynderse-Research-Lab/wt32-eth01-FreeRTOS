@@ -12,6 +12,8 @@
 #define CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM (0.0f)
 
 // Joint-space pick heights for Gantry::moveTo(JointConfig).
+// CONVEYOR_Z_SAFE_JOINT_MM aliases GANTRY_SAFE_Z_HEIGHT_MM = margin below Z+
+// (mm). Absolute band floor = z_max - this margin.
 #define CONVEYOR_Z_PICK_JOINT_MM                (10.0f)
 #define CONVEYOR_Z_SAFE_JOINT_MM                (GANTRY_SAFE_Z_HEIGHT_MM)
 

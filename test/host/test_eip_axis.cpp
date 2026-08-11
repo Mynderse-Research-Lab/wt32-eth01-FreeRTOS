@@ -276,17 +276,62 @@ static void test_linear_move_stays_busy_until_target(void) {
     TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "busy cleared before reaching target");
   }
 
-  // AtReference + in band completes without host StopMotion.
+  // AtReference + in band must be stable for several ticks before Hold.
   Bytes at_target = makeK5100Input154(12500, false, false, true);
   at_target[9] |= 0x04 | 0x08 | 0x20;
   image.setFeedback(at_target);
   axis.update();
-  TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "should clear busy on AtReference");
+  TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "need multi-tick stable arrival");
+  axis.update();
+  TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "need multi-tick stable arrival");
+  axis.update();
+  TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "should clear busy after stable AtReference");
 
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_TRUE_MESSAGE((cmd[1] & 0x04) == 0,
                            "Position Absolute must not StopMotion on arrival");
+}
+
+static void test_linear_arrival_requires_stable_ticks(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(5.0f, 50.0f, 0.0f, 0.0f));
+
+  // Enter Run.
+  Bytes mid = makeK5100Input154(1000, false, false, false);
+  mid[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(mid);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  Bytes at = makeK5100Input154(5000, false, false, true);
+  at[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(at);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Far-from-target feedback resets the stable arrival counter.
+  Bytes glitch = makeK5100Input154(2000, false, false, false);
+  glitch[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(glitch);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  image.setFeedback(at);
+  axis.update();
+  TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "counter reset by glitch");
+  axis.update();
+  TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "counter reset by glitch");
+  axis.update();
+  TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "clears after 3 stable ticks");
 }
 
 static void test_linear_soft_home_joint_frame(void) {
@@ -726,6 +771,7 @@ int main(void) {
   RUN_TEST(test_process_image_online);
   RUN_TEST(test_linear_x_belt_move_command);
   RUN_TEST(test_linear_move_stays_busy_until_target);
+  RUN_TEST(test_linear_arrival_requires_stable_ticks);
   RUN_TEST(test_linear_soft_home_joint_frame);
   RUN_TEST(test_linear_absolute_keeps_target_on_overshoot_feedback);
   RUN_TEST(test_linear_move_does_not_stop_at_half_travel);
