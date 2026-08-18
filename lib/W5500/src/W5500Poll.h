@@ -71,7 +71,13 @@ inline bool busyPollMs(uint32_t timeout_ms, const std::function<bool()>& check) 
 
 // SENDOK waits: UDP Class 1 must fail fast; TCP FO can wait longer.
 constexpr uint32_t kUdpSendOkTimeoutUs = 2000;    // 2 ms tight (was 20 ms + yields)
+// First UDP datagram to a new DIPR (3-axis Class 1 on one socket) may ARP.
+// 2 ms was aborting SEND before SENDOK/TIMEOUT, then chip-recovering X/Z.
+constexpr uint32_t kUdpDestChangeSendOkTimeoutUs = 10000;
 constexpr uint32_t kTcpSendOkTimeoutUs = 500000;  // 500 ms
+// Sn_CR RECV completes in microseconds. busyPollMs(100) allowed yield
+// (timeout > kBusyPollYieldAboveUs) and cost ~1 ms per datagram at 1000 Hz.
+constexpr uint32_t kUdpRecvCmdTimeoutUs = 2000;
 
 }  // namespace w5500
 

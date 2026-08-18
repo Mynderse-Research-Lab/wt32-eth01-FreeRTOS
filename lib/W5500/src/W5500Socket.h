@@ -41,6 +41,12 @@ uint16_t nextEphemeralPort();
 // Close a socket and return it to SOCK_CLOSED state.
 void socketClose(W5500Hal& hal, uint8_t sock);
 
+// Drop dest / SENDOK-pending / Sn_TX_WR software caches for every socket.
+// W5500::recover() writes Sn_CR_CLOSE without socketClose(), so it must call
+// this or a later send can inherit a stale deferred SENDOK or TX pointer.
+// Caller must already hold spiBusMutex() (or be single-threaded).
+void socketResetSoftwareState();
+
 // TCP client connect. Sets destination IP/port, issues OPEN+CONNECT,
 // polls Sn_SR until SOCK_ESTABLISHED or timeout. Returns true on connect.
 bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
@@ -60,8 +66,12 @@ int socketRecv(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
                uint32_t timeoutMs);
 
 // Send UDP datagram to a specific destination.
+// deferSendOk: when the destination is already cached, issue SEND and return
+// without polling SENDOK; the next send on this socket confirms it (and
+// returns -1 if it reported TIMEOUT/DISCON). Only safe when the caller sends
+// at most once per socket per period. A destination change always waits.
 int socketSendTo(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len,
-                 uint32_t destIp, uint16_t destPort);
+                 uint32_t destIp, uint16_t destPort, bool deferSendOk = false);
 
 // Receive UDP datagram. Returns payload bytes, 0 if no data within timeout,
 // -1 on error. W5500 prepends an 8-byte header (dest IP 4B + dest port 2B +
@@ -72,6 +82,20 @@ int socketRecvFrom(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
 // Non-blocking UDP recv: return 0 immediately when RX_RSR has no full header.
 int socketRecvFromNonBlocking(W5500Hal& hal, uint8_t sock, uint8_t* buf,
                               size_t maxLen);
+
+// One queued UDP datagram, payload only (the 8-byte W5500 header is stripped).
+// data points into the caller's batch buffer.
+struct UdpDatagram {
+    const uint8_t* data = nullptr;
+    uint16_t len = 0;
+};
+
+// Non-blocking batch recv: read every queued datagram that fits in buf with a
+// single RX_RSR/RX_RD burst, a single RX buffer burst and a single RECV.
+// Returns the datagram count (0 when none queued). Datagrams that do not fit
+// in buf stay queued for the next call.
+size_t socketRecvFromBatch(W5500Hal& hal, uint8_t sock, uint8_t* buf,
+                           size_t bufLen, UdpDatagram* out, size_t maxOut);
 
 // UDP socket bind.
 bool socketBind(W5500Hal& hal, uint8_t sock, uint16_t port);

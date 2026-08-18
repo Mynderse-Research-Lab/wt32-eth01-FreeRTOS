@@ -92,7 +92,59 @@ bool EipSocketW5500Tcp::isConnected() const {
 // ==========================================================================
 
 EipSocketW5500Udp::EipSocketW5500Udp(w5500::W5500Hal& hal)
-    : hal_(hal) {}
+    : hal_(hal) {
+    for (size_t i = 0; i < kMaxP2pTx; ++i) {
+        p2p_tx_sock_[i] = -1;
+        p2p_tx_dest_[i] = 0;
+    }
+}
+
+void EipSocketW5500Udp::closeP2pTx() {
+    for (size_t i = 0; i < p2p_tx_count_; ++i) {
+        if (p2p_tx_sock_[i] >= 0) {
+            w5500::socketClose(hal_, static_cast<uint8_t>(p2p_tx_sock_[i]));
+            p2p_tx_sock_[i] = -1;
+            p2p_tx_dest_[i] = 0;
+        }
+    }
+    p2p_tx_count_ = 0;
+}
+
+int EipSocketW5500Udp::p2pTxSockFor(uint32_t dest_ip_host) {
+    for (size_t i = 0; i < p2p_tx_count_; ++i) {
+        if (p2p_tx_dest_[i] == dest_ip_host) {
+            return p2p_tx_sock_[i];
+        }
+    }
+    if (p2p_tx_count_ >= kMaxP2pTx) {
+#ifdef ESP_PLATFORM
+        ESP_LOGE("EipW5500", "UDP P2P TX table full (max %u dests)",
+                 static_cast<unsigned>(kMaxP2pTx));
+#endif
+        return -1;
+    }
+    const int sock = w5500::socketOpen(hal_, w5500::SocketMode::kUdp, 0);
+    if (sock < 0) {
+#ifdef ESP_PLATFORM
+        ESP_LOGE("EipW5500", "UDP P2P TX open failed dest=0x%08lX",
+                 static_cast<unsigned long>(dest_ip_host));
+#endif
+        return -1;
+    }
+    p2p_tx_sock_[p2p_tx_count_] = sock;
+    p2p_tx_dest_[p2p_tx_count_] = dest_ip_host;
+    ++p2p_tx_count_;
+#ifdef ESP_PLATFORM
+    ESP_LOGI("EipW5500", "UDP P2P TX sock=%d dest=%u.%u.%u.%u (slot %u)",
+             sock,
+             static_cast<unsigned>((dest_ip_host >> 24) & 0xFF),
+             static_cast<unsigned>((dest_ip_host >> 16) & 0xFF),
+             static_cast<unsigned>((dest_ip_host >> 8) & 0xFF),
+             static_cast<unsigned>(dest_ip_host & 0xFF),
+             static_cast<unsigned>(p2p_tx_count_ - 1));
+#endif
+    return sock;
+}
 
 bool EipSocketW5500Udp::bind(uint16_t port, uint32_t multicast_connection_id) {
     close();
@@ -103,20 +155,23 @@ bool EipSocketW5500Udp::bind(uint16_t port, uint32_t multicast_connection_id) {
     }
 
     if (mcast_ip == 0) {
-        // Point-to-point T->O: a single UDP socket on port 2222 handles both
-        // O->T send and T->O receive. No IGMP/multicast ambiguity.
+        // P2P T->O stays on port 2222. O->T uses one TX socket per dest so
+        // DIPR/DPORT stay cached (3-axis Class 1 on one socket rewrote dest
+        // every SEND and blew the 2000 µs RPI).
         int sock = w5500::socketOpen(hal_, w5500::SocketMode::kUdp, port, 0);
         if (sock < 0) {
 #ifdef ESP_PLATFORM
-            ESP_LOGE("EipW5500", "UDP P2P open failed port=%u", port);
+            ESP_LOGE("EipW5500", "UDP P2P RX open failed port=%u", port);
 #endif
             return false;
         }
         rx_sock_ = sock;
-        tx_sock_ = sock;
+        tx_sock_ = -1;
+        p2p_split_tx_ = true;
         bound_ = true;
 #ifdef ESP_PLATFORM
-        ESP_LOGI("EipW5500", "UDP P2P sock=%d port=%u", sock, port);
+        ESP_LOGI("EipW5500", "UDP P2P RX sock=%d port=%u (TX per dest)", sock,
+                 port);
 #endif
         return true;
     }
@@ -155,6 +210,8 @@ bool EipSocketW5500Udp::bind(uint16_t port, uint32_t multicast_connection_id) {
 }
 
 void EipSocketW5500Udp::close() {
+    closeP2pTx();
+    p2p_split_tx_ = false;
     if (tx_sock_ >= 0 && tx_sock_ != rx_sock_) {
         w5500::socketClose(hal_, static_cast<uint8_t>(tx_sock_));
     }
@@ -168,12 +225,19 @@ void EipSocketW5500Udp::close() {
 
 ssize_t EipSocketW5500Udp::sendTo(const uint8_t* data, size_t len,
                                    uint32_t dest_ip_host, uint16_t port) {
-    if (tx_sock_ < 0 || !bound_) return -1;
-    if (dest_ip_host == 0) return -1;
+    if (!bound_ || dest_ip_host == 0) return -1;
 
+    int sock = tx_sock_;
+    if (p2p_split_tx_) {
+        sock = p2pTxSockFor(dest_ip_host);
+    }
+    if (sock < 0) return -1;
+
+    // Each P2P Class 1 axis owns its TX socket and sends once per RPI, so
+    // SENDOK can be confirmed at the head of the next cycle's send.
     const ssize_t sent = static_cast<ssize_t>(
-        w5500::socketSendTo(hal_, static_cast<uint8_t>(tx_sock_),
-                             data, len, dest_ip_host, port));
+        w5500::socketSendTo(hal_, static_cast<uint8_t>(sock),
+                             data, len, dest_ip_host, port, p2p_split_tx_));
 #ifdef ESP_PLATFORM
     if (sent != static_cast<ssize_t>(len)) {
         ESP_LOGW("EipW5500",
@@ -183,7 +247,7 @@ ssize_t EipSocketW5500Udp::sendTo(const uint8_t* data, size_t len,
                  static_cast<unsigned>((dest_ip_host >> 8) & 0xFF),
                  static_cast<unsigned>(dest_ip_host & 0xFF),
                  port, static_cast<int>(sent), static_cast<unsigned>(len),
-                 tx_sock_);
+                 sock);
     }
 #endif
     return sent;
@@ -212,6 +276,21 @@ ssize_t EipSocketW5500Udp::recvFrom(uint8_t* buf, size_t max_len,
 #endif
     }
     return static_cast<ssize_t>(n);
+}
+
+size_t EipSocketW5500Udp::recvBatch(uint8_t* buf, size_t buf_len,
+                                     UdpDatagramView* views, size_t max_views) {
+    if (rx_sock_ < 0 || buf == nullptr || views == nullptr) return 0;
+    if (max_views > kMaxRecvBatch) max_views = kMaxRecvBatch;
+
+    w5500::UdpDatagram queued[kMaxRecvBatch];
+    const size_t n = w5500::socketRecvFromBatch(
+        hal_, static_cast<uint8_t>(rx_sock_), buf, buf_len, queued, max_views);
+    for (size_t i = 0; i < n; ++i) {
+        views[i].data = queued[i].data;
+        views[i].len = queued[i].len;
+    }
+    return n;
 }
 
 }  // namespace eip

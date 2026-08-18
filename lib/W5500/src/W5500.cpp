@@ -1,5 +1,6 @@
 #include "W5500.h"
 #include "W5500BusMutex.h"
+#include "W5500Socket.h"
 
 #include "sdkconfig.h"
 
@@ -221,6 +222,7 @@ bool W5500::recover() {
     for (uint8_t sock = 0; sock < 8; ++sock) {
         writeReg(kBlockSocketReg(sock), Sn_CR, Sn_CR_CLOSE);
     }
+    w5500::socketResetSoftwareState();
 
     hardReset();
 
