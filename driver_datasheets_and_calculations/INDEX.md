@@ -9,6 +9,12 @@ Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEM
 | File | Role |
 |------|------|
 | `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
+| `Technical Information_SCHUNK_ERD_04 Catalog section.pdf` | Theta ERD 04 catalog chapter |
+| `Technical Information_SCHUNK_ERD Catalog section.pdf` | Full ERD series catalog chapter |
+| `SCHUNK_ERD_Operating_Manual.pdf` | ERD assembly / operating manual |
+| `SCHUNK_ERD-ERT_IndraDrive_CS_Commissioning_instructions.pdf` | IndraDrive CS commissioning |
+| `SCHUNK_ERD_motor_parameter-commissioning.zip` (+ extracted tree) | Motor params / IndraDrive `.par` / Motordatenblatt |
+| `SCHUNK_ERD04_Motordatenblatt_IndraDrive.pdf` / `SCHUNK_ERD04_Datasheet_IndraDrive.pdf` | ERD04 IndraDrive motor data (from zip) |
 | `Technical Information_Beta 100-ZRS*.pdf` | X belt actuator |
 | `Technical Information_Beta 80-SRS*.pdf` | Z ballscrew actuator |
 | `Technical Information_SCHUNK KGG 100-80*.pdf` | Gripper |
@@ -24,7 +30,6 @@ Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEM
 
 | Document | Needed for |
 |----------|------------|
-| SCHUNK ERD 04-40-D-H-N full datasheet | Theta torque curve / envelope |
 | SCHUNK Trap Move attachments | Inertia / torque commissioning slots in `axis_drivetrain_params.h` |
 | 2198-IN020 | Formal TBIO pin drawing |
 | MPB-xxVRS Functional Description | HCS01 X31 details if needed beyond EIP |
