@@ -3,26 +3,31 @@
  * @brief Multi-axis gantry control system for ESP32.
  * @version 2.1.0
  *
- * Production motion is EtherNet/IP only (Kinetix 5100 X/Z; HCS01 theta deferred).
+ * Production motion is EtherNet/IP only (Kinetix 5100 X/Z; HCS01 theta gated
+ * by CONFIG_EIP_AXIS_THETA, default on).
  * Application code drives axes exclusively through this Gantry facade.
  *
- * Coordinate convention (firmware-wide, as of 2026-05):
+ * Coordinate convention (firmware-wide, as of 2026-08):
  *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
  *   - Y: along-belt direction; NO gantry actuator. Conveyor downstream is
- *        the -Y direction. Battery positions on the belt carry y values;
+ *        +Y. Battery positions on the belt carry y values;
  *        the motion layer does not consume them.
- *   - Z: vertical (gantry descent). +Z = up; joint Z=0 is homing datum; physical
- *        coordinated X+Z only within GANTRY_SAFE_Z_HEIGHT_MM of Z−/A015 (band
- *        ceiling = z_min + margin). Z limits: A015=min (−Z), A014=max (+Z);
- *        X: A014=min, A015=max. Z Absolute joint sense inverted so − seeks A015.
+ *   - Z: vertical (gantry descent). +Z = down (toward the belt). Joint Z=0
+ *        is the sample where A015 deasserts (switch disabled) during creep —
+ *        no extra offset. That end is retracted. X Absolute only while Z is
+ *        in the SAFE_Z retract/traverse band (interlock, not a path via);
+ *        in-band X and Z may run together. Theta may turn only in that same
+ *        band. Above the band, Z moves alone.
+ *        Z limits: A015=min (retract), A014=max (+Z / belt); X: A014=min,
+ *        A015=max. Z Absolute joint sense inverted so − seeks A015.
  *        The vertical actuator was called "Y" in pre-2026-05 firmware - it is
  *        the same hardware, just renamed.
- *   - Theta: rotation about Z.
+ *   - Theta: rotation about Z (right-handed about +Z).
  *
  * Verified hardware layout:
  *   - X: Allen-Bradley Kinetix 5100 + SCHUNK Beta 100-ZRS belt actuator.
  *   - Z: Allen-Bradley Kinetix 5100 + SCHUNK Beta 80-SRS ballscrew actuator.
- *   - Theta: Custom pulse-train driver + SCHUNK ERD 04-40-D-H-N rotary module.
+ *   - Theta: Bosch Rexroth HCS01 + SCHUNK ERD 04-40-D-H-N (EIP assemblies 101/102).
  *   - End effector: SCHUNK KGG 100-80 pneumatic parallel gripper (digital).
  */
 
@@ -141,12 +146,14 @@ public:
     void setJointLimits(float xMin, float xMax,
                         float zMin, float zMax,
                         float thetaMin, float thetaMax);
+    JointLimits getJointLimits() const { return config_.limits; }
     void setEndEffectorPin(int pin, bool activeHigh = true);
     void setSafeZHeight(float safeHeight_mm);
     /// Absolute joint-Z band ceiling for X traverse / coordinated X+Z
     /// (= z_min + Z− margin).
     float traverseClearanceZMm() const;
-    /// True when current joint Z is in the SAFE_Z bottom band (X Absolute allowed).
+    /// True when current joint Z is in the SAFE_Z retract/traverse band
+    /// (X Absolute and theta allowed).
     bool zInTraverseBand() const;
 
     // ---------- Motion ----------
@@ -155,17 +162,20 @@ public:
     /// @brief Calibrate X (Z/Theta: call calibrateZ / calibrateTheta separately).
     int  calibrate();
 
-    /// @brief Full EIP bring-up: Z- (A015) → X home/cal → X=park →
-    ///        Z+ stroke (A014) → return to SAFE_Z ceiling (z_min + margin).
-    ///        Preferred over separate home/calibrate when both axes are present.
+    /// @brief Full EIP bring-up: Z- (A015 clear = Z=0) → X home/cal →
+    ///        X=park → Z+ stroke (A014) → return to SAFE_Z ceiling
+    ///        (z_min + margin). Preferred over separate home/calibrate when
+    ///        both axes are present.
     bool startEipBringUp();
     bool eipBringUpInProgress() const;
 
-    // Per-axis homing / calibration. X and Z use EIP drive-managed clear-edge
-    // when configureDriveManagedLimits() is active. Theta remains a stub.
+    // Per-axis homing / calibration. X and Z: seek min → creep until switch
+    // disables → latch that sample as joint 0. Theta: HIPERFACE origin —
+    // aligned when |S-0-0051| is small (C0300 at mechanical home); otherwise
+    // firmware offsets and shrinks thetalim to remaining drive travel.
     void homeX();
     void homeZ();
-    void homeTheta();
+    bool homeTheta();
     int  calibrateX();
     int  calibrateZ();
     int  calibrateTheta();
@@ -188,13 +198,17 @@ public:
                        uint32_t speed_mm_per_s        = 50,
                        uint32_t speed_deg_per_s       = 30,
                        uint32_t acceleration_mm_per_s2 = 0,
-                       uint32_t deceleration_mm_per_s2 = 0);
+                       uint32_t deceleration_mm_per_s2 = 0,
+                       uint32_t acceleration_deg_per_s2 = 0,
+                       uint32_t deceleration_deg_per_s2 = 0);
 
     GantryError moveTo(const EndEffectorPose& pose,
                        uint32_t speed_mm_per_s        = 50,
                        uint32_t speed_deg_per_s       = 30,
                        uint32_t acceleration_mm_per_s2 = 0,
-                       uint32_t deceleration_mm_per_s2 = 0);
+                       uint32_t deceleration_mm_per_s2 = 0,
+                       uint32_t acceleration_deg_per_s2 = 0,
+                       uint32_t deceleration_deg_per_s2 = 0);
 
     bool isBusy() const;
     bool isEnabled() const;
@@ -215,14 +229,23 @@ public:
     int32_t getZEncoderPulses() const;
     float   getZPulsesPerMm() const;
     int     getCurrentTheta() const;
+    float   getCurrentThetaDeg() const;
+    float   getThetaDriveAbsDeg() const;
+    bool    isThetaDriveOriginAligned() const;
+    float   getThetaPulsesPerDeg() const;
+    bool    setThetaPuuPerDeg(double puu_per_deg);
+    bool    hasThetaAxis() const;
+    bool    hasThetaLiveFeedback() const;
+    bool    getThetaCipStatus(char* buf, size_t n) const;
 
     // ---------- Diagnostics ----------
     bool isAlarmActive() const;
     bool clearAlarm();
-    /// @brief Print X/Z EIP fault/warning summaries (no-op if no codes).
+    /// @brief Print X/Z/theta EIP fault/warning summaries (no-op if no codes).
     void logDriveAlarmSummaries() const;
     bool getXDriveAlarmSummary(char* buf, size_t n) const;
     bool getZDriveAlarmSummary(char* buf, size_t n) const;
+    bool getThetaDriveAlarmSummary(char* buf, size_t n) const;
     void setHomingSpeed(uint32_t speed_pps);
 
     // ---------- Kinematics ----------
@@ -274,11 +297,11 @@ private:
     KinematicParameters  kinematicParams_;
     float                stepsPerRev_;
 
-    // Sequential / path motion state machine. Naming follows +Z = up:
-    //   Z_DESCENDING  - Z-alone lowering toward the belt.
-    //   Z_RETRACTING  - Z-alone rising toward clearance / higher Z.
-    //   X_MOVING      - X-alone traverse (Z held at/above clearance).
-    //   XZ_MOVING     - coordinated X+Z Absolute (both endpoints >= clearance).
+    // Sequential / path motion state machine. +Z = down (toward belt):
+    //   Z_DESCENDING  - Z-alone increasing joint Z (toward belt / A014).
+    //   Z_RETRACTING  - Z-alone decreasing joint Z (toward A015 / retract).
+    //   X_MOVING      - X-alone (Z in SAFE_Z band).
+    //   XZ_MOVING     - in-band X+Z, or retract with X unlocked once in-band.
     enum class MotionState {
         IDLE,
         Z_DESCENDING,
@@ -292,13 +315,15 @@ private:
     float       targetX_mm_;
     float       targetZ_mm_;
     float       targetTheta_deg_;
-    // Margin above Z−/A015 (mm) for coordinated X+Z / X traverse bottom band.
-    // Band ceiling = traverseClearanceZMm() = z_min + this (from Z−/A015).
+    // Margin from Z−/A015 (mm) for X traverse / SAFE_Z retract band.
+    // Band ceiling = traverseClearanceZMm() = z_min + this.
     float       safeZMarginFromMaxMm_;
     uint32_t    speed_mm_per_s_;
     uint32_t    speed_deg_per_s_;
     uint32_t    acceleration_mm_per_s2_;
     uint32_t    deceleration_mm_per_s2_;
+    uint32_t    acceleration_deg_per_s2_;
+    uint32_t    deceleration_deg_per_s2_;
     bool        gripperTargetState_;
     uint32_t    gripperActuateStart_ms_;
     uint32_t    gripperActuateDurationMs_;
@@ -314,6 +339,13 @@ private:
     size_t pathSegmentIndex_ = 0;
     float pathSegStartX_mm_ = 0.0f;
     float pathSegStartZ_mm_ = 0.0f;
+    bool pathSegXArmed_ = false;
+    bool pathSegZArmed_ = false;
+    // Theta: wait for 25% of the in-band X+Z segment, then run at window speed.
+    bool thetaPending_ = false;
+    float thetaPendingSpeedDegS_ = 0.0f;
+    size_t thetaWindowSegIndex_ = 0;
+    bool thetaHoldsDescent_ = false;
     // PnP: after path to pick completes, run gripper then retract to clearance.
     bool pathDoGripperAfter_ = false;
 
@@ -327,9 +359,9 @@ private:
     // True once Absolute seek/creep has been observed busy (guards preempt race).
     bool eipLimitSawBusy_ = false;
 
-    // Full bring-up SM (Z- datum → enter Z+ band → X home/cal → X park →
-    // Z+ stroke → return to band floor). When active, single-axis eipLimitPhase_
-    // is not used.
+    // Full bring-up SM (Z- A015-clear = 0 → X home/cal → X park →
+    // Z+ stroke → return to band ceiling). When active, single-axis
+    // eipLimitPhase_ is not used.
     enum class BringUpPhase : uint8_t {
         kIdle = 0,
         kZMinusSeek,
@@ -363,12 +395,22 @@ private:
 
     bool planPathTo(float x0, float z0, float x1, float z1);
     bool armCurrentPathSegment();
+    /// Start deferred path X once Z is in the SAFE_Z band (retract overlap).
+    void tryArmDeferredPathX();
     bool pathSegmentAxesIdle() const;
     /// Current joints within tolerance of the armed segment endpoint.
     bool pathSegmentAtTarget() const;
     void finishPathOrAdvance();
     void failPath(const char* why);
     void startThetaOrIdle();
+    float thetaAccelDegPerS2() const;
+    float thetaDecelDegPerS2() const;
+    /// Refuse theta unless Z is in the SAFE_Z retract/traverse band.
+    bool requireThetaTraverseInterlock(const char* what);
+    void scheduleThetaForPath();
+    void tryStartPendingTheta();
+    float pathSegProgressFrac() const;
+    bool commandThetaMove(float speed_deg_s);
 
     uint32_t getHomingSpeed() const;
     bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
@@ -382,8 +424,9 @@ private:
     float eipSeekSpeedMmS() const;
     float eipCreepSpeedMmS() const;
     float eipCalSeekSpeedMmS() const;
+    float eipHomeCalAccelMmS2() const;
     bool eipStartMoveDelta(float delta_mm, float speed_mm_s);
-    /// Refuse X Absolute unless Z is in the SAFE_Z bottom band.
+    /// Refuse X Absolute unless Z is in the SAFE_Z retract/traverse band.
     bool requireXTraverseInterlock(const char* what);
     void startEipPrecisionHome(EipLimitAxisRole role);
     void startEipPrecisionCalibrate(EipLimitAxisRole role);

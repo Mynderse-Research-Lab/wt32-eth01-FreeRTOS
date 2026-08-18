@@ -8,6 +8,7 @@
 #include "GantryEipLinearAxis.h"
 
 #include "EipClass1TimingStats.h"
+#include "GantryUtils.h"
 #include "Kinetix5100Assembly.h"
 #include "KinetixFaultCodes.h"
 
@@ -16,7 +17,9 @@
 
 #if defined(ESP_PLATFORM)
 #include "esp_log.h"
+#include "esp_timer.h"
 #else
+#include "esp_timer.h"
 #define ESP_LOGW(tag, fmt, ...) ((void)0)
 #define ESP_LOGI(tag, fmt, ...) ((void)0)
 #endif
@@ -31,8 +34,11 @@ constexpr uint8_t kArmServoSettleTicks = 40;
 constexpr uint8_t kHomePreloadTicks = 4;
 constexpr uint8_t kHomeStartTicks = 5;
 constexpr uint16_t kHomeWaitTicks = 200;  // ~2 s @ 100 Hz
-// Fast-path Absolute: StartMotion published in moveToMm (no preload hold).
-constexpr uint8_t kMoveStartMotionTicks = 1;
+// Absolute PTP matches Home34: preload Position (SM=0), then StartMotion edge.
+// Fast-path SM=1 in the same packet as a new Position was dropped by Kinetix
+// (Z 130→30 sat until the 60 s timeout; retry after StopMotion ran).
+constexpr uint8_t kMovePreloadTicks = 4;
+constexpr uint8_t kMoveStartMotionTicks = 5;
 constexpr uint8_t kStopPulseTicks = 5;
 constexpr uint8_t kStopStableTicks = 20;   // 200 ms @ 100 Hz
 constexpr uint16_t kStopTimeoutTicks = 300;  // ~3 s @ 100 Hz — never end Stop early
@@ -58,6 +64,7 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       command_position_puu_(0),
       log_tag_(""),
       log_rate_hz_(0),
+      last_axislog_us_(0),
       last_fault_latched_(false),
       last_warning_latched_(false),
       last_fault_code_(0),
@@ -455,10 +462,25 @@ void GantryEipLinearAxis::advanceMovePhase(
 
   if (move_phase_ticks_ > 0) --move_phase_ticks_;
 
-  if (move_phase_ == MovePhase::kStart && move_phase_ticks_ == 0) {
-    move_phase_ = MovePhase::kRun;
-    run_ticks_ = 0;
+  if (move_phase_ == MovePhase::kPreload) {
     republishMoveCommand(/*start_motion_edge=*/false);
+    if (move_phase_ticks_ == 0) {
+      move_phase_ = MovePhase::kStart;
+      move_phase_ticks_ = kMoveStartMotionTicks;
+      eip::class1TimingStats().noteAbsoluteStartMotionPublished(
+          eip::class1NowUs());
+      republishMoveCommand(/*start_motion_edge=*/true);
+    }
+    return;
+  }
+
+  if (move_phase_ == MovePhase::kStart) {
+    republishMoveCommand(/*start_motion_edge=*/move_phase_ticks_ > 0);
+    if (move_phase_ticks_ == 0) {
+      move_phase_ = MovePhase::kRun;
+      run_ticks_ = 0;
+      republishMoveCommand(/*start_motion_edge=*/false);
+    }
     return;
   }
 
@@ -554,13 +576,12 @@ bool GantryEipLinearAxis::moveToMm(float target_mm, float speed_mm_per_s,
   }
 
   motion_commanded_ = true;
-  // Fast-path: publish Absolute + StartMotion immediately (no GantryUpdate wait).
-  move_phase_ = MovePhase::kStart;
-  move_phase_ticks_ = kMoveStartMotionTicks;
+  // Preload the new Absolute with StartMotion=0; the rising edge is kStart.
+  move_phase_ = MovePhase::kPreload;
+  move_phase_ticks_ = kMovePreloadTicks;
   run_ticks_ = 0;
   arrival_stable_ticks_ = 0;
-  eip::class1TimingStats().noteAbsoluteStartMotionPublished(eip::class1NowUs());
-  return publishCommand(buildMoveCommand(/*start_motion_edge=*/true));
+  return publishCommand(buildMoveCommand(/*start_motion_edge=*/false));
 }
 
 bool GantryEipLinearAxis::moveRelativeMm(float delta_mm, float speed_mm_per_s,
@@ -773,6 +794,12 @@ void GantryEipLinearAxis::update() {
 
   if (motion_commanded_) {
     advanceMovePhase(fb);
+    if (motion_commanded_ &&
+        axisLogDue(log_rate_hz_, esp_timer_get_time(), &last_axislog_us_)) {
+      const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
+      ESP_LOGI(tag, "MOVE mm=%.3f target=%.3f", (double)getCurrentMm(),
+               (double)target_mm_);
+    }
   }
 }
 
@@ -796,6 +823,9 @@ uint32_t GantryEipLinearAxis::homingSpeedPps() const {
 
 void GantryEipLinearAxis::setLogTag(const char* tag) { log_tag_ = tag ? tag : ""; }
 
-void GantryEipLinearAxis::setLogRateHz(uint32_t hz) { log_rate_hz_ = hz; }
+void GantryEipLinearAxis::setLogRateHz(uint32_t hz) {
+  log_rate_hz_ = hz;
+  last_axislog_us_ = 0;
+}
 
 }  // namespace Gantry

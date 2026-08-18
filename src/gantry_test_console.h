@@ -9,8 +9,8 @@
  * @brief Wiring snapshot passed to the diagnostic console task.
  *
  * Coordinate convention (firmware-wide, as of 2026-05):
- *   X = horizontal traverse, Y = along-belt (no gantry actuator; -Y =
- *   downstream), Z = vertical (+Z = up; belt = 0). The vertical actuator was
+ *   X = horizontal traverse, Y = along-belt (no gantry actuator; +Y =
+ *   downstream), Z = vertical (+Z = down; 0 = A015 retract). The vertical actuator was
  *   labelled "Y" in pre-2026-05 firmware; the fields below use the new names.
  */
 struct GantryTestConsoleConfig {

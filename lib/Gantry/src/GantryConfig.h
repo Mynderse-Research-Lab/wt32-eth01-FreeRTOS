@@ -7,13 +7,12 @@
  *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
  *        Actuator: belt linear stage.
  *   - Y: along-belt direction; the gantry has NO Y actuator. Conveyor
- *        downstream is the -Y direction. Used only by the pick scheduler and
+ *        downstream is +Y. Used only by the pick scheduler and
  *        the MQTT bridge to describe battery positions on the belt.
- *   - Z: vertical (gantry descent axis). +Z = up; joint Z=0 is the homing
- *        datum (limit switch), not necessarily the belt touch plane — see
+ *   - Z: vertical (gantry descent axis). +Z = down (toward the belt);
+ *        joint Z=0 is the A015 retract datum — see
  *        GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM in axis_drivetrain_params.h.
- *        Safe-retracted / top-home is at Z = Z_max.
- *   - Theta: rotation about the vertical (Z) axis.
+ *   - Theta: rotation about Z (right-handed about +Z).
  *
  * The vertical actuator was historically named "Y"; references to "Y axis"
  * elsewhere in old code/docs refer to what is now the Z axis.
@@ -40,9 +39,10 @@ namespace Gantry {
  * The gantry has TWO prismatic joints and ONE rotary joint:
  *   - x:     X-axis position (mm) - horizontal traverse along the beam
  *            (across the conveyor; +X by hardware convention).
- *   - z:     Z-axis position (mm) - vertical; +Z = up; Z=0 is the homing datum
- *            (see GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM for physical bed plane).
- *   - theta: Rotation around the vertical (Z) axis (degrees).
+ *   - z:     Z-axis position (mm) - vertical; +Z = down (toward belt);
+ *            Z=0 is the A015 retract datum
+ *            (see GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM).
+ *   - theta: Rotation around Z (degrees), right-handed about +Z.
  *
  * There is intentionally no JointConfig::y member - the conveyor along-belt
  * (Y) direction has no gantry actuator; battery Y positions live in the pick
@@ -50,7 +50,7 @@ namespace Gantry {
  */
 struct JointConfig {
     float x;      // X-axis position (mm) - horizontal traverse
-    float z;      // Z-axis position (mm) - vertical, +Z = up; 0 = homing datum
+    float z;      // Z-axis position (mm) - vertical, +Z = down; 0 = A015 retract
     float theta;  // Theta angle (degrees) - rotation around Z
 
     JointConfig() : x(0.0f), z(0.0f), theta(0.0f) {}
@@ -104,13 +104,13 @@ struct JointLimits {
  *
  * All four spatial fields are explicit:
  *   - x:     horizontal (across belt, mm).
- *   - y:     along-belt (mm); -y is downstream. The gantry itself does not
+ *   - y:     along-belt (mm); +y is downstream. The gantry itself does not
  *            traverse in y; this field carries the gantry's fixed along-belt
  *            placement plus any along-belt offsets through theta + gripper.
- *   - z:     vertical (mm); +z = up. Workspace TCP height above the physical
- *            belt/bed: z_pose = z_joint + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+ *   - z:     vertical (mm); +z = down (toward belt).
+ *            z_pose = z_joint + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
  *            (macro in axis_drivetrain_params.h; default 0).
- *   - theta: rotation about z (deg).
+ *   - theta: rotation about z (deg), right-handed about +Z.
  */
 struct EndEffectorPose {
     float x, y, z;    // Position (mm)

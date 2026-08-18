@@ -60,6 +60,19 @@ menu "Gantry kinematics"
             default 3000
             range 1 50000
 
+        config GANTRY_DEFAULT_ACCEL_DEG_PER_S2
+            int "Default theta accel (deg/s^2)"
+            default 180
+            range 1 18000
+            help
+                Boot default for console `accel` theta arguments / Gantry
+                theta moves until overridden. Conservative vs AXIS_THETA_ACCEL.
+
+        config GANTRY_DEFAULT_DECEL_DEG_PER_S2
+            int "Default theta decel (deg/s^2)"
+            default 180
+            range 1 18000
+
         config GANTRY_PATH_MAX_SPEED_MM_PER_S
             int "2-D path speed ceiling (mm/s)"
             default 500

@@ -16,6 +16,8 @@
 
 namespace Gantry {
 
+class GantryLimitSwitch;
+
 /**
  * @class GantryLinearAxis
  * @brief Linear axis interface (unit: mm). Pulse-domain accessors are exposed
@@ -63,6 +65,18 @@ public:
     }
     virtual uint16_t getDriveFaultCode() const { return 0; }
     virtual uint16_t getDriveWarningCode() const { return 0; }
+    /// EIP overtravel: A014/PL. Default false for non-EIP fakes.
+    virtual bool isA014WarningActive() const { return false; }
+    /// EIP overtravel: A015/NL. Default false for non-EIP fakes.
+    virtual bool isA015WarningActive() const { return false; }
+    /// Optional: sync drive overtravel into GantryLimitSwitch objects.
+    virtual void attachLimitSwitches(GantryLimitSwitch* min_sw,
+                                     GantryLimitSwitch* max_sw) {
+        (void)min_sw;
+        (void)max_sw;
+    }
+    /// When true, A015 maps to joint-min and A014 to joint-max (Z).
+    virtual void setJointMinWarningA015(bool enable) { (void)enable; }
 
     // ---------- Scaling ----------
     virtual double pulsesPerMm() const = 0;

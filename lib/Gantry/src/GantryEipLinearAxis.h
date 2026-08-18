@@ -15,6 +15,7 @@
 #include "Kinetix5100Assembly.h"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace Gantry {
 
@@ -60,9 +61,6 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   bool getDriveAlarmSummary(char* buf, size_t n) const override;
   uint16_t getDriveFaultCode() const override;
   uint16_t getDriveWarningCode() const override;
-  /// True only while warning_present and code is A014/A015 (clear-edge safe).
-  bool isA014WarningActive() const;
-  bool isA015WarningActive() const;
 
   double pulsesPerMm() const override;
   bool isEncoderFeedbackEnabled() const override;
@@ -74,9 +72,12 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   void setLogRateHz(uint32_t hz) override;
 
   /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
-  void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw);
+  void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw) override;
   /// When true, A015 maps to joint-min soft switch and A014 to joint-max (Z).
-  void setJointMinWarningA015(bool enable);
+  void setJointMinWarningA015(bool enable) override;
+  /// True only while warning_present and code is A014/A015 (clear-edge safe).
+  bool isA014WarningActive() const override;
+  bool isA015WarningActive() const override;
 
  private:
   bool publishCommand(const eip::k5100::OutputAssembly104& cmd);
@@ -99,6 +100,7 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   int32_t command_position_puu_;
   const char* log_tag_;
   uint32_t log_rate_hz_;
+  int64_t last_axislog_us_;
   bool last_fault_latched_;
   bool last_warning_latched_;
   uint16_t last_fault_code_;
@@ -122,9 +124,11 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   uint16_t home_wait_ticks_;
 
   // Position Absolute PTP (OM=1 TM=2 NonCyclic=0). Done on AtReference.
+  // kPreload latches the new Position with StartMotion=0; kStart is the edge.
   // kStopping holds isBusy() until encoder position is stable (single stop gate).
   enum class MovePhase : uint8_t {
     kIdle = 0,
+    kPreload,
     kStart,
     kRun,
     kStopping

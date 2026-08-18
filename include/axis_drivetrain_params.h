@@ -41,13 +41,12 @@
  *
  * Coordinate convention:
  *   - X: horizontal traverse along the gantry beam (across the conveyor belt).
- *   - Y: along-belt direction; the gantry has NO Y actuator. Conveyor downstream
- *        is the -Y direction. Used by the pick scheduler to describe battery
+ *   - Y: along-belt direction; the gantry has NO Y actuator. Conveyor
+ *        downstream is +Y. Used by the pick scheduler to describe battery
  *        positions on the belt; not consumed by the motion layer.
- *   - Z: vertical (gantry descent axis). +Z = up (away from belt). Firmware
- *        joint Z=0 is the homing datum (limit switch), which is generally
- *        NOT exactly on the belt touch plane; see GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM.
- *        Z_max is the top / home / safe-retracted position.
+ *   - Z: vertical (gantry descent axis). +Z = down (toward the belt).
+ *        Firmware joint Z=0 is the A015 retract datum (switch-clear sample);
+ *        pick is toward A014 / joint max. See GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM.
  *
  * Verified target actuators:
  *   - X: SCHUNK Beta 100-ZRS toothed-belt linear actuator (200 mm/rev, 550 mm stroke, +/-0.08 mm repeatability)
@@ -137,9 +136,9 @@
  *   mech. stroke:     150 mm   -> AXIS_Z_HARD_LIMIT_MAX_MM
  *   axial tolerance:  0.08 mm; repeat accuracy: +/-0.03 mm
  *
- * Sign convention: +Z = up. Joint Z=0 is the homing datum (see
- * GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM for the physical belt/bed plane).
- * Z_HARD_LIMIT_MAX_MM is the top of stroke and the safe-retracted height. */
+ * Sign convention: +Z = down (toward belt). Joint Z=0 is the A015 retract
+ * datum (see GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM). Z_HARD_LIMIT_MAX_MM is
+ * toward the belt (A014), not a retracted home. */
 #define AXIS_Z_DRIVETRAIN                   DT_BALLSCREW
 #if defined(CONFIG_AXIS_Z_LEAD_MM_PER_REV)
 #define AXIS_Z_LEAD_MM_PER_REV             ((float)CONFIG_AXIS_Z_LEAD_MM_PER_REV)
@@ -186,17 +185,13 @@
 #endif
 
 /*
- * Physical belt / bed vs firmware Z datum (mm, +Z up).
+ * World Z vs firmware joint datum (mm, +Z down).
  *
- * After homing, joint Z=0 sits at a mechanical reference (e.g. MIN limit),
- * which is usually offset from the actual belt or bed contact plane.
- *   GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM = distance from the belt/bed contact
- *   plane to the firmware joint Z datum, measured along +Z (positive means
- *   the Z=0 datum lies above the bed; the bed is at joint z = -this value).
- *
- * Forward kinematics sets pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
- * so pose.z reads as TCP height above the physical bed when this is non-zero.
- * Default 0 keeps legacy behaviour (datum coincident with the bed plane).
+ * After homing, joint Z=0 sits at A015 (retracted). Increasing joint Z
+ * moves toward the belt / A014.
+ *   GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM = world-Z of that joint-0 sample
+ *   (legacy name; not "height above bed"). pose.z = joint.z + this offset.
+ * Default 0: world Z coincides with joint Z.
  */
 #if defined(CONFIG_GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM)
 #define GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM  ((float)CONFIG_GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM)
@@ -232,6 +227,19 @@
 #define AXIS_THETA_HARD_LIMIT_MAX_DEG      ((float)CONFIG_AXIS_THETA_HARD_LIMIT_MAX_DEG)
 #else
 #define AXIS_THETA_HARD_LIMIT_MAX_DEG      180.0f
+#endif
+/* Drive-abs window that F2057 enforces (S-0-0051 degrees). After the ERD04
+ * overlay (S-0-0278=36000, S-0-0049=+180, S-0-0050=-180) this matches thetalim.
+ * Live bench before overlay used S-0-0278=180 / S-0-0050=0. */
+#if defined(CONFIG_AXIS_THETA_DRIVE_ABS_MIN_DEG)
+#define AXIS_THETA_DRIVE_ABS_MIN_DEG       ((float)CONFIG_AXIS_THETA_DRIVE_ABS_MIN_DEG)
+#else
+#define AXIS_THETA_DRIVE_ABS_MIN_DEG       -180.0f
+#endif
+#if defined(CONFIG_AXIS_THETA_DRIVE_ABS_MAX_DEG)
+#define AXIS_THETA_DRIVE_ABS_MAX_DEG       ((float)CONFIG_AXIS_THETA_DRIVE_ABS_MAX_DEG)
+#else
+#define AXIS_THETA_DRIVE_ABS_MAX_DEG       180.0f
 #endif
 #if defined(CONFIG_AXIS_THETA_MAX_SPEED_DEG_PER_S)
 #define AXIS_THETA_MAX_SPEED_DEG_PER_S     ((float)CONFIG_AXIS_THETA_MAX_SPEED_DEG_PER_S)
@@ -269,7 +277,7 @@
  * the frozen production design before the firmware can command correct TCP
  * poses. See the "Geometry freeze gate" block a few lines down for the
  * attestation macro that silences the reminder once the design is frozen. */
-/* Kinematic offsets in the new X / Y(=along-belt, -Y downstream) / Z(=up)
+/* Kinematic offsets in the X / Y(=along-belt, +Y downstream) / Z(=down)
  * frame. Semantics (unchanged numbers from the development rig):
  *   GANTRY_Z_AXIS_Y_OFFSET_MM     - along-belt offset of the Z-column from
  *                                   the X beam datum (formerly Y_AXIS_Z_OFFSET).
@@ -278,9 +286,9 @@
  *   GANTRY_GRIPPER_X_OFFSET_MM    - X offset of the gripper TCP from the
  *                                   theta module (formerly GRIPPER_Y_OFFSET).
  *   GANTRY_GRIPPER_Z_OFFSET_MM    - Z offset of the gripper TCP from the
- *                                   theta module mounting flange.
- *   GANTRY_SAFE_Z_HEIGHT_MM       - margin below Z+ (mm) for coordinated X+Z
- *                                   (band floor = z_max - this).
+ *                                   theta module mounting flange (+Z down).
+ *   GANTRY_SAFE_Z_HEIGHT_MM       - margin from Z−/A015 (mm) for X traverse
+ *                                   (band ceiling = z_min + this; retracted).
  *   GANTRY_CAL_X_PARK_MM          - X park before Z+ seek during bring-up. */
 #if defined(CONFIG_GANTRY_Z_AXIS_Y_OFFSET_MM)
 #define GANTRY_Z_AXIS_Y_OFFSET_MM          ((float)CONFIG_GANTRY_Z_AXIS_Y_OFFSET_MM)
@@ -302,10 +310,11 @@
 #else
 #define GANTRY_GRIPPER_Z_OFFSET_MM         80.0f
 #endif
-/* Traverse clearance margin above the Z− endstop / A015 (joint mm).
- * Coordinated X+Z Absolute is allowed only while Z is within this margin of
- * Z− (joint Z <= z_min + this). Above that bottom band Z moves alone with X
- * held. Limit codes: X A014=min/A015=max; Z A015=min (−Z)/A014=max (+Z).
+/* Traverse clearance margin from the Z− endstop / A015 (joint mm).
+ * X Absolute is allowed only while Z is within this margin of Z−
+ * (joint Z <= z_min + this) — the retracted traverse band. Beyond that
+ * (+Z toward the belt) Z moves alone with X held. Limit codes:
+ * X A014=min/A015=max; Z A015=min (retract)/A014=max (toward belt).
  * Z Absolute joint sense is inverted so joint − seeks A015. */
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #define GANTRY_SAFE_Z_HEIGHT_MM            ((float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
@@ -355,6 +364,16 @@
 #define GANTRY_DEFAULT_DECEL_MM_PER_S2         ((uint32_t)CONFIG_GANTRY_DEFAULT_DECEL_MM_PER_S2)
 #else
 #define GANTRY_DEFAULT_DECEL_MM_PER_S2         3000u
+#endif
+#if defined(CONFIG_GANTRY_DEFAULT_ACCEL_DEG_PER_S2)
+#define GANTRY_DEFAULT_ACCEL_DEG_PER_S2        ((uint32_t)CONFIG_GANTRY_DEFAULT_ACCEL_DEG_PER_S2)
+#else
+#define GANTRY_DEFAULT_ACCEL_DEG_PER_S2        180u
+#endif
+#if defined(CONFIG_GANTRY_DEFAULT_DECEL_DEG_PER_S2)
+#define GANTRY_DEFAULT_DECEL_DEG_PER_S2        ((uint32_t)CONFIG_GANTRY_DEFAULT_DECEL_DEG_PER_S2)
+#else
+#define GANTRY_DEFAULT_DECEL_DEG_PER_S2        180u
 #endif
 #if defined(CONFIG_GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2)
 #define GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2    ((double)CONFIG_GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2)

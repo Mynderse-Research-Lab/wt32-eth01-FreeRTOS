@@ -10,6 +10,8 @@
 #include "ethernet_app_config.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
+#include "gantry_console_parse.h"
+#include "GantryPathProfile.h"
 #include "gpio_expander.h"
 #include "MCP23S17.h"
 #include "esp_log.h"
@@ -31,6 +33,14 @@ extern "C" int getchar(void);
 
 namespace {
 static const char *TAG = "GantryConsole";
+
+using GantryConsole::AxisToken;
+using GantryConsole::LinearUnitMode;
+using GantryConsole::applyRangeLimitU32;
+using GantryConsole::kMinAccelDegPerS2;
+using GantryConsole::kMinAccelMmPerS2;
+using GantryConsole::kMinSpeedMmPerS;
+using GantryConsole::parseAxisToken;
 
 SemaphoreHandle_t g_consoleCmdMutex = nullptr;
 
@@ -168,12 +178,16 @@ static bool g_homeCompletedThisSession = false;
 static bool g_calibratedThisSession = false;
 static bool g_homeZCompletedThisSession = false;
 static bool g_calibratedZThisSession = false;
+static bool g_homeThetaThisSession = false;
+static bool g_calibratedThetaThisSession = false;
 static bool g_calibrationInProgress = false;
-enum class LinearUnitMode { MM = 0, INCH = 1 };
+static bool g_testCycleInProgress = false;
 static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
 static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
 static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
 static uint32_t g_moveDecelMmPerS2 = GANTRY_DEFAULT_DECEL_MM_PER_S2;
+static uint32_t g_moveAccelDegPerS2 = GANTRY_DEFAULT_ACCEL_DEG_PER_S2;
+static uint32_t g_moveDecelDegPerS2 = GANTRY_DEFAULT_DECEL_DEG_PER_S2;
 static bool g_motionProfileRangeLimitEnabled = true;
 static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
 // LIVE POS periodic logger frequency control.
@@ -197,10 +211,6 @@ bool physicalLimitsAvailable(const GantryTestConsoleConfig *cfg) {
          cfg->gantry->driveManagedLimitsEnabled();
 }
 
-static constexpr float kMmPerInch = 25.4f;
-static constexpr uint32_t kMinSpeedMmPerS = 1;
-static constexpr uint32_t kMinAccelMmPerS2 = 100;
-
 // Shared 2-D path envelope: console speed/accel/decel are the RESULTANT along
 // the X-Z path. Protective clamp: never exceed Z ballscrew critical-RPM speed.
 uint32_t maxLinearSpeedMmPerS() {
@@ -216,35 +226,37 @@ uint32_t maxLinearAccelMmPerS2() {
   return GANTRY_PATH_MAX_ACCEL_MM_PER_S2;
 }
 
-uint32_t applyRangeLimitU32(uint32_t value, uint32_t minValue, uint32_t maxValue, bool enabled) {
-  if (!enabled) {
-    return value;
+uint32_t maxThetaSpeedDegPerS() {
+  if (AXIS_THETA_MAX_SPEED_DEG_PER_S <= 0.0f) {
+    return 3600u;
   }
-  if (value < minValue) {
-    return minValue;
+  return static_cast<uint32_t>(AXIS_THETA_MAX_SPEED_DEG_PER_S);
+}
+
+uint32_t maxThetaAccelDegPerS2() {
+  if (AXIS_THETA_ACCEL_DEG_PER_S2 <= 0.0f) {
+    return 18000u;
   }
-  if (value > maxValue) {
-    return maxValue;
+  return static_cast<uint32_t>(AXIS_THETA_ACCEL_DEG_PER_S2);
+}
+
+uint32_t maxThetaDecelDegPerS2() {
+  if (AXIS_THETA_DECEL_DEG_PER_S2 <= 0.0f) {
+    return 18000u;
   }
-  return value;
+  return static_cast<uint32_t>(AXIS_THETA_DECEL_DEG_PER_S2);
 }
 
 const char *getLinearUnitLabel() {
-  return (g_linearUnitMode == LinearUnitMode::INCH) ? "in" : "mm";
+  return GantryConsole::linearUnitLabel(g_linearUnitMode);
 }
 
 float convertMmToSelected(float valueMm) {
-  if (g_linearUnitMode == LinearUnitMode::INCH) {
-    return valueMm / kMmPerInch;
-  }
-  return valueMm;
+  return GantryConsole::convertMmToSelected(valueMm, g_linearUnitMode);
 }
 
 float convertSelectedToMm(float valueSelected) {
-  if (g_linearUnitMode == LinearUnitMode::INCH) {
-    return valueSelected * kMmPerInch;
-  }
-  return valueSelected;
+  return GantryConsole::convertSelectedToMm(valueSelected, g_linearUnitMode);
 }
 
 void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
@@ -459,8 +471,9 @@ void printStatus(Gantry::Gantry *gantry) {
   const float zDisp = convertMmToSelected((float)gantry->getCurrentZ());
   ESP_LOGI(TAG, "X Position: %.3f %s", xDisp, getLinearUnitLabel());
   ESP_LOGI(TAG, "X Encoder : %d pulses", gantry->getXEncoder());
-  ESP_LOGI(TAG, "Z Position: %.3f %s (+Z = up; belt = 0)", zDisp, getLinearUnitLabel());
-  ESP_LOGI(TAG, "Theta: %d deg", gantry->getCurrentTheta());
+  ESP_LOGI(TAG, "Z Position: %.3f %s (+Z = down / toward belt; 0 = A015 retract)", zDisp, getLinearUnitLabel());
+  ESP_LOGI(TAG, "Theta: %.2f deg%s", gantry->getCurrentThetaDeg(),
+           gantry->hasThetaAxis() ? "" : " (axis not compiled in)");
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
@@ -476,11 +489,14 @@ void printStatus(Gantry::Gantry *gantry) {
       ESP_LOGW(TAG, "Z drive: %s", zSum);
     }
   }
-  ESP_LOGI(TAG, "2-D Path Profile: speed=%.3f %s/s, theta=%lu deg/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
+  ESP_LOGI(TAG, "2-D Path Profile: speed=%.3f %s/s, accel=%.3f %s/s2, decel=%.3f %s/s2",
            convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
-           (unsigned long)g_moveSpeedDegPerS,
            convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
            convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
+  ESP_LOGI(TAG, "Theta Profile: speed=%lu deg/s, accel=%lu deg/s2, decel=%lu deg/s2",
+           (unsigned long)g_moveSpeedDegPerS,
+           (unsigned long)g_moveAccelDegPerS2,
+           (unsigned long)g_moveDecelDegPerS2);
   ESP_LOGI(TAG, "Path Range Limits: %s (speed:%.3f-%.3f %s/s, accel/decel:%.3f-%.3f %s/s2)",
            g_motionProfileRangeLimitEnabled ? "ENABLED" : "DISABLED",
            convertMmToSelected((float)kMinSpeedMmPerS),
@@ -489,9 +505,27 @@ void printStatus(Gantry::Gantry *gantry) {
            convertMmToSelected((float)kMinAccelMmPerS2),
            convertMmToSelected((float)maxLinearAccelMmPerS2()),
            getLinearUnitLabel());
+  ESP_LOGI(TAG, "Theta Range Limits: speed=1-%lu deg/s, accel/decel=%lu-%lu deg/s2",
+           (unsigned long)maxThetaSpeedDegPerS(),
+           (unsigned long)kMinAccelDegPerS2,
+           (unsigned long)maxThetaAccelDegPerS2());
+  {
+    const Gantry::JointLimits lim = gantry->getJointLimits();
+    ESP_LOGI(TAG, "Theta joint limits: %.1f .. %.1f deg (thetalim)",
+             (double)lim.theta_min, (double)lim.theta_max);
+    ESP_LOGI(TAG, "Theta drive abs: %.3f deg (S-0-0051) origin %s",
+             (double)gantry->getThetaDriveAbsDeg(),
+             gantry->isThetaDriveOriginAligned() ? "ALIGNED joint=drive"
+                                                 : "OFFSET (run C0300 at home pose, then home t)");
+    char cip[192] = {};
+    if (gantry->getThetaCipStatus(cip, sizeof(cip)) && cip[0]) {
+      ESP_LOGI(TAG, "Theta CIP: %s", cip);
+    }
+  }
   ESP_LOGI(TAG, "Units: linear=%s (internal mm)", getLinearUnitLabel());
-  ESP_LOGI(TAG, "PUU scale: X=%.3f PUU/mm  Z=%.3f PUU/mm (use puuinfo / puucal)",
-           gantry->getPulsesPerMm(), gantry->getZPulsesPerMm());
+  ESP_LOGI(TAG, "PUU scale: X=%.3f PUU/mm  Z=%.3f PUU/mm  T=%.3f PUU/deg (puuinfo / puu t / puucal)",
+           gantry->getPulsesPerMm(), gantry->getZPulsesPerMm(),
+           gantry->getThetaPulsesPerDeg());
 
   ESP_LOGI(TAG, "Joint Config: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
            convertMmToSelected(current.x), getLinearUnitLabel(),
@@ -520,9 +554,18 @@ void printPuuInfo(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Z: scale=%.4f PUU/mm  actual=%.3f mm (%ld PUU)  target=%.3f mm  lead=%.1f mm/rev",
            zPpm, zMm, static_cast<long>(gantry->getZEncoderPulses()), target.z,
            AXIS_Z_LEAD_MM_PER_REV);
+  if (gantry->hasThetaAxis()) {
+    const float tPpd = gantry->getThetaPulsesPerDeg();
+    ESP_LOGI(TAG,
+             "Theta: scale=%.4f PUU/deg  actual=%.3f deg  target=%.3f deg  "
+             "(HIPERFACE abs; confirm with a known-degree move)",
+             tPpd, gantry->getCurrentThetaDeg(), target.theta);
+  } else {
+    ESP_LOGI(TAG, "Theta: axis not compiled in (CONFIG_EIP_AXIS_THETA)");
+  }
   ESP_LOGI(TAG, "Calibrate: move a known delta, measure travel, then:");
-  ESP_LOGI(TAG, "  puucal <x|z> <commanded_mm> <measured_mm>");
-  ESP_LOGI(TAG, "Suggested Kconfig: EIP_AXIS_X_PUU_PER_MM / EIP_AXIS_Z_PUU_PER_MM");
+  ESP_LOGI(TAG, "  puucal <x|z|t> c m   - suggest new PUU/mm or PUU/deg from commanded vs measured");
+  ESP_LOGI(TAG, "Suggested Kconfig: EIP_AXIS_X_PUU_PER_MM / EIP_AXIS_Z_PUU_PER_MM / EIP_AXIS_THETA_PUU_PER_DEG");
   ESP_LOGI(TAG, "Formula: new = current * (commanded / measured)");
 }
 
@@ -532,33 +575,50 @@ void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
     return;
   }
 
-  char axis = '\0';
-  float commanded = 0.0f;
-  float measured = 0.0f;
-  if (sscanf(cmd, "puucal %c %f %f", &axis, &commanded, &measured) != 3) {
-    ESP_LOGE(TAG, "Usage: puucal <x|z> <commanded_mm> <measured_mm>");
+  const GantryConsole::PuuCalParse parsed = GantryConsole::parsePuuCalCommand(cmd);
+  if (!parsed.ok) {
+    ESP_LOGE(TAG, "Usage: puucal <x|z|t> <commanded> <measured>");
     return;
   }
-  axis = static_cast<char>(tolower(static_cast<unsigned char>(axis)));
-  if (axis != 'x' && axis != 'z') {
-    ESP_LOGE(TAG, "Axis must be x or z");
-    return;
-  }
-  if (commanded <= 0.0f || measured <= 0.0f) {
-    ESP_LOGE(TAG, "commanded_mm and measured_mm must be > 0");
+  const char axis = parsed.axis;
+  const float commanded = parsed.commanded;
+  const float measured = parsed.measured;
+
+  if (axis == 't') {
+    if (!gantry->hasThetaAxis()) {
+      ESP_LOGE(TAG, "Theta axis not compiled in");
+      return;
+    }
+    const float current = gantry->getThetaPulsesPerDeg();
+    double suggested = 0.0;
+    if (!GantryConsole::suggestPuuScale(static_cast<double>(current), commanded,
+                                        measured, suggested)) {
+      ESP_LOGE(TAG, "No PUU/deg scale available for theta");
+      return;
+    }
+    const float errPct = (measured - commanded) / commanded * 100.0f;
+    ESP_LOGI(TAG, "=== PUU calibration (t) ===");
+    ESP_LOGI(TAG, "Commanded=%.3f deg  Measured=%.3f deg  error=%+.2f%%",
+             commanded, measured, errPct);
+    ESP_LOGI(TAG, "Current scale=%.4f PUU/deg", current);
+    ESP_LOGI(TAG, "Suggested scale=%.4f PUU/deg", suggested);
+    if (gantry->setThetaPuuPerDeg(suggested)) {
+      ESP_LOGI(TAG, "Applied live. Re-run 'home t'. Persist with CONFIG_EIP_AXIS_THETA_PUU_PER_DEG=%.4f",
+               suggested);
+    } else {
+      ESP_LOGE(TAG, "Failed to apply PUU/deg");
+    }
     return;
   }
 
   const float current =
       (axis == 'x') ? gantry->getPulsesPerMm() : gantry->getZPulsesPerMm();
-  if (current <= 0.0f) {
+  double suggested = 0.0;
+  if (!GantryConsole::suggestPuuScale(static_cast<double>(current), commanded,
+                                      measured, suggested)) {
     ESP_LOGE(TAG, "No PUU/mm scale available for axis %c", axis);
     return;
   }
-
-  const double suggested =
-      static_cast<double>(current) *
-      (static_cast<double>(commanded) / static_cast<double>(measured));
   const float errPct =
       (measured - commanded) / commanded * 100.0f;
 
@@ -575,6 +635,63 @@ void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
              suggested);
   }
   ESP_LOGI(TAG, "Target tol: X +/-0.08 mm (SCHUNK), Z +/-0.03 mm (first pass +/-0.5 mm OK)");
+}
+
+void runPuuSetCommand(Gantry::Gantry *gantry, const char *cmd) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+  char axis = '\0';
+  double scale = 0.0;
+  if (sscanf(cmd, "puu %c %lf", &axis, &scale) != 2) {
+    ESP_LOGE(TAG, "Usage: puu t <puu_per_deg>");
+    return;
+  }
+  axis = static_cast<char>(tolower(static_cast<unsigned char>(axis)));
+  if (axis != 't') {
+    ESP_LOGE(TAG, "Live PUU set is theta-only (X/Z stay Kconfig + puucal suggest)");
+    return;
+  }
+  if (!gantry->hasThetaAxis()) {
+    ESP_LOGE(TAG, "Theta axis not compiled in");
+    return;
+  }
+  if (scale <= 0.0) {
+    ESP_LOGE(TAG, "PUU/deg must be > 0");
+    return;
+  }
+  if (!gantry->setThetaPuuPerDeg(scale)) {
+    ESP_LOGE(TAG, "Failed to apply PUU/deg");
+    return;
+  }
+  ESP_LOGI(TAG, "OK Theta scale=%.4f PUU/deg. Re-run 'home t'. Persist CONFIG_EIP_AXIS_THETA_PUU_PER_DEG=%.4f",
+           scale, scale);
+}
+
+void runThetaLimCommand(Gantry::Gantry *gantry, const char *cmd) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+  const GantryConsole::ThetaLimParse parsed = GantryConsole::parseThetaLimCommand(cmd);
+  if (!parsed.ok) {
+    ESP_LOGE(TAG, "Usage: thetalim <min_deg> <max_deg>");
+    return;
+  }
+  const float minDeg = parsed.min_deg;
+  const float maxDeg = parsed.max_deg;
+  gantry->setThetaLimits(minDeg, maxDeg);
+  const Gantry::JointLimits applied = gantry->getJointLimits();
+  if (applied.theta_min != minDeg || applied.theta_max != maxDeg) {
+    ESP_LOGW(TAG,
+             "thetalim clamped to captured envelope %.1f .. %.1f (requested "
+             "%.1f .. %.1f) — C0300 + home t ALIGNED to widen",
+             (double)applied.theta_min, (double)applied.theta_max,
+             (double)minDeg, (double)maxDeg);
+  }
+  ESP_LOGI(TAG, "OK Theta joint limits %.1f .. %.1f deg",
+           (double)applied.theta_min, (double)applied.theta_max);
 }
 
 void printLimits(const GantryTestConsoleConfig *cfg) {
@@ -935,25 +1052,6 @@ void runGpioDriveCommand(const char *cmd) {
 // Tokenize `home` / `calibrate` args (default X). Soft-home / soft-calibrate
 // only when neither GPIO limits nor EIP drive-managed switches are available.
 
-enum class AxisToken { X, Z, THETA };
-
-bool parseAxisToken(const char *tok, AxisToken &out) {
-  if (tok == nullptr) return false;
-  if (strcmp(tok, "x") == 0) {
-    out = AxisToken::X;
-    return true;
-  }
-  if (strcmp(tok, "z") == 0) {
-    out = AxisToken::Z;
-    return true;
-  }
-  if (strcmp(tok, "t") == 0 || strcmp(tok, "theta") == 0) {
-    out = AxisToken::THETA;
-    return true;
-  }
-  return false;
-}
-
 // EIP soft-home / soft-calibrate when limit_switches_active=false.
 
 void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
@@ -1105,38 +1203,45 @@ void waitGantryIdle(const GantryTestConsoleConfig *cfg, uint32_t timeout_ms) {
   }
 }
 
-void runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
+bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
   if (!cfg->gantry->isEnabled()) {
     ESP_LOGE(TAG, "ERROR: Motors not enabled");
-    return;
+    return false;
   }
   if (!cfg->gantry->driveManagedLimitsEnabled()) {
     ESP_LOGE(TAG, "ERROR: Bring-up requires EIP drive-managed limits");
-    return;
+    return false;
   }
   if (cfg->gantry->isBusy() || g_calibrationInProgress) {
     ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before bring-up");
-    return;
+    return false;
   }
   g_calibrationInProgress = true;
   g_calibratedThisSession = false;
   g_calibratedZThisSession = false;
+  g_calibratedThetaThisSession = false;
   g_homeCompletedThisSession = false;
   g_homeZCompletedThisSession = false;
+  g_homeThetaThisSession = false;
 
   if (!cfg->gantry->startEipBringUp()) {
     g_calibrationInProgress = false;
     ESP_LOGE(TAG, "ERROR: Bring-up did not start");
-    return;
+    return false;
   }
 
   ESP_LOGI(TAG,
-           "EIP bring-up started: Z- (A015) -> X home/cal -> X=%.1f -> Z+ (A014) "
-           "-> SAFE_Z ceiling (use 'stop' to abort, 'status' to monitor)",
+           "EIP bring-up started: Z- (A015 switch-clear = 0) -> X home/cal -> "
+           "X=%.1f -> Z+ (A014) -> SAFE_Z ceiling (use 'stop' to abort, "
+           "'status' to monitor)",
            (double)GANTRY_CAL_X_PARK_MM);
 
   const TickType_t start = xTaskGetTickCount();
   while (cfg->gantry->eipBringUpInProgress() || cfg->gantry->isBusy()) {
+    if (cfg->gantry->isAbortRequested()) {
+      ESP_LOGE(TAG, "ERROR: Bring-up aborted");
+      break;
+    }
     if ((xTaskGetTickCount() - start) >
         pdMS_TO_TICKS(Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS * 4)) {
       ESP_LOGE(TAG, "ERROR: Bring-up timed out");
@@ -1146,6 +1251,10 @@ void runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
     vTaskDelay(pdMS_TO_TICKS(50));
   }
   g_calibrationInProgress = false;
+
+  if (cfg->gantry->isAbortRequested()) {
+    return false;
+  }
 
   const int xLen = static_cast<int>(cfg->gantry->xAxisLengthMm());
   const int zLen = static_cast<int>(cfg->gantry->zAxisLengthMm());
@@ -1158,14 +1267,398 @@ void runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
                                 AXIS_Z_HARD_LIMIT_MIN_MM, (float)zLen,
                                 AXIS_THETA_HARD_LIMIT_MIN_DEG,
                                 AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    if (cfg->gantry->hasThetaAxis()) {
+      if (cfg->gantry->homeTheta() && cfg->gantry->calibrateTheta() > 0) {
+        g_homeThetaThisSession = true;
+        g_calibratedThetaThisSession = true;
+        ESP_LOGI(TAG,
+                 "Bring-up: theta origin %s (drive_abs=%.3f, joint_lim=%.1f..%.1f)",
+                 cfg->gantry->isThetaDriveOriginAligned() ? "ALIGNED" : "OFFSET",
+                 (double)cfg->gantry->getThetaDriveAbsDeg(),
+                 (double)cfg->gantry->getJointLimits().theta_min,
+                 (double)cfg->gantry->getJointLimits().theta_max);
+      } else {
+        ESP_LOGW(TAG,
+                 "Bring-up: X/Z OK; theta home/cal failed "
+                 "(CIP .23 / Class 1 / encoder?) — X/Z gates stay set");
+      }
+    }
     ESP_LOGI(TAG,
              "OK Bring-up complete: X stroke=%d mm, Z stroke=%d mm, "
              "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
              xLen, zLen, (double)cfg->gantry->traverseClearanceZMm(),
              (double)GANTRY_SAFE_Z_HEIGHT_MM);
-  } else {
-    ESP_LOGE(TAG, "ERROR: Bring-up finished without valid X/Z stroke");
+    return true;
   }
+  ESP_LOGE(TAG, "ERROR: Bring-up finished without valid X/Z stroke");
+  return false;
+}
+
+const char *gantryErrorName(Gantry::GantryError err) {
+  switch (err) {
+    case Gantry::GantryError::OK:
+      return "OK";
+    case Gantry::GantryError::NOT_INITIALIZED:
+      return "NOT_INITIALIZED";
+    case Gantry::GantryError::MOTOR_NOT_ENABLED:
+      return "MOTOR_NOT_ENABLED";
+    case Gantry::GantryError::ALREADY_MOVING:
+      return "ALREADY_MOVING";
+    case Gantry::GantryError::INVALID_POSITION:
+      return "INVALID_POSITION";
+    case Gantry::GantryError::INVALID_PARAMETER:
+      return "INVALID_PARAMETER";
+    case Gantry::GantryError::TIMEOUT:
+      return "TIMEOUT (alarm?)";
+    case Gantry::GantryError::LIMIT_SWITCH_FAILED:
+      return "LIMIT_SWITCH_FAILED";
+    case Gantry::GantryError::CALIBRATION_FAILED:
+      return "CALIBRATION_FAILED";
+    case Gantry::GantryError::CONVERSION_ERROR:
+      return "CONVERSION_ERROR";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+bool testCycleWaitMs(const GantryTestConsoleConfig *cfg, uint32_t ms) {
+  const TickType_t start = xTaskGetTickCount();
+  while ((xTaskGetTickCount() - start) < pdMS_TO_TICKS(ms)) {
+    if (cfg->gantry->isAbortRequested()) {
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  return true;
+}
+
+bool testCycleWaitIdle(const GantryTestConsoleConfig *cfg, uint32_t timeout_ms) {
+  const TickType_t start = xTaskGetTickCount();
+  while (cfg->gantry->isBusy() || cfg->gantry->eipBringUpInProgress()) {
+    if (cfg->gantry->isAbortRequested()) {
+      return false;
+    }
+    if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) {
+      ESP_LOGE(TAG, "ERROR: test_cycle idle wait timed out after %lu ms",
+               (unsigned long)timeout_ms);
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  return true;
+}
+
+bool testCyclePoseNear(const GantryTestConsoleConfig *cfg, float x_mm, float z_mm,
+                       float eps_mm, bool check_theta, float theta_deg,
+                       float eps_deg) {
+  const Gantry::JointConfig cur = cfg->gantry->getCurrentJointConfig();
+  const float dx = fabsf(cur.x - x_mm);
+  const float dz = fabsf(cur.z - z_mm);
+  if (dx > eps_mm || dz > eps_mm) {
+    ESP_LOGE(TAG,
+             "ERROR: test_cycle pose miss: got x=%.3f z=%.3f, want x=%.3f "
+             "z=%.3f (eps=%.1f mm)",
+             (double)cur.x, (double)cur.z, (double)x_mm, (double)z_mm,
+             (double)eps_mm);
+    return false;
+  }
+  if (check_theta && cfg->gantry->hasThetaAxis()) {
+    if (fabsf(cur.theta - theta_deg) > eps_deg) {
+      ESP_LOGE(TAG,
+               "ERROR: test_cycle pose miss: got theta=%.3f, want %.3f "
+               "(eps=%.1f deg)",
+               (double)cur.theta, (double)theta_deg, (double)eps_deg);
+      return false;
+    }
+    ESP_LOGI(TAG,
+             "[TEST_CYCLE] pose ok: x=%.3f z=%.3f theta=%.3f (target %.3f / "
+             "%.3f / %.3f)",
+             (double)cur.x, (double)cur.z, (double)cur.theta, (double)x_mm,
+             (double)z_mm, (double)theta_deg);
+    return true;
+  }
+  ESP_LOGI(TAG, "[TEST_CYCLE] pose ok: x=%.3f z=%.3f (target %.3f / %.3f)",
+           (double)cur.x, (double)cur.z, (double)x_mm, (double)z_mm);
+  return true;
+}
+
+bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
+                      float from_x_mm, float from_z_mm, float x_mm, float z_mm,
+                      float theta_deg, int expected_segs, uint32_t speed_deg_per_s,
+                      uint32_t accel_deg_per_s2, uint32_t decel_deg_per_s2) {
+  constexpr float kPoseEpsMm = 1.5f;
+  constexpr float kPoseEpsDeg = 1.0f;
+  const uint32_t th_v =
+      (speed_deg_per_s > 0u) ? speed_deg_per_s : g_moveSpeedDegPerS;
+  const uint32_t th_a =
+      (accel_deg_per_s2 > 0u) ? accel_deg_per_s2 : g_moveAccelDegPerS2;
+  const uint32_t th_d =
+      (decel_deg_per_s2 > 0u) ? decel_deg_per_s2 : g_moveDecelDegPerS2;
+  const Gantry::JointConfig cur = cfg->gantry->getCurrentJointConfig();
+  const float ceiling = cfg->gantry->traverseClearanceZMm();
+  Gantry::Path::PathSegment segs[3];
+  const size_t n_cmd = Gantry::Path::planSegments(from_x_mm, from_z_mm, x_mm,
+                                                  z_mm, ceiling, segs);
+  const size_t n_live =
+      Gantry::Path::planSegments(cur.x, cur.z, x_mm, z_mm, ceiling, segs);
+  ESP_LOGI(TAG,
+           "[TEST_CYCLE] %s: move (%.1f, %.1f, %.1f deg) live from "
+           "(%.3f, %.3f, %.3f) n=%u; commanded from (%.1f, %.1f) n=%u; "
+           "v=%lu mm/s a=%lu d=%lu; theta v=%lu deg/s a=%lu d=%lu",
+           name, (double)x_mm, (double)z_mm, (double)theta_deg, (double)cur.x,
+           (double)cur.z, (double)cur.theta, (unsigned)n_live,
+           (double)from_x_mm, (double)from_z_mm, (unsigned)n_cmd,
+           (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveAccelMmPerS2,
+           (unsigned long)g_moveDecelMmPerS2, (unsigned long)th_v,
+           (unsigned long)th_a, (unsigned long)th_d);
+  if (expected_segs >= 0 && static_cast<int>(n_cmd) != expected_segs) {
+    ESP_LOGE(TAG,
+             "ERROR: test_cycle %s expected %d path segs from commanded "
+             "start, planner gave %u",
+             name, expected_segs, (unsigned)n_cmd);
+    return false;
+  }
+
+  Gantry::JointConfig target{};
+  target.x = x_mm;
+  target.z = z_mm;
+  target.theta = theta_deg;
+  const Gantry::GantryError result =
+      cfg->gantry->moveTo(target, g_moveSpeedMmPerS, th_v, g_moveAccelMmPerS2,
+                          g_moveDecelMmPerS2, th_a, th_d);
+  if (result != Gantry::GantryError::OK) {
+    ESP_LOGE(TAG, "ERROR: test_cycle %s move failed: %s", name,
+             gantryErrorName(result));
+    return false;
+  }
+  vTaskDelay(pdMS_TO_TICKS(50));
+  const bool theta_need =
+      cfg->gantry->hasThetaAxis() && fabsf(cur.theta - theta_deg) > 0.5f;
+  if (!cfg->gantry->isBusy() && (n_live > 0 || theta_need)) {
+    const Gantry::JointConfig after = cfg->gantry->getCurrentJointConfig();
+    const bool xz_miss = fabsf(after.x - x_mm) > kPoseEpsMm ||
+                         fabsf(after.z - z_mm) > kPoseEpsMm;
+    const bool th_miss =
+        theta_need && fabsf(after.theta - theta_deg) > kPoseEpsDeg;
+    if (xz_miss || th_miss) {
+      ESP_LOGE(TAG, "ERROR: test_cycle %s motion did not start", name);
+      return false;
+    }
+  }
+  if (!testCycleWaitIdle(cfg, Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS)) {
+    return false;
+  }
+  if (cfg->gantry->isAlarmActive()) {
+    ESP_LOGE(TAG, "ERROR: test_cycle %s alarm after move", name);
+    return false;
+  }
+  return testCyclePoseNear(cfg, x_mm, z_mm, kPoseEpsMm,
+                           cfg->gantry->hasThetaAxis(), theta_deg, kPoseEpsDeg);
+}
+
+bool testCycleThetaCapacityLegs(const GantryTestConsoleConfig *cfg, float x_mm,
+                                float z_mm) {
+  if (!cfg->gantry->hasThetaAxis()) {
+    ESP_LOGI(TAG, "[TEST_CYCLE] skip G-I: no theta axis");
+    return true;
+  }
+  const Gantry::JointLimits lim = cfg->gantry->getJointLimits();
+  const uint32_t th_v = maxThetaSpeedDegPerS();
+  const uint32_t th_a = maxThetaAccelDegPerS2();
+  const uint32_t th_d = maxThetaDecelDegPerS2();
+  ESP_LOGI(TAG,
+           "[TEST_CYCLE] theta capacity G-I at (%.1f, %.1f): thetalim "
+           "%.1f .. %.1f deg (hard envelope %.1f .. %.1f) at v=%lu deg/s "
+           "a=%lu d=%lu deg/s2",
+           (double)x_mm, (double)z_mm, (double)lim.theta_min,
+           (double)lim.theta_max, (double)AXIS_THETA_HARD_LIMIT_MIN_DEG,
+           (double)AXIS_THETA_HARD_LIMIT_MAX_DEG, (unsigned long)th_v,
+           (unsigned long)th_a, (unsigned long)th_d);
+  return testCycleMoveLeg(cfg, "G", x_mm, z_mm, x_mm, z_mm, lim.theta_min, 0,
+                          th_v, th_a, th_d) &&
+         testCycleMoveLeg(cfg, "H", x_mm, z_mm, x_mm, z_mm, lim.theta_max, 0,
+                          th_v, th_a, th_d) &&
+         testCycleMoveLeg(cfg, "I", x_mm, z_mm, x_mm, z_mm, 0.0f, 0, th_v, th_a,
+                          th_d);
+}
+
+void testCycleTask(void *param) {
+  auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
+  bool pass = false;
+
+  if (cfg == nullptr || cfg->gantry == nullptr) {
+    ESP_LOGE(TAG, "ERROR: test_cycle FAIL: gantry not initialized");
+    g_testCycleInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  ESP_LOGI(TAG,
+           "[TEST_CYCLE] start: enable, EIP bring-up (home+cal), path legs "
+           "A-F at live speed/accel/decel, then theta capacity G-I");
+
+  do {
+    cfg->gantry->enable();
+    if (!testCycleWaitMs(cfg, 2000)) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: aborted during servo arm");
+      break;
+    }
+    // Class 1 may not have been up on the first ServoOn edge (same as console
+    // enable). Re-issue after a settle so Active can latch.
+    cfg->gantry->enable();
+    if (!testCycleWaitMs(cfg, 10000)) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: aborted during servo arm");
+      break;
+    }
+    if (!cfg->gantry->isEnabled()) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: motors not enabled");
+      break;
+    }
+    if (cfg->gantry->isAlarmActive()) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: alarm after enable");
+      break;
+    }
+
+    ESP_LOGI(TAG, "[TEST_CYCLE] EIP bring-up (home + calibrate)");
+    if (!runEipBringUpSequence(cfg)) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: bring-up (home/cal) failed");
+      break;
+    }
+    if (!testCyclePoseNear(cfg, GANTRY_CAL_X_PARK_MM,
+                           cfg->gantry->traverseClearanceZMm(), 5.0f, false,
+                           0.0f, 1.0f)) {
+      ESP_LOGE(TAG,
+               "ERROR: test_cycle FAIL: not at X park / SAFE_Z after bring-up");
+      break;
+    }
+
+    ESP_LOGI(TAG,
+             "[TEST_CYCLE] path profile: speed=%lu mm/s accel=%lu mm/s2 "
+             "decel=%lu mm/s2 (console speed/accel; next leg picks up live "
+             "changes)",
+             (unsigned long)g_moveSpeedMmPerS,
+             (unsigned long)g_moveAccelMmPerS2,
+             (unsigned long)g_moveDecelMmPerS2);
+
+    // Bench legs from post-bring-up park (X=35, Z=SAFE_Z): in-band dual, Z-only
+    // descend, combined retract (X deferred), outbound 2-seg, both-above 3-seg,
+    // combined retract (theta held at 0). Then G-I: theta-only at (0,0) to
+    // live thetalim min/max (firmware kinematic envelope) and back to 0, at
+    // AXIS_THETA max speed/accel. Theta is SAFE_Z-interlocked; (0,0) is in-band.
+    const float park_x = GANTRY_CAL_X_PARK_MM;
+    const float park_z = cfg->gantry->traverseClearanceZMm();
+    if (!testCycleMoveLeg(cfg, "A", park_x, park_z, 220.0f, 8.0f, 0.0f, 1, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "B", 220.0f, 8.0f, 220.0f, 130.0f, 0.0f, 1, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "C", 220.0f, 130.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "D", 0.0f, 0.0f, 350.0f, 130.0f, 0.0f, 2, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "E", 350.0f, 130.0f, 80.0f, 110.0f, 0.0f, 3, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "F", 80.0f, 110.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0,
+                          0) ||
+        !testCycleThetaCapacityLegs(cfg, 0.0f, 0.0f)) {
+      break;
+    }
+
+    pass = true;
+    ESP_LOGI(TAG, "OK test_cycle PASS");
+  } while (false);
+
+  if (!pass) {
+    if (cfg->gantry->isAbortRequested()) {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL: aborted");
+    } else {
+      ESP_LOGE(TAG, "ERROR: test_cycle FAIL");
+    }
+  }
+  g_testCycleInProgress = false;
+  vTaskDelete(nullptr);
+}
+
+float pickThetaPathDeltaDeg(const Gantry::JointLimits &lim) {
+  float d = (lim.theta_min < 0.0f) ? (0.5f * lim.theta_min)
+                                   : (0.5f * lim.theta_max);
+  if (fabsf(d) < 5.0f) {
+    d = (fabsf(lim.theta_min) >= fabsf(lim.theta_max)) ? lim.theta_min
+                                                       : lim.theta_max;
+  }
+  if (d < lim.theta_min) {
+    d = lim.theta_min;
+  }
+  if (d > lim.theta_max) {
+    d = lim.theta_max;
+  }
+  return d;
+}
+
+void testThetaPathTask(void *param) {
+  auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
+  bool pass = false;
+
+  if (cfg == nullptr || cfg->gantry == nullptr) {
+    ESP_LOGE(TAG, "ERROR: test_theta_path FAIL: gantry not initialized");
+    g_testCycleInProgress = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  ESP_LOGI(TAG,
+           "[TEST_THETA_PATH] combined in-band X+Z+theta (25-75 window); "
+           "dtheta from live thetalim");
+
+  do {
+    if (!cfg->gantry->isEnabled()) {
+      ESP_LOGE(TAG, "ERROR: test_theta_path FAIL: enable and bring-up first");
+      break;
+    }
+    if (cfg->gantry->isAlarmActive()) {
+      ESP_LOGE(TAG, "ERROR: test_theta_path FAIL: alarm active");
+      break;
+    }
+    if (!cfg->gantry->hasThetaAxis()) {
+      ESP_LOGE(TAG, "ERROR: test_theta_path FAIL: no theta axis");
+      break;
+    }
+
+    const Gantry::JointConfig cur0 = cfg->gantry->getCurrentJointConfig();
+    if (fabsf(cur0.x) > 1.5f || fabsf(cur0.z) > 1.5f) {
+      ESP_LOGI(TAG, "[TEST_THETA_PATH] retract to (0,0) first");
+      if (!testCycleMoveLeg(cfg, "park", cur0.x, cur0.z, 0.0f, 0.0f, 0.0f, -1,
+                            0, 0, 0)) {
+        break;
+      }
+    }
+
+    const Gantry::JointLimits lim = cfg->gantry->getJointLimits();
+    const float dtheta = pickThetaPathDeltaDeg(lim);
+    ESP_LOGI(TAG,
+             "[TEST_THETA_PATH] J: (220, 8, %.1f deg) from (0,0) thetalim "
+             "%.1f .. %.1f",
+             (double)dtheta, (double)lim.theta_min, (double)lim.theta_max);
+
+    if (!testCycleMoveLeg(cfg, "J", 0.0f, 0.0f, 220.0f, 8.0f, dtheta, 1, 0, 0,
+                          0) ||
+        !testCycleMoveLeg(cfg, "K", 220.0f, 8.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0,
+                          0)) {
+      break;
+    }
+
+    pass = true;
+    ESP_LOGI(TAG, "OK test_theta_path PASS");
+  } while (false);
+
+  if (!pass) {
+    if (cfg->gantry->isAbortRequested()) {
+      ESP_LOGE(TAG, "ERROR: test_theta_path FAIL: aborted");
+    } else {
+      ESP_LOGE(TAG, "ERROR: test_theta_path FAIL");
+    }
+  }
+  g_testCycleInProgress = false;
+  vTaskDelete(nullptr);
 }
 
 void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
@@ -1177,8 +1670,24 @@ void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
       runHomeZSequence(cfg);
       break;
     case AxisToken::THETA:
-      cfg->gantry->homeTheta();
-      ESP_LOGI(TAG, "OK Theta home accepted (stub - not yet wired)");
+      if (!cfg->gantry->hasThetaAxis()) {
+        ESP_LOGE(TAG, "ERROR: Theta axis not compiled in (CONFIG_EIP_AXIS_THETA)");
+        return;
+      }
+      if (!cfg->gantry->isEnabled()) {
+        ESP_LOGE(TAG, "ERROR: Motors not enabled");
+        return;
+      }
+      if (cfg->gantry->homeTheta()) {
+        g_homeThetaThisSession = true;
+        ESP_LOGI(TAG, "OK Theta origin captured (HIPERFACE; no X31). %s",
+                 cfg->gantry->isThetaDriveOriginAligned()
+                     ? "ALIGNED: joint = drive abs"
+                     : "OFFSET: thetalim shrunk to remaining drive travel; "
+                       "C0300 at this pose then 'home t' for full envelope");
+      } else {
+        ESP_LOGE(TAG, "ERROR: Theta home failed (enable, Class 1 on CIP .23, clear alarm)");
+      }
       break;
   }
 }
@@ -1257,8 +1766,33 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
       break;
     }
     case AxisToken::THETA:
-      cfg->gantry->calibrateTheta();
-      ESP_LOGI(TAG, "OK Theta calibrate accepted (stub - not yet wired)");
+      if (!cfg->gantry->hasThetaAxis()) {
+        ESP_LOGE(TAG, "ERROR: Theta axis not compiled in (CONFIG_EIP_AXIS_THETA)");
+        return;
+      }
+      if (!g_homeThetaThisSession) {
+        ESP_LOGE(TAG, "ERROR: Run 'home t' first after startup");
+        return;
+      }
+      if (!cfg->gantry->isEnabled()) {
+        ESP_LOGE(TAG, "ERROR: Motors not enabled");
+        return;
+      }
+      {
+        const int span = cfg->gantry->calibrateTheta();
+        if (span > 0) {
+          g_calibratedThetaThisSession = true;
+          ESP_LOGI(TAG,
+                   "OK Theta calibrated: envelope %.1f .. %.1f deg (span %d); "
+                   "drive_abs=%.3f aligned=%d",
+                   (double)cfg->gantry->getJointLimits().theta_min,
+                   (double)cfg->gantry->getJointLimits().theta_max, span,
+                   (double)cfg->gantry->getThetaDriveAbsDeg(),
+                   cfg->gantry->isThetaDriveOriginAligned() ? 1 : 0);
+        } else {
+          ESP_LOGE(TAG, "ERROR: Theta calibrate failed");
+        }
+      }
       break;
   }
 }
@@ -1375,6 +1909,25 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 
   if (strcmp(cmdLower, "help") == 0 || strcmp(cmdLower, "?") == 0) {
     gantryTestPrintHelp();
+  } else if (g_testCycleInProgress &&
+             strcmp(cmdLower, "stop") != 0 &&
+             strcmp(cmdLower, "status") != 0 &&
+             strcmp(cmdLower, "faults") != 0 &&
+             strcmp(cmdLower, "alarms") != 0 &&
+             strcmp(cmdLower, "eiptiming") != 0 &&
+             strcmp(cmdLower, "limits") != 0 &&
+             strcmp(cmdLower, "puuinfo") != 0 &&
+             strncmp(cmdLower, "puucal", 6) != 0 &&
+             strncmp(cmdLower, "puu ", 4) != 0 &&
+             strncmp(cmdLower, "thetalim", 8) != 0 &&
+             strncmp(cmdLower, "speed", 5) != 0 &&
+             strncmp(cmdLower, "accel", 5) != 0 &&
+             strncmp(cmdLower, "rangelimit", 10) != 0 &&
+             strncmp(cmdLower, "livepos", 7) != 0 &&
+             strncmp(cmdLower, "axislog", 7) != 0) {
+    ESP_LOGE(TAG,
+             "ERROR: test_cycle/test_theta_path running — 'stop' to abort, "
+             "'status' to monitor");
 #if MCP_DEBUG_CMDS
   } else if (strncmp(cmdLower, "mcp_pin_mode", 12) == 0) {
     runMcpPinModeCommand(cmd);
@@ -1405,11 +1958,27 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     } else {
       ESP_LOGI(TAG, "Z: (no EIP summary)");
     }
+    char tSum[192] = {};
+    if (cfg->gantry->hasThetaAxis()) {
+      if (cfg->gantry->getThetaDriveAlarmSummary(tSum, sizeof(tSum))) {
+        ESP_LOGI(TAG, "T: %s", tSum[0] ? tSum : "clear");
+      } else {
+        ESP_LOGI(TAG, "T: %s", tSum[0] ? tSum : "(no T->O)");
+      }
+      if (!cfg->gantry->hasThetaLiveFeedback()) {
+        ESP_LOGW(TAG, "T: Class 1 down — cyclic C0500 cannot reach the drive; "
+                      "use 'py tools/hcs01_eng.py c0500'");
+      }
+    }
     cfg->gantry->logDriveAlarmSummaries();
   } else if (strcmp(cmdLower, "puuinfo") == 0) {
     printPuuInfo(cfg->gantry);
   } else if (strncmp(cmdLower, "puucal", 6) == 0) {
     runPuuCalCommand(cfg->gantry, cmd);
+  } else if (strncmp(cmdLower, "puu ", 4) == 0) {
+    runPuuSetCommand(cfg->gantry, cmd);
+  } else if (strncmp(cmdLower, "thetalim", 8) == 0) {
+    runThetaLimCommand(cfg->gantry, cmd);
   } else if (strcmp(cmdLower, "limits") == 0) {
     printLimits(cfg);
   } else if (strcmp(cmdLower, "pins") == 0) {
@@ -1427,24 +1996,69 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   } else if (strncmp(cmdLower, "home", 4) == 0 &&
              (cmdLower[4] == '\0' || cmdLower[4] == ' ' || cmdLower[4] == '\t')) {
     dispatchPerAxisCommand(cfg, cmdLower, "home", runHomeForAxis);
+  } else if (strcmp(cmdLower, "test_cycle") == 0) {
+    if (g_testCycleInProgress || g_calibrationInProgress ||
+        cfg->gantry->isBusy()) {
+      ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before test_cycle");
+      return;
+    }
+    if (!cfg->gantry->driveManagedLimitsEnabled()) {
+      ESP_LOGE(TAG, "ERROR: test_cycle requires EIP drive-managed limits");
+      return;
+    }
+    g_testCycleInProgress = true;
+    BaseType_t created = xTaskCreatePinnedToCore(
+        testCycleTask, "TestCycle", 8192, (void *)cfg, 2, nullptr,
+        CONSOLE_TASK_CORE);
+    if (created != pdPASS) {
+      g_testCycleInProgress = false;
+      ESP_LOGE(TAG, "ERROR: test_cycle task create failed");
+    } else {
+      ESP_LOGI(TAG,
+               "OK test_cycle started (use 'stop' to abort, 'status' to monitor)");
+    }
+  } else if (strcmp(cmdLower, "test_theta_path") == 0) {
+    if (g_testCycleInProgress || g_calibrationInProgress ||
+        cfg->gantry->isBusy()) {
+      ESP_LOGE(TAG, "ERROR: Gantry busy — finish or 'stop' before test_theta_path");
+      return;
+    }
+    g_testCycleInProgress = true;
+    BaseType_t created = xTaskCreatePinnedToCore(
+        testThetaPathTask, "TestThetaPath", 8192, (void *)cfg, 2, nullptr,
+        CONSOLE_TASK_CORE);
+    if (created != pdPASS) {
+      g_testCycleInProgress = false;
+      ESP_LOGE(TAG, "ERROR: test_theta_path task create failed");
+    } else {
+      ESP_LOGI(TAG,
+               "OK test_theta_path started (use 'stop' to abort, 'status' to "
+               "monitor)");
+    }
   } else if (strncmp(cmdLower, "calibrate", 9) == 0 &&
              (cmdLower[9] == '\0' || cmdLower[9] == ' ' || cmdLower[9] == '\t')) {
     dispatchPerAxisCommand(cfg, cmdLower, "calibrate", runCalibrateForAxis);
   } else if (strncmp(cmdLower, "speed", 5) == 0) {
-    int speedMm = -1;
-    int speedDeg = -1;
-    int parsed = sscanf(cmd, "speed %d %d", &speedMm, &speedDeg);
-    if (parsed < 1 || speedMm <= 0) {
+    const GantryConsole::SpeedParse parsed = GantryConsole::parseSpeedCommand(cmdLower);
+    if (!parsed.ok) {
       ESP_LOGE(TAG, "Usage: speed <mm_per_s> [deg_per_s]");
       return;
     }
-    const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)speedMm);
+    const uint32_t requestedSpeedMm = (uint32_t)convertSelectedToMm((float)parsed.speed_mm);
     const uint32_t clampedSpeedMm =
         applyRangeLimitU32(requestedSpeedMm, kMinSpeedMmPerS, maxLinearSpeedMmPerS(),
                            g_motionProfileRangeLimitEnabled);
     g_moveSpeedMmPerS = clampedSpeedMm;
-    if (parsed >= 2 && speedDeg > 0) {
-      g_moveSpeedDegPerS = (uint32_t)speedDeg;
+    if (parsed.has_deg) {
+      const uint32_t requestedDeg = (uint32_t)parsed.speed_deg;
+      const uint32_t clampedDeg =
+          applyRangeLimitU32(requestedDeg, 1u, maxThetaSpeedDegPerS(),
+                             g_motionProfileRangeLimitEnabled);
+      g_moveSpeedDegPerS = clampedDeg;
+      if (g_motionProfileRangeLimitEnabled && clampedDeg != requestedDeg) {
+        ESP_LOGW(TAG, "Theta speed clamped: requested=%lu deg/s -> applied=%lu deg/s",
+                 (unsigned long)requestedDeg, (unsigned long)clampedDeg);
+      }
     }
     if (g_motionProfileRangeLimitEnabled && clampedSpeedMm != requestedSpeedMm) {
       ESP_LOGW(TAG, "Speed clamped: requested=%.3f %s/s -> applied=%.3f %s/s",
@@ -1455,20 +2069,19 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
              convertMmToSelected((float)g_moveSpeedMmPerS), getLinearUnitLabel(),
              (unsigned long)g_moveSpeedDegPerS);
   } else if (strncmp(cmdLower, "accel", 5) == 0) {
-    int accel = -1;
-    int decel = -1;
-    int parsed = sscanf(cmd, "accel %d %d", &accel, &decel);
-    if (parsed < 1 || accel <= 0) {
-      ESP_LOGE(TAG, "Usage: accel <mm_per_s2> [decel_mm_per_s2] (values must be > 0)");
+    const GantryConsole::AccelParse parsed = GantryConsole::parseAccelCommand(cmdLower);
+    if (!parsed.ok) {
+      ESP_LOGE(TAG,
+               "Usage: accel <mm_per_s2> [decel_mm] [deg_per_s2] [decel_deg] (values must be > 0)");
       return;
     }
-    if (parsed >= 2 && decel <= 0) {
-      ESP_LOGE(TAG, "Decel must be > 0");
-      return;
-    }
+    const int accel = parsed.accel;
+    const int decel = parsed.decel;
+    const int accelDeg = parsed.accel_deg;
+    const int decelDeg = parsed.decel_deg;
     const uint32_t requestedAccel = (uint32_t)convertSelectedToMm((float)accel);
     const uint32_t requestedDecel =
-        (parsed >= 2 && decel > 0) ? (uint32_t)convertSelectedToMm((float)decel)
+        (parsed.n >= 2 && decel > 0) ? (uint32_t)convertSelectedToMm((float)decel)
                                    : (uint32_t)convertSelectedToMm((float)accel);
     const uint32_t clampedAccel =
         applyRangeLimitU32(requestedAccel, kMinAccelMmPerS2, maxLinearAccelMmPerS2(),
@@ -1478,10 +2091,25 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                            g_motionProfileRangeLimitEnabled);
 
     g_moveAccelMmPerS2 = clampedAccel;
-    if (parsed >= 2 && decel >= 0) {
-      g_moveDecelMmPerS2 = clampedDecel;
-    } else {
-      g_moveDecelMmPerS2 = clampedAccel;
+    g_moveDecelMmPerS2 = (parsed.n >= 2 && decel >= 0) ? clampedDecel : clampedAccel;
+    if (parsed.n >= 3) {
+      const uint32_t reqA = (uint32_t)accelDeg;
+      const uint32_t reqD =
+          (parsed.n >= 4 && decelDeg > 0) ? (uint32_t)decelDeg : reqA;
+      const uint32_t clA =
+          applyRangeLimitU32(reqA, kMinAccelDegPerS2, maxThetaAccelDegPerS2(),
+                             g_motionProfileRangeLimitEnabled);
+      const uint32_t clD =
+          applyRangeLimitU32(reqD, kMinAccelDegPerS2, maxThetaAccelDegPerS2(),
+                             g_motionProfileRangeLimitEnabled);
+      g_moveAccelDegPerS2 = clA;
+      g_moveDecelDegPerS2 = clD;
+      if (g_motionProfileRangeLimitEnabled && (clA != reqA || clD != reqD)) {
+        ESP_LOGW(TAG,
+                 "Theta accel/decel clamped: requested=(%lu,%lu) -> applied=(%lu,%lu) deg/s2",
+                 (unsigned long)reqA, (unsigned long)reqD,
+                 (unsigned long)clA, (unsigned long)clD);
+      }
     }
     if (g_motionProfileRangeLimitEnabled &&
         (clampedAccel != requestedAccel || clampedDecel != requestedDecel)) {
@@ -1491,24 +2119,20 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                convertMmToSelected((float)clampedAccel), convertMmToSelected((float)clampedDecel),
                getLinearUnitLabel());
     }
-    ESP_LOGI(TAG, "OK Path accel updated: accel=%.3f %s/s2, decel=%.3f %s/s2 (resultant)",
-             convertMmToSelected((float)g_moveAccelMmPerS2), getLinearUnitLabel(),
-             convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel());
+    ESP_LOGI(TAG,
+             "OK Path accel: %.3f / %.3f %s/s2 (resultant); theta %lu / %lu deg/s2",
+             convertMmToSelected((float)g_moveAccelMmPerS2),
+             convertMmToSelected((float)g_moveDecelMmPerS2), getLinearUnitLabel(),
+             (unsigned long)g_moveAccelDegPerS2,
+             (unsigned long)g_moveDecelDegPerS2);
   } else if (strncmp(cmdLower, "units", 5) == 0) {
     char unitStr[16] = {0};
-    int parsed = sscanf(cmd, "units %15s", unitStr);
+    int parsed = sscanf(cmdLower, "units %15s", unitStr);
     if (parsed < 1) {
       ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
-    for (int i = 0; unitStr[i]; i++) {
-      unitStr[i] = static_cast<char>(tolower(unitStr[i]));
-    }
-    if (strcmp(unitStr, "mm") == 0) {
-      g_linearUnitMode = LinearUnitMode::MM;
-    } else if (strcmp(unitStr, "in") == 0 || strcmp(unitStr, "inch") == 0 || strcmp(unitStr, "inches") == 0) {
-      g_linearUnitMode = LinearUnitMode::INCH;
-    } else {
+    if (!GantryConsole::parseLinearUnit(unitStr, g_linearUnitMode)) {
       ESP_LOGE(TAG, "Usage: units <mm|in>");
       return;
     }
@@ -1525,6 +2149,10 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     ESP_LOGI(TAG, "Configured path ranges: speed=%lu..%lu mm/s, accel/decel=%lu..%lu mm/s2",
              (unsigned long)kMinSpeedMmPerS, (unsigned long)maxLinearSpeedMmPerS(),
              (unsigned long)kMinAccelMmPerS2, (unsigned long)maxLinearAccelMmPerS2());
+    ESP_LOGI(TAG, "Configured theta ranges: speed=1..%lu deg/s, accel/decel=%lu..%lu deg/s2",
+             (unsigned long)maxThetaSpeedDegPerS(),
+             (unsigned long)kMinAccelDegPerS2,
+             (unsigned long)maxThetaAccelDegPerS2());
   } else if (strncmp(cmdLower, "livepos", 7) == 0) {
     int hz = -1;
     int parsed = sscanf(cmd, "livepos %d", &hz);
@@ -1590,15 +2218,15 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                (unsigned long)g_axisLogFrequencyHz, (unsigned long)periodMs);
     }
   } else if (strncmp(cmdLower, "move", 4) == 0) {
-    float x = 0.0f;
-    float z = 0.0f;
-    float theta = 0.0f;
-    int parsed = sscanf(cmd, "move %f %f %f", &x, &z, &theta);
-    if (parsed < 3) {
+    const GantryConsole::MoveParse parsed = GantryConsole::parseMoveCommand(cmdLower);
+    if (!parsed.ok) {
       ESP_LOGE(TAG, "Usage: move <x_%s> <z_%s> <theta_deg>",
                getLinearUnitLabel(), getLinearUnitLabel());
       return;
     }
+    const float x = parsed.x;
+    const float z = parsed.z;
+    const float theta = parsed.theta;
 
     Gantry::JointConfig target;
     target.x = convertSelectedToMm(x);
@@ -1612,6 +2240,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     const Gantry::JointConfig cur = cfg->gantry->getCurrentJointConfig();
     const bool moveX = fabsf(target.x - cur.x) > kHoldEpsMm;
     const bool moveZ = fabsf(target.z - cur.z) > kHoldEpsMm;
+    constexpr float kHoldEpsDeg = 0.1f;
+    const bool moveT = fabsf(target.theta - cur.theta) > kHoldEpsDeg;
     if (moveX && (!g_homeCompletedThisSession || !g_calibratedThisSession)) {
       ESP_LOGE(TAG,
                "ERROR: X move blocked. Run 'home x' then 'calibrate x' "
@@ -1624,21 +2254,35 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                "(or 'calibrate all').");
       return;
     }
-    if (!moveX && !moveZ) {
-      // Theta-only or no-op still needs at least one axis brought up once.
-      if ((!g_homeCompletedThisSession || !g_calibratedThisSession) &&
-          (!g_homeZCompletedThisSession || !g_calibratedZThisSession)) {
-        ESP_LOGE(TAG,
-                 "ERROR: Move blocked. Run home+calibrate for X and/or Z "
-                 "after startup (or 'calibrate all').");
+    if (moveT) {
+      if (!cfg->gantry->hasThetaAxis()) {
+        ESP_LOGE(TAG, "ERROR: Theta move requested but axis not compiled in");
         return;
       }
+      if (!g_homeThetaThisSession || !g_calibratedThetaThisSession) {
+        ESP_LOGE(TAG,
+                 "ERROR: Theta move blocked. Run 'home t' then 'calibrate t' "
+                 "(or 'calibrate all' after theta Class 1 is up).");
+        return;
+      }
+      if (!cfg->gantry->zInTraverseBand()) {
+        ESP_LOGE(TAG,
+                 "ERROR: theta move blocked — Z above SAFE_Z band ceiling "
+                 "(%.1f mm). Theta only while Z is in the retract/traverse "
+                 "band. Linear path still runs.",
+                 (double)cfg->gantry->traverseClearanceZMm());
+      }
+    }
+    if (!moveX && !moveZ && !moveT) {
+      ESP_LOGI(TAG, "Move is a no-op (already at target)");
+      return;
     }
 
     ESP_LOGI(TAG, "Moving to: x=%.3f %s, z=%.3f %s, theta=%.1f deg",
              x, getLinearUnitLabel(), z, getLinearUnitLabel(), theta);
     Gantry::GantryError result = cfg->gantry->moveTo(
-        target, g_moveSpeedMmPerS, g_moveSpeedDegPerS, g_moveAccelMmPerS2, g_moveDecelMmPerS2);
+        target, g_moveSpeedMmPerS, g_moveSpeedDegPerS, g_moveAccelMmPerS2,
+        g_moveDecelMmPerS2, g_moveAccelDegPerS2, g_moveDecelDegPerS2);
     if (result == Gantry::GantryError::OK) {
       vTaskDelay(pdMS_TO_TICKS(20));
       if (cfg->gantry->isBusy()) {
@@ -1648,17 +2292,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Check alarm/limits and commanded-vs-encoder X position in status logs");
       }
     } else {
-      const char *errName = "UNKNOWN";
-      switch (result) {
-        case Gantry::GantryError::NOT_INITIALIZED: errName = "NOT_INITIALIZED"; break;
-        case Gantry::GantryError::MOTOR_NOT_ENABLED: errName = "MOTOR_NOT_ENABLED"; break;
-        case Gantry::GantryError::ALREADY_MOVING: errName = "ALREADY_MOVING"; break;
-        case Gantry::GantryError::INVALID_POSITION: errName = "INVALID_POSITION"; break;
-        case Gantry::GantryError::INVALID_PARAMETER: errName = "INVALID_PARAMETER"; break;
-        case Gantry::GantryError::TIMEOUT: errName = "TIMEOUT (alarm?)"; break;
-        default: break;
-      }
-      ESP_LOGE(TAG, "ERROR: Move failed: %d (%s)", (int)result, errName);
+      ESP_LOGE(TAG, "ERROR: Move failed: %d (%s)", (int)result,
+               gantryErrorName(result));
       if (result == Gantry::GantryError::ALREADY_MOVING) {
         ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
@@ -1684,15 +2319,25 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     if (g_calibrationInProgress) {
       ESP_LOGI(TAG, "Calibration abort requested");
     }
+    if (g_testCycleInProgress) {
+      ESP_LOGI(TAG, "test_cycle abort requested");
+    }
   } else if (strcmp(cmdLower, "alarmreset") == 0 || strcmp(cmdLower, "arst") == 0) {
     if (cfg->gantry->clearAlarm()) {
       ESP_LOGI(TAG, "OK Alarm reset pulse sent (clears Fault/Warning latch e.g. A603)");
       char xSum[192] = {};
       char zSum[192] = {};
+      char tSum[192] = {};
       (void)cfg->gantry->getXDriveAlarmSummary(xSum, sizeof(xSum));
       (void)cfg->gantry->getZDriveAlarmSummary(zSum, sizeof(zSum));
-      ESP_LOGI(TAG, "After reset - X: %s | Z: %s",
-               xSum[0] ? xSum : "?", zSum[0] ? zSum : "?");
+      (void)cfg->gantry->getThetaDriveAlarmSummary(tSum, sizeof(tSum));
+      ESP_LOGI(TAG, "After reset - X: %s | Z: %s | T: %s",
+               xSum[0] ? xSum : "?", zSum[0] ? zSum : "?",
+               tSum[0] ? tSum : (cfg->gantry->hasThetaAxis() ? "?" : "n/a"));
+      if (cfg->gantry->hasThetaAxis() && !cfg->gantry->hasThetaLiveFeedback()) {
+        ESP_LOGW(TAG, "Theta Class 1 down — arst bit5 did not reach HCS01; "
+                      "use 'py tools/hcs01_eng.py c0500'");
+      }
     } else {
       ESP_LOGE(TAG, "ERROR: Alarm reset failed (ARST pin may be disabled)");
     }
@@ -1765,10 +2410,13 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
-  ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix FaultCode/WarningCode (e.g. A603)");
-  ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm scale and positions");
+  ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix and theta HCS01 diag");
+  ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm and theta PUU/deg");
   ESP_LOGI(TAG, "  eiptiming            - dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)");
-  ESP_LOGI(TAG, "  puucal <x|z> c m     - suggest new PUU/mm from commanded vs measured mm");
+  ESP_LOGI(TAG, "  puu t <scale>        - set live theta PUU/deg (re-run home t)");
+  ESP_LOGI(TAG, "  puucal <x|z|t> c m   - suggest (x/z) or apply (t) PUU scale from commanded vs measured");
+  ESP_LOGI(TAG, "  thetalim <min> <max> - set theta software joint limits (deg); "
+                "clamped to captured envelope after home t");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
 #if MCP_DEBUG_CMDS
@@ -1781,21 +2429,26 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gpio_drive g v       - drive direct ESP32 GPIO g to v (0|1)");
   ESP_LOGI(TAG, "  enable               - enable motors");
   ESP_LOGI(TAG, "  disable              - disable motors");
-  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP: seek A014/PL; all=Z then X; "
-                "X needs SAFE_Z band)");
+  ESP_LOGI(TAG, "  home [x|z|t|all]     - home (EIP X/Z: seek A014/PL; t=HIPERFACE "
+                "soft-home; all=Z then X then t; X needs SAFE_Z band)");
   ESP_LOGI(TAG, "  calibrate [x|z|t|all] - calibrate; 'all' = EIP bring-up "
-                "(Z-/A015 -> X home/cal -> X=%.0f -> Z+/A014 -> SAFE_Z)",
+                "(Z-/A015 switch-clear = 0 -> X home/cal -> X=%.0f -> Z+/A014 -> SAFE_Z "
+                "-> theta soft-home)",
            (double)GANTRY_CAL_X_PARK_MM);
   ESP_LOGI(TAG, "  units <mm|in>        - set linear input/output units");
-  ESP_LOGI(TAG, "  speed <v> [deg/s]    - set 2-D path speed (resultant; v in selected linear units/s)");
-  ESP_LOGI(TAG, "  accel <a> [d]        - set 2-D path accel/decel (resultant; >0, selected linear units/s2)");
+  ESP_LOGI(TAG, "  speed <v> [deg/s]    - set 2-D path speed (resultant) and optional theta deg/s");
+  ESP_LOGI(TAG, "  accel <a> [d] [ta] [td] - path accel/decel; optional theta accel/decel (deg/s2)");
   ESP_LOGI(TAG, "  rangelimit <0|1>     - enable/disable path speed+accel/decel range clamps");
   ESP_LOGI(TAG, "  livepos <hz>         - set LIVE POS periodic rate (0=off, default off)");
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
-  ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=up, z=joint datum");
+  ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
+    ESP_LOGI(TAG, "  test_cycle           - enable, EIP bring-up (home+cal), path "
+                "legs A-F, then theta G-I at thetalim min/max");
+  ESP_LOGI(TAG, "  test_theta_path      - combined in-band X+Z+theta (25-75 "
+                "window) using live thetalim-safe dtheta; enable+bring-up first");
   ESP_LOGI(TAG, "  stop                 - stop all motion");
-  ESP_LOGI(TAG, "  alarmreset | arst    - pulse alarm reset output (ARST)");
+  ESP_LOGI(TAG, "  alarmreset | arst    - pulse EIP FaultReset / HCS01 C0500 bit5");
 #if CONFIG_GANTRY_SELFTEST
   ESP_LOGI(TAG, "  selftest             - run basic math/config tests");
 #endif

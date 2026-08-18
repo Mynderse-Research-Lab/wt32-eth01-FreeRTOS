@@ -2,10 +2,11 @@
  * @file main.cpp
  * @brief Gantry control application for WT32-ETH01 with W5500 EtherNet/IP.
  *
- * Coordinate convention (firmware-wide, as of 2026-05):
+ * Coordinate convention (firmware-wide, as of 2026-08):
  *   X = horizontal traverse (across belt), Y = along-belt (no gantry actuator;
- *   conveyor downstream = -Y), Z = vertical (+Z = up). Joint Z=0 is homing datum;
- *   physical bed offset: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (axis_drivetrain_params.h).
+ *   conveyor downstream = +Y), Z = vertical (+Z = down). Joint Z=0 is A015
+ *   retract datum; physical offset: GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+ *   (axis_drivetrain_params.h).
  *
  * FreeRTOS application with:
  * - W5500 SPI Ethernet for EtherNet/IP drive control (X, Z)
@@ -88,8 +89,19 @@ void gantryUpdateTask(void* param) {
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "\n========================================");
     ESP_LOGI(TAG, "WT32-ETH01 Gantry Controller (EIP over W5500)");
-    ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z (Theta unpowered; PC uplink exclusive)");
+#if defined(CONFIG_EIP_AXIS_THETA)
+    ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z -> Theta HCS01 (%s)",
+             CONFIG_EIP_TARGET_IP_THETA);
+#else
+    ESP_LOGI(TAG, "EIP line: WT32 -> X -> Z (Theta gated off; PC uplink exclusive)");
+#endif
     ESP_LOGI(TAG, "========================================\n");
+
+    // Enable WT32 LAN8720 crystal (GPIO16) before other bring-up so REFCLK and
+    // RJ45 LEDs can come up; EthernetLink::start() will re-assert if needed.
+    if (!MqttBridge::EthernetLink::enablePhyOscillator()) {
+        ESP_LOGW(TAG, "LAN8720 crystal enable failed — plant ETH / TCP :2323 may be unavailable");
+    }
 
     // SPI3 shared bus (MCP default client) + MCP23S17 Field/UI + TFT stub
     static display::SpiDisplay spiDisplay;
@@ -190,14 +202,19 @@ extern "C" void app_main(void) {
 #endif
 
 #if defined(CONFIG_EIP_AXIS_THETA)
+    // AXIS_THETA_* accel/decel are placeholders until IndraWorks numbers exist.
+    const double thetaPuuPerDeg = CONFIG_EIP_AXIS_THETA_PUU_PER_DEG;
     auto thetaAxis = std::make_unique<Gantry::GantryEipRotaryAxis>(
         eipImageTheta, Gantry::EipRotaryAxisConfig{
-            (double)AXIS_THETA_ENCODER_PPR / 360.0,
-            (int32_t)AXIS_THETA_MAX_SPEED_DEG_PER_S * (int32_t)(AXIS_THETA_ENCODER_PPR / 360),
-            (int32_t)AXIS_THETA_ACCEL_DEG_PER_S2 * (int32_t)(AXIS_THETA_ENCODER_PPR / 360),
-            (int32_t)AXIS_THETA_DECEL_DEG_PER_S2 * (int32_t)(AXIS_THETA_ENCODER_PPR / 360)
+            thetaPuuPerDeg,
+            static_cast<int32_t>(AXIS_THETA_MAX_SPEED_DEG_PER_S * thetaPuuPerDeg),
+            static_cast<int32_t>(AXIS_THETA_ACCEL_DEG_PER_S2 * thetaPuuPerDeg),
+            static_cast<int32_t>(AXIS_THETA_DECEL_DEG_PER_S2 * thetaPuuPerDeg),
         });
-    ESP_LOGI(TAG, "Theta axis over EIP (HCS01, %.1f PUU/deg)", (double)AXIS_THETA_ENCODER_PPR / 360.0);
+    ESP_LOGI(TAG,
+             "Theta axis over EIP (HCS01 101/102, %.1f PUU/deg), CIP/FKM %s "
+             "(eng HTTP is typically .22)",
+             thetaPuuPerDeg, CONFIG_EIP_TARGET_IP_THETA);
 #else
     auto thetaAxis = std::unique_ptr<Gantry::GantryRotaryAxis>(nullptr);
 #endif

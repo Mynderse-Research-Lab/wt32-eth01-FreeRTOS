@@ -5,12 +5,13 @@
  * Joint-space seek signs (both axes):
  *   Home seeks joint min (negative delta).
  *   Cal seeks joint max (positive delta).
- * Clear-edge creeps reverse direction until the warning clears.
+ * Clear-edge creeps reverse until the limit warning deasserts. Joint 0 is
+ * that sample — the moment the switch is disabled — with no extra offset.
  *
  * Warning map (drive TBIO after assign):
  *   X: A014/PL = joint min, A015/NL = joint max.
- *   Z: A015/NL = joint min (−Z), A014/PL = joint max (+Z).
- * SAFE_Z band is from Z− / A015 (bottom); that is geometry, not warning polarity.
+ *   Z: A015/NL = joint min (retract / −Z), A014/PL = joint max (+Z down).
+ * SAFE_Z band is from Z− / A015 (retract); that is geometry, not warning polarity.
  * Z Absolute joint sense is inverted so homeSeek (−joint) moves toward A015.
  */
 #pragma once
@@ -85,7 +86,7 @@ inline SeekOutcome evaluateSeek(bool endWarning, bool busy, bool sawBusy) {
 enum class CreepOutcome : uint8_t {
     kWait,
     kStartMove,
-    kCleared,  // warning gone -> finish home/cal
+    kCleared,  // warning gone = switch disabled → latch joint 0 here
 };
 
 inline CreepOutcome evaluateCreep(bool endWarning, bool busy) {
