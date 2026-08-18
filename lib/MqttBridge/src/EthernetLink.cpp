@@ -17,30 +17,91 @@
 namespace MqttBridge {
 
 static const char* TAG = "EthernetLink";
-// WT32-ETH01 internal LAN8720 (see pinout.csv / docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md).
-static constexpr int ETH_PHY_POWER_GPIO = 16;  // PHY supply enable, not a strap pin
-static constexpr int ETH_PHY_ADDR = -1;  // ESP_ETH_PHY_ADDR_AUTO — let driver probe addresses 0-31
+// WT32-ETH01: GPIO16 gates the LAN8720 external crystal (not a PHY reset line).
+// Vendor / ESPHome use PHY address 1 (strapped on-module).
+static constexpr gpio_num_t ETH_PHY_OSC_GPIO = GPIO_NUM_16;
+// Prefer auto-scan; WT32 modules are usually strapped to address 1.
+static constexpr int32_t ETH_PHY_ADDR = ESP_ETH_PHY_ADDR_AUTO;
+static constexpr uint32_t ETH_PHY_OSC_SETTLE_MS = 1000;
 
-static bool enablePhyPower() {
+static void probeLan8720ViaMdio(esp_eth_mac_t* mac) {
+    if (mac == nullptr || mac->read_phy_reg == nullptr) {
+        return;
+    }
+    // PHYIDR1/PHYIDR2 = regs 2/3. LAN8720 vendor ID is 0x0007 / 0xC0Fx when alive.
+    int found = 0;
+    for (uint32_t addr = 0; addr < 32; ++addr) {
+        uint32_t id1 = 0;
+        uint32_t id2 = 0;
+        if (mac->read_phy_reg(mac, addr, 2, &id1) != ESP_OK) {
+            continue;
+        }
+        if (id1 == 0x0000u || id1 == 0xffffu) {
+            continue;
+        }
+        (void)mac->read_phy_reg(mac, addr, 3, &id2);
+        ESP_LOGI(TAG, "MDIO probe: addr=%lu PHYIDR1=0x%04lx PHYIDR2=0x%04lx",
+                 static_cast<unsigned long>(addr),
+                 static_cast<unsigned long>(id1),
+                 static_cast<unsigned long>(id2));
+        ++found;
+    }
+    if (found == 0) {
+        ESP_LOGW(TAG,
+                 "MDIO probe: no PHY ID at any address — LAN8720 not responding "
+                 "(crystal on GPIO0 / PHY dead / MDC23-MDIO18). GPIO16 high alone is not enough.");
+    }
+}
+
+bool EthernetLink::enablePhyOscillator() {
+    // WT32-ETH01: GPIO16 enables the LAN8720 50 MHz crystal.
+    // On ESP32 + IDF v6, GPIO16 is NOT an RTCIO (rtc_io_num_map[16] == -1).
+    // Do not pass this pin as phy reset_gpio_num — the IDF driver would pulse
+    // it low and kill the crystal during init (power-up timeout).
+
+    // Already driven high (e.g. early app_main call) — do not gpio_reset_pin
+    // (that briefly floats the pad and drops the oscillator).
+    if (gpio_get_level(ETH_PHY_OSC_GPIO) == 1) {
+        (void)gpio_set_direction(ETH_PHY_OSC_GPIO, GPIO_MODE_INPUT_OUTPUT);
+        (void)gpio_set_level(ETH_PHY_OSC_GPIO, 1);
+        return true;
+    }
+
+    gpio_reset_pin(ETH_PHY_OSC_GPIO);
+
     gpio_config_t io = {};
-    io.pin_bit_mask = (1ULL << ETH_PHY_POWER_GPIO);
-    io.mode = GPIO_MODE_OUTPUT;
+    io.pin_bit_mask = (1ULL << ETH_PHY_OSC_GPIO);
+    io.mode = GPIO_MODE_INPUT_OUTPUT;  // allow readback of driven level
     io.pull_up_en = GPIO_PULLUP_DISABLE;
     io.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io.intr_type = GPIO_INTR_DISABLE;
     esp_err_t err = gpio_config(&io);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "PHY power gpio_config failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "PHY osc gpio_config failed: %s", esp_err_to_name(err));
         return false;
     }
-    err = gpio_set_level(static_cast<gpio_num_t>(ETH_PHY_POWER_GPIO), 1);
+    (void)gpio_set_drive_capability(ETH_PHY_OSC_GPIO, GPIO_DRIVE_CAP_3);
+    (void)gpio_set_pull_mode(ETH_PHY_OSC_GPIO, GPIO_FLOATING);
+
+    err = gpio_set_level(ETH_PHY_OSC_GPIO, 1);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "PHY power enable failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "PHY osc gpio_set_level(1) failed: %s", esp_err_to_name(err));
         return false;
     }
-    // LAN8720 needs settle time after rail comes up.
-    vTaskDelay(pdMS_TO_TICKS(200));
-    ESP_LOGI(TAG, "PHY power enabled on GPIO%d", ETH_PHY_POWER_GPIO);
+
+    vTaskDelay(pdMS_TO_TICKS(ETH_PHY_OSC_SETTLE_MS));
+    const int level = gpio_get_level(ETH_PHY_OSC_GPIO);
+    if (level != 1) {
+        ESP_LOGW(TAG,
+                 "PHY osc GPIO%d readback=%d after drive-high — check short/panel "
+                 "on ETH enable; RJ45 LEDs may stay dark",
+                 static_cast<int>(ETH_PHY_OSC_GPIO), level);
+    } else {
+        ESP_LOGI(TAG,
+                 "PHY osc enabled on GPIO%d (settle %lu ms)",
+                 static_cast<int>(ETH_PHY_OSC_GPIO),
+                 static_cast<unsigned long>(ETH_PHY_OSC_SETTLE_MS));
+    }
     return true;
 }
 
@@ -147,7 +208,7 @@ bool EthernetLink::start() {
         return false;
     }
 
-    if (!enablePhyPower()) {
+    if (!enablePhyOscillator()) {
         return false;
     }
 
@@ -161,10 +222,25 @@ bool EthernetLink::start() {
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ETH_PHY_ADDR;
-    // GPIO16 on WT32 is PHY power, not a dedicated reset line.
+    // Crystal enable is handled only by enablePhyOscillator(). Do NOT set
+    // reset_gpio_num=16 — IDF pulses that pin low during hw reset and then
+    // BMCR power-up times out (MDIO sees no live PHY).
     phy_config.reset_gpio_num = -1;
+    phy_config.reset_timeout_ms = 2000;
 
     eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    // Explicit WT32 wiring (matches IDF esp32 default; do not use CLK_OUT on 17 —
+    // GPIO17 is W5500 MOSI).
+    esp32_emac_config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
+    esp32_emac_config.clock_config.rmii.clock_gpio = 0;
+
+    // Extra settle after other bring-up (W5500/SPI) before first MDIO access.
+    vTaskDelay(pdMS_TO_TICKS(200));
+    (void)gpio_set_level(ETH_PHY_OSC_GPIO, 1);
+
+    ESP_LOGI(TAG,
+             "ETH bring-up: reset_gpio=-1 phy_addr=auto osc_gpio=%d level=%d",
+             static_cast<int>(ETH_PHY_OSC_GPIO), gpio_get_level(ETH_PHY_OSC_GPIO));
 
     esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
     esp_eth_phy_t* phy = esp_eth_phy_new_lan87xx(&phy_config);
@@ -178,6 +254,8 @@ bool EthernetLink::start() {
         }
         return false;
     }
+
+    probeLan8720ViaMdio(mac);
 
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     err = esp_eth_driver_install(&eth_config, &eth_handle_);
@@ -228,8 +306,7 @@ bool EthernetLink::start() {
 
     started_ = true;
     link_up_ = false;
-    ESP_LOGI(TAG, "LAN8720 Ethernet started (PHY_ADDR=%d, RMII CLK_IN GPIO0 per sdkconfig)",
-             ETH_PHY_ADDR);
+    ESP_LOGI(TAG, "LAN8720 Ethernet started (phy_addr=auto, RMII CLK_EXT_IN GPIO0)");
     return true;
 }
 

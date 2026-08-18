@@ -15,6 +15,11 @@ public:
     EthernetLink() = default;
     ~EthernetLink();
 
+    // WT32-ETH01: GPIO16 enables the LAN8720 external 50 MHz crystal (REFCLK
+    // into GPIO0). Call early in boot so the oscillator is up before EMAC
+    // MDIO probe; RJ45 link LEDs stay dark while this pin is low.
+    static bool enablePhyOscillator();
+
     bool start();
     bool waitForUp(uint32_t timeout_ms);
     bool isUp() const;
