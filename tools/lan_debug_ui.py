@@ -70,16 +70,17 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("gpio_drive", "gpio_drive <gpio> <0|1>", "drive a direct ESP32 GPIO"),
     ("enable", "enable", "enable motors"),
     ("disable", "disable", "disable motors"),
-    ("home", "home [x|z|t|all]", "home (EIP: -X A014/PL sweep; else soft-home)"),
-    ("calibrate", "calibrate [x|z|t|all]", "calibrate (EIP: +X A015/NL measure; else SCHUNK envelope)"),
+    ("home", "home [x|z|t|all]", "home (EIP: seek A014/PL; all=Z then X; X needs SAFE_Z band)"),
+    ("calibrate", "calibrate [x|z|t|all]", "calibrate; 'all' = EIP bring-up (Z- → X home/cal → Z+ → SAFE_Z)"),
     ("units", "units <mm|in>", "set linear input/output units"),
-    ("speed", "speed <v> [deg_per_s]", "set move speed in selected linear units/s"),
-    ("accel", "accel <a> [decel]", "set accel/decel (>0, selected linear units/s2)"),
-    ("rangelimit", "rangelimit <0|1>", "enable/disable speed+accel/decel range clamps"),
-    ("livepos", "livepos [hz]", "LIVE POS periodic rate (0=off); bare = query"),
-    ("axislog", "axislog [hz]", "per-axis MOVE periodic rate (0=off); bare = query"),
-    ("move", "move <x> <z> <theta>", "move to (x_linear, z_linear, theta_deg); +Z=up"),
+    ("speed", "speed <v> [deg_per_s]", "set 2-D path speed (resultant; v in selected linear units/s)"),
+    ("accel", "accel <a> [decel]", "set 2-D path accel/decel (resultant; >0, selected linear units/s2)"),
+    ("rangelimit", "rangelimit <0|1>", "enable/disable path speed+accel/decel range clamps"),
+    ("livepos", "livepos <hz>", "LIVE POS periodic rate (0=off); hz is required"),
+    ("axislog", "axislog <hz>", "per-axis MOVE periodic rate (0=off); hz is required"),
+    ("move", "move <x> <z> <theta>", "move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract"),
     ("grip", "grip <0|1>", "gripper (0=open, 1=close)"),
+    ("test_cycle", "test_cycle", "enable + EIP bring-up, then path legs A-F at live speed/accel"),
     ("stop", "stop", "stop all motion and disable"),
     ("alarmreset", "alarmreset | arst", "pulse alarm reset (EIP FaultReset bit)"),
     ("selftest", "selftest", "run basic math/config tests (optional build)"),
@@ -191,10 +192,13 @@ class LanDebugApp:
         self.history_idx = 0
         self.records: list[tuple[str, str]] = []  # (severity, text)
 
-        # Session gating mirrors the firmware: move needs home + calibrate since
-        # boot, and `stop` does NOT clear either gate (it only aborts + disables).
+        # Session gating mirrors firmware: X move needs X home+cal; Z-only needs
+        # Z home+cal. UI enables Move if either pair is ready (firmware enforces
+        # per-axis). `stop` does NOT clear gates.
         self.homed = False
         self.calibrated = False
+        self.z_homed = False
+        self.z_calibrated = False
 
         root.title(f"WT32 gantry LAN debug - {host}:{port}")
         root.geometry("1180x820")
@@ -213,6 +217,8 @@ class LanDebugApp:
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.bind("<Escape>", lambda _e: self.cmd_stop())
+        root.bind("<Control-l>", lambda _e: self.clear_log())
+        root.bind("<Control-L>", lambda _e: self.clear_log())
         self.root.after(40, self._drain_events)
 
     # ---------------------------------------------------------------- layout
@@ -236,22 +242,33 @@ class LanDebugApp:
         self.conn_label.pack(side=tk.LEFT, padx=10)
 
     def _build_status_strip(self) -> None:
-        box = ttk.LabelFrame(self.root, text="Live state (parsed from log)", padding=(8, 4))
-        box.pack(fill=tk.X, padx=8, pady=(0, 4))
+        # tk.LabelFrame (not ttk) so Alarm can paint the strip background red.
+        self.status_strip = tk.LabelFrame(
+            self.root, text="Live state (parsed from log)", padx=8, pady=4,
+            bg="#f5f5f5", fg="#333",
+        )
+        self.status_strip.pack(fill=tk.X, padx=8, pady=(0, 4))
         self.state_vars: dict[str, tk.StringVar] = {}
+        self.state_value_labels: dict[str, tk.Label] = {}
         fields = [
             ("X", "x"), ("X enc", "x_enc"), ("Z", "z"), ("Theta", "theta"),
             ("Enabled", "enabled"), ("Busy", "busy"), ("Alarm", "alarm"),
             ("Units", "units"), ("Homed", "homed"), ("Calibrated", "calibrated"),
         ]
         for col, (label, key) in enumerate(fields):
-            cell = ttk.Frame(box)
+            cell = tk.Frame(self.status_strip, bg="#f5f5f5")
             cell.grid(row=0, column=col, padx=6, sticky="w")
-            ttk.Label(cell, text=label, font=("Segoe UI", 8)).pack(anchor="w")
+            tk.Label(cell, text=label, font=("Segoe UI", 8), bg="#f5f5f5", fg="#555").pack(
+                anchor="w"
+            )
             var = tk.StringVar(value="-")
             self.state_vars[key] = var
-            ttk.Label(cell, textvariable=var, font=("Consolas", 10, "bold")).pack(anchor="w")
-            box.columnconfigure(col, weight=1)
+            value = tk.Label(cell, textvariable=var, font=("Consolas", 10, "bold"),
+                             bg="#f5f5f5", fg="#111")
+            value.pack(anchor="w")
+            self.state_value_labels[key] = value
+            self.status_strip.columnconfigure(col, weight=1)
+        self._status_alarm = False
 
     def _build_safety_bar(self) -> None:
         bar = tk.Frame(self.root, padx=8, pady=4)
@@ -296,7 +313,7 @@ class LanDebugApp:
         seq = ttk.LabelFrame(tab, text="Home / calibrate", padding=6)
         seq.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
         ttk.Label(seq, text="Axis").grid(row=0, column=0, sticky="w")
-        self.home_axis = tk.StringVar(value="x")
+        self.home_axis = tk.StringVar(value="all")
         ttk.Combobox(
             seq, textvariable=self.home_axis, values=["x", "z", "t", "all"],
             width=6, state="readonly",
@@ -305,23 +322,43 @@ class LanDebugApp:
         ttk.Button(seq, text="Calibrate", command=self.cmd_calibrate, width=12).grid(
             row=1, column=1, pady=2
         )
+        ttk.Button(seq, text="Bring-up (all)", command=self.cmd_bringup, width=12).grid(
+            row=2, column=0, pady=2
+        )
+        ttk.Button(seq, text="Test cycle", command=self.cmd_test_cycle, width=12).grid(
+            row=2, column=1, pady=2
+        )
         ttk.Label(
-            seq, text="calibrate needs home first;\nmove needs both since boot.",
+            seq,
+            text="Bring-up = calibrate all.\n"
+                 "Seek 100 mm/s, 2000 mm/s².\n"
+                 "Path / test_cycle use Profile.",
             foreground="#555", font=("Segoe UI", 8),
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         mv = ttk.LabelFrame(tab, text="Move (absolute)", padding=6)
         mv.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
         self.move_x = tk.StringVar(value="0")
         self.move_z = tk.StringVar(value="0")
         self.move_t = tk.StringVar(value="0")
-        for col, (label, var) in enumerate(
-            (("X", self.move_x), ("Z", self.move_z), ("Theta", self.move_t))
-        ):
-            ttk.Label(mv, text=label).grid(row=0, column=col, sticky="w")
-            ttk.Spinbox(
-                mv, textvariable=var, from_=-1000.0, to=1000.0, increment=1.0, width=9,
-            ).grid(row=1, column=col, padx=3)
+        self.move_x_label = ttk.Label(mv, text="X (mm)")
+        self.move_z_label = ttk.Label(mv, text="Z (mm, +down)")
+        self.move_t_label = ttk.Label(mv, text="Theta (deg)")
+        self.move_x_label.grid(row=0, column=0, sticky="w")
+        self.move_z_label.grid(row=0, column=1, sticky="w")
+        self.move_t_label.grid(row=0, column=2, sticky="w")
+        # Envelope from EXPECTED_ELECTROMECHANICAL_ASSEMBLY: X ≈ 420–550 mm, Z ≈ 150 mm.
+        self.move_x_spin = ttk.Spinbox(
+            mv, textvariable=self.move_x, from_=0.0, to=550.0, increment=1.0, width=9,
+        )
+        self.move_x_spin.grid(row=1, column=0, padx=3)
+        self.move_z_spin = ttk.Spinbox(
+            mv, textvariable=self.move_z, from_=0.0, to=150.0, increment=1.0, width=9,
+        )
+        self.move_z_spin.grid(row=1, column=1, padx=3)
+        ttk.Spinbox(
+            mv, textvariable=self.move_t, from_=-360.0, to=360.0, increment=1.0, width=9,
+        ).grid(row=1, column=2, padx=3)
         self.btn_move = ttk.Button(mv, text="Move", command=self.cmd_move, width=12)
         self.btn_move.grid(row=2, column=0, columnspan=2, pady=(6, 0))
         self.gate_override = tk.BooleanVar(value=False)
@@ -347,10 +384,7 @@ class LanDebugApp:
         self.units_var = tk.StringVar(value="mm")
         ttk.Radiobutton(un, text="mm", variable=self.units_var, value="mm").pack(anchor="w")
         ttk.Radiobutton(un, text="in", variable=self.units_var, value="in").pack(anchor="w")
-        ttk.Button(
-            un, text="Apply", width=12,
-            command=lambda: self.send(f"units {self.units_var.get()}"),
-        ).pack(pady=4)
+        ttk.Button(un, text="Apply", width=12, command=self.cmd_units).pack(pady=4)
 
         prof = ttk.LabelFrame(tab, text="Speed / accel (selected units)", padding=6)
         prof.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
@@ -375,6 +409,12 @@ class LanDebugApp:
         ttk.Button(prof, text="Query (status)", command=lambda: self.send("status")).grid(
             row=2, column=4, padx=4, pady=(4, 0)
         )
+        ttk.Label(
+            prof,
+            text="Path and test_cycle legs only. Home/cal seek is locked at\n"
+                 "100 mm/s, 2000 mm/s². rangelimit caps accel at 3000 mm/s².",
+            foreground="#555", font=("Segoe UI", 8),
+        ).grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         rl = ttk.LabelFrame(tab, text="Range clamps", padding=6)
         rl.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
@@ -396,9 +436,6 @@ class LanDebugApp:
                 rates, text="Set", width=6,
                 command=lambda c=cmd, v=var: self._send_rate(c, v),
             ).grid(row=row, column=2, padx=2)
-            ttk.Button(
-                rates, text="Query", width=7, command=lambda c=cmd: self.send(c),
-            ).grid(row=row, column=3, padx=2)
 
         for col in range(4):
             tab.columnconfigure(col, weight=1)
@@ -581,6 +618,13 @@ class LanDebugApp:
             return
         self.authed = False
         self.pw_sent_for_prompt = False
+        # New TCP session: firmware session gates are boot-scoped, but this UI
+        # has not observed them yet, so grey Move until home+calibrate (or override).
+        self.homed = False
+        self.calibrated = False
+        self.z_homed = False
+        self.z_calibrated = False
+        self._set_alarm_strip(False)
         try:
             self.client.connect(host, port)
         except OSError as exc:
@@ -591,6 +635,7 @@ class LanDebugApp:
         self.conn_label.configure(foreground="#e65100")
         self._log("sys", f"=== connected to {host}:{port} ===")
         self._set_online(True)
+        self._refresh_move_gate()
 
     def disconnect(self) -> None:
         self.client.close()
@@ -673,6 +718,8 @@ class LanDebugApp:
             return
 
         if text.startswith("OK authenticated"):
+            if "recent IP" in text:
+                self._log("sys", "already authenticated (recent IP)")
             self._mark_authed()
         elif text.startswith("ERROR: bad password"):
             self.pw_sent_for_prompt = False
@@ -684,6 +731,8 @@ class LanDebugApp:
         match = ESP_LINE_RE.match(text)
         if match:
             severity = match.group(1)
+        if severity == "E" or text.startswith("E ("):
+            self._set_alarm_strip(True)
         self._parse_state(text)
         self._log(severity, text)
 
@@ -704,6 +753,7 @@ class LanDebugApp:
             self.state_vars["z"].set(live.group(4))
             self.state_vars["theta"].set(live.group(5))
             self.state_vars["units"].set(live.group(2))
+            self._apply_unit_labels(live.group(2))
             return
 
         for pattern, key in (
@@ -714,6 +764,7 @@ class LanDebugApp:
             if hit:
                 self.state_vars[key].set(f"{hit.group(1)} {hit.group(2)}")
                 self.state_vars["units"].set(hit.group(2))
+                self._apply_unit_labels(hit.group(2))
                 return
 
         simple = [
@@ -728,43 +779,155 @@ class LanDebugApp:
             hit = re.search(pattern, body)
             if hit:
                 self.state_vars[key].set(hit.group(1))
+                if key == "alarm":
+                    self._set_alarm_strip(hit.group(1) == "Yes")
+                if key == "units":
+                    self._apply_unit_labels(hit.group(1))
                 return
 
         if re.search(r"^OK Motors enabled", body):
             self.state_vars["enabled"].set("Yes")
         elif re.search(r"^OK Motors disabled|^OK Stop requested", body):
             self.state_vars["enabled"].set("No")
+            # Firmware `stop` does NOT clear home/calibrate session gates; UI matches.
         else:
             unit = re.match(r"^OK Linear units set to (\w+)", body)
             if unit:
                 self.state_vars["units"].set(unit.group(1))
+                self._apply_unit_labels(unit.group(1))
 
-        # Session gates. Firmware sets homed on any accepted home path and
-        # calibrated on soft-calibrate or a successful measured length.
-        if re.search(r"OK soft-home|OK X drive-managed home accepted|OK X homing started", body):
+        self._sync_profile_from_log(body)
+
+        # Session gates. Firmware sets per-axis home/cal; Move enables if X or Z
+        # pair is ready (Z-only jog before X bring-up). Bring-up / test_cycle PASS
+        # satisfy all four (calibrate all / test_cycle).
+        if re.search(r"OK Bring-up complete|OK test_cycle PASS", body):
+            self._mark_session_xz_ready()
+        if re.search(
+            r"OK soft-home|OK X drive-managed home accepted|OK X homing started",
+            body,
+        ):
             self.homed = True
+            self._refresh_move_gate()
+        if re.search(
+            r"OK Z drive-managed home accepted|OK Z homing started",
+            body,
+        ):
+            self.z_homed = True
             self._refresh_move_gate()
         if re.search(r"OK Calibrated length|OK X soft-calibrate", body):
             self.calibrated = True
             self._refresh_move_gate()
-        if re.search(r"Calibration failed|Calibration aborted", body):
-            self.calibrated = False
+        if re.search(r"OK Z Calibrated length", body):
+            self.z_calibrated = True
+            self._refresh_move_gate()
+        if re.search(r"Calibration failed|Calibration aborted|Z calibration failed|Z calibration aborted", body):
+            if "Z calibration" in body:
+                self.z_calibrated = False
+            else:
+                self.calibrated = False
             self._refresh_move_gate()
         if re.search(r"Run 'home x' first", body):
             self.homed = False
             self._refresh_move_gate()
-        if re.search(r"ERROR: Move blocked", body):
-            self._log("sys", "Move rejected by firmware - run home then calibrate.")
+        if re.search(r"ERROR: (X |Z )?Move blocked|ERROR: Move blocked", body):
+            self._log("sys", "Move rejected by firmware - check home/calibrate for axes that move.")
+
+    def _mark_session_xz_ready(self) -> None:
+        self.homed = True
+        self.calibrated = True
+        self.z_homed = True
+        self.z_calibrated = True
+        self._refresh_move_gate()
+
+    @staticmethod
+    def _numeric_text(raw: str) -> str:
+        try:
+            value = float(raw)
+        except ValueError:
+            return raw
+        if value.is_integer():
+            return str(int(value))
+        return raw
+
+    def _sync_profile_from_log(self, body: str) -> None:
+        """Mirror firmware path speed/accel into the Profile tab spinboxes."""
+        if not hasattr(self, "speed_lin"):
+            return
+        path = re.search(
+            r"2-D Path Profile:\s*speed=([\d.]+)\s*\w+/s,.*accel=([\d.]+)\s*\w+/s2",
+            body,
+        )
+        if path:
+            self.speed_lin.set(self._numeric_text(path.group(1)))
+            self.accel_var.set(self._numeric_text(path.group(2)))
+            return
+        cycle = re.search(
+            r"\[TEST_CYCLE\] path profile:\s*speed=(\d+)\s*mm/s\s*accel=(\d+)\s*mm/s2",
+            body,
+        )
+        if cycle:
+            self.speed_lin.set(cycle.group(1))
+            self.accel_var.set(cycle.group(2))
+            return
+        speed = re.search(r"^OK Path speed updated:\s*([\d.]+)\s*\w+/s", body)
+        if speed:
+            self.speed_lin.set(self._numeric_text(speed.group(1)))
+        accel = re.search(r"^OK Path accel updated:\s*accel=([\d.]+)\s*\w+/s2", body)
+        if accel:
+            self.accel_var.set(self._numeric_text(accel.group(1)))
 
     def _refresh_move_gate(self) -> None:
-        self.state_vars["homed"].set("Yes" if self.homed else "no")
-        self.state_vars["calibrated"].set("Yes" if self.calibrated else "no")
+        x_ok = self.homed and self.calibrated
+        z_ok = self.z_homed and self.z_calibrated
+        self.state_vars["homed"].set("Yes" if (self.homed or self.z_homed) else "no")
+        self.state_vars["calibrated"].set(
+            "Yes" if (self.calibrated or self.z_calibrated) else "no"
+        )
         if not hasattr(self, "btn_move"):
             return
         ready = self.client.connected and (
-            self.gate_override.get() or (self.homed and self.calibrated)
+            self.gate_override.get() or x_ok or z_ok
         )
         self.btn_move.configure(state=tk.NORMAL if ready else tk.DISABLED)
+
+    def _apply_unit_labels(self, unit: str) -> None:
+        """Switch Move spinbox labels/limits when firmware units are mm vs in."""
+        if not hasattr(self, "move_x_label"):
+            return
+        linear = "in" if unit.lower().startswith("in") else "mm"
+        self.units_var.set(linear)
+        self.move_x_label.configure(text=f"X ({linear})")
+        self.move_z_label.configure(text=f"Z ({linear}, +down)")
+        if linear == "in":
+            self.move_x_spin.configure(to=550.0 / 25.4)
+            self.move_z_spin.configure(to=150.0 / 25.4)
+        else:
+            self.move_x_spin.configure(to=550.0)
+            self.move_z_spin.configure(to=150.0)
+
+    def _set_alarm_strip(self, active: bool) -> None:
+        if not hasattr(self, "status_strip"):
+            return
+        if getattr(self, "_status_alarm", None) == active:
+            return
+        self._status_alarm = active
+        bg = "#ffcdd2" if active else "#f5f5f5"
+        fg = "#b71c1c" if active else "#111"
+        self.status_strip.configure(bg=bg)
+        for child in self.status_strip.winfo_children():
+            try:
+                child.configure(bg=bg)
+            except tk.TclError:
+                pass
+            for grand in child.winfo_children():
+                try:
+                    grand.configure(bg=bg)
+                except tk.TclError:
+                    pass
+        alarm_label = self.state_value_labels.get("alarm")
+        if alarm_label is not None:
+            alarm_label.configure(fg=fg, bg=bg)
 
     # ------------------------------------------------------------------- log
 
@@ -880,8 +1043,10 @@ class LanDebugApp:
         axis = self.home_axis.get()
         if self._confirm(
             "Home",
-            f"Home axis '{axis}'?\n\nWith drive endstops this sweeps toward -X until "
-            "A014/PL, then creeps off the switch.",
+            f"Home axis '{axis}'?\n\n"
+            "EIP: seek A014/PL (X min) / A015 (Z retract). all = Z then X; "
+            "X needs the SAFE_Z band. Seek is locked at 100 mm/s, 2000 mm/s²; "
+            "switch-clear creep is 1 mm/s. STOP aborts.",
         ):
             self.send(f"home {axis}")
 
@@ -889,10 +1054,31 @@ class LanDebugApp:
         axis = self.home_axis.get()
         if self._confirm(
             "Calibrate",
-            f"Calibrate axis '{axis}'?\n\nThis measures to A015/NL at +X. Home must "
-            "have completed this session.",
+            f"Calibrate axis '{axis}'?\n\n"
+            "'all' is full EIP bring-up (Z- then X home/cal then Z+ then SAFE_Z). "
+            "Per-axis seeks joint max. Seek is locked at 100 mm/s, 2000 mm/s² "
+            "(not Profile path speed). A single-axis cal still needs home this session.",
         ):
             self.send(f"calibrate {axis}")
+
+    def cmd_bringup(self) -> None:
+        if self._confirm(
+            "Bring-up",
+            "Run 'calibrate all' (EIP bring-up)?\n\n"
+            "Enable first. Sequence: Z home (A015 = 0) → X home/cal → park X → "
+            "Z+ (A014) → SAFE_Z. Seek 100 mm/s / 2000 mm/s². STOP aborts.",
+        ):
+            self.send("calibrate all")
+
+    def cmd_test_cycle(self) -> None:
+        if self._confirm(
+            "Test cycle",
+            "Run test_cycle?\n\n"
+            "Enable + EIP bring-up, then path legs A–F at the live Profile "
+            "speed/accel. Bring-up seek is locked at 100 mm/s / 2000 mm/s². "
+            "STOP aborts. Motors stay enabled on PASS.",
+        ):
+            self.send("test_cycle")
 
     def cmd_move(self) -> None:
         try:
@@ -906,9 +1092,14 @@ class LanDebugApp:
         if self._confirm(
             "Move",
             f"Move to X={x:g} {unit}, Z={z:g} {unit}, Theta={theta:g} deg?\n\n"
-            "Absolute target. +Z is up.",
+            "Absolute target. +Z is down (0 = A015 retract, toward belt).",
         ):
             self.send(f"move {x:g} {z:g} {theta:g}")
+
+    def cmd_units(self) -> None:
+        unit = self.units_var.get()
+        self._apply_unit_labels(unit)
+        self.send(f"units {unit}")
 
     def cmd_speed(self) -> None:
         linear = self.speed_lin.get().strip()
@@ -958,13 +1149,13 @@ class LanDebugApp:
         self.send(f"mcp_pin_mode {pin} {self.mcp_mode.get()}")
 
     def cmd_mcp_reg(self, write: bool) -> None:
-        reg = self._parse_int(self.reg_addr.get(), "register")
+        reg = self._parse_int(self.reg_addr.get(), "register", maximum=0x1F)
         if reg is None:
             return
         if not write:
             self.send(f"mcp_reg r 0x{reg:02X}")
             return
-        value = self._parse_int(self.reg_val.get(), "value")
+        value = self._parse_int(self.reg_val.get(), "value", maximum=0xFF)
         if value is None:
             return
         if self._confirm(
@@ -987,7 +1178,7 @@ class LanDebugApp:
             self.send(f"gpio_drive {gpio} {level}")
 
     @staticmethod
-    def _parse_int(text: str, label: str) -> int | None:
+    def _parse_int(text: str, label: str, maximum: int = 0xFF) -> int | None:
         raw = text.strip()
         if not raw:
             messagebox.showerror("mcp_reg", f"Missing {label}.")
@@ -997,8 +1188,10 @@ class LanDebugApp:
         except ValueError:
             messagebox.showerror("mcp_reg", f"{label} must be hex (0x0A) or decimal.")
             return None
-        if not 0 <= value <= 0xFF:
-            messagebox.showerror("mcp_reg", f"{label} must fit in one byte (0..0xFF).")
+        if not 0 <= value <= maximum:
+            messagebox.showerror(
+                "mcp_reg", f"{label} must be 0..0x{maximum:02X} (got 0x{value:X})."
+            )
             return None
         return value
 

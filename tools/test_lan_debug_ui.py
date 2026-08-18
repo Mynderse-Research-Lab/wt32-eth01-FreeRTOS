@@ -129,7 +129,9 @@ def test_parsing_and_gating() -> None:
 
     app._handle_line("I (11) GT: X Position: 123.456 mm")
     check("status X Position", app.state_vars["x"].get(), "123.456 mm")
-    app._handle_line("I (12) GT: Z Position: 7.500 mm (+Z = up; belt = 0)")
+    app._handle_line(
+        "I (12) GT: Z Position: 7.500 mm (+Z = down / toward belt; 0 = A015 retract)"
+    )
     check("status Z Position", app.state_vars["z"].get(), "7.500 mm")
     app._handle_line("I (13) GT: Motor Enabled: Yes")
     check("status Motor Enabled", app.state_vars["enabled"].get(), "Yes")
@@ -156,6 +158,21 @@ def test_parsing_and_gating() -> None:
     check("calibrated after a measured length", app.calibrated, True)
     check("move enabled after home + calibrate", str(app.btn_move["state"]), "normal")
 
+    app.homed = False
+    app.calibrated = False
+    app.z_homed = False
+    app.z_calibrated = False
+    app._refresh_move_gate()
+    check("move gated after clearing all session flags", str(app.btn_move["state"]), "disabled")
+    app._handle_line(
+        "I (21b) GantryConsole: OK Z homing started (use 'stop' to abort, 'status' to monitor)"
+    )
+    check("z_homed after Z home", app.z_homed, True)
+    check("move still gated with only Z home", str(app.btn_move["state"]), "disabled")
+    app._handle_line("I (21c) GantryConsole: OK Z Calibrated length: 148 mm")
+    check("z_calibrated after Z cal", app.z_calibrated, True)
+    check("move enabled after Z home + calibrate only", str(app.btn_move["state"]), "normal")
+
     app.client._sock = None
     app._refresh_move_gate()
     check("move re-gated when the link drops", str(app.btn_move["state"]), "disabled")
@@ -164,6 +181,9 @@ def test_parsing_and_gating() -> None:
 
     app._handle_line("E (22) X: Calibration failed")
     check("calibrate gate drops on failure", app.calibrated, False)
+    app.z_homed = False
+    app.z_calibrated = False
+    app._refresh_move_gate()
     check("move re-gated after a calibration failure", str(app.btn_move["state"]), "disabled")
 
     app._handle_line(
@@ -174,6 +194,8 @@ def test_parsing_and_gating() -> None:
     app.gate_override.set(True)
     app.homed = False
     app.calibrated = False
+    app.z_homed = False
+    app.z_calibrated = False
     app._refresh_move_gate()
     check("'already homed' override re-enables move", str(app.btn_move["state"]), "normal")
     app.gate_override.set(False)
@@ -191,6 +213,66 @@ def test_parsing_and_gating() -> None:
     check("units command reply parsed", app.state_vars["units"].get(), "mm")
     app._handle_line("I (27) GantryConsole:   units <mm|in>        - set linear input/output units")
     check("help text does not clobber units", app.state_vars["units"].get(), "mm")
+
+    names = [name for name, _usage, _desc in ui.COMMANDS]
+    check("COMMANDS includes test_cycle", "test_cycle" in names, True)
+    move_help = next(desc for name, _usage, desc in ui.COMMANDS if name == "move")
+    check("move catalog is +Z=down", "+Z=down" in move_help, True)
+
+    app.homed = False
+    app.calibrated = False
+    app.z_homed = False
+    app.z_calibrated = False
+    app._refresh_move_gate()
+    app._handle_line(
+        "I (38) GantryConsole: OK test_cycle started (use 'stop' to abort, 'status' to monitor)"
+    )
+    check("test_cycle started does not set session gates", app.homed, False)
+    check("test_cycle started does not set Z home", app.z_homed, False)
+    app._handle_line("E (39) GantryConsole: ERROR: test_cycle FAIL")
+    check("test_cycle FAIL does not invent X home", app.homed, False)
+    check("test_cycle FAIL does not invent X cal", app.calibrated, False)
+
+    app._handle_line(
+        "I (40) GantryConsole: OK Bring-up complete: X stroke=419 mm, Z stroke=149 mm, "
+        "SAFE_Z ceiling=30.0 mm (z_min + 30.0)"
+    )
+    check("Bring-up complete sets X home", app.homed, True)
+    check("Bring-up complete sets X cal", app.calibrated, True)
+    check("Bring-up complete sets Z home", app.z_homed, True)
+    check("Bring-up complete sets Z cal", app.z_calibrated, True)
+    check("move enabled after Bring-up complete", str(app.btn_move["state"]), "normal")
+
+    app.homed = False
+    app.calibrated = False
+    app.z_homed = False
+    app.z_calibrated = False
+    app._refresh_move_gate()
+    app._handle_line("I (41) GantryConsole: OK test_cycle PASS")
+    check("test_cycle PASS sets X home", app.homed, True)
+    check("test_cycle PASS sets Z cal", app.z_calibrated, True)
+    check("move enabled after test_cycle PASS", str(app.btn_move["state"]), "normal")
+
+    app._handle_line(
+        "I (42) GantryConsole: 2-D Path Profile: speed=500.000 mm/s, theta=30 deg/s, "
+        "accel=3000.000 mm/s2, decel=3000.000 mm/s2"
+    )
+    check("status Path Profile speed", app.speed_lin.get(), "500")
+    check("status Path Profile accel", app.accel_var.get(), "3000")
+    app._handle_line(
+        "I (43) GantryConsole: [TEST_CYCLE] path profile: speed=50 mm/s accel=3000 mm/s2 "
+        "decel=3000 mm/s2 (console speed/accel; next leg picks up live changes)"
+    )
+    check("TEST_CYCLE path profile speed", app.speed_lin.get(), "50")
+    app._handle_line(
+        "I (44) GantryConsole: OK Path speed updated: 250.000 mm/s (resultant), theta=30 deg/s"
+    )
+    check("Path speed updated", app.speed_lin.get(), "250")
+    app._handle_line(
+        "I (45) GantryConsole: OK Path accel updated: accel=2000.000 mm/s2, decel=2000.000 mm/s2 "
+        "(resultant)"
+    )
+    check("Path accel updated", app.accel_var.get(), "2000")
 
     app.authed = False
     app._handle_prompt("> ")
