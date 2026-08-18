@@ -2,8 +2,8 @@
  * @file EipClass1TimingStats.h
  * @brief Ring-buffer Class 1 latency samples (host-testable, no ESP-IDF).
  *
- * Captures exchange / O->T send / cycle / cmd-to-StartMotion wall times for
- * the L1+L2+L3 < 500 us go/no-go gate.
+ * Captures exchange / O->T send / T->O drain / cycle / cmd-to-StartMotion wall
+ * times for the L1+L2+L3 < 500 us go/no-go gate.
  */
 
 #ifndef ETHERNET_IP_EIP_CLASS1_TIMING_STATS_H
@@ -31,8 +31,17 @@ class Class1TimingStats {
 
   void recordExchangeUs(uint32_t us);
   void recordOtSendUs(uint32_t us);
+  void recordToDrainUs(uint32_t us);
   void recordCycleUs(uint32_t us);
   void recordCmdToStartUs(uint32_t us);
+
+  // Pacing health: an overrun means xTaskDelayUntil did not block, so the
+  // cycle was not on the RPI grid. Both must stay near zero for a
+  // deterministic cadence.
+  void notePaceOverrun() { ++pace_overrun_; }
+  void notePaceYield() { ++pace_yield_; }
+  uint32_t paceOverrunCount() const { return pace_overrun_; }
+  uint32_t paceYieldCount() const { return pace_yield_; }
 
   // Absolute fast-path: axis notes wall time when StartMotion is published.
   void noteAbsoluteStartMotionPublished(int64_t now_us);
@@ -41,6 +50,7 @@ class Class1TimingStats {
 
   Class1TimingSnapshot exchange() const;
   Class1TimingSnapshot otSend() const;
+  Class1TimingSnapshot toDrain() const;
   Class1TimingSnapshot cycle() const;
   Class1TimingSnapshot cmdToStart() const;
 
@@ -59,9 +69,12 @@ class Class1TimingStats {
 
   Ring exchange_;
   Ring ot_send_;
+  Ring to_drain_;
   Ring cycle_;
   Ring cmd_to_start_;
   uint32_t exchange_count_ = 0;
+  uint32_t pace_overrun_ = 0;
+  uint32_t pace_yield_ = 0;
 
   bool start_pending_ = false;
   int64_t start_published_us_ = 0;

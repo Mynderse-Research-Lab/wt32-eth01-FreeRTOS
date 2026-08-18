@@ -130,6 +130,16 @@ bool EipScanner::forwardOpen() {
   uint16_t to_size = static_cast<uint16_t>(config_.to_assembly_size) +
                      kClass1SeqCountSize;
 
+#ifdef ESP_PLATFORM
+  ESP_LOGI(kTag, "FO sizes O->T=%u T->O=%u asm=%u/%u rpi=%lu inst %u/%u/%u",
+           ot_size, to_size,
+           static_cast<unsigned>(config_.ot_assembly_size),
+           static_cast<unsigned>(config_.to_assembly_size),
+           static_cast<unsigned long>(config_.ot_rpi_us),
+           config_.config_assembly_instance, config_.ot_assembly_instance,
+           config_.to_assembly_instance);
+#endif
+
   open_params_.ot_net_params = makeNetworkConnectionParams(
       ot_size,
       ConnectionType::kPointToPoint, ConnectionPriority::kScheduled,

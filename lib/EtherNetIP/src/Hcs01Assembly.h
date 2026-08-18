@@ -4,7 +4,7 @@
 // and IndraDrive Functions manual.
 // section 4.2 (Functions manual Tab. 4-21/4-22):
 //
-//   Output assembly, instance 101 (O->T): 10 bytes  (command to drive)
+//   Output assembly, instance 101 (O->T): 18 bytes  (command to drive)
 //   Input  assembly, instance 102 (T->O): 14 bytes  (actual from drive)
 //
 // All scalars are little-endian (Intel format). The i32 word-order caveat

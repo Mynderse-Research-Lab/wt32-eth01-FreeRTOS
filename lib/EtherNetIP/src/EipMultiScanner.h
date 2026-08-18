@@ -1,4 +1,5 @@
-// Multi-axis Class 1 scanner: shared UDP 2222, demux T->O by connection ID.
+// Multi-axis Class 1 scanner: T->O on shared UDP 2222 (demux by CID);
+// O->T is one W5500 UDP socket per dest (see EipSocketW5500Udp).
 //
 // Mirrors the PC dual-hold pattern (tools/eip_test.py): one UDP listener,
 // one ForwardOpen per axis, O->T keepalive while opening the peer so the
@@ -28,9 +29,10 @@ struct MultiAxisSlot {
 
 class EipMultiScanner {
  public:
-  static constexpr size_t kMaxAxes = 2;
-  // Cap T->O drains per cycle so a flood cannot stall the Class 1 loop.
-  static constexpr size_t kMaxDrainPerCycle = 8;
+  static constexpr size_t kMaxAxes = 3;
+  // Hard cap so a flood cannot stall Class 1. Cyclic drain also stops once
+  // every connected axis has one T->O this cycle.
+  static constexpr size_t kMaxDrainPerCycle = 16;
 
   EipMultiScanner(ITcpClient** tcp, size_t axis_count, IUdpEndpoint& udp,
                   const MultiAxisSlot* slots);
@@ -50,6 +52,10 @@ class EipMultiScanner {
 
   // Send O->T for every connected axis (no recv). Used as FO keepalive.
   bool sendKeepaliveAll();
+
+  // Drain already-buffered T->O (non-blocking). Call during HoldKA / after FO
+  // so the shared UDP RX cannot overflow before the cyclic loop starts.
+  size_t drainBufferedInputs(size_t max_n = kMaxDrainPerCycle);
 
   // Seed feedback clocks for all connected axes. Call when the Class 1 cyclic
   // loop actually starts — not at ForwardOpen (FO→first-exchange gap is not

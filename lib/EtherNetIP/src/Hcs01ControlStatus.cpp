@@ -48,8 +48,23 @@ Hcs01ControlWord Hcs01ControlWord::decode(uint16_t raw) {
 
 Hcs01ControlWord Hcs01ControlWord::makeDriveEnable() {
   Hcs01ControlWord cw;
+  cw.operating_mode_select = true;
   cw.drive_on = true;
+  cw.drive_enable = true;
   cw.drive_halt = true;  // Drive Start via 0->1 on bit13
+  return cw;
+}
+
+Hcs01ControlWord Hcs01ControlWord::makeDriveHalt() {
+  Hcs01ControlWord cw = makeDriveEnable();
+  cw.drive_halt = false;  // Halt via 1->0 on bit13
+  return cw;
+}
+
+Hcs01ControlWord Hcs01ControlWord::makeDriveOff() {
+  Hcs01ControlWord cw;
+  cw.operating_mode_select = true;
+  cw.drive_enable = true;  // Class 1 active; Drive ON stays 0 (Ab)
   return cw;
 }
 

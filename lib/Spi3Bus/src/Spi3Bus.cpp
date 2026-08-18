@@ -1,10 +1,9 @@
 #include "Spi3Bus.h"
+#include "Spi3BusCritical.h"
 
 #include "gantry_app_constants.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-
-#include <atomic>
 
 namespace spi3 {
 namespace {
@@ -12,11 +11,11 @@ namespace {
 const char* TAG = "Spi3Bus";
 SemaphoreHandle_t g_mutex = nullptr;
 bool g_ready = false;
-std::atomic<int> g_class1_critical{0};
+Class1Critical g_class1;
 
 esp_err_t waitClass1Clear(TickType_t timeout_ticks) {
     const TickType_t start = xTaskGetTickCount();
-    while (g_class1_critical.load(std::memory_order_acquire) > 0) {
+    while (g_class1.active()) {
         if ((xTaskGetTickCount() - start) >= timeout_ticks) {
             ESP_LOGW(TAG, "SPI3 deferred: Class 1 critical timeout");
             return ESP_ERR_TIMEOUT;
@@ -37,7 +36,7 @@ esp_err_t withLocked(const std::function<esp_err_t()>& fn) {
         ESP_LOGE(TAG, "SPI3 mutex timeout");
         return ESP_ERR_TIMEOUT;
     }
-    if (g_class1_critical.load(std::memory_order_acquire) > 0) {
+    if (g_class1.active()) {
         xSemaphoreGive(g_mutex);
         if (waitClass1Clear(pdMS_TO_TICKS(20)) != ESP_OK) {
             return ESP_ERR_TIMEOUT;
@@ -120,20 +119,11 @@ spi_host_device_t host() { return SPI3_HOST; }
 
 SemaphoreHandle_t mutex() { return g_mutex; }
 
-void class1CriticalEnter() {
-    g_class1_critical.fetch_add(1, std::memory_order_acq_rel);
-}
+void class1CriticalEnter() { g_class1.enter(); }
 
-void class1CriticalExit() {
-    int v = g_class1_critical.fetch_sub(1, std::memory_order_acq_rel);
-    if (v <= 0) {
-        g_class1_critical.store(0, std::memory_order_release);
-    }
-}
+void class1CriticalExit() { g_class1.exit(); }
 
-bool class1CriticalActive() {
-    return g_class1_critical.load(std::memory_order_acquire) > 0;
-}
+bool class1CriticalActive() { return g_class1.active(); }
 
 esp_err_t withMcp(const std::function<esp_err_t()>& fn) { return withLocked(fn); }
 

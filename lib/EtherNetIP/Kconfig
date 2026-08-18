@@ -31,7 +31,9 @@ menu "EtherNet/IP originator"
         depends on EIP_SCANNER_ENABLED
         default n
         help
-            HCS01 theta over EtherNet/IP. Deferred until 3-phase bench power.
+            HCS01 theta over EtherNet/IP Class 1 (assemblies 101/102).
+            CIP listens on EIP_TARGET_IP_THETA (FKM MAC), not the
+            engineering HTTP/IndraWorks address.
 
     config EIP_TARGET_IP_X
         string "X-axis drive IP address"
@@ -47,13 +49,23 @@ menu "EtherNet/IP originator"
         help
             IP of the Z Kinetix 5100 (TCP 44818 / UDP 2222).
 
-    config EIP_TARGET_IP
-        string "Target drive IP address (legacy single-axis / theta)"
-        default "192.168.1.20"
-        depends on EIP_SCANNER_ENABLED && (EIP_AXIS_THETA || (!EIP_AXIS_X && !EIP_AXIS_Z))
+    config EIP_TARGET_IP_THETA
+        string "Theta-axis CIP / FKM IP address"
+        default "192.168.1.23"
+        depends on EIP_AXIS_THETA
         help
-            Used when only theta is selected, or when no X/Z axis is enabled
-            (idle scanner). Prefer EIP_TARGET_IP_X / EIP_TARGET_IP_Z.
+            EtherNet/IP (FKM) IP of the HCS01 — TCP 44818 / UDP 2222.
+            Distinct from engineering-over-IP (X24/X25, typically
+            192.168.1.22, MAC …B6). CIP is on the FKM MAC (…B9).
+            Must not collide with X .20 / Z .21 / W5500 .10.
+
+    config EIP_TARGET_IP
+        string "Target drive IP address (legacy idle scanner)"
+        default "192.168.1.20"
+        depends on EIP_SCANNER_ENABLED && !EIP_AXIS_X && !EIP_AXIS_Z && !EIP_AXIS_THETA
+        help
+            Used only when no axis is enabled (idle scanner). Prefer
+            EIP_TARGET_IP_X / EIP_TARGET_IP_Z / EIP_TARGET_IP_THETA.
 
     config EIP_W5500_IP
         string "W5500 source IP address (this device on EIP daisy-chain)"
@@ -111,12 +123,12 @@ menu "EtherNet/IP originator"
 
     config EIP_AXIS_THETA_PUU_PER_DEG
         float "Theta-axis PUU/deg scaling (HCS01)"
-        default 100.0
+        default 10000.0
         depends on EIP_AXIS_THETA
         help
-            Position-units-per-degree for the HCS01 rotary axis drive.
-            Default is a placeholder; bench validation determines the
-            correct value from the IndraWorks position scaling.
+            Position-units-per-degree for HCS01 S-0-0282 / S-0-0051.
+            Live drive uses 0.0001 deg LSB (3600000 increments/rev → 10000).
+            Confirm with puuinfo after a known-degree move.
 
     config EIP_X_RPI_US
         int "X/Z axis RPI (microseconds)"
@@ -132,11 +144,11 @@ menu "EtherNet/IP originator"
 
     config EIP_THETA_RPI_US
         int "Theta axis RPI (microseconds)"
-        default 4000
+        default 2000
         depends on EIP_AXIS_THETA
         help
             Requested packet interval for the HCS01 Class 1 implicit
-            I/O connection, in microseconds.
+            I/O connection, in microseconds. Drive minimum API is 2 ms.
 
     choice EIP_ENDSTOP_SOURCE
         prompt "Endstop limit switch reporting path"

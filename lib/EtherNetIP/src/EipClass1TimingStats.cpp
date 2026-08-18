@@ -58,9 +58,12 @@ Class1TimingSnapshot Class1TimingStats::Ring::snapshot() const {
 void Class1TimingStats::reset() {
   exchange_ = Ring{};
   ot_send_ = Ring{};
+  to_drain_ = Ring{};
   cycle_ = Ring{};
   cmd_to_start_ = Ring{};
   exchange_count_ = 0;
+  pace_overrun_ = 0;
+  pace_yield_ = 0;
   start_pending_ = false;
   start_published_us_ = 0;
 }
@@ -71,6 +74,8 @@ void Class1TimingStats::recordExchangeUs(uint32_t us) {
 }
 
 void Class1TimingStats::recordOtSendUs(uint32_t us) { ot_send_.push(us); }
+
+void Class1TimingStats::recordToDrainUs(uint32_t us) { to_drain_.push(us); }
 
 void Class1TimingStats::recordCycleUs(uint32_t us) { cycle_.push(us); }
 
@@ -102,6 +107,9 @@ Class1TimingSnapshot Class1TimingStats::exchange() const {
 }
 Class1TimingSnapshot Class1TimingStats::otSend() const {
   return ot_send_.snapshot();
+}
+Class1TimingSnapshot Class1TimingStats::toDrain() const {
+  return to_drain_.snapshot();
 }
 Class1TimingSnapshot Class1TimingStats::cycle() const {
   return cycle_.snapshot();

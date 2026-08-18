@@ -39,6 +39,23 @@ inline uint32_t class1RpiFractionUs(uint32_t rpi_us, uint32_t tick_us = 1000) {
   return rpi_us % tick_us;
 }
 
+// Overrun after xTaskDelayUntil (pdFALSE): keep the period grid (DelayUntil
+// already advanced last_wake). Catch up immediately so a 1 ms tick-phase miss
+// does not stretch every cycle by an extra tick. Yield one tick every N
+// consecutive overruns so IDLE can still feed the TWDT if exchange > RPI.
+// yield_every=0 never yields. Caller zeros streak on pdTRUE (on-time).
+enum class Class1OverrunAction : uint8_t { kCatchUp = 0, kYieldTick = 1 };
+
+inline Class1OverrunAction class1OverrunAction(uint32_t& streak,
+                                               uint32_t yield_every = 8) {
+  ++streak;
+  if (yield_every != 0 && streak >= yield_every) {
+    streak = 0;
+    return Class1OverrunAction::kYieldTick;
+  }
+  return Class1OverrunAction::kCatchUp;
+}
+
 // Soft-miss policy: allow a few T->O misses while O->T keeps running before
 // tearing down dual Class 1 (avoids cascading E602 on a single dropped UDP).
 inline bool shouldTeardownAfterInputMisses(uint32_t consecutive_misses,

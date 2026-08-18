@@ -10,6 +10,7 @@
 #include "EipMultiScanner.h"
 #include "EipProcessImage.h"
 #include "EipScanner.h"
+#include "EipScannerPolicy.h"
 #include "EipSocketW5500.h"
 #include "Hcs01Assembly.h"
 #include "W5500.h"
@@ -38,7 +39,6 @@ static constexpr uint32_t kLinkPollMs = 500;
 static constexpr uint32_t kLinkSettleMs = 300;
 static constexpr uint32_t kReconnectIdleMs = 2500;
 static constexpr uint32_t kPostResetSettleMs = 100;
-static constexpr unsigned kMaxChipRecovers = 3;
 static constexpr uint32_t kTimingLogEveryN = 200;
 
 // Last Class 1 RPI used for pacing (granted API or CONFIG fallback).
@@ -69,7 +69,8 @@ struct KeepaliveCtx {
 
 // Tick-aligned Class 1 cadence. xTaskDelayUntil always blocks when on time so
 // IDLE1 can feed the task WDT. Sub-ms RPI fraction (if any) is spun only after
-// that block. On overrun, force a 1-tick sleep and reseed the wake clock.
+// that block. On overrun, catch up without reseeding last_wake; yield one tick
+// every N consecutive overruns (TWDT safety if exchange > RPI).
 void paceClass1RemainderUs(uint32_t rem_us) {
   if (rem_us == 0) return;
   // Fractional top-up only (< 1 FreeRTOS tick). DelayUntil already blocked.
@@ -80,14 +81,19 @@ void paceClass1RemainderUs(uint32_t rem_us) {
 
 void paceClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
   constexpr uint32_t kTickUs = 1000u;
+  static uint32_t overrun_streak = 0;
   const TickType_t period =
       static_cast<TickType_t>(class1PaceTicks(rpi_us, kTickUs));
-  // pdFALSE => deadline already passed; no block happened this cycle.
+  // pdFALSE => deadline already passed; last_wake still advanced by period.
   if (xTaskDelayUntil(&last_wake, period) == pdFALSE) {
-    vTaskDelay(1);
-    last_wake = xTaskGetTickCount();
+    class1TimingStats().notePaceOverrun();
+    if (class1OverrunAction(overrun_streak) == Class1OverrunAction::kYieldTick) {
+      class1TimingStats().notePaceYield();
+      vTaskDelay(1);
+    }
     return;
   }
+  overrun_streak = 0;
   const uint32_t frac = class1RpiFractionUs(rpi_us, kTickUs);
   if (frac != 0) {
     paceClass1RemainderUs(frac);
@@ -131,76 +137,52 @@ void keepaliveTask(void* arg) {
 // that still cannot sustain Class 1, hard-reset the ESP (matches bench recovery).
 void escalateChipRecover(ScannerTaskCtx* ctx, unsigned& recover_streak,
                          uint32_t& backoff_ms) {
-  ++recover_streak;
-  if (recover_streak > kMaxChipRecovers) {
+  if (chipRecoverOnFailure(recover_streak) == ChipRecoverDecision::kRestart) {
     ESP_LOGE(TAG,
              "W5500 recover exhausted (%u) — esp_restart()",
              recover_streak);
     esp_restart();
   }
 
-  if (ctx->chip != nullptr && ctx->chip->recover()) {
-    reliabilityStats().noteChipRecover();
+  const bool ok = ctx->chip != nullptr && ctx->chip->recover();
+  reliabilityStats().noteChipRecover();
+  if (ok) {
     ESP_LOGW(TAG, "W5500 recover #%u OK — settling link", recover_streak);
-    backoff_ms = 1000;
+    backoff_ms = chipRecoverNextBackoffMs(backoff_ms, true);
     vTaskDelay(pdMS_TO_TICKS(kLinkSettleMs + kPostResetSettleMs));
   } else {
-    reliabilityStats().noteChipRecover();
     ESP_LOGW(TAG, "W5500 recover #%u failed — backoff %lu ms", recover_streak,
              static_cast<unsigned long>(backoff_ms));
     vTaskDelay(pdMS_TO_TICKS(backoff_ms));
-    backoff_ms = (backoff_ms < 30000) ? backoff_ms * 2 : 30000;
+    backoff_ms = chipRecoverNextBackoffMs(backoff_ms, false);
   }
 }
 
 ScannerConfig makeKinetixConfig(const char* ip, uint16_t connection_serial,
                                 uint32_t ot_connection_id) {
-  ScannerConfig cfg;
-  cfg.target_ip = ip;
-  cfg.target_ip_host = parseIpv4Host(ip);
-  cfg.drive_family = ScannerConfig::DriveFamily::kKinetix5100;
-  cfg.config_assembly_instance = CONFIG_EIP_CONFIG_ASSEMBLY_INSTANCE;
-  cfg.ot_assembly_instance = 104;
-  cfg.to_assembly_instance = 154;
-  cfg.ot_assembly_size = 40;
-  cfg.to_assembly_size = 52;
-  cfg.ot_rpi_us = CONFIG_EIP_X_RPI_US;
-  cfg.to_rpi_us = CONFIG_EIP_X_RPI_US;
-  cfg.ot_connection_id = ot_connection_id;
-  // Non-zero T->O CID so demux matches sequenced-address IDs in T->O frames
-  // (Kinetix FO reply often echoes this; 0 forces a fragile O->T fallback).
-  cfg.to_connection_id = 0x20000000u | static_cast<uint32_t>(connection_serial);
-  cfg.connection_serial = connection_serial;
-  cfg.originator_vendor_id = CONFIG_EIP_ORIGINATOR_VENDOR_ID;
-  // Generous timeout: FO of the second axis must not starve the first.
-  cfg.connection_timeout_multiplier = 7;
-  cfg.include_run_idle_header = true;
-  cfg.include_run_idle_bit_in_net_params = false;
-  cfg.to_connection_type = ConnectionType::kPointToPoint;
+  KinetixScannerArgs a;
+  a.ip = ip;
+  a.connection_serial = connection_serial;
+  a.ot_connection_id = ot_connection_id;
+  a.config_assembly_instance = CONFIG_EIP_CONFIG_ASSEMBLY_INSTANCE;
+  a.rpi_us = CONFIG_EIP_X_RPI_US;
+  a.originator_vendor_id = CONFIG_EIP_ORIGINATOR_VENDOR_ID;
 #if defined(CONFIG_EIP_TO_POINT_TO_POINT) && !CONFIG_EIP_TO_POINT_TO_POINT
-  cfg.to_connection_type = ConnectionType::kMulticast;
+  a.to_point_to_point = false;
 #endif
-  return cfg;
+  return makeKinetixScannerConfig(a);
 }
 
 #if defined(CONFIG_EIP_AXIS_THETA)
 ScannerConfig makeThetaConfig() {
-  ScannerConfig cfg;
-  cfg.target_ip = CONFIG_EIP_TARGET_IP;
-  cfg.target_ip_host = parseIpv4Host(CONFIG_EIP_TARGET_IP);
-  cfg.drive_family = ScannerConfig::DriveFamily::kHcs01;
-  cfg.config_assembly_instance = CONFIG_EIP_CONFIG_ASSEMBLY_INSTANCE;
-  cfg.ot_assembly_instance = 101;
-  cfg.to_assembly_instance = 102;
-  cfg.ot_assembly_size = sizeof(hcs01::Hcs01PositioningCommand);
-  cfg.to_assembly_size = sizeof(hcs01::Hcs01PositioningActual);
-  cfg.ot_rpi_us = CONFIG_EIP_THETA_RPI_US;
-  cfg.to_rpi_us = CONFIG_EIP_THETA_RPI_US;
-  cfg.originator_vendor_id = CONFIG_EIP_ORIGINATOR_VENDOR_ID;
-  cfg.connection_timeout_multiplier = 7;
-  cfg.include_run_idle_header = true;
-  cfg.include_run_idle_bit_in_net_params = true;
-  return cfg;
+  ThetaScannerArgs a;
+  a.ip = CONFIG_EIP_TARGET_IP_THETA;
+  a.rpi_us = CONFIG_EIP_THETA_RPI_US;
+  a.originator_vendor_id = CONFIG_EIP_ORIGINATOR_VENDOR_ID;
+#if defined(CONFIG_EIP_TO_POINT_TO_POINT) && !CONFIG_EIP_TO_POINT_TO_POINT
+  a.to_point_to_point = false;
+#endif
+  return makeThetaScannerConfig(a);
 }
 
 void singleAxisTask(void* arg) {
@@ -220,9 +202,16 @@ void singleAxisTask(void* arg) {
     if (ctx->image_theta) scanner.setProcessImage(ctx->image_theta);
 
     if (!scanner.connect()) {
-      ESP_LOGW(TAG, "Theta connect failed — chip recover");
+      // Missing/unreachable HCS01 (ARP/TCP) is not a W5500 fault. Soft-retry
+      // so X/Z Class 1 is not yanked by escalateChipRecover / esp_restart.
+      ESP_LOGW(TAG,
+               "Theta connect failed — soft retry (no chip recover); "
+               "check HCS01 CIP IP %s (FKM, not eng .22) / daisy-chain",
+               CONFIG_EIP_TARGET_IP_THETA);
       scanner.disconnect();
-      escalateChipRecover(ctx, recover_streak, backoff_ms);
+      recover_streak = 0;
+      vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+      backoff_ms = (backoff_ms < 15000) ? backoff_ms * 2 : 15000;
       continue;
     }
     recover_streak = 0;
@@ -302,6 +291,13 @@ void multiAxisTask(void* arg) {
   slots[n].image = ctx->image_z;
   ++n;
 #endif
+#if defined(CONFIG_EIP_AXIS_THETA)
+  if (ctx->image_theta != nullptr) {
+    slots[n].config = makeThetaConfig();
+    slots[n].image = ctx->image_theta;
+    ++n;
+  }
+#endif
 
   if (n == 0) {
     ESP_LOGW(TAG, "No X/Z axes enabled; scanner idle");
@@ -309,8 +305,7 @@ void multiAxisTask(void* arg) {
     return;
   }
 
-  ESP_LOGI(TAG, "Multi-axis scanner: %u Kinetix slot(s)",
-           static_cast<unsigned>(n));
+  ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
 
   while (true) {
     while (!ctx->link->isUp()) {
@@ -326,12 +321,13 @@ void multiAxisTask(void* arg) {
 
     EipSocketW5500Tcp tcp0(*ctx->hal);
     EipSocketW5500Tcp tcp1(*ctx->hal);
+    EipSocketW5500Tcp tcp2(*ctx->hal);
     EipSocketW5500Udp udp(*ctx->hal);
-    ITcpClient* tcps[EipMultiScanner::kMaxAxes] = {&tcp0, &tcp1};
+    ITcpClient* tcps[EipMultiScanner::kMaxAxes] = {&tcp0, &tcp1, &tcp2};
 
     EipMultiScanner scanner(tcps, n, udp, slots);
 
-    // Stage connect so keepalive can run during the second ForwardOpen.
+    // Stage connect so keepalive can run during later ForwardOpens.
     bool ok = scanner.openAxis(0);
     if (ok) ok = scanner.bindSharedUdp();
 
@@ -341,12 +337,35 @@ void multiAxisTask(void* arg) {
       ka.run = true;
       xTaskCreatePinnedToCore(keepaliveTask, "EipHoldKA", kKeepaliveStack, &ka,
                               kKeepalivePriority, &ka_handle, kScannerCore);
-      ok = scanner.openAxis(1);
+      for (size_t i = 1; i < n; ++i) {
+        const bool opened = scanner.openAxis(i);
+        if (opened) {
+          continue;
+        }
+        if (slots[i].config.drive_family ==
+            ScannerConfig::DriveFamily::kHcs01) {
+          ESP_LOGW(TAG,
+                   "Theta ForwardOpen failed — X/Z stay up; check HCS01 "
+                   "map/FO sizes");
+          continue;
+        }
+        ok = false;
+        break;
+      }
       ka.run = false;
       vTaskDelay(pdMS_TO_TICKS(20));
       if (ka.failed) {
-        ESP_LOGW(TAG, "HoldKA O->T send failed during second FO");
+        ESP_LOGW(TAG, "HoldKA O->T send failed during peer FO");
         ok = false;
+      }
+    }
+
+    // Prime UDP dest/ARP for every axis and empty RX before cyclic start.
+    if (ok) {
+      for (int prime = 0; prime < 4; ++prime) {
+        (void)scanner.sendKeepaliveAll();
+        (void)scanner.drainBufferedInputs();
+        vTaskDelay(pdMS_TO_TICKS(2));
       }
     }
 
@@ -447,6 +466,7 @@ void multiAxisTask(void* arg) {
 void dumpClass1TimingStats() {
   const Class1TimingSnapshot ex = class1TimingStats().exchange();
   const Class1TimingSnapshot ot = class1TimingStats().otSend();
+  const Class1TimingSnapshot dr = class1TimingStats().toDrain();
   const Class1TimingSnapshot cy = class1TimingStats().cycle();
   const Class1TimingSnapshot cs = class1TimingStats().cmdToStart();
   const uint32_t budget_us = g_class1_budget_rpi_us;
@@ -466,6 +486,12 @@ void dumpClass1TimingStats() {
            static_cast<unsigned long>(ot.p50_us),
            static_cast<unsigned long>(ot.p99_us),
            static_cast<unsigned long>(ot.max_us));
+  ESP_LOGI(TAG, "  drain     n=%lu min/p50/p99/max=%lu/%lu/%lu/%lu us",
+           static_cast<unsigned long>(dr.count),
+           static_cast<unsigned long>(dr.min_us),
+           static_cast<unsigned long>(dr.p50_us),
+           static_cast<unsigned long>(dr.p99_us),
+           static_cast<unsigned long>(dr.max_us));
   ESP_LOGI(TAG, "  cycle     n=%lu min/p50/p99/max=%lu/%lu/%lu/%lu us",
            static_cast<unsigned long>(cy.count),
            static_cast<unsigned long>(cy.min_us),
@@ -478,6 +504,9 @@ void dumpClass1TimingStats() {
            static_cast<unsigned long>(cs.p50_us),
            static_cast<unsigned long>(cs.p99_us),
            static_cast<unsigned long>(cs.max_us));
+  ESP_LOGI(TAG, "  pace      overrun=%lu yield=%lu",
+           static_cast<unsigned long>(class1TimingStats().paceOverrunCount()),
+           static_cast<unsigned long>(class1TimingStats().paceYieldCount()));
   const ReliabilitySnapshot rs = reliabilityStats().snapshot();
   ESP_LOGI(TAG,
            "  reliability soft_miss=%lu sendok_fail=%lu chip_recover=%lu "
@@ -499,18 +528,6 @@ void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
   ctx.image_z = image_z;
   ctx.image_theta = image_theta;
 
-#if defined(CONFIG_EIP_AXIS_THETA)
-  BaseType_t ok_theta =
-      xTaskCreatePinnedToCore(singleAxisTask, "EipScannerT", kScannerStack, &ctx,
-                              kScannerPriority, nullptr, kScannerCore);
-  if (ok_theta != pdPASS) {
-    ESP_LOGE(TAG, "Failed to create EipScanner task for Theta");
-  } else {
-    ESP_LOGI(TAG, "EipScanner task started (theta %s, core %d)",
-             CONFIG_EIP_TARGET_IP, static_cast<int>(kScannerCore));
-  }
-#endif
-
 #if defined(CONFIG_EIP_AXIS_X) || defined(CONFIG_EIP_AXIS_Z)
   BaseType_t ok_multi =
       xTaskCreatePinnedToCore(multiAxisTask, "EipScannerM", kScannerStack, &ctx,
@@ -518,8 +535,18 @@ void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
   if (ok_multi != pdPASS) {
     ESP_LOGE(TAG, "Failed to create EipScanner task for X/Z");
   } else {
-    ESP_LOGI(TAG, "EipScanner task started (X/Z multi, core %d)",
+    ESP_LOGI(TAG, "EipScanner task started (multi, core %d)",
              static_cast<int>(kScannerCore));
+  }
+#elif defined(CONFIG_EIP_AXIS_THETA)
+  BaseType_t ok_theta =
+      xTaskCreatePinnedToCore(singleAxisTask, "EipScannerT", kScannerStack, &ctx,
+                              kScannerPriority, nullptr, kScannerCore);
+  if (ok_theta != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create EipScanner task for Theta");
+  } else {
+    ESP_LOGI(TAG, "EipScanner task started (theta %s, core %d)",
+             CONFIG_EIP_TARGET_IP_THETA, static_cast<int>(kScannerCore));
   }
 #endif
 }

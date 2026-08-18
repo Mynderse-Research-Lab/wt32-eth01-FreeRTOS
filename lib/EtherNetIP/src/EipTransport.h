@@ -72,6 +72,12 @@ class ITcpClient {
   virtual bool isConnected() const = 0;
 };
 
+/// One datagram inside a batch read buffer; data points into that buffer.
+struct UdpDatagramView {
+  const uint8_t* data = nullptr;
+  size_t len = 0;
+};
+
 class IUdpEndpoint {
  public:
   virtual ~IUdpEndpoint() = default;
@@ -82,6 +88,18 @@ class IUdpEndpoint {
   virtual ssize_t sendTo(const uint8_t* data, size_t len, uint32_t dest_ip_host,
                          uint16_t port) = 0;
   virtual ssize_t recvFrom(uint8_t* buf, size_t max_len, uint32_t timeout_ms) = 0;
+  /// Non-blocking: read every queued datagram into buf in one transaction
+  /// burst and describe them in views. Returns the datagram count. The default
+  /// is one recvFrom, which every transport supports.
+  virtual size_t recvBatch(uint8_t* buf, size_t buf_len, UdpDatagramView* views,
+                           size_t max_views) {
+    if (buf == nullptr || views == nullptr || max_views == 0) return 0;
+    const ssize_t n = recvFrom(buf, buf_len, 0);
+    if (n <= 0) return 0;
+    views[0].data = buf;
+    views[0].len = static_cast<size_t>(n);
+    return 1;
+  }
   virtual void close() = 0;
 };
 

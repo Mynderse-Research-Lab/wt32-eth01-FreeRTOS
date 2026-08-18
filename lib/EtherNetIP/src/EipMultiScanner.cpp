@@ -106,6 +106,20 @@ bool EipMultiScanner::forwardOpenAxis(size_t i) {
   uint16_t to_size =
       static_cast<uint16_t>(ax.config.to_assembly_size) + kClass1SeqCountSize;
 
+#ifdef ESP_PLATFORM
+  ESP_LOGI(kTag,
+           "axis%u FO sizes O->T=%u T->O=%u asm=%u/%u rpi=%lu inst %u/%u/%u T->O=%s",
+           static_cast<unsigned>(i), ot_size, to_size,
+           static_cast<unsigned>(ax.config.ot_assembly_size),
+           static_cast<unsigned>(ax.config.to_assembly_size),
+           static_cast<unsigned long>(ax.config.ot_rpi_us),
+           ax.config.config_assembly_instance, ax.config.ot_assembly_instance,
+           ax.config.to_assembly_instance,
+           (ax.config.to_connection_type == ConnectionType::kMulticast)
+               ? "mcast"
+               : "p2p");
+#endif
+
   ax.open_params.ot_net_params = makeNetworkConnectionParams(
       ot_size, ConnectionType::kPointToPoint, ConnectionPriority::kScheduled,
       false, false, ax.config.include_run_idle_bit_in_net_params);
@@ -268,22 +282,105 @@ bool EipMultiScanner::sendAxisOutput(size_t i) {
                                            class1NowUs());
     return true;
   }
+#ifdef ESP_PLATFORM
+  ESP_LOGW(kTag, "axis%u O->T send failed dest=%s (%d of %u)",
+           static_cast<unsigned>(i),
+           ax.config.target_ip ? ax.config.target_ip : "?",
+           static_cast<int>(sent), static_cast<unsigned>(frame.size()));
+#endif
   return false;
 }
 
 bool EipMultiScanner::sendKeepaliveAll() {
   bool any = false;
   for (size_t i = 0; i < axis_count_; ++i) {
-    if (axes_[i].state == AxisState::kConnected) {
-      if (!sendAxisOutput(i)) return false;
-      any = true;
+    if (axes_[i].state != AxisState::kConnected) continue;
+    if (!sendAxisOutput(i)) {
+      if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01) {
+#ifdef ESP_PLATFORM
+        ESP_LOGW(kTag,
+                 "axis%u HCS01 keepalive O->T failed — X/Z keep pumping",
+                 static_cast<unsigned>(i));
+#endif
+        continue;
+      }
+      return false;
     }
+    any = true;
   }
   return any;
 }
 
+size_t EipMultiScanner::drainBufferedInputs(size_t max_n) {
+  if (max_n > kMaxDrainPerCycle) max_n = kMaxDrainPerCycle;
+  // One burst holds every axis' Class 1 CPF (tens of bytes each). Do not put
+  // EipSession::kMaxFrameSize (4 KiB) on the HoldKA stack (4 KiB) — that
+  // overflowed TLSF after theta FO.
+  constexpr size_t kClass1UdpBatchMax = 512;
+  uint8_t buf[kClass1UdpBatchMax];
+  UdpDatagramView views[kMaxDrainPerCycle];
+  size_t applied = 0;
+  size_t need = 0;
+  for (size_t i = 0; i < axis_count_; ++i) {
+    last_got_[i] = false;
+    if (axes_[i].state == AxisState::kConnected) ++need;
+  }
+  size_t drained = 0;
+  bool done = false;
+  while (!done && drained < max_n) {
+    const size_t got =
+        udp_.recvBatch(buf, sizeof(buf), views, max_n - drained);
+    if (got == 0) break;
+
+    for (size_t v = 0; v < got && !done; ++v) {
+      ++drained;
+      const size_t n = views[v].len;
+
+      uint32_t cid = 0;
+      const uint8_t* assy = nullptr;
+      size_t assy_len = 0;
+      if (!parseClass1InputCpfView(views[v].data, n, cid, assy, assy_len,
+                                   false)) {
+        continue;
+      }
+
+      const size_t idx = matchAxisByConnectionId(cid);
+      if (idx >= kMaxAxes) {
+#ifdef ESP_PLATFORM
+        static uint32_t last_unmatched_cid = 0;
+        if (cid != last_unmatched_cid) {
+          last_unmatched_cid = cid;
+          ESP_LOGW(kTag, "T->O unmatched cid=0x%08lX n=%d",
+                   static_cast<unsigned long>(cid), static_cast<int>(n));
+        }
+#endif
+        continue;
+      }
+      if (last_got_[idx]) continue;
+      last_got_[idx] = true;
+#ifdef ESP_PLATFORM
+      if (!axes_[idx].received_to_since_cyclic_) {
+        ESP_LOGI(kTag, "axis%u first T->O assy=%u expect=%u cid=0x%08lX",
+                 static_cast<unsigned>(idx), static_cast<unsigned>(assy_len),
+                 static_cast<unsigned>(axes_[idx].config.to_assembly_size),
+                 static_cast<unsigned long>(cid));
+      }
+#endif
+      (void)applyFeedback(idx, assy, assy_len);
+      ++applied;
+      // One fresh T->O per connected axis is enough this cycle.
+      if (need > 0 && applied >= need) done = true;
+    }
+  }
+  return applied;
+}
+
 bool EipMultiScanner::applyFeedback(size_t i, const uint8_t* assembly,
                                     size_t len) {
+  const size_t expect = axes_[i].config.to_assembly_size;
+  if (expect > 0 && len > expect) {
+    len = expect;
+  }
   if (axes_[i].image != nullptr) {
     axes_[i].image->setFeedback(assembly, len);
     axes_[i].image->setOnline(true);
@@ -320,7 +417,17 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
   for (size_t n = 0; n < axis_count_; ++n) {
     const size_t i = (ot_rotate_ + n) % axis_count_;
     if (axes_[i].state != AxisState::kConnected) continue;
-    if (!sendAxisOutput(i)) return ExchangeStatus::kOutputSendFailed;
+    if (!sendAxisOutput(i)) {
+      if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01) {
+#ifdef ESP_PLATFORM
+        ESP_LOGW(kTag,
+                 "axis%u HCS01 O->T failed — X/Z stay up",
+                 static_cast<unsigned>(i));
+#endif
+        continue;
+      }
+      return ExchangeStatus::kOutputSendFailed;
+    }
   }
   ot_sent_since_cyclic_ = true;
   if (axis_count_ > 0) {
@@ -333,25 +440,13 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     }
   }
 
-  // Drain every complete datagram already buffered — no wait for drive phase.
-  uint8_t buf[EipSession::kMaxFrameSize];
-  for (size_t drained = 0; drained < kMaxDrainPerCycle; ++drained) {
-    const ssize_t n = udp_.recvFrom(buf, sizeof(buf), 0);
-    if (n <= 0) break;
-
-    uint32_t cid = 0;
-    const uint8_t* assy = nullptr;
-    size_t assy_len = 0;
-    if (!parseClass1InputCpfView(buf, static_cast<size_t>(n), cid, assy,
-                                 assy_len, false)) {
-      continue;
+  {
+    const int64_t t_drain0 = class1NowUs();
+    (void)drainBufferedInputs(kMaxDrainPerCycle);
+    const int64_t dt = class1NowUs() - t_drain0;
+    if (dt >= 0 && dt <= static_cast<int64_t>(UINT32_MAX)) {
+      class1TimingStats().recordToDrainUs(static_cast<uint32_t>(dt));
     }
-
-    const size_t idx = matchAxisByConnectionId(cid);
-    if (idx >= kMaxAxes) continue;
-    if (last_got_[idx]) continue;
-    last_got_[idx] = true;
-    (void)applyFeedback(idx, assy, assy_len);
   }
 
   uint32_t rpi_us = 0;
@@ -386,6 +481,15 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     return ExchangeStatus::kOk;
   }
 
+  bool any_kinetix = false;
+  for (size_t i = 0; i < axis_count_; ++i) {
+    if (axes_[i].state != AxisState::kConnected) continue;
+    if (axes_[i].config.drive_family != ScannerConfig::DriveFamily::kHcs01) {
+      any_kinetix = true;
+      break;
+    }
+  }
+
   for (size_t i = 0; i < axis_count_; ++i) {
     if (axes_[i].state != AxisState::kConnected) continue;
     const int64_t last = axes_[i].last_feedback_us;
@@ -393,9 +497,30 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
         (last > 0 && now >= last)
             ? static_cast<uint32_t>(now - last)
             : UINT32_MAX;
-    if (shouldTeardownAfterStaleUs(age, rpi_us)) {
-      return ExchangeStatus::kInputMiss;
+    if (!shouldTeardownAfterStaleUs(age, rpi_us)) continue;
+    if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01 &&
+        any_kinetix) {
+#ifdef ESP_PLATFORM
+      static uint32_t hcs01_stale_warn_ms = 0;
+      const uint32_t now_ms = static_cast<uint32_t>(now / 1000);
+      if (shouldWarnSoftMiss(hcs01_stale_warn_ms, now_ms, 1000)) {
+        ESP_LOGW(kTag,
+                 "axis%u HCS01 T->O stale — X/Z stay up (age=%lu us)",
+                 static_cast<unsigned>(i), static_cast<unsigned long>(age));
+      }
+#endif
+      if (axes_[i].image != nullptr) {
+        axes_[i].image->setOnline(false);
+      }
+      continue;
     }
+#ifdef ESP_PLATFORM
+    ESP_LOGW(kTag,
+             "axis%u T->O stale (age=%lu us rpi=%lu) — teardown",
+             static_cast<unsigned>(i), static_cast<unsigned long>(age),
+             static_cast<unsigned long>(rpi_us));
+#endif
+    return ExchangeStatus::kInputMiss;
   }
   return ExchangeStatus::kOk;
 }

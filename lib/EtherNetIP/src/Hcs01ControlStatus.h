@@ -52,8 +52,12 @@ struct Hcs01ControlWord {
   uint16_t encode() const;
   static Hcs01ControlWord decode(uint16_t raw);
 
-  // Enable sequence: Drive ON (bit15) + Drive Start via Drive Halt 0->1 (bit13).
+  // Enable: Drive ON (15) + Drive Enable (14) + Start via Halt 0->1 (13) + OM (1).
   static Hcs01ControlWord makeDriveEnable();
+  // Halt while remaining enabled: bit13 1->0 (drive_halt=false).
+  static Hcs01ControlWord makeDriveHalt();
+  // Torque off, stay in operating mode. Bit1 must stay 1 — 1→0 is C0100/A0050.
+  static Hcs01ControlWord makeDriveOff();
   // Safe shutdown on bus failure: clear bits 13/14/15.
   static Hcs01ControlWord makeBusFailureSafe();
 };
