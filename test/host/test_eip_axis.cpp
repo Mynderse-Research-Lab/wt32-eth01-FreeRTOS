@@ -16,9 +16,12 @@
 #include "EipTransport.h"
 #include "GantryEipLinearAxis.h"
 #include "GantryEipRotaryAxis.h"
+#include "GantryThetaOrigin.h"
+#include "GantryUtils.h"
 #include "Hcs01Assembly.h"
 #include "Kinetix5100Assembly.h"
 #include "KinetixFaultCodes.h"
+#include "axis_drivetrain_params.h"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -151,7 +154,7 @@ Bytes makeK5100Input154(int32_t position, bool fault, bool cmd_in_progress,
 }
 
 Bytes makeHcs01Input102(int32_t position_puu, bool class1_error,
-                        bool command_reached) {
+                        bool command_reached, uint32_t diagnostic = 0) {
   eip::hcs01::Hcs01PositioningActual actual;
   actual.status = eip::hcs01::Hcs01StatusWord::decode(0xC410);
   if (class1_error) {
@@ -163,7 +166,7 @@ Bytes makeHcs01Input102(int32_t position_puu, bool class1_error,
   }
   actual.position_feedback = position_puu;
   actual.velocity_feedback = 100;
-  actual.diagnostic_message = 0;
+  actual.diagnostic_message = diagnostic;
 
   Bytes frame;
   eip::ByteWriter w(frame);
@@ -180,6 +183,11 @@ int32_t readLeI32(const Bytes& data, size_t offset) {
       (static_cast<uint32_t>(data[offset + 1]) << 8) |
       (static_cast<uint32_t>(data[offset + 2]) << 16) |
       (static_cast<uint32_t>(data[offset + 3]) << 24));
+}
+
+uint16_t readLeU16(const Bytes& data, size_t offset) {
+  return static_cast<uint16_t>(data[offset] |
+                               (static_cast<uint16_t>(data[offset + 1]) << 8));
 }
 
 }  // namespace
@@ -226,6 +234,17 @@ static void armAxisForMove(Gantry::GantryEipLinearAxis& axis,
   }
 }
 
+// kPreload=4 + kStart=5 @ 100 Hz. Extra ticks keep tests off the phase edge.
+static void pumpAbsoluteToRun(Gantry::GantryEipLinearAxis& axis,
+                              eip::EipProcessImage& image, int32_t position_puu) {
+  Bytes fb = makeK5100Input154(position_puu, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  for (int i = 0; i < 12; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
+}
+
 static void test_linear_x_belt_move_command(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -242,18 +261,67 @@ static void test_linear_x_belt_move_command(void) {
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_UINT32(eip::k5100::kOutput104Size, cmd.size());
   TEST_ASSERT_EQUAL_INT32(12500, readLeI32(cmd, 16));
-  // Fast-path: OperatingMode=Position, TravelMode=2, Absolute, StartMotion high.
+  // Preload: OperatingMode=Position, TravelMode=2, Absolute, StartMotion low.
   TEST_ASSERT_EQUAL_INT8(1, (int8_t)cmd[0]);
   TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
   TEST_ASSERT_EQUAL_UINT8(0, cmd[24]);  // NonCyclicMoveType Absolute
-  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  // One update clears the StartMotion edge and enters Run.
-  axis.update();
+  Bytes fb = makeK5100Input154(0, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);  // StartMotion edge after preload
+
+  for (int i = 0; i < 5; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);  // Run
+}
+
+static void test_linear_second_absolute_preloads_before_start_edge(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(12.5f, 50.0f, 0.0f, 0.0f));
+  pumpAbsoluteToRun(axis, image, 0);
+
+  Bytes at = makeK5100Input154(12500, false, false, true);
+  at[9] |= 0x04 | 0x08 | 0x20;
+  for (int i = 0; i < 6; ++i) {
+    image.setFeedback(at);
+    axis.update();
+    if (!axis.isBusy()) break;
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  TEST_ASSERT_TRUE(axis.moveToMm(5.0f, 50.0f, 0.0f, 0.0f));
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_EQUAL_INT32(5000, readLeI32(cmd, 16));
   TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
+
+  Bytes fb = makeK5100Input154(12500, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
 }
 
 static void test_linear_move_stays_busy_until_target(void) {
@@ -305,11 +373,10 @@ static void test_linear_arrival_requires_stable_ticks(void) {
   armAxisForMove(axis, image, 0);
   TEST_ASSERT_TRUE(axis.moveToMm(5.0f, 50.0f, 0.0f, 0.0f));
 
-  // Enter Run.
   Bytes mid = makeK5100Input154(1000, false, false, false);
   mid[9] |= 0x04 | 0x08 | 0x20;
   image.setFeedback(mid);
-  axis.update();
+  pumpAbsoluteToRun(axis, image, 1000);
   TEST_ASSERT_TRUE(axis.isBusy());
 
   Bytes at = makeK5100Input154(5000, false, false, true);
@@ -523,6 +590,34 @@ static void test_kinetix_a014_a015_helpers(void) {
   TEST_ASSERT_NOT_NULL(strstr(info.name, "Positive"));
 }
 
+static void test_kinetix_format_helpers_and_a603(void) {
+  TEST_ASSERT_EQUAL_UINT16(0x0603, eip::k5100::codeDigits(0x1603));
+  TEST_ASSERT_EQUAL_UINT16(0x0603, eip::k5100::codeDigits(0x0603));
+  TEST_ASSERT_TRUE(eip::k5100::isWarningA603(0x0603));
+  TEST_ASSERT_TRUE(eip::k5100::isWarningA603(0x1603));
+  TEST_ASSERT_FALSE(eip::k5100::isWarningA603(0x0014));
+
+  char disp[8];
+  eip::k5100::formatDisplayCode(disp, sizeof(disp), 'A', 0x0603);
+  TEST_ASSERT_EQUAL_STRING("A603", disp);
+  eip::k5100::formatDisplayCode(disp, sizeof(disp), 'E', 0x0602);
+  TEST_ASSERT_EQUAL_STRING("E602", disp);
+
+  char summary[192];
+  TEST_ASSERT_FALSE(eip::k5100::formatDriveTripSummary(summary, sizeof(summary),
+                                                       false, false, false, 0, 0));
+  TEST_ASSERT_EQUAL_STRING("clear", summary);
+
+  TEST_ASSERT_TRUE(eip::k5100::formatDriveTripSummary(
+      summary, sizeof(summary), false, true, false, 0, 0x0603));
+  TEST_ASSERT_NOT_NULL(strstr(summary, "A603"));
+  TEST_ASSERT_NOT_NULL(strstr(summary, "WARN"));
+
+  TEST_ASSERT_TRUE(eip::k5100::formatDriveTripSummary(
+      summary, sizeof(summary), false, false, true, 0, 0));
+  TEST_ASSERT_NOT_NULL(strstr(summary, "ConnectionFaulted"));
+}
+
 static void test_linear_absolute_aborts_busy_on_a015(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -536,11 +631,7 @@ static void test_linear_absolute_aborts_busy_on_a015(void) {
   TEST_ASSERT_TRUE(axis.moveToMm(50.0f, 20.0f, 0.0f, 0.0f));
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  // Enter Run (StartMotion edge clears after one tick).
-  Bytes run_fb = makeK5100Input154(0, false, false, false);
-  run_fb[9] |= 0x04 | 0x08 | 0x20;
-  image.setFeedback(run_fb);
-  axis.update();
+  pumpAbsoluteToRun(axis, image, 0);
   TEST_ASSERT_TRUE(axis.isBusy());
 
   // A015 warning during Run must abort and clear busy (escape moves still OK).
@@ -560,8 +651,10 @@ static void test_linear_absolute_aborts_busy_on_a015(void) {
   // While still on A015, Absolute must not re-abort (creep/escape path).
   Bytes a015_run = makeK5100Input154(1000, false, false, false, 0, 0x0015, true);
   a015_run[9] |= 0x04 | 0x08 | 0x20;
-  image.setFeedback(a015_run);
-  axis.update();  // StartMotion edge
+  for (int i = 0; i < 12; ++i) {
+    image.setFeedback(a015_run);
+    axis.update();
+  }
   TEST_ASSERT_TRUE(axis.isBusy());
   for (int i = 0; i < 10; ++i) {
     image.setFeedback(a015_run);
@@ -663,12 +756,7 @@ static void test_abort_image_differs_from_move_only_by_stop_bit(void) {
   TEST_ASSERT_TRUE(axis.moveToMm(600.0f, 1.0f, 0.0f, 0.0f));
 
   // Settle into Run and capture the accepted in-flight image.
-  Bytes run_fb = makeK5100Input154(1000, false, false, false);
-  run_fb[9] |= 0x04 | 0x08 | 0x20;
-  for (int i = 0; i < 5; ++i) {
-    image.setFeedback(run_fb);
-    axis.update();
-  }
+  pumpAbsoluteToRun(axis, image, 1000);
   TEST_ASSERT_TRUE(axis.isBusy());
   Bytes run_cmd;
   TEST_ASSERT_TRUE(image.getCommand(run_cmd));
@@ -692,6 +780,64 @@ static void test_abort_image_differs_from_move_only_by_stop_bit(void) {
   }
 }
 
+static void test_rotary_enable_holds_feedback_and_keeps_halt(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  image.setFeedback(makeHcs01Input102(9000, false, true));
+  TEST_ASSERT_TRUE(axis.enable());
+
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const uint16_t cw0 = readLeU16(cmd, 0);
+  TEST_ASSERT_BITS_HIGH(0x0020, cw0);  // C0500 / clear_errors
+  TEST_ASSERT_BITS_HIGH(0x0002, cw0);  // stay OM
+  TEST_ASSERT_BITS_LOW(0x8000, cw0);   // Drive ON after fault-clear
+  TEST_ASSERT_EQUAL_INT32(9000, readLeI32(cmd, 2));
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  for (int i = 0; i < 12; ++i) {
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const uint16_t cw = readLeU16(cmd, 0);
+  TEST_ASSERT_BITS_HIGH(0x8000, cw);  // Drive ON
+  TEST_ASSERT_BITS_HIGH(0x4000, cw);  // Drive Enable
+  TEST_ASSERT_BITS_LOW(0x2000, cw);   // Halt active — do not start
+  TEST_ASSERT_BITS_LOW(0x0020, cw);   // clear_errors released
+
+  TEST_ASSERT_TRUE(axis.disable());
+  Bytes off;
+  TEST_ASSERT_TRUE(image.getCommand(off));
+  TEST_ASSERT_EQUAL_INT32(9000, readLeI32(off, 2));
+  const uint16_t off_cw = readLeU16(off, 0);
+  TEST_ASSERT_BITS_HIGH(0x0002, off_cw);  // OM bit1 — must not enter A0050
+  TEST_ASSERT_BITS_LOW(0xA000, off_cw);   // Drive ON + Halt off
+}
+
+static void test_rotary_arst_while_disabled_stays_drive_off(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  image.setFeedback(makeHcs01Input102(1785000, true, true, 0x4009u));
+  TEST_ASSERT_TRUE(axis.clearAlarm());
+  TEST_ASSERT_FALSE(axis.isEnabled());
+  for (int i = 0; i < 12; ++i) {
+    axis.update();
+  }
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const uint16_t cw = readLeU16(cmd, 0);
+  TEST_ASSERT_BITS_HIGH(0x0002, cw);  // OM
+  TEST_ASSERT_BITS_LOW(0x8000, cw);   // Drive ON must stay 0
+  TEST_ASSERT_BITS_LOW(0x0020, cw);   // C0500 pulse released
+}
+
 static void test_rotary_move_and_feedback(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -702,14 +848,144 @@ static void test_rotary_move_and_feedback(void) {
   TEST_ASSERT_TRUE(axis.enable());
   TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 30.0f, 0.0f, 0.0f));
 
-  Bytes cmd;
-  TEST_ASSERT_TRUE(image.getCommand(cmd));
-  TEST_ASSERT_EQUAL_UINT32(eip::hcs01::kOutput101Size, cmd.size());
-  TEST_ASSERT_EQUAL_INT32(4500, readLeI32(cmd, 2));
+  Bytes preload;
+  TEST_ASSERT_TRUE(image.getCommand(preload));
+  TEST_ASSERT_EQUAL_UINT32(eip::hcs01::kOutput101Size, preload.size());
+  TEST_ASSERT_EQUAL_INT32(4500, readLeI32(preload, 2));
+  TEST_ASSERT_BITS_LOW(0x2000, readLeU16(preload, 0));
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  for (int i = 0; i < 16; ++i) {
+    axis.update();
+  }
+  Bytes started;
+  TEST_ASSERT_TRUE(image.getCommand(started));
+  TEST_ASSERT_EQUAL_INT32(4500, readLeI32(started, 2));
+  TEST_ASSERT_BITS_HIGH(0x2000, readLeU16(started, 0));
+  TEST_ASSERT_TRUE(axis.isBusy());
 
   image.setFeedback(makeHcs01Input102(4500, false, true));
+  axis.update();
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, axis.getCurrentDeg());
   TEST_ASSERT_FALSE(axis.isBusy());
+}
+
+static void test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel(void) {
+  // Live F2057 case: drive abs ~178.5°, S-0-0049/0278 window ±180.
+  // Offset home keeps joint 0 here but must not command 178.5+180.
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 10000.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+
+  image.setFeedback(makeHcs01Input102(1785127, false, true));
+  TEST_ASSERT_TRUE(axis.captureSoftHome());
+  TEST_ASSERT_FALSE(axis.isDriveOriginAligned());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 178.5127f, axis.getDriveAbsDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getCurrentDeg());
+  TEST_ASSERT_TRUE(axis.getMaxDeg() < 2.0f);
+  TEST_ASSERT_TRUE(axis.getMaxDeg() > 0.0f);
+
+  TEST_ASSERT_TRUE(axis.moveToDeg(180.0f, 30.0f, 180.0f, 180.0f));
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const int32_t cmd_puu = readLeI32(cmd, 2);
+  TEST_ASSERT_TRUE(cmd_puu <= 1800000);
+  TEST_ASSERT_TRUE(cmd_puu > 1785127);
+}
+
+static void test_rotary_aligned_home_is_drive_identity(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 10000.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+
+  image.setFeedback(makeHcs01Input102(0, false, true));
+  TEST_ASSERT_TRUE(axis.captureSoftHome());
+  TEST_ASSERT_TRUE(axis.isDriveOriginAligned());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getDriveAbsDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getCurrentDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.6f, AXIS_THETA_DRIVE_ABS_MAX_DEG - 0.5f,
+                           axis.getMaxDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.6f, AXIS_THETA_DRIVE_ABS_MIN_DEG + 0.5f,
+                           axis.getMinDeg());
+
+  TEST_ASSERT_TRUE(axis.moveToDeg(180.0f, 30.0f, 180.0f, 180.0f));
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const int32_t cmd_puu = readLeI32(cmd, 2);
+  TEST_ASSERT_TRUE(cmd_puu <= 1800000);
+  TEST_ASSERT_TRUE(cmd_puu >= 1790000);
+}
+
+static void test_rotary_unaligned_small_delta_keeps_offset_command(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+
+  image.setFeedback(makeHcs01Input102(9000, false, true));
+  TEST_ASSERT_TRUE(axis.hasLiveFeedback());
+  TEST_ASSERT_TRUE(axis.captureSoftHome());
+  TEST_ASSERT_FALSE(axis.isDriveOriginAligned());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, axis.getCurrentDeg());
+
+  TEST_ASSERT_TRUE(axis.moveToDeg(10.0f, 30.0f, 0.0f, 0.0f));
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_EQUAL_INT32(10000, readLeI32(cmd, 2));
+}
+
+static void test_rotary_set_puu_per_deg(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  TEST_ASSERT_FALSE(axis.setPuuPerDeg(0.0));
+  TEST_ASSERT_FALSE(axis.setPuuPerDeg(-1.0));
+  TEST_ASSERT_TRUE(axis.setPuuPerDeg(200.0));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 200.0f, static_cast<float>(axis.pulsesPerDeg()));
+  TEST_ASSERT_TRUE(axis.moveToDeg(10.0f, 5.0f, 20.0f, 30.0f));
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_EQUAL_INT32(2000, readLeI32(cmd, 2));
+  TEST_ASSERT_EQUAL_INT32(1000, readLeI32(cmd, 6));
+  TEST_ASSERT_EQUAL_INT32(4000, readLeI32(cmd, 10));
+  TEST_ASSERT_EQUAL_INT32(6000, readLeI32(cmd, 14));
+}
+
+static void test_rotary_halt_clears_start_bit(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  TEST_ASSERT_FALSE(axis.isBusy());
+  TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 30.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  TEST_ASSERT_TRUE(axis.stopMotion());
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  const uint16_t cw = readLeU16(cmd, 0);
+  TEST_ASSERT_BITS_HIGH(0x8000, cw);
+  TEST_ASSERT_BITS_LOW(0x2000, cw);
 }
 
 static void test_rotary_alarm(void) {
@@ -721,6 +997,57 @@ static void test_rotary_alarm(void) {
 
   image.setFeedback(makeHcs01Input102(0, true, true));
   TEST_ASSERT_TRUE(axis.isAlarmActive());
+}
+
+static void test_rotary_thetalim_cannot_expand_past_offset_envelope(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 10000.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  image.setFeedback(makeHcs01Input102(1785127, false, true));
+  TEST_ASSERT_TRUE(axis.captureSoftHome());
+  const float env_max = axis.getMaxDeg();
+  TEST_ASSERT_TRUE(env_max < 2.0f);
+
+  axis.setAngleRange(-180.0f, 180.0f);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, env_max, axis.getMaxDeg());
+  TEST_ASSERT_TRUE(axis.getMaxDeg() < 2.0f);
+
+  axis.setAngleRange(-10.0f, 0.5f);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, -10.0f, axis.getMinDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.5f, axis.getMaxDeg());
+}
+
+static void test_rotary_alarm_summary_and_cip_status(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+
+  char buf[128] = {};
+  image.setFeedback(makeHcs01Input102(0, false, true));
+  TEST_ASSERT_TRUE(axis.getDriveAlarmSummary(buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("clear", buf);
+  TEST_ASSERT_TRUE(axis.formatCipStatus(buf, sizeof(buf)));
+  TEST_ASSERT_NOT_NULL(std::strstr(buf, "T->O live"));
+  TEST_ASSERT_NOT_NULL(std::strstr(buf, "c1err=0"));
+
+  image.setFeedback(makeHcs01Input102(0, true, true, 0x2057u));
+  TEST_ASSERT_TRUE(axis.getDriveAlarmSummary(buf, sizeof(buf)));
+  TEST_ASSERT_NOT_NULL(std::strstr(buf, "F2057"));
+  TEST_ASSERT_NOT_NULL(std::strstr(buf, "c1err=1"));
+}
+
+static void test_axis_log_due_period(void) {
+  int64_t last = 0;
+  TEST_ASSERT_FALSE(Gantry::axisLogDue(0, 1000, &last));
+  TEST_ASSERT_TRUE(Gantry::axisLogDue(10, 1000, &last));
+  TEST_ASSERT_EQUAL(1000, static_cast<int>(last));
+  TEST_ASSERT_FALSE(Gantry::axisLogDue(10, 50000, &last));
+  TEST_ASSERT_TRUE(Gantry::axisLogDue(10, 101000, &last));
 }
 
 static void test_scanner_process_image_exchange(void) {
@@ -770,6 +1097,7 @@ int main(void) {
   RUN_TEST(test_process_image_command_feedback);
   RUN_TEST(test_process_image_online);
   RUN_TEST(test_linear_x_belt_move_command);
+  RUN_TEST(test_linear_second_absolute_preloads_before_start_edge);
   RUN_TEST(test_linear_move_stays_busy_until_target);
   RUN_TEST(test_linear_arrival_requires_stable_ticks);
   RUN_TEST(test_linear_soft_home_joint_frame);
@@ -780,12 +1108,23 @@ int main(void) {
   RUN_TEST(test_linear_feedback_and_alarm);
   RUN_TEST(test_kinetix_a603_warning_decode);
   RUN_TEST(test_kinetix_a014_a015_helpers);
+  RUN_TEST(test_kinetix_format_helpers_and_a603);
   RUN_TEST(test_linear_absolute_aborts_busy_on_a015);
   RUN_TEST(test_stop_motion_clears_busy_when_position_stable);
   RUN_TEST(test_stop_motion_stays_busy_while_position_creeps);
   RUN_TEST(test_abort_image_differs_from_move_only_by_stop_bit);
+  RUN_TEST(test_rotary_enable_holds_feedback_and_keeps_halt);
+  RUN_TEST(test_rotary_arst_while_disabled_stays_drive_off);
   RUN_TEST(test_rotary_move_and_feedback);
+  RUN_TEST(test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel);
+  RUN_TEST(test_rotary_aligned_home_is_drive_identity);
+  RUN_TEST(test_rotary_unaligned_small_delta_keeps_offset_command);
+  RUN_TEST(test_rotary_set_puu_per_deg);
+  RUN_TEST(test_rotary_halt_clears_start_bit);
   RUN_TEST(test_rotary_alarm);
+  RUN_TEST(test_rotary_thetalim_cannot_expand_past_offset_envelope);
+  RUN_TEST(test_rotary_alarm_summary_and_cip_status);
+  RUN_TEST(test_axis_log_due_period);
   RUN_TEST(test_scanner_process_image_exchange);
   return UNITY_END();
 }

@@ -23,6 +23,16 @@ Add a new test:
   ESP-IDF / FreeRTOS dependencies behind interfaces so the logic stays
   host-compilable.
 
+Optional line-coverage report (gcovr, no percentage gate):
+
+    cmake -S test/host -B build/host -DGANTRY_HOST_COVERAGE=ON
+    cmake --build build/host --target coverage
+
+That rebuilds with `--coverage -O0`, re-runs ctest, and writes
+`build/host/coverage/index.html` plus `build/host/coverage/summary.txt`.
+Install gcovr first (`pip install gcovr`) if the coverage target reports it
+missing. The two-command gate above stays the CI / commit-hook default.
+
 2) On-target selftest (prototype convenience)
 ---------------------------------------------
 The interactive serial console exposes a "selftest" command that runs the same

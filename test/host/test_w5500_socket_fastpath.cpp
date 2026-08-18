@@ -6,6 +6,7 @@
 #include "W5500Socket.h"
 #include "unity.h"
 
+#include <chrono>
 #include <cstring>
 #include <vector>
 
@@ -35,9 +36,11 @@ class CountingHal : public w5500::W5500Hal {
   // Merged CR+IR poll (Sn_CR burst of 2). Default: CR cleared + SENDOK.
   uint8_t poll_ir = Sn_IR_SENDOK;
   bool poll_stuck = false;  // never report done (SENDOK timeout path)
+  size_t poll_pending_reads = 0;  // report "not done" for this many polls
 
   std::vector<Txn> txns;
   uint8_t last_dest[6] = {};
+  uint8_t last_cr_written = 0;
   size_t sn_sr_reads = 0;
   size_t recv_cmd_writes = 0;
 
@@ -123,6 +126,7 @@ class CountingHal : public w5500::W5500Hal {
     }
     if (addr != Sn_CR) return;
 
+    last_cr_written = value;
     if (value == Sn_CR_OPEN) {
       if ((sn_mr[sock] & 0x0F) == Sn_MR_UDP) {
         sn_sr[sock] = SOCK_UDP;
@@ -163,13 +167,25 @@ class CountingHal : public w5500::W5500Hal {
     std::memset(buf, 0, len);
 
     if (isSocketRegBlock(block) && addr == Sn_CR && len >= 2) {
-      if (poll_stuck) {
+      if (poll_stuck || poll_pending_reads > 0) {
+        if (poll_pending_reads > 0) --poll_pending_reads;
         buf[0] = 0;
         buf[1] = 0;
       } else {
         buf[0] = 0;
         buf[1] = poll_ir;
         sn_ir = poll_ir;
+      }
+      return;
+    }
+
+    if (isSocketRegBlock(block) && addr == Sn_RX_RSR && len >= 2) {
+      const uint16_t rsr = rxRsr();
+      buf[0] = static_cast<uint8_t>(rsr >> 8);
+      buf[1] = static_cast<uint8_t>(rsr & 0xFF);
+      if (len >= 4) {
+        buf[2] = static_cast<uint8_t>(rx_rd >> 8);
+        buf[3] = static_cast<uint8_t>(rx_rd & 0xFF);
       }
       return;
     }
@@ -209,6 +225,71 @@ class CountingHal : public w5500::W5500Hal {
       if (t.is_write) ++n;
     }
     return n;
+  }
+
+  size_t countRxBufReads() const {
+    size_t n = 0;
+    for (const Txn& t : txns) {
+      if (!t.is_write && t.kind == Txn::Kind::kBuf && isRxBufBlock(t.block)) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  size_t countRsrRdBursts() const {
+    size_t n = 0;
+    const uint8_t blk = kBlockSocketReg(0);
+    for (const Txn& t : txns) {
+      if (!t.is_write && t.kind == Txn::Kind::kBuf && t.block == blk &&
+          t.addr == Sn_RX_RSR && t.len == 4) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  // Merged Sn_CR + Sn_IR SENDOK poll bursts.
+  size_t countCrIrPolls() const {
+    size_t n = 0;
+    const uint8_t blk = kBlockSocketReg(0);
+    for (const Txn& t : txns) {
+      if (!t.is_write && t.kind == Txn::Kind::kBuf && t.block == blk &&
+          t.addr == Sn_CR && t.len == 2) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  size_t countTxWrReads() const {
+    size_t n = 0;
+    const uint8_t blk = kBlockSocketReg(0);
+    for (const Txn& t : txns) {
+      if (!t.is_write && t.kind == Txn::Kind::kReg16 && t.block == blk &&
+          t.addr == Sn_TX_WR) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  size_t countIrReads() const {
+    size_t n = 0;
+    const uint8_t blk = kBlockSocketReg(0);
+    for (const Txn& t : txns) {
+      if (!t.is_write && t.kind == Txn::Kind::kReg && t.block == blk &&
+          t.addr == Sn_IR) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  bool lastTxnIsCommandWrite() const {
+    if (txns.empty()) return false;
+    const Txn& t = txns.back();
+    return t.is_write && t.kind == Txn::Kind::kReg && t.addr == Sn_CR;
   }
 };
 
@@ -350,12 +431,226 @@ static void test_socket_close_clears_dest_cache(void) {
   TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countDestWrites()));
 }
 
+// Deferred mode: a cached-dest send issues SEND and returns without polling.
+static void test_sendto_deferred_skips_sendok_poll(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  const uint32_t ip = 0xC0A80114;
+
+  // First send changes the dest, so it still waits for SENDOK.
+  TEST_ASSERT_EQUAL_INT(
+      8, w5500::socketSendTo(hal, 0, payload, 8, ip, 2222, true));
+  TEST_ASSERT_TRUE(hal.countCrIrPolls() >= 1);
+
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      8, w5500::socketSendTo(hal, 0, payload, 8, ip, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countCrIrPolls()));
+  TEST_ASSERT_TRUE(hal.lastTxnIsCommandWrite());
+  TEST_ASSERT_EQUAL_HEX8(Sn_CR_SEND, hal.last_cr_written);
+
+  w5500::socketClose(hal, 0);
+}
+
+// The owed SENDOK is confirmed by exactly one poll at the head of the next send.
+static void test_sendto_deferred_confirms_on_next_send(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[4] = {1, 2, 3, 4};
+  const uint32_t ip = 0xC0A80114;
+
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countCrIrPolls()));
+  // Write-only IR clear: the poll already carried the IR value.
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countIrReads()));
+  TEST_ASSERT_TRUE(hal.lastTxnIsCommandWrite());
+  TEST_ASSERT_EQUAL_HEX8(Sn_CR_SEND, hal.last_cr_written);
+
+  w5500::socketClose(hal, 0);
+}
+
+// SENDOK not yet set on the deferred confirm: bounded spin, still succeeds.
+static void test_sendto_deferred_confirm_spins_when_not_ready(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[4] = {5, 6, 7, 8};
+  const uint32_t ip = 0xC0A80114;
+
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+
+  hal.poll_pending_reads = 3;
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(4, static_cast<uint32_t>(hal.countCrIrPolls()));
+
+  w5500::socketClose(hal, 0);
+}
+
+// TIMEOUT / DISCON discovered on the deferred confirm fails the next send.
+static void test_sendto_deferred_confirm_reports_failure(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[4] = {1, 1, 1, 1};
+  const uint32_t ip = 0xC0A80114;
+
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+
+  hal.poll_ir = Sn_IR_TIMEOUT;
+  TEST_ASSERT_EQUAL_INT(
+      -1, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+
+  // The failed confirm must not leave the socket owing another one.
+  hal.poll_ir = Sn_IR_SENDOK;
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countCrIrPolls()));
+
+  w5500::socketClose(hal, 0);
+
+  CountingHal hal2;
+  w5500::socketClose(hal2, 0);
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal2, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal2, 0, payload, 4, ip, 2222, true));
+  hal2.poll_ir = Sn_IR_DISCON;
+  TEST_ASSERT_EQUAL_INT(
+      -1, w5500::socketSendTo(hal2, 0, payload, 4, ip, 2222, true));
+  w5500::socketClose(hal2, 0);
+}
+
+// A dest change keeps the blocking ARP-length SENDOK wait even in deferred mode.
+static void test_sendto_deferred_dest_change_still_blocks(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[4] = {9, 9, 9, 9};
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80114, 2222, true));
+
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80115, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countDestWrites()));
+  TEST_ASSERT_TRUE(hal.countCrIrPolls() >= 1);
+
+  // Nothing was deferred, so the following send owes no confirmation.
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80115, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countCrIrPolls()));
+
+  // Dest change budgets the 10 ms ARP wait, not the 2 ms cached-dest wait.
+  w5500::socketClose(hal, 0);
+  hal.poll_stuck = true;
+  const auto t0 = std::chrono::steady_clock::now();
+  TEST_ASSERT_EQUAL_INT(
+      -1, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80116, 2222, true));
+  const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              std::chrono::steady_clock::now() - t0)
+                              .count();
+  TEST_ASSERT_TRUE(elapsed_us >= 5000);
+
+  hal.poll_stuck = false;
+  w5500::socketClose(hal, 0);
+}
+
+// Sn_TX_WR is host-owned: read once at OPEN, then tracked in software.
+static void test_tx_wr_read_once_after_open(void) {
+  CountingHal hal;
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(0, w5500::socketOpen(hal, w5500::SocketMode::kUdp, 2222, 0));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countTxWrReads()));
+  const uint8_t payload[4] = {1, 2, 3, 4};
+  const uint16_t wr0 = hal.tx_wr;
+
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80114, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countTxWrReads()));
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(wr0 + 4), hal.tx_wr);
+
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80114, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countTxWrReads()));
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(wr0 + 8), hal.tx_wr);
+
+  // Re-open invalidates then re-seeds so a chip reset cannot be inherited.
+  w5500::socketClose(hal, 0);
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(0, w5500::socketOpen(hal, w5500::SocketMode::kUdp, 2222, 0));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countTxWrReads()));
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, 0xC0A80114, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countTxWrReads()));
+
+  w5500::socketClose(hal, 0);
+}
+
+// Close / recover-style reset must drop a deferred SENDOK so the next send
+// does not confirm a SEND the chip no longer has.
+static void test_close_and_reset_clear_deferred_pending(void) {
+  CountingHal hal;
+  w5500::socketClose(hal, 0);
+  const uint8_t payload[4] = {1, 2, 3, 4};
+  const uint32_t ip = 0xC0A80114;
+
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+
+  w5500::socketClose(hal, 0);
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  // Dest cache was dropped, so this send waits for SENDOK once. A leftover
+  // deferred confirm would add a second CR+IR poll.
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countCrIrPolls()));
+
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  w5500::socketResetSoftwareState();
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      4, w5500::socketSendTo(hal, 0, payload, 4, ip, 2222, true));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countCrIrPolls()));
+
+  w5500::socketClose(hal, 0);
+}
+
+static void test_rx_rsr_rd_contiguous(void) {
+  TEST_ASSERT_EQUAL_UINT16(0x0026, Sn_RX_RSR);
+  TEST_ASSERT_EQUAL_UINT16(0x0028, Sn_RX_RD);
+  TEST_ASSERT_EQUAL_UINT16(Sn_RX_RSR + 2, Sn_RX_RD);
+}
+
 static void test_recv_nonblocking_empty_returns_zero(void) {
   CountingHal hal;
   uint8_t buf[16];
   hal.recv_cmd_writes = 0;
+  hal.txns.clear();
   TEST_ASSERT_EQUAL_INT(0, w5500::socketRecvFromNonBlocking(hal, 0, buf, sizeof(buf)));
   TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.recv_cmd_writes));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countRxBufReads()));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countRsrRdBursts()));
 }
 
 static void test_recv_nonblocking_strips_header(void) {
@@ -365,6 +660,7 @@ static void test_recv_nonblocking_strips_header(void) {
   const uint16_t rd0 = hal.rx_rd;
 
   uint8_t out[16] = {};
+  hal.txns.clear();
   TEST_ASSERT_EQUAL_INT(
       4, w5500::socketRecvFromNonBlocking(hal, 0, out, sizeof(out)));
   TEST_ASSERT_EQUAL_UINT8_ARRAY(payload, out, sizeof(payload));
@@ -372,6 +668,8 @@ static void test_recv_nonblocking_strips_header(void) {
                            hal.rx_rd);
   TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
   TEST_ASSERT_TRUE(hal.recv_cmd_writes >= 1);
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countRxBufReads()));
+  TEST_ASSERT_TRUE(hal.countRsrRdBursts() >= 1);
 }
 
 static void test_recv_nonblocking_truncates_but_advances(void) {
@@ -428,9 +726,147 @@ static void test_recv_nonblocking_back_to_back(void) {
   TEST_ASSERT_EQUAL_INT(0, w5500::socketRecvFromNonBlocking(hal, 0, out, sizeof(out)));
 }
 
+static void test_recv_nonblocking_large_payload_second_read(void) {
+  CountingHal hal;
+  std::vector<uint8_t> payload(300, 0x5A);
+  payload[0] = 0x11;
+  payload[299] = 0x22;
+  hal.enqueueUdpDatagram(payload.data(), static_cast<uint16_t>(payload.size()));
+
+  uint8_t out[300] = {};
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_INT(
+      300, w5500::socketRecvFromNonBlocking(hal, 0, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_HEX8(0x11, out[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x22, out[299]);
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+  TEST_ASSERT_EQUAL_UINT32(2, static_cast<uint32_t>(hal.countRxBufReads()));
+}
+
+// Two queued datagrams: one RSR/RD pass, one payload burst, one RECV.
+static void test_recv_batch_two_datagrams_one_burst(void) {
+  CountingHal hal;
+  const uint8_t a[] = {0xA1, 0xA2};
+  const uint8_t b[] = {0xB1, 0xB2, 0xB3};
+  hal.enqueueUdpDatagram(a, sizeof(a));
+  hal.enqueueUdpDatagram(b, sizeof(b));
+
+  uint8_t buf[128] = {};
+  w5500::UdpDatagram dg[4] = {};
+  hal.recv_cmd_writes = 0;
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_UINT32(
+      2, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 4)));
+
+  TEST_ASSERT_EQUAL_UINT16(2, dg[0].len);
+  TEST_ASSERT_EQUAL_HEX8(0xA1, dg[0].data[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xA2, dg[0].data[1]);
+  TEST_ASSERT_EQUAL_UINT16(3, dg[1].len);
+  TEST_ASSERT_EQUAL_HEX8(0xB1, dg[1].data[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xB3, dg[1].data[2]);
+  // Views point into the caller's burst buffer.
+  TEST_ASSERT_TRUE(dg[0].data == buf + 8);
+
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countRxBufReads()));
+  TEST_ASSERT_EQUAL_UINT32(2, static_cast<uint32_t>(hal.countRsrRdBursts()));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.recv_cmd_writes));
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+
+  TEST_ASSERT_EQUAL_UINT32(
+      0, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 4)));
+}
+
+static void test_recv_batch_empty_makes_no_recv(void) {
+  CountingHal hal;
+  uint8_t buf[64] = {};
+  w5500::UdpDatagram dg[2] = {};
+  hal.recv_cmd_writes = 0;
+  hal.txns.clear();
+  TEST_ASSERT_EQUAL_UINT32(
+      0, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 2)));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.recv_cmd_writes));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countRxBufReads()));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(hal.countRsrRdBursts()));
+}
+
+// maxOut caps the batch; the surplus stays queued and RX_RD advances only over
+// what was handed back.
+static void test_recv_batch_respects_max_out(void) {
+  CountingHal hal;
+  const uint8_t a[] = {0xA1, 0xA2};
+  const uint8_t b[] = {0xB1, 0xB2, 0xB3};
+  hal.enqueueUdpDatagram(a, sizeof(a));
+  hal.enqueueUdpDatagram(b, sizeof(b));
+
+  uint8_t buf[128] = {};
+  w5500::UdpDatagram dg[2] = {};
+  TEST_ASSERT_EQUAL_UINT32(
+      1, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 1)));
+  TEST_ASSERT_EQUAL_UINT16(2, dg[0].len);
+  TEST_ASSERT_EQUAL_UINT16(11, hal.rxRsr());  // 8 + 3 still queued
+
+  TEST_ASSERT_EQUAL_UINT32(
+      1, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 1)));
+  TEST_ASSERT_EQUAL_UINT16(3, dg[0].len);
+  TEST_ASSERT_EQUAL_HEX8(0xB1, dg[0].data[0]);
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+}
+
+static void test_recv_batch_bad_header_drains(void) {
+  CountingHal hal;
+  const uint8_t bad0[8] = {0, 0, 0, 0, 0, 0, 0, 0};  // declared length 0
+  hal.enqueueRawRx(bad0, 8);
+  uint8_t buf[64] = {};
+  w5500::UdpDatagram dg[2] = {};
+  TEST_ASSERT_EQUAL_UINT32(
+      0, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 2)));
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+
+  CountingHal hal2;
+  const uint8_t bad1[8] = {0, 0, 0, 0, 0, 0, 0x00, 0x20};  // len=32, avail=8
+  hal2.enqueueRawRx(bad1, 8);
+  TEST_ASSERT_EQUAL_UINT32(
+      0, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal2, 0, buf, sizeof(buf), dg, 2)));
+  TEST_ASSERT_EQUAL_UINT16(0, hal2.rxRsr());
+}
+
+// A datagram larger than the batch buffer must not stall the FIFO.
+static void test_recv_batch_oversized_datagram_advances(void) {
+  CountingHal hal;
+  std::vector<uint8_t> payload(300, 0x5A);
+  payload[0] = 0x11;
+  hal.enqueueUdpDatagram(payload.data(), static_cast<uint16_t>(payload.size()));
+  const uint8_t tail[] = {0xC1, 0xC2};
+  hal.enqueueUdpDatagram(tail, sizeof(tail));
+
+  uint8_t buf[64] = {};
+  w5500::UdpDatagram dg[4] = {};
+  TEST_ASSERT_EQUAL_UINT32(
+      1, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 4)));
+  TEST_ASSERT_EQUAL_UINT16(sizeof(buf) - 8, dg[0].len);
+  TEST_ASSERT_EQUAL_HEX8(0x11, dg[0].data[0]);
+
+  // The oversized frame was consumed whole, so the next one is readable.
+  TEST_ASSERT_EQUAL_UINT32(
+      1, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 4)));
+  TEST_ASSERT_EQUAL_UINT16(2, dg[0].len);
+  TEST_ASSERT_EQUAL_HEX8(0xC1, dg[0].data[0]);
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_dipr_dport_contiguous);
+  RUN_TEST(test_rx_rsr_rd_contiguous);
   RUN_TEST(test_sendto_caches_dest);
   RUN_TEST(test_sendto_rewrites_on_dest_change);
   RUN_TEST(test_sendto_restores_multicast_dest);
@@ -438,10 +874,23 @@ int main(void) {
   RUN_TEST(test_sendto_ir_timeout_and_discon);
   RUN_TEST(test_sendto_rejects_bad_length);
   RUN_TEST(test_socket_close_clears_dest_cache);
+  RUN_TEST(test_sendto_deferred_skips_sendok_poll);
+  RUN_TEST(test_sendto_deferred_confirms_on_next_send);
+  RUN_TEST(test_sendto_deferred_confirm_spins_when_not_ready);
+  RUN_TEST(test_sendto_deferred_confirm_reports_failure);
+  RUN_TEST(test_sendto_deferred_dest_change_still_blocks);
+  RUN_TEST(test_tx_wr_read_once_after_open);
+  RUN_TEST(test_close_and_reset_clear_deferred_pending);
   RUN_TEST(test_recv_nonblocking_empty_returns_zero);
   RUN_TEST(test_recv_nonblocking_strips_header);
   RUN_TEST(test_recv_nonblocking_truncates_but_advances);
   RUN_TEST(test_recv_nonblocking_bad_header_drains);
   RUN_TEST(test_recv_nonblocking_back_to_back);
+  RUN_TEST(test_recv_nonblocking_large_payload_second_read);
+  RUN_TEST(test_recv_batch_two_datagrams_one_burst);
+  RUN_TEST(test_recv_batch_empty_makes_no_recv);
+  RUN_TEST(test_recv_batch_respects_max_out);
+  RUN_TEST(test_recv_batch_bad_header_drains);
+  RUN_TEST(test_recv_batch_oversized_datagram_advances);
   return UNITY_END();
 }

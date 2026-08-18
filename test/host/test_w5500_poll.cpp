@@ -25,8 +25,10 @@ static void test_busy_poll_us_timeout(void) {
 
 static void test_sendok_timeout_constants(void) {
   TEST_ASSERT_EQUAL_UINT32(2000u, w5500::kUdpSendOkTimeoutUs);
+  TEST_ASSERT_EQUAL_UINT32(10000u, w5500::kUdpDestChangeSendOkTimeoutUs);
   TEST_ASSERT_EQUAL_UINT32(500000u, w5500::kTcpSendOkTimeoutUs);
   TEST_ASSERT_EQUAL_UINT32(50000u, w5500::kBusyPollYieldAboveUs);
+  TEST_ASSERT_EQUAL_UINT32(2000u, w5500::kUdpRecvCmdTimeoutUs);
 }
 
 static void test_busy_poll_tight_timeout(void) {

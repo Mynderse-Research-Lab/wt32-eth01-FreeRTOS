@@ -23,7 +23,21 @@ static void test_control_word_enable_sequence(void) {
   Hcs01ControlWord cw = Hcs01ControlWord::makeDriveEnable();
   uint16_t raw = cw.encode();
   TEST_ASSERT_BITS_HIGH(0x8000, raw);  // bit15 Drive ON
+  TEST_ASSERT_BITS_HIGH(0x4000, raw);  // bit14 Drive Enable
   TEST_ASSERT_BITS_HIGH(0x2000, raw);  // bit13 Drive Halt/Start
+  TEST_ASSERT_BITS_HIGH(0x0002, raw);  // bit1  operating mode
+
+  Hcs01ControlWord halt = Hcs01ControlWord::makeDriveHalt();
+  uint16_t halt_raw = halt.encode();
+  TEST_ASSERT_BITS_HIGH(0x8000, halt_raw);
+  TEST_ASSERT_BITS_HIGH(0x4000, halt_raw);
+  TEST_ASSERT_BITS_LOW(0x2000, halt_raw);
+
+  Hcs01ControlWord off = Hcs01ControlWord::makeDriveOff();
+  uint16_t off_raw = off.encode();
+  TEST_ASSERT_BITS_HIGH(0x0002, off_raw);  // stay in OM
+  TEST_ASSERT_BITS_HIGH(0x4000, off_raw);
+  TEST_ASSERT_BITS_LOW(0xA000, off_raw);  // Drive ON + Halt off
 
   Hcs01ControlWord safe = Hcs01ControlWord::makeBusFailureSafe();
   TEST_ASSERT_EQUAL_HEX16(0x0000, safe.encode());
@@ -75,6 +89,13 @@ static void test_status_word_roundtrip(void) {
   TEST_ASSERT_TRUE(decoded.in_standstill);
   TEST_ASSERT_TRUE(decoded.class1_error);
   TEST_ASSERT_EQUAL(sw.ready, decoded.ready);
+}
+
+static void test_assembly_wire_sizes(void) {
+  TEST_ASSERT_EQUAL_UINT32(18, eip::hcs01::kOutput101Size);
+  TEST_ASSERT_EQUAL_UINT32(14, eip::hcs01::kInput102Size);
+  TEST_ASSERT_EQUAL_UINT16(101, eip::hcs01::kOutputInstance101);
+  TEST_ASSERT_EQUAL_UINT16(102, eip::hcs01::kInputInstance102);
 }
 
 static void test_positioning_command_serialize(void) {
@@ -163,6 +184,7 @@ int main(void) {
   RUN_TEST(test_control_word_roundtrip);
   RUN_TEST(test_status_word_decode);
   RUN_TEST(test_status_word_roundtrip);
+  RUN_TEST(test_assembly_wire_sizes);
   RUN_TEST(test_positioning_command_serialize);
   RUN_TEST(test_positioning_actual_deserialize);
   RUN_TEST(test_positioning_actual_rejects_short);

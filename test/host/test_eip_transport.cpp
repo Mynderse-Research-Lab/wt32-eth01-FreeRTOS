@@ -80,8 +80,13 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
     flood_ = true;
     flood_frame_ = std::move(frame);
   }
+  // Batch mode packs every pending frame into one recvBatch call, the way the
+  // W5500 endpoint drains the RX FIFO in a single burst.
+  void setBatchMode(bool v) { batch_ = v; }
   const Bytes& lastSent() const { return last_sent_; }
   size_t recvCallCount() const { return recv_calls_; }
+  size_t batchCallCount() const { return batch_calls_; }
+  size_t batchDatagramCount() const { return batch_datagrams_; }
 
   bool bind(uint16_t, uint32_t = 0) override { return true; }
   ssize_t sendTo(const uint8_t* data, size_t len, uint32_t, uint16_t) override {
@@ -111,17 +116,47 @@ class FakeUdpEndpoint : public eip::IUdpEndpoint {
     std::memcpy(buf, r.data(), n);
     return static_cast<ssize_t>(n);
   }
+  size_t recvBatch(uint8_t* buf, size_t buf_len, eip::UdpDatagramView* views,
+                   size_t max_views) override {
+    if (!batch_) {
+      return eip::IUdpEndpoint::recvBatch(buf, buf_len, views, max_views);
+    }
+    ++batch_calls_;
+    size_t n = 0;
+    size_t off = 0;
+    while (n < max_views) {
+      const Bytes* frame = nullptr;
+      if (flood_) {
+        frame = &flood_frame_;
+      } else if (response_index_ < responses_.size()) {
+        frame = &responses_[response_index_++];
+      } else {
+        break;
+      }
+      if (off + frame->size() > buf_len) break;
+      std::memcpy(buf + off, frame->data(), frame->size());
+      views[n].data = buf + off;
+      views[n].len = frame->size();
+      off += frame->size();
+      ++n;
+    }
+    batch_datagrams_ += n;
+    return n;
+  }
   void close() override {}
 
  private:
   std::vector<Bytes> responses_;
   size_t response_index_ = 0;
   size_t recv_calls_ = 0;
+  size_t batch_calls_ = 0;
+  size_t batch_datagrams_ = 0;
   Bytes last_sent_;
   bool echo_ = false;
   bool empty_returns_zero_ = false;
   bool fail_send_ = false;
   bool flood_ = false;
+  bool batch_ = false;
   Bytes echo_frame_;
   Bytes flood_frame_;
 };
@@ -584,6 +619,27 @@ static void test_class1_rpi_remainder_and_miss_policy(void) {
   TEST_ASSERT_EQUAL_UINT32(1, eip::class1PaceTicks(0, 1000));
   TEST_ASSERT_EQUAL_UINT32(0, eip::class1RpiFractionUs(0, 1000));
 
+  // Overrun: catch up 1..7, yield+reset at 8. Firmware zeros streak on pdTRUE.
+  {
+    uint32_t streak = 0;
+    for (uint32_t i = 1; i <= 7; ++i) {
+      TEST_ASSERT_EQUAL(eip::Class1OverrunAction::kCatchUp,
+                        eip::class1OverrunAction(streak, 8));
+      TEST_ASSERT_EQUAL_UINT32(i, streak);
+    }
+    TEST_ASSERT_EQUAL(eip::Class1OverrunAction::kYieldTick,
+                      eip::class1OverrunAction(streak, 8));
+    TEST_ASSERT_EQUAL_UINT32(0, streak);
+  }
+  {
+    uint32_t streak = 0;
+    for (int i = 0; i < 16; ++i) {
+      TEST_ASSERT_EQUAL(eip::Class1OverrunAction::kCatchUp,
+                        eip::class1OverrunAction(streak, 0));
+    }
+    TEST_ASSERT_EQUAL_UINT32(16, streak);
+  }
+
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(0));
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(2));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(3));
@@ -652,6 +708,31 @@ static void test_class1_timing_stats_ring_and_cmd_to_start(void) {
   TEST_ASSERT_EQUAL_UINT32(1, cs.count);
   TEST_ASSERT_EQUAL_UINT32(250, cs.min_us);
   TEST_ASSERT_EQUAL_UINT32(250, cs.p50_us);
+}
+
+static void test_class1_timing_drain_ring_and_pace_counters(void) {
+  eip::class1TimingStats().reset();
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1TimingStats().toDrain().count);
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1TimingStats().paceOverrunCount());
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1TimingStats().paceYieldCount());
+
+  for (uint32_t i = 1; i <= 5; ++i) {
+    eip::class1TimingStats().recordToDrainUs(i * 50);
+  }
+  const eip::Class1TimingSnapshot dr = eip::class1TimingStats().toDrain();
+  TEST_ASSERT_EQUAL_UINT32(5, dr.count);
+  TEST_ASSERT_EQUAL_UINT32(50, dr.min_us);
+  TEST_ASSERT_EQUAL_UINT32(250, dr.max_us);
+
+  eip::class1TimingStats().notePaceOverrun();
+  eip::class1TimingStats().notePaceOverrun();
+  eip::class1TimingStats().notePaceYield();
+  TEST_ASSERT_EQUAL_UINT32(2, eip::class1TimingStats().paceOverrunCount());
+  TEST_ASSERT_EQUAL_UINT32(1, eip::class1TimingStats().paceYieldCount());
+
+  eip::class1TimingStats().reset();
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1TimingStats().paceOverrunCount());
+  TEST_ASSERT_EQUAL_UINT32(0, eip::class1TimingStats().toDrain().count);
 }
 
 static void test_multi_scanner_input_miss_status(void) {
@@ -886,6 +967,111 @@ static void test_drain_applies_multiple_datagrams_one_cycle(void) {
   d.scanner->disconnect();
 }
 
+static void test_hcs01_stale_does_not_teardown_kinetix(void) {
+  FakeTcpClient tcp0;
+  FakeTcpClient tcp1;
+  FakeTcpClient tcp2;
+  FakeUdpEndpoint udp;
+  eip::EipProcessImage img0;
+  eip::EipProcessImage img1;
+  eip::EipProcessImage img2;
+
+  eip::ForwardOpenReply fo0 = makeSampleForwardOpenReply();
+  fo0.ot_connection_id = 0x10000001;
+  fo0.to_connection_id = 0x20000001;
+  fo0.connection_serial = 0x0001;
+  fo0.to_api_us = 1000;
+
+  eip::ForwardOpenReply fo1 = makeSampleForwardOpenReply();
+  fo1.ot_connection_id = 0x10000002;
+  fo1.to_connection_id = 0x20000002;
+  fo1.connection_serial = 0x0002;
+  fo1.to_api_us = 1000;
+
+  eip::ForwardOpenReply fo2 = makeSampleForwardOpenReply();
+  fo2.ot_connection_id = 0x10000003;
+  fo2.to_connection_id = 0x20000003;
+  fo2.connection_serial = 0x0003;
+  fo2.to_api_us = 1000;
+
+  const uint32_t h0 = 0x11110001;
+  const uint32_t h1 = 0x11110002;
+  const uint32_t h2 = 0x11110003;
+  tcp0.enqueueResponse(makeRegisterSessionReply(h0));
+  tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardOpenMrReply(fo0)));
+  tcp0.enqueueResponse(makeSendRRDataEncapReply(h0, makeForwardCloseMrReply()));
+  tcp0.enqueueResponse(makeRegisterSessionReply(0));
+  tcp1.enqueueResponse(makeRegisterSessionReply(h1));
+  tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardOpenMrReply(fo1)));
+  tcp1.enqueueResponse(makeSendRRDataEncapReply(h1, makeForwardCloseMrReply()));
+  tcp1.enqueueResponse(makeRegisterSessionReply(0));
+  tcp2.enqueueResponse(makeRegisterSessionReply(h2));
+  tcp2.enqueueResponse(makeSendRRDataEncapReply(h2, makeForwardOpenMrReply(fo2)));
+  tcp2.enqueueResponse(makeSendRRDataEncapReply(h2, makeForwardCloseMrReply()));
+  tcp2.enqueueResponse(makeRegisterSessionReply(0));
+
+  eip::ScannerConfig cfg0 = makeTestScannerConfig();
+  cfg0.target_ip = "192.168.1.20";
+  cfg0.connection_serial = 0x0001;
+  cfg0.ot_connection_id = 0x10000001;
+  cfg0.to_connection_id = 0x20000001;
+
+  eip::ScannerConfig cfg1 = makeTestScannerConfig();
+  cfg1.target_ip = "192.168.1.21";
+  cfg1.connection_serial = 0x0002;
+  cfg1.ot_connection_id = 0x10000002;
+  cfg1.to_connection_id = 0x20000002;
+
+  eip::ScannerConfig cfg2 = makeTestScannerConfig();
+  cfg2.target_ip = "192.168.1.23";
+  cfg2.drive_family = eip::ScannerConfig::DriveFamily::kHcs01;
+  cfg2.config_assembly_instance = 0;
+  cfg2.ot_assembly_instance = 101;
+  cfg2.to_assembly_instance = 102;
+  cfg2.ot_assembly_size = 18;
+  cfg2.to_assembly_size = 14;
+  cfg2.connection_serial = 0x0003;
+  cfg2.ot_connection_id = 0x10000003;
+  cfg2.to_connection_id = 0x20000003;
+
+  eip::MultiAxisSlot slots[3] = {{cfg0, &img0}, {cfg1, &img1}, {cfg2, &img2}};
+  eip::ITcpClient* tcps[3] = {&tcp0, &tcp1, &tcp2};
+  eip::EipMultiScanner scanner(tcps, 3, udp, slots);
+  TEST_ASSERT_TRUE(scanner.openAxis(0));
+  TEST_ASSERT_TRUE(scanner.bindSharedUdp());
+  TEST_ASSERT_TRUE(scanner.openAxis(1));
+  TEST_ASSERT_TRUE(scanner.openAxis(2));
+
+  udp.setEmptyReturnsZero(true);
+  const Bytes kx(52, 0xA0);
+  const Bytes kz(52, 0xB1);
+  auto feedKinetix = [&]() {
+    udp.enqueueResponse(
+        eip::buildClass1OutputCpf(fo0.to_connection_id, 1, 1, kx, false));
+    udp.enqueueResponse(
+        eip::buildClass1OutputCpf(fo1.to_connection_id, 1, 1, kz, false));
+  };
+
+  feedKinetix();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  feedKinetix();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  feedKinetix();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+  TEST_ASSERT_TRUE(img0.isOnline());
+  TEST_ASSERT_TRUE(img1.isOnline());
+  TEST_ASSERT_FALSE(img2.isOnline());
+
+  scanner.disconnect();
+}
+
 static void test_drain_ignores_duplicate_cid(void) {
   DualConnected d;
   d.udp.setEmptyReturnsZero(true);
@@ -928,6 +1114,33 @@ static void test_drain_ignores_unknown_cid(void) {
   d.scanner->disconnect();
 }
 
+static void test_drain_stops_when_all_axes_got(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+
+  const Bytes assy0(52, 0xA0);
+  const Bytes assy1(52, 0xB1);
+  const Bytes extra(52, 0xEE);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy0, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo1.to_connection_id, 1, 1, assy1, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 2, 2, extra, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(2, static_cast<uint32_t>(d.udp.recvCallCount()));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(1));
+
+  Bytes fb0;
+  TEST_ASSERT_TRUE(d.img0.getFeedback(fb0));
+  TEST_ASSERT_EQUAL_HEX8(0xA0, fb0[0]);
+
+  d.scanner->disconnect();
+}
+
 static void test_drain_is_bounded(void) {
   DualConnected d(20000, false);
   const Bytes assy(52, 0x55);
@@ -939,6 +1152,73 @@ static void test_drain_is_bounded(void) {
   TEST_ASSERT_EQUAL_UINT32(
       static_cast<uint32_t>(eip::EipMultiScanner::kMaxDrainPerCycle),
       static_cast<uint32_t>(d.udp.recvCallCount()));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+
+  d.scanner->disconnect();
+}
+
+// exchangeOnce must time the drain so eiptiming can show it.
+static void test_exchange_records_drain_sample(void) {
+  DualConnected d(20000, false);
+  d.udp.setEmptyReturnsZero(true);
+  eip::class1TimingStats().reset();
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(1, eip::class1TimingStats().toDrain().count);
+
+  d.scanner->disconnect();
+}
+
+// One batched burst carries both axes plus a duplicate; first CID wins and no
+// second drain call is needed.
+static void test_batch_drain_applies_both_axes_in_one_call(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+  d.udp.setBatchMode(true);
+
+  const Bytes first(52, 0x11);
+  const Bytes dup(52, 0x22);
+  const Bytes assy1(52, 0xB1);
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, first, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 2, 2, dup, false));
+  d.udp.enqueueResponse(
+      eip::buildClass1OutputCpf(d.fo1.to_connection_id, 1, 1, assy1, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(d.udp.batchCallCount()));
+  TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(d.udp.recvCallCount()));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(1));
+
+  Bytes fb0;
+  Bytes fb1;
+  TEST_ASSERT_TRUE(d.img0.getFeedback(fb0));
+  TEST_ASSERT_TRUE(d.img1.getFeedback(fb1));
+  TEST_ASSERT_EQUAL_HEX8(0x11, fb0[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xB1, fb1[0]);
+
+  d.scanner->disconnect();
+}
+
+// Batched frames are still capped at kMaxDrainPerCycle per cycle.
+static void test_batch_drain_is_bounded(void) {
+  DualConnected d(20000, false);
+  d.udp.setBatchMode(true);
+  const Bytes assy(52, 0x55);
+  d.udp.setFloodFrame(
+      eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy, false));
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_EQUAL_UINT32(
+      static_cast<uint32_t>(eip::EipMultiScanner::kMaxDrainPerCycle),
+      static_cast<uint32_t>(d.udp.batchDatagramCount()));
+  TEST_ASSERT_TRUE(d.udp.batchCallCount() <
+                   eip::EipMultiScanner::kMaxDrainPerCycle);
   TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
 
   d.scanner->disconnect();
@@ -1007,12 +1287,18 @@ int main(void) {
   RUN_TEST(test_class1_rpi_remainder_and_miss_policy);
   RUN_TEST(test_stale_teardown_boundary);
   RUN_TEST(test_class1_timing_stats_ring_and_cmd_to_start);
+  RUN_TEST(test_class1_timing_drain_ring_and_pace_counters);
   RUN_TEST(test_multi_scanner_input_miss_status);
   RUN_TEST(test_fo_delay_before_first_exchange_not_stale);
   RUN_TEST(test_drain_applies_multiple_datagrams_one_cycle);
+  RUN_TEST(test_hcs01_stale_does_not_teardown_kinetix);
   RUN_TEST(test_drain_ignores_duplicate_cid);
   RUN_TEST(test_drain_ignores_unknown_cid);
+  RUN_TEST(test_drain_stops_when_all_axes_got);
   RUN_TEST(test_drain_is_bounded);
+  RUN_TEST(test_exchange_records_drain_sample);
+  RUN_TEST(test_batch_drain_applies_both_axes_in_one_call);
+  RUN_TEST(test_batch_drain_is_bounded);
   RUN_TEST(test_feedback_age_resets_on_fresh_data);
   RUN_TEST(test_exchange_reports_send_failure);
   return UNITY_END();
