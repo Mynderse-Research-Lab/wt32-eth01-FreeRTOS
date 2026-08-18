@@ -12,7 +12,8 @@ This document explains **how the firmware software works** end-to-end: bring-up,
 Gantry orchestration, process-image mailbox, Class 1 UDP lifecycle (including
 why bind/send/recv/close fails), Absolute PTP state machines, console gates, and
 host-test anchors. Electromechanical detail lives in the companions above.
-MQTT/pick requirements live in the SRS docs (§10).
+MQTT bridge design: [`MQTT_comms_subsys.md`](../MQTT_comms_subsys.md); pick wiring
+status is in §10.
 
 ---
 
@@ -24,17 +25,19 @@ flowchart TD
   G["Gantry::Gantry"]
   X["GantryEipLinearAxis X"]
   Z["GantryEipLinearAxis Z"]
-  T["GantryEipRotaryAxis Theta deferred"]
+  T["GantryEipRotaryAxis Theta gated"]
   EE["GantryEndEffector MCP PA0 DOUT0"]
   Spi3["Spi3Bus SPI3"]
   Mcp["MCP23S17 Field+UI"]
   Disp["SpiDisplay stub MCP CS"]
   ImgX["EipProcessImage X"]
   ImgZ["EipProcessImage Z"]
+  ImgT["EipProcessImage Theta"]
   Scan["EipMultiScanner / EipScannerTask"]
   W["W5500 SPI2"]
   DX["Kinetix X .20"]
   DZ["Kinetix Z .21"]
+  DT["HCS01 Theta CIP .23 / eng .22"]
   Mqtt["MqttBridge"]
   Lan["LAN8720 RMII"]
 
@@ -45,15 +48,18 @@ flowchart TD
   Spi3 --> Disp
   G --> X
   G --> Z
-  G -.-> T
+  G --> T
   G --> EE
   X --> ImgX
   Z --> ImgZ
+  T --> ImgT
   Scan --> ImgX
   Scan --> ImgZ
+  Scan --> ImgT
   Scan --> W
   W --> DX
   W --> DZ
+  W --> DT
   Mqtt --> Lan
 ```
 
@@ -62,7 +68,7 @@ flowchart TD
 | Application | [`src/main.cpp`](../src/main.cpp), [`src/gantry_test_console.cpp`](../src/gantry_test_console.cpp) |
 | Motion API | [`lib/Gantry/src/Gantry.h`](../lib/Gantry/src/Gantry.h) |
 | X/Z adapters | [`GantryEipLinearAxis`](../lib/Gantry/src/GantryEipLinearAxis.cpp) |
-| Theta adapter | [`GantryEipRotaryAxis`](../lib/Gantry/src/GantryEipRotaryAxis.cpp) (not wired in `main`) |
+| Theta adapter | [`GantryEipRotaryAxis`](../lib/Gantry/src/GantryEipRotaryAxis.cpp) (`CONFIG_EIP_AXIS_THETA`) |
 | SPI3 / Field / TFT | [`lib/Spi3Bus/`](../lib/Spi3Bus/), [`lib/MCP23S17/`](../lib/MCP23S17/), [`lib/SpiDisplay/`](../lib/SpiDisplay/) |
 | Scanner / Class 1 | [`lib/EtherNetIP/`](../lib/EtherNetIP/) |
 | SPI Ethernet | [`lib/W5500/`](../lib/W5500/) |
@@ -88,7 +94,7 @@ Both networks currently use addresses in `192.168.1.0/24`, but they must stay on
 | Segment | Devices on this L2 |
 |---------|--------------------|
 | **Plant** (SW-008 / LAN8720) | PC `192.168.1.10`, WT32 LAN8720 `192.168.1.100`, MQTT, TCP `:2323` |
-| **EIP** (WIZ daisy-chain only) | WT32 W5500 `192.168.1.10`, Kinetix X/Z, HCS01 |
+| **EIP** (WIZ daisy-chain only) | WT32 W5500 `192.168.1.10`, Kinetix X `.20` / Z `.21`, HCS01 CIP `.23` (eng HTTP stays `.22`) |
 
 **Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the plant unmanaged switch. That merges the domains: PC and W5500 both appear as `.10`, ARP/Class 1 flood the switch (all port LEDs blink), and `lan_debug_ui.py` / ping to `.100` fail until the EIP uplink is removed.
 
@@ -160,8 +166,10 @@ From [`src/main.cpp`](../src/main.cpp):
 
 1. **SPI3 + MCP** — bus init, Field/UI/TFT CS/W5500 RST; optional TFT stub.
 2. **W5500** — `w5500.init(...)` with MCP-driven RST (static; must outlive the scanner).
-3. **Process images** — `eipImageX` / `eipImageZ`.
-4. **Axes + Gantry** — `GantryEipLinearAxis` X/Z → `Gantry::Gantry(..., theta=nullptr, PIN_GRIPPER)` → joint limits → `gantry.begin()`.
+3. **Process images** — `eipImageX` / `eipImageZ` / `eipImageTheta`.
+4. **Axes + Gantry** — `GantryEipLinearAxis` X/Z (and `GantryEipRotaryAxis` when
+   `CONFIG_EIP_AXIS_THETA=y`) → `Gantry::Gantry(..., PIN_GRIPPER)` → joint limits →
+   `gantry.begin()`.
 5. **`gantry.enable()` is deferred** until Class 1 + `GantryUpdate` are running (operator `enable` / console).
 6. **Scanner** — `eip::startScannerTask(...)` **before** MQTT (priority **6**, above gantry/SPI3 users).
 7. **MQTT objects constructed** (not started yet).
@@ -186,7 +194,7 @@ Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
 (`CONSOLE_TCP_*` via [`ethernet_app_config.h`](../include/ethernet_app_config.h)).  
 Plant IP: menuconfig **LAN8720 plant Ethernet**.  
 Scanner / HoldKA: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp).  
-X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T + non-blocking T→O drain so exchange fits under 2 ms. Class 1 pacing uses `esp_timer` µs remainder (FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/cycle/cmd-to-StartMotion p50/p99 plus
+X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T (deferred SENDOK on cached dests) + batched T→O drain so exchange fits under 2 ms. Class 1 pacing uses `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs; FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/drain/cycle/cmd-to-StartMotion p50/p99, `pace overrun`/`yield`, plus
 reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 **GO/NO-GO** is exchange p99 vs granted/configured RPI.
 
@@ -200,7 +208,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 | Soft-home / soft-calibrate (no GPIO limits) | **Live** (bench) |
 | Drive endstops (TBIO + `EIP_ENDSTOP_FROM_DRIVE`) | **X trip/recover + home/cal PASS** (2026-08-10); **Z ready** (motor mounted; TBIO = axis stroke only, not conveyor height; conveyor sensor unwired) |
 | Boot `gantry.enable()` | **Not** — deferred |
-| Theta / `GantryEipRotaryAxis` | **Deferred** (`nullptr`) |
+| Theta / `GantryEipRotaryAxis` | **Enabled** (`CONFIG_EIP_AXIS_THETA=y`; CIP `192.168.1.23` FKM, eng `.22`; FO config **0** / 101/102, Class 1 **24/16** from 18/14 + seq + Run/Idle; HIPERFACE soft-home) |
 | Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |
 | Pick → `moveTo(EndEffectorPose)` | **Not wired** (`SKIP:pick_motion_not_wired`) |
 | PulseMotor / MCP motion path | **Removed** (MCP restored only for Field/UI) |
@@ -211,10 +219,10 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 
 | Symbol | Meaning |
 |--------|---------|
-| X | Across belt (Beta 100-ZRS) |
-| Y | Along belt; **−Y downstream**; **no joint** |
-| Z | Vertical; **+Z up** |
-| Theta | Rotation about Z |
+| X | Across belt (sign unchanged) |
+| Y | Along belt; **+Y downstream**; **no joint** |
+| Z | Vertical; **+Z down** (toward belt) |
+| Theta | Rotation about Z (right-handed about +Z) |
 
 - **Joint:** `(x, z, theta)`. Joint Z=0 is the firmware soft-home datum (`zero_puu_`).
 - **Pose:** `(x, y, z, theta)` with `pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`.
@@ -273,15 +281,51 @@ Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
 derived speed cap still applies to the path speed ceiling.
 
 **Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **30 mm**): margin
-above Z− / A015 (joint min). Coordinated X+Z Absolute **and any X Absolute**
-(home/cal/path/EIP seek) are allowed only while joint Z is in that bottom band
-(`z <= z_min + margin`). Above it, Z moves alone with X held; console
-`home x` / `calibrate x` refuse. Limit warning codes: **X** A014/PL = joint
-min, A015/NL = joint max; **Z** A015/NL = joint min (−Z), A014/PL = joint max
-(+Z). Z Absolute joint sense is **inverted** so joint − seeks A015.
+from Z− / A015 (retracted joint min). Any X Absolute (home/cal/path/EIP seek)
+is allowed only while joint Z is in that traverse band
+(`z <= z_min + margin`). Beyond it (further +Z / toward the belt), Z moves
+alone with X held; console `home x` / `calibrate x` refuse.
+SAFE_Z is an **X and theta interlock**, not a path via: in-band X and Z may
+run together; theta may turn only while Z is in the band. Retract from above
+the band to an in-band target is one Z Absolute (X starts
+once Z is in-band). Above the band, Z-only. Theta on a combined move is
+scheduled against the **in-band X+Z traverse segment**: start at **25%** of
+that segment, finish by **75%**. Required theta speed is
+`|dTheta| / (0.5 * T_seg)` (constant-speed `T_seg = L / V`), clamped to
+`AXIS_THETA_MAX_SPEED_DEG_PER_S`. If the cap forces finish past 75%, the
+below-band descent segment is **held** until theta is idle. Theta-only
+commands while Z is out of band are refused (linear path still runs).
+Limit warning codes: **X** A014/PL = joint min,
+A015/NL = joint max; **Z** A015/NL = joint min (retract), A014/PL = joint max
+(+Z down / toward belt). Z Absolute joint sense is **inverted** so joint −
+seeks A015.
+**Joint 0** is the sample at min-switch disable (warning deassert / post-creep
+instant) — no extra offset after clear. That datum is the **retracted** end.
 
-**EIP bring-up** (`calibrate all`): Z- datum (A015) → X home/cal → park X at
+**EIP bring-up** (`calibrate all`): Z- A015 → creep until switch disabled →
+**Z=0** → X home (A014 clear → X=0) / cal → park X at
 `GANTRY_CAL_X_PARK_MM` (35) → Z+ stroke (A014) → return to SAFE_Z ceiling.
+Seek, park, and SAFE_Z return are locked at **100 mm/s** and **2000 mm/s²**
+(not console `speed`/`accel`). Switch-clear creep stays **1 mm/s**.
+
+**`test_cycle`**: after boot, one console command runs enable (waits for servo
+arm), the same EIP bring-up as `calibrate all` (home + calibrate), then path
+legs A–F from park using the **live** console `speed` / `accel` / decel
+(boot defaults 50 mm/s and 3000 mm/s² unless you change them; `rangelimit`
+still clamps). Waypoints: `(220,8)` → `(220,130)` → `(0,0)` →
+`(350,130)` → `(80,110)` → `(0,0)` with theta held at 0. Then G–I are
+theta-only at `(0,0)` (in-band, so the SAFE_Z interlock allows rotation) to
+the live `thetalim` min, then max, then back to 0. After `home t`, that
+envelope is the **captured** origin plan: full ±180 only when drive abs is
+aligned (`|S-0-0051| ≤ 2°`); otherwise remaining drive travel (about +1° at
+HIPERFACE ~178.5°). G–I use the
+theta speed/accel **caps** (`AXIS_THETA_MAX_SPEED_DEG_PER_S` / accel/decel,
+3600 deg/s and 18000 deg/s² unless menuconfig tightens them), not the
+console theta default of 30 deg/s. Pass requires pose within 1.5 mm and
+1.0°. Segment counts are checked on the commanded X–Z waypoint chain (G–I
+are 0 X–Z segments). `stop` aborts. `selftest` is math-only and is not this.
+C0300 + overlay + `home t` ALIGNED is required before G–I exercise ±180°.
+An offset home shrinks H so it does not command past S-0-0278.
 
 ### Orchestration state machine
 
@@ -290,17 +334,23 @@ Private `MotionState` in [`Gantry.cpp`](../lib/Gantry/src/Gantry.cpp):
 | State | Role |
 |-------|------|
 | `IDLE` | No sequenced motion |
-| `Z_DESCENDING` / `Z_RETRACTING` | Z-alone path segment |
+| `Z_DESCENDING` / `Z_RETRACTING` | Z-alone toward belt (+Z) / toward A015 (retract) |
 | `GRIPPER_ACTUATING` | Timed open/close (PnP only) |
-| `X_MOVING` | X-alone path segment (Z held ≥ clearance) |
-| `XZ_MOVING` | Coordinated X+Z Absolute segment |
-| `THETA_MOVING` | Present; unused while theta is `nullptr` |
+| `X_MOVING` | X-alone path segment (Z in SAFE_Z band) |
+| `XZ_MOVING` | In-band X+Z, or retract with X unlocked once Z is in-band |
+| `THETA_MOVING` | Present; used when `CONFIG_EIP_AXIS_THETA=y` |
 
 JOINT_DIRECT skips gripper choreography; both joint and pose moves use the
 same path planner / clearance rule.
 
-Arm **both** axes of a coordinated segment **before** publishing `motionState_`
-(avoids dual StartMotion / A603 races).
+**X-Z path (production):** in-band X+Z together; above SAFE_Z, Z-alone. X
+Absolute and theta are interlocked unless Z is in the retract/traverse band.
+Retract from pick height to an in-band target does not stop at SAFE_Z.
+Theta window: 25–75% of the in-band traverse; descent below the band waits
+for theta idle if the speed cap is hit.
+
+Arm Z first, then X (or defer X until the interlock is true) before publishing
+`motionState_` (A603 / StartMotion race guard).
 
 ### Abort matrix
 
@@ -401,7 +451,7 @@ Why wrong fails:
 2. The host stack replies **ICMP port unreachable**.
 3. The drive tears down Class 1 and **releases torque with no keypad fault**.
 
-PC harness history (same invariant): [`tools/eip_test.py`](../tools/eip_test.py) module docstring — fixed with `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent `io_sock`. Firmware P2P uses one W5500 UDP socket for both send and recv on 2222 ([`EipSocketW5500Udp`](../lib/EtherNetIP/src/EipSocketW5500.cpp)).
+PC harness history (same invariant): [`tools/eip_test.py`](../tools/eip_test.py) module docstring — fixed with `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent `io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and opens one TX socket per dest IP so DIPR stays cached ([`EipSocketW5500Udp`](../lib/EtherNetIP/src/EipSocketW5500.cpp)).
 
 A Class 1 connection only holds torque while O→T keeps arriving within the connection timeout. Stalling longer than CTM×RPI silently drops the connection.
 
@@ -412,21 +462,22 @@ A Class 1 connection only holds torque while O→T keeps arriving within the con
 1. `openAxis(0)` (TCP FO on X).
 2. `bindSharedUdp()` — one socket on 2222 for both axes.
 3. Spawn **`EipHoldKA`** (~5 ms) so X keeps receiving O→T while Z’s FO runs.
-4. `openAxis(1)` (Z); stop HoldKA; abort connect if `ka.failed`.
-5. Cyclic `exchangeOnce`:
-   - Send O→T for all axes starting at a **rotating** index (fairness).
-   - Drain T→O until all freshened or timeout; **re-send O→T on API** while waiting (`sendKeepaliveAll`) so peers do not starve.
+4. `openAxis(1)` (Z); then `openAxis(2)` (HCS01 theta, non-fatal if FO fails).
+5. HoldKA **drains T→O** so the shared UDP RX cannot overflow. After FO, a short prime loop sends O→T to every dest (ARP / DIPR) and drains again.
+6. Cyclic `exchangeOnce`:
+   - Send O→T for all axes starting at a **rotating** index (fairness). P2P O→T uses **one W5500 UDP socket per dest** so DIPR/DPORT stay cached. Cached-dest SEND returns without polling SENDOK; the next send on that socket confirms it (TIMEOUT/DISCON still escalates `kOutputSendFailed`, one cycle late). Dest-change SENDOK wait is **10 ms** so the first packet to a new IP is not aborted mid-ARP. TCP `socketSend` stays blocking.
+   - Drain T→O in **one RX burst** (settled Sn_RX_RSR+Sn_RX_RD, one payload read, one `Sn_RX_RD` advance + `RECV`). Iterate datagram views until each connected axis has one datagram this cycle (or RX empty / `kMaxDrainPerCycle`). First packet per axis wins (`last_got_[]`). Surplus frames in the burst are consumed so they cannot stale-feed the next cycle.
    - Demux by connection ID (`matchAxisByConnectionId`; fallback O→T CID).
-   - Track **per-axis** T→O miss streaks (teardown when any axis hits 3).
-6. Pace with `rpiRemainderMs(granted_api_ms, elapsed)` so period ≈ API, not ~2× API ([`EipClass1Timing.h`](../lib/EtherNetIP/src/EipClass1Timing.h)).
+   - Track **per-axis** T→O miss streaks. Kinetix stale still tears down. **HCS01-only stale does not chip-recover X/Z.**
+7. Pace with `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs). Cutting serialized SENDOK/RECV waits targets exchange p99 near **1000 µs**, which is meant to leave ~1 ms of slack so on-time cycles always block on the 2-tick grid. Live 2026-08-18 image `0x9c6c0` (n=128, 6 s settle): exchange p99 **938 GO**, cycle min/p50/p99 **1342/1999/2659**, ot_send p99 **452**, drain p99 **421**, `pace overrun=23 yield=2`, `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one tick every 8 consecutive overruns ([`EipClass1Timing.h`](../lib/EtherNetIP/src/EipClass1Timing.h) `class1OverrunAction`) as the TWDT safety net. `eiptiming` prints a `drain` line and `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns dominate.
 
 Exchange outcomes:
 
 | Status | Meaning | Action |
 |--------|---------|--------|
-| `kOk` | All T→O freshened | Clear per-axis miss streaks; sleep RPI remainder |
-| `kInputMiss` | Partial / timeout on T→O | Soft-retry per axis; tear down only after **3** consecutive misses **on any axis** |
-| `kOutputSendFailed` | O→T / W5500 SENDOK fail | Disconnect → `W5500::recover()` immediately |
+| `kOk` | T→O fresh on Kinetix (HCS01 may be isolated) | Sleep RPI remainder |
+| `kInputMiss` | Kinetix T→O stale | Soft-retry; tear down after **3** consecutive Kinetix misses |
+| `kOutputSendFailed` | Kinetix O→T / W5500 SENDOK fail | Disconnect → `W5500::recover()` immediately |
 
 ### Recover ladder
 
@@ -439,7 +490,7 @@ From [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp) / [`W5500:
 | Hard O→T fail | Disconnect → GPIO **32** hard reset + reconfigure (`recover` under SPI bus mutex) |
 | Recover streak | Cap **3** consecutive recovers; then **`esp_restart()`** |
 | Backoff | Exponential on recover fail (cap 30 s); post-reset settle; reconnect idle **2500 ms** |
-| SENDOK wait | tight µs poll (UDP **2 ms** cap, TCP longer); polling SPI under bus acquire |
+| SENDOK wait | P2P cached dest: deferred to next send; dest-change **10 ms**; TCP still blocking; polling SPI under bus acquire |
 
 ### Failure modes (root cause → fix)
 
@@ -512,12 +563,13 @@ Never command Position before Active (A603). `moveToMm` rejects unless arm is `k
 ### MovePhase (Absolute PTP)
 
 ```
-kIdle → kStart (fast-path) → kRun → (kStopping on abort/timeout) → hold
+kIdle → kPreload → kStart → kRun → (kStopping on abort/timeout) → hold
 ```
 
 | Phase | Ticks | Behavior |
 |-------|-------|----------|
-| `kStart` | 1 | `moveToMm` publishes OM=1 TM=2 Absolute + **StartMotion=1** immediately |
+| `kPreload` | 4 | `moveToMm` publishes OM=1 TM=2 Absolute, **StartMotion=0** (latch Position) |
+| `kStart` | 5 | StartMotion=1 edge (same cadence as Home34) |
 | `kRun` | ≤6000 (~60 s) | StartMotion=0; wait done predicate |
 | `kStopping` | stop pulse 5; stable 10 | `stop_motion` pulse; wait ±0.02 mm stable and speed low; then hold |
 
@@ -578,7 +630,7 @@ Menuconfig: **Gantry kinematics** + EtherNet/IP originator (IPs, PUU/mm,
 |------|----------|
 | Soft-home (joint zero) | Only when **no** GPIO limits and **no** drive-managed endstops; `softHomeJointDatum()`; Home34 on arm |
 | Drive endstops (TBIO) | KNX Forward/Reverse Limit on INPUT1–4; `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → external `GantryLimitSwitch` |
-| Drive home / calibrate | Console `home`/`calibrate` (`x`/`z`/`all`) when drive-managed: **X** A014→min / A015→max; **Z** A015→min (−Z) / A014→max (+Z). `calibrate all` = full bring-up. Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
+| Drive home / calibrate | Console `home`/`calibrate` (`x`/`z`/`all`) when drive-managed: **X** A014→min / A015→max; **Z** A015→min (−Z) / A014→max (+Z). `calibrate all` = full bring-up. Seek/park 100 mm/s, 2000 mm/s²; creep 1 mm/s. Absolute Run aborts on A014/A015 so busy clears; escape `move` still allowed |
 | Hard envelope | Measured stroke from calibrate, or SCHUNK `AXIS_*_HARD_LIMIT_*` via soft-calibrate |
 | Abort | See §3 abort matrix |
 
@@ -632,46 +684,62 @@ UART remains for bring-up before Ethernet is ready (no password).
 ### Commands
 
 Primary: `help`, `status`, `faults` / `alarms`, `enable`, `disable`, `home`,
-`calibrate`, `speed`, `accel`, `move`, `grip`, `stop`, `alarmreset`,
-`puuinfo`, `puucal`, `livepos`, `units`, `selftest`.
+`calibrate`, `test_cycle`, `speed`, `accel`, `move`, `grip`, `stop`, `alarmreset`,
+`puuinfo`, `puucal`, `puu t`, `thetalim`, `livepos`, `units`, `selftest`.
 
 Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
-`axislog` (no-op on EIP axes today).
+`axislog` (EIP axes emit START/END always; periodic MOVE when `axislog` Hz > 0).
 
 | Command | EIP-specific behavior |
 |---------|------------------------|
 | `enable` / `disable` | Arms / ServoOff via Gantry |
 | `home` | Drive-managed: seek joint min per axis (`home x` A014; `home z` A015; `all` = Z then X); else soft-home |
 | `calibrate` | Drive-managed: seek joint max (`calibrate x` A015; `calibrate z` A014); **`calibrate all`** = bring-up Z−→band→X→Z+→band; else SCHUNK hard envelope (X soft-cal) |
+| `test_cycle` | Enable + bring-up (home/cal) + path legs A–F at live `speed`/`accel`, then theta G–I at `thetalim` min/max using kinematic speed/accel caps; `stop` aborts |
+| `test_theta_path` | Combined in-band X+Z+theta (25–75% window) with live thetalim-safe dθ; enable + bring-up first |
 | `move` | Requires **home + calibrate this session** (X gates) |
 | `stop` | Abort + disable; does **not** clear session home/cal gates |
-| `alarmreset` / `arst` | EIP **FaultReset** bit (not ARST GPIO) |
+| `alarmreset` / `arst` | EIP **FaultReset** (Kinetix) and HCS01 C0500 **bit5**; if Gantry is disabled, theta stays Drive OFF (no WaitAf / AF). HTTP `hcs01_eng.py c0500` if theta T→O is stale |
 | `faults` / `alarms` | Decode FaultCode/WarningCode (e.g. A603) |
-| `puuinfo` / `puucal` | Scale / suggest PUU/mm from commanded vs measured |
+| `puuinfo` / `puucal` / `puu t` | Scale / suggest PUU/mm; theta PUU/deg is live-settable |
+| `speed` / `accel` | Path mm/s and mm/s²; optional theta deg/s and deg/s² |
+| `thetalim` | Software theta joint min/max (deg) |
 
 MCP diagnostic commands (`mcp_*`) are **legacy leftovers** — MCP hardware is
 removed; do not rely on them.
 
 ---
 
-## 10. Theta (deferred) and MQTT boundary
+## 10. Theta (HCS01) and MQTT boundary
 
 ### Theta (HCS01)
 
-- Assemblies **101/102**, freely configurable profile (`P-0-4084 = 0xFFFE`); map in
-  EtherNet/IP HCS01 sources (`Hcs01Assembly.h`).
-- `GantryEipRotaryAxis` has no Absolute Arm/Move SM — enable + command-accept /
-  command-reached / halt / clear-errors.
-- `main.cpp` passes `theta = nullptr`.
-- Needs 3-phase power, IndraWorks, EDS / ForwardOpen validation.
-- When enabled, use the EtherNet/IP originator theta IP Kconfig (not X/Z `.20`/`.21`).
+HCS01 has **two IPs / two MACs** on the same drive:
+
+| Path | Address | MAC | Ports |
+|------|---------|-----|-------|
+| Engineering (X24/X25) | `192.168.1.22` | `00-60-34-97-41-B6` | HTTP :80, telnet :23, IndraWorks |
+| CIP / FKM (EtherNet/IP) | `192.168.1.23` | `00-60-34-97-41-B9` | TCP 44818, UDP 2222 |
+
+Firmware `EIP_TARGET_IP_THETA` defaults to **`.23`**. RegisterSession on `.22` times out. Soft-retry if CIP is down so X/Z Class 1 is not yanked.
+
+- Assemblies **101/102** (18 / 14 bytes), freely configurable profile (`P-0-4084 = 0xFFFE`). Map: `P-0-4081` = 4077, 0282, 0259, 0260, 0359; `P-0-4080` = 4078, 0051, 0040, 0390. See `Hcs01Assembly.h`.
+- Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
+- `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t`.
+- Theta Absolute: enable holds current S-0-0282 with **Drive Halt active** (bit13=0). Drive display **AH** is ready=3 + halt (firmware used to log that as AF). `moveToDeg` preloads the target while AH, releases halt (AH→AF), then toggles command-accept. Keep S-0-0282 in its continuous absolute frame: the live drive permits ±36000° and S-0-0076 is non-modulo `0x0002`; manually wrapping at ±180° could command the long way around. Busy is a motion-active flag (idle `command_value_reached` is not “busy”). Halt 1→0 is `makeDriveHalt` / `stop`.
+- **Home** = HIPERFACE origin capture (no X31). If `|S-0-0051| ≤ 2°` after **C0300** (S-0-0447) at the mechanical/cable-neutral pose, joint **is** drive abs (`zero_puu_ = 0`) and thetalim is the full firmware envelope ∩ drive travel. If HIPERFACE is still ~178° (not C0300'd), firmware **offsets** so that pose is joint 0 (does not slew to encoder-native 0 — that would wrap the gripper cable) but **shrinks thetalim** to remaining drive travel (about **+1° / −180°** at 178.5° with ±180 drive limits). That is the F2057 root cause: a firmware-only origin does not move S-0-0278. **Calibrate** applies the captured envelope. **Do not** seek X31.
+- Bench 2026-08-18: AH→AF sequencing is proven (`-10°` reached `-9.95°`, return reached `-0.08°`). A `+10°` joint command from drive absolute `178.4921°` correctly produced continuous S-0-0282 `188.4921°`, but the drive rejected it with **F2057 Target position out of travel range** because live S-0-0278 is `180.0000°` (S-0-0049/S-0-0050=`0`). Do not hide this by wrapping. Align with **surgical** HTTP writes (do not load a full `.par`): (1) `py tools/hcs01_eng.py travel --yes` (**S-0-0278=36000**, **S-0-0049=+180**, **S-0-0050=−180**); (2) at cable-neutral pose `c0300 --yes` so S-0-0051→0; (3) `save --yes` (C2200); (4) reboot / 24 V cycle then `verify-origin`; (5) `home t` — `status` must show origin **ALIGNED**. Then joint ±180 maps to drive ±180.
+- Console: `home t` / `calibrate t`; `calibrate all` runs theta after X/Z bring-up (X/Z gates stay set if theta CIP is down). Theta-only `move` does not require X/Z home. `status` prints drive abs vs ALIGNED/OFFSET and a **Theta CIP** line (`T->O live` vs STALE, `in_ref`, ready AH/AF, **c1err** = P-0-4078 bit13 drive interlock — not EtherNet/IP Class 1). `faults` / `arst` print theta diag; `arst` already pulses HCS01 C0500 bit5, but that only reaches the drive while T→O is live — otherwise use `hcs01_eng.py c0500`. `arst` while motors are disabled does **not** Drive ON / WaitAf (stays Ab). Theta profile knobs match X/Z: `speed <mm/s> [deg/s]`, `accel <a> [d] [deg/s2] [decel_deg]`, `puu t <scale>`, `puucal t c m` (applies live), `thetalim <min> <max>`, `rangelimit`. After OFFSET home, `thetalim` is **clamped** to the captured envelope (cannot restore ±180 without C0300 + `home t` ALIGNED). `test_theta_path` runs a combined in-band X+Z+theta move with a thetalim-safe dθ.
+- `CONFIG_GANTRY_THETA_SEQUENTIAL` default **n**: theta is scheduled on the
+  in-band X+Z segment (start 25%, finish 75%) unless sequential choreography
+  is enabled (theta after the linear path, still SAFE_Z-gated).
+- F2174 after HCS01 reboot is expected until `home t` recaptures origin. Status `in_ref=0` is the cue. **Do not** seek X31.
 
 ### MQTT / pick
 
 `MqttBridge` (LAN8720) → queue → `pick_scheduler` → (future)
 `Gantry::moveTo(EndEffectorPose)`. Today pick motion is **not wired**
-(`SKIP:pick_motion_not_wired`). Specs:
-[`Pickup_algo_and_MQTTBridge_SRS.md`](../Pickup_algo_and_MQTTBridge_SRS.md),
+(`SKIP:pick_motion_not_wired`). Bridge design:
 [`MQTT_comms_subsys.md`](../MQTT_comms_subsys.md).
 
 ---
@@ -691,7 +759,7 @@ ctest --test-dir build/host --output-on-failure
 |-------|-------|
 | [`test_eip_encoding.cpp`](../test/host/test_eip_encoding.cpp) | Encap, CPF, FO, Kinetix 104/154 wire bytes |
 | [`test_eip_transport.cpp`](../test/host/test_eip_transport.cpp) | Session, Class 1 frames, multi-scanner demux, RPI miss policy |
-| [`test_eip_axis.cpp`](../test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, stable arrival, A603, scanner↔image |
+| [`test_eip_axis.cpp`](../test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, HCS01 rotary soft-home/halt, A603, scanner↔image |
 | [`test_path_profile.cpp`](../test/host/test_path_profile.cpp) | 2-D path decompose + clearance segment planner |
 | W5500 / SOEM / kinematics suites | SPI HAL, OSAL, trajectory math |
 
@@ -708,9 +776,23 @@ ctest --test-dir build/host --output-on-failure
 | TFT CS policy | After boot / `refreshStub`, MCP TFT CS idle HIGH; Class 1 still OK |
 | Free ADC | GPIO 12/32/33/39 available for isolated analogs |
 | W5500 Class 1 | `eiptiming` / jog — no regression vs SPI2-only |
-| Boot / console | UART0 + IO0 download still work; do not wire DC to IO0 |
+| Boot / console | UART0 works; hold IO0 low **only while flashing** — do not leave USB-UART DTR on IO0 |
 
 Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII CLK-out).
+**Gotcha (2026-08-17):** USB-UART **DTR hard-wired to IO0** fights the 50 MHz REFCLK. Symptom: GPIO16 high but RJ45 LEDs dark + LAN8720 `power up timeout` / no MDIO.
+
+**DTR / RTS pin policy (no alternate ESP GPIO for DTR):**
+
+| Adapter signal | WT32 connection | Notes |
+|----------------|-----------------|--------|
+| TX | IO3 (RXD0) | Crossed |
+| RX | IO1 (TXD0) | Crossed |
+| GND | GND | |
+| **RTS** | **EN** via auto-reset transistor circuit (preferred) or reset button | Pulses reset for esptool |
+| **DTR** | **IO0** only via Espressif 2-transistor auto-reset circuit (idle = float) — **or leave DTR NC** | ROM bootloader samples **IO0 only**; cannot remap DTR to GPIO12/32/etc. |
+| BOOT (manual) | Momentary IO0→GND while EN reset | Use when DTR is NC |
+
+**Deployment (accepted limitation — no PCB change):** the field programming connector includes IO0. **Unplug that harness to run plant Ethernet** (TCP `:2323` / MQTT). Plug in only for flash/UART service. Do not permanently strap DTR→IO0.
 
 ---
 
