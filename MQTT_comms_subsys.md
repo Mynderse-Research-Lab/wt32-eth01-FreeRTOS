@@ -4,12 +4,12 @@ This document describes how the planned communications stack works from first po
 
 ## Coordinate convention (firmware-wide, as of 2026-05)
 
-- **X** — horizontal traverse along the gantry beam, across the conveyor belt.
-- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **−Y direction**.
-- **Z** — vertical (gantry descent axis). **+Z = up**; belt surface is `Z = 0`; safe-retracted top-home is `Z = Z_max`.
-- **Theta** — rotation about the vertical (Z) axis.
+- **X** — horizontal traverse along the gantry beam, across the conveyor belt (sign unchanged).
+- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **+Y direction**.
+- **Z** — vertical (gantry descent axis). **+Z = down** (toward the belt). Joint Z=0 is A015 (retracted); pick height is toward joint max / A014.
+- **Theta** — rotation about Z, right-handed about +Z.
 
-This document follows that convention throughout. Earlier revisions used `s` (positive downstream) for along-belt and `y_across_mm` for across-belt; those names are retired.
+This document follows that convention throughout. Earlier revisions used `−Y` downstream and `+Z` up; both signs were flipped together (right-handed frame preserved, X unchanged).
 
 ## Actors and topics
 
@@ -24,8 +24,8 @@ Topics:
 
 | Topic | Direction (gantry) | Payload role |
 |-------|----------------------|----------------|
-| `/BatID` | Subscribe | One JSON object per detection: dimensions, **`y_bat_mm`** (along-belt; negative downstream), **`x_across_mm`** (across-belt), `theta_deg`, `t_epoch_us` — see [Along-belt frame and BatID](#along-belt-frame-and-batid) |
-| `/conveyorA/speed` | Subscribe | Belt speed magnitude + `t_epoch_us` (sign of belt direction is fixed by the −Y convention, not by the payload) |
+| `/BatID` | Subscribe | One JSON object per detection: dimensions, **`y_bat_mm`** (along-belt; **+Y downstream**), **`x_across_mm`** (across-belt), `theta_deg`, `t_epoch_us` — see [Along-belt frame and BatID](#along-belt-frame-and-batid) |
+| `/conveyorA/speed` | Subscribe | Belt speed magnitude + `t_epoch_us` (sign of belt direction is fixed by the +Y convention, not by the payload) |
 | `/conveyorA/config` | Subscribe + publish | Gantry publishes **request**; conveyor publishes **response** (same topic; correlate with `request_id`) |
 | `/gantry/status` | Publish | State machine + skip reasons + timestamps for operators and upstream automation |
 
@@ -38,8 +38,8 @@ These conventions are agreed for integration; mirror them in `include/conveyor_i
 ### Along-belt axis `y` (mm)
 
 - **Origin:** belt **roller axis** datum projected into the belt plane (single agreed mechanical reference).
-- **`−Y`:** **downstream** along the belt — the direction of motion that carries the battery **toward the pickup plane**.
-- **Pickup is downstream of the camera** (so `y_pick_mm < y_cam_mm < 0` in this frame; both planes are downstream of the roller datum).
+- **`+Y`:** **downstream** along the belt — the direction of conveyor motion that carries the battery **toward the pickup plane**.
+- **Pickup is downstream of the camera** (so `y_pick_mm > y_cam_mm > 0` in this frame; both planes are downstream of the roller datum).
 
 ### Across-belt axis `x` (mm)
 
@@ -48,41 +48,41 @@ These conventions are agreed for integration; mirror them in `include/conveyor_i
 
 ### Vertical axis `z` (mm)
 
-- **`+Z = up`**, `Z = 0` at the belt surface. `z_pick_mm` is just above the belt; `z_safe_mm` is the safe-retracted top height (typically `AXIS_Z_HARD_LIMIT_MAX_MM`). The Z actuator joint maps directly to workspace Z (no sign flip).
+- **`+Z = down`**. Joint Z=0 is A015 (retracted). `z_pick` is toward the belt (near joint max / A014); `z_safe` is the traverse/retract band (`GANTRY_SAFE_Z_HEIGHT_MM` from Z−). Joint Z maps directly to workspace Z (no extra sign flip).
 
 ### Measured along-belt distances from the roller datum (as-built)
 
 | Symbol | Approx. value (mm) | Meaning |
 |--------|-------------------|---------|
-| `y_cam_mm`  | **−336.55** | Along-belt position of the **camera optical center** projected onto the belt. Negative because the camera is downstream of the roller datum. |
-| `y_pick_mm` | **−1016**   | Along-belt position of the **gantry pickup plane** (same datum, same axis). Further downstream than the camera. |
+| `y_cam_mm`  | **+336.55** | Along-belt position of the **camera optical center** projected onto the belt. Positive because the camera is downstream of the roller datum. |
+| `y_pick_mm` | **+1016**   | Along-belt position of the **gantry pickup plane** (same datum, same axis). Further downstream than the camera. |
 
 Fixed span camera → pickup (for sanity checks and docs):
 
 \[
-L_{\mathrm{cam}\rightarrow\mathrm{pick}} = y_{\mathrm{cam}} - y_{\mathrm{pick}} \approx 679.45\ \mathrm{mm}
+L_{\mathrm{cam}\rightarrow\mathrm{pick}} = y_{\mathrm{pick}} - y_{\mathrm{cam}} \approx 679.45\ \mathrm{mm}
 \]
 
 ### Authoritative field: `y_bat_mm`
 
-The identification system publishes **`y_bat_mm`**: the battery **reference point** along the along-belt axis at **`t_epoch_us`**, in the **same frame** as `y_cam_mm` / `y_pick_mm` (negative downstream).
+The identification system publishes **`y_bat_mm`**: the battery **reference point** along the along-belt axis at **`t_epoch_us`**, in the **same frame** as `y_cam_mm` / `y_pick_mm` (**+Y downstream**).
 
-- The battery may appear **anywhere in the camera FOV**. The vision stack shall **fold the within-FOV along-belt offset into `y_bat_mm` before publish** (e.g. \(y_{\mathrm{bat}} = y_{\mathrm{cam}} + \Delta y_{\mathrm{fov}}\), where \(\Delta y_{\mathrm{fov}} > 0\) places the battery upstream of camera center and \(\Delta y_{\mathrm{fov}} < 0\) places it downstream). The gantry **does not** apply a separate FOV delta.
+- The battery may appear **anywhere in the camera FOV**. The vision stack shall **fold the within-FOV along-belt offset into `y_bat_mm` before publish** (e.g. \(y_{\mathrm{bat}} = y_{\mathrm{cam}} + \Delta y_{\mathrm{fov}}\), where \(\Delta y_{\mathrm{fov}} > 0\) places the battery downstream of camera center and \(\Delta y_{\mathrm{fov}} < 0\) places it upstream). The gantry **does not** apply a separate FOV delta.
 - **Production `/BatID`:** treat **`y_bat_mm` as the single authoritative along-belt coordinate** — avoid also publishing a second along-belt delta that could conflict (optional non-authoritative `debug` fields on another topic are fine).
 
 ### Intercept distance for timing
 
 \[
-D_{\mathrm{mm}} = y_{\mathrm{bat,mm}} - y_{\mathrm{pick,mm}}
+D_{\mathrm{mm}} = y_{\mathrm{pick,mm}} - y_{\mathrm{bat,mm}}
 \]
 
 `D_mm > 0` means the battery is still upstream of the pick line and feasible to catch; `D_mm ≤ 0` means it has already passed (`SKIP:past_pickup_plane`).
 
-Then \(\tau \approx D / v_{\mathrm{belt}}\), with \(v_{\mathrm{belt}} = |{\rm speed\_mm\_per\_s}|\) from `/conveyorA/speed` (same `t_epoch_us` / staleness rules as elsewhere). The sign of belt motion is fixed by the `−Y` convention; `/conveyorA/speed` carries the unsigned magnitude. Example: at **5 ft/s** \(\approx\) **1524 mm/s**, if \(\Delta y_{\mathrm{fov}} = 0\) (battery reference on the camera centerline at detection, so \(y_{\mathrm{bat}} = y_{\mathrm{cam}} = -336.55\)), \(D = -336.55 - (-1016) = 679.45\) mm, hence \(\tau \approx 679.45 / 1524 \approx 0.45\) s before the reference reaches the pickup plane — before gantry motion and grip margins.
+Then \(\tau \approx D / v_{\mathrm{belt}}\), with \(v_{\mathrm{belt}} = |{\rm speed\_mm\_per\_s}|\) from `/conveyorA/speed` (same `t_epoch_us` / staleness rules as elsewhere). The sign of belt motion is fixed by the `+Y` convention; `/conveyorA/speed` carries the unsigned magnitude. Example: at **5 ft/s** \(\approx\) **1524 mm/s**, if \(\Delta y_{\mathrm{fov}} = 0\) (battery reference on the camera centerline at detection, so \(y_{\mathrm{bat}} = y_{\mathrm{cam}} = +336.55\)), \(D = 1016 - 336.55 = 679.45\) mm, hence \(\tau \approx 679.45 / 1524 \approx 0.45\) s before the reference reaches the pickup plane — before gantry motion and grip margins.
 
 ### One-line spec (vision / identification)
 
-> **`y_bat_mm` shall be the along-belt coordinate (mm, `−Y` downstream from the roller datum) of the battery reference point at `t_epoch_us`, already including the within-camera-FOV along-belt offset relative to the camera optical centerline projection; the gantry computes \(D = y_{\mathrm{bat}} - y_{\mathrm{pick}}\) with no further FOV correction.**
+> **`y_bat_mm` shall be the along-belt coordinate (mm, `+Y` downstream from the roller datum) of the battery reference point at `t_epoch_us`, already including the within-camera-FOV along-belt offset relative to the camera optical centerline projection; the gantry computes \(D = y_{\mathrm{pick}} - y_{\mathrm{bat}}\) with no further FOV correction.**
 
 ### Size (unchanged intent)
 

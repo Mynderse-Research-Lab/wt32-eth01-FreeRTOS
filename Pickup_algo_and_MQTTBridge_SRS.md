@@ -3,16 +3,16 @@
 **Project:** WT32-ETH01 Gantry Controller (consumer-battery sorting MVP)
 **Subsystem under specification:** Communications bridge (Ethernet + MQTT + JSON) and battery-pickup planning / sequencing layer on the gantry firmware.
 **Document status:** Draft for intermediate development.
-**Revision:** 0.2 — 2026-05-13.
+**Revision:** 0.3 — 2026-08-17.
 
-**Coordinate convention (firmware-wide, as of revision 0.2):**
+**Coordinate convention (firmware-wide, as of revision 0.3):**
 
-- **X** — horizontal traverse along the gantry beam, across the conveyor belt.
-- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **−Y direction**; battery detections move toward more-negative `y` as they advance.
-- **Z** — vertical (gantry descent axis). **+Z = up**; belt surface is `Z = 0`; safe-retracted top-home is `Z = Z_max`.
-- **Theta** — rotation about the vertical (Z) axis, in degrees.
+- **X** — horizontal traverse along the gantry beam, across the conveyor belt (sign unchanged).
+- **Y** — along-belt direction. The gantry has **no Y actuator**. Conveyor downstream is the **+Y direction**; battery detections move toward more-positive `y` as they advance.
+- **Z** — vertical (gantry descent axis). **+Z = down** (toward the belt). Joint Z=0 is A015 (retracted); pick height is toward joint max / A014.
+- **Theta** — rotation about Z, right-handed about +Z, in degrees.
 
-This is a change from revision 0.1, which used `+s` downstream and `y_across_mm` for the across-belt coordinate. The firmware codebase has been refactored to the X / Y(=along-belt) / Z(=up) convention; this SRS follows suit.
+This is a change from revision 0.2 (`−Y` downstream, `+Z` up). X is unchanged; Y and Z flipped together so the frame stays right-handed.
 
 **DOCX export (diagrams as embedded images):** From the repository root run `.\tools\srs_build\build.ps1` (requires Node.js + npm + pandoc). See `tools/srs_build/README.md`.
 
@@ -63,10 +63,10 @@ This SRS is the contract that downstream design, implementation, and acceptance 
 | **Camera plane** | The fixed along-belt position at which the vision system reports detections. |
 | **Local time** | `esp_timer_get_time()` in microseconds; monotonic from boot. |
 | **Epoch time** | `t_epoch_us` carried in external MQTT payloads; UTC microseconds. |
-| `y` (along-belt) | Along-belt scalar coordinate in mm. `−Y` is downstream (toward the pickup plane). |
+| `y` (along-belt) | Along-belt scalar coordinate in mm. `+Y` is downstream (toward the pickup plane). |
 | `x` (across-belt) | Across-belt lateral coordinate in mm. `+X` aligns with the gantry beam's positive traverse direction. |
-| `z` (vertical) | Vertical coordinate in mm. `+Z = up`; belt surface is `Z = 0`. |
-| `D_mm` | Along-belt intercept distance the battery still has to travel before reaching the pickup plane: `D_mm = y_bat_mm − y_pick_mm`. Positive when the battery is still upstream of the pickup plane. |
+| `z` (vertical) | Vertical coordinate in mm. `+Z = down` (toward the belt). Joint Z=0 is retracted (A015). |
+| `D_mm` | Along-belt intercept distance the battery still has to travel before reaching the pickup plane: `D_mm = y_pick_mm − y_bat_mm`. Positive when the battery is still upstream of the pickup plane. |
 | `τ` (tau) | Time-to-intercept: `D_mm / v_belt`, where `v_belt = abs(speed_mm_per_s)` > 0. |
 | **Stale** | A telemetry sample whose age exceeds the configured freshness threshold. |
 | **SKIP** | A `/gantry/status` message that reports a non-fatal refusal to execute a pick, with a machine-readable reason code. |
@@ -148,16 +148,16 @@ The firmware is the **only** moving party on the network; the vision system and 
 
 ### 3.1 Along-belt frame (Y)
 
-REQ-IF-001 — The firmware shall use a single along-belt scalar coordinate `y` measured in millimetres, with the origin at the belt roller axis datum projected into the belt plane, `−Y` pointing **downstream** (toward the pickup plane). Because both the camera plane and the pickup plane lie downstream of the roller datum, `y_pick_mm < y_cam_mm < 0`.
+REQ-IF-001 — The firmware shall use a single along-belt scalar coordinate `y` measured in millimetres, with the origin at the belt roller axis datum projected into the belt plane, `+Y` pointing **downstream** (toward the pickup plane). Because both the camera plane and the pickup plane lie downstream of the roller datum, `y_pick_mm > y_cam_mm > 0`.
 
 REQ-IF-002 — Two compile-time constants in `include/conveyor_intercept_params.h` shall pin the camera plane and the pickup plane onto the `y` axis:
 
 | Symbol | Constant | Nominal as-built value (mm) |
 |--------|----------|------------------------------|
-| `y_cam_mm`  | `CONVEYOR_Y_CAM_MM`  | −336.55 |
-| `y_pick_mm` | `CONVEYOR_Y_PICK_MM` | −1016.00 |
+| `y_cam_mm`  | `CONVEYOR_Y_CAM_MM`  | +336.55 |
+| `y_pick_mm` | `CONVEYOR_Y_PICK_MM` | +1016.00 |
 
-REQ-IF-003 — The intercept distance shall be computed as `D_mm = y_bat_mm − y_pick_mm`, where `y_bat_mm` is the authoritative along-belt coordinate of the battery reference point at `t_epoch_us`, published by the vision system on `/BatID`. `D_mm > 0` means the battery is upstream of (closer to the roller than) the pickup plane and still has `D_mm` of belt travel before crossing the pick line. `D_mm ≤ 0` means the battery has already passed the pickup plane and the detection is infeasible. The firmware **shall not** apply any additional camera-FOV correction to `y_bat_mm`; that fold-in is the vision system's responsibility.
+REQ-IF-003 — The intercept distance shall be computed as `D_mm = y_pick_mm − y_bat_mm`, where `y_bat_mm` is the authoritative along-belt coordinate of the battery reference point at `t_epoch_us`, published by the vision system on `/BatID`. `D_mm > 0` means the battery is upstream of (closer to the roller than) the pickup plane and still has `D_mm` of belt travel before crossing the pick line. `D_mm ≤ 0` means the battery has already passed the pickup plane and the detection is infeasible. The firmware **shall not** apply any additional camera-FOV correction to `y_bat_mm`; that fold-in is the vision system's responsibility.
 
 REQ-IF-004 — Time-to-intercept shall be computed as `τ = D_mm / v_belt`, where `v_belt = |speed_mm_per_s|` is the magnitude of the latest non-stale conveyor speed. `τ ≤ 0` shall be treated as infeasible (`SKIP:past_pickup_plane`).
 
@@ -169,16 +169,16 @@ REQ-IF-006 — Detections with `x_across_mm < 0` or `x_across_mm > width_mm` sha
 
 ### 3.3 Vertical frame (Z)
 
-REQ-IF-007 — Workspace Z is the vertical coordinate of the gripper TCP, measured positive upward from the belt surface (`Z = 0`). The gantry Z actuator joint `joint.z` maps directly to this workspace Z (no sign flip).
+REQ-IF-007 — Workspace Z is the vertical coordinate of the gripper TCP, measured **positive downward** (+Z toward the belt). Joint Z=0 is A015 (retracted). The gantry Z actuator joint `joint.z` maps directly to this workspace Z (no extra sign flip).
 
 REQ-IF-008 — Two compile-time constants in `include/conveyor_intercept_params.h` shall pin the planner's vertical targets:
 
 | Symbol | Constant | Nominal as-built value (mm) |
 |--------|----------|------------------------------|
-| `z_safe_mm`  | `CONVEYOR_Z_SAFE_MM`   | `AXIS_Z_HARD_LIMIT_MAX_MM` (default 150) |
-| `z_pick_mm`  | `CONVEYOR_Z_PICK_MM`   | 5.0 (gripper just above the belt surface) |
+| `z_safe_mm`  | `CONVEYOR_Z_SAFE_JOINT_MM` | `GANTRY_SAFE_Z_HEIGHT_MM` (default 30, retract/traverse band) |
+| `z_pick_mm`  | `CONVEYOR_Z_PICK_JOINT_MM` | placeholder near joint max / A014 (re-measure on belt) |
 
-`approach_pose.z` shall always be set to `z_safe_mm`. `descend_pose.z` shall be `z_pick_mm` minus any battery-height-dependent grip offset.
+`approach_pose.z` shall always be set to `z_safe_mm`. `descend_pose.z` shall be `z_pick_mm` plus any battery-height-dependent grip offset along +Z.
 
 ### 3.4 Time
 
@@ -225,7 +225,7 @@ REQ-MB-011 — A `/BatID` payload shall be accepted only if **all** of the follo
 
 - All required fields are present and of the expected types.
 - `t_epoch_us > 0`.
-- `y_bat_mm` falls within `[y_cam_mm − CAM_FOV_HALF_MM, y_cam_mm + CAM_FOV_HALF_MM]`, where `CAM_FOV_HALF_MM` is a compile-time constant (default 300 mm) approximating half the camera FOV plus tolerance. Because `y_cam_mm < 0`, this window straddles the camera plane on both the upstream (`+y` side) and downstream (`−y` side) of the camera datum.
+- `y_bat_mm` falls within `[y_cam_mm − CAM_FOV_HALF_MM, y_cam_mm + CAM_FOV_HALF_MM]`, where `CAM_FOV_HALF_MM` is a compile-time constant (default 300 mm) approximating half the camera FOV plus tolerance. Because `y_cam_mm > 0`, this window straddles the camera plane on both the upstream (`−y` side) and downstream (`+y` side) of the camera datum.
 - `x_across_mm` is within `[0, width_mm]` when conveyor width is known; otherwise within `[0, MAX_PLAUSIBLE_WIDTH_MM]` (default 1500 mm).
 - No dimension is NaN, negative, or implausibly large (length / width / height each ≤ 500 mm by default).
 - `theta_deg ∈ [−180, 180]`.
@@ -408,7 +408,7 @@ REQ-NF-002 — The scheduler shall be able to plan and start an `APPROACH` move 
 
 REQ-NF-003 — The pick state machine shall be able to handle a sustained detection rate of at least 1 Hz at the design belt speed of 1524 mm/s.
 
-REQ-NF-004 — `GRIP_LATENCY_MARGIN_US` (default 50 000 µs) shall provide adequate margin such that at the design speed (1524 mm/s) the battery has not moved more than ±5 mm in the `−Y` direction past the planned pick point at the moment `gantry.grip(true)` is issued.
+REQ-NF-004 — `GRIP_LATENCY_MARGIN_US` (default 50 000 µs) shall provide adequate margin such that at the design speed (1524 mm/s) the battery has not moved more than ±5 mm in the `+Y` direction past the planned pick point at the moment `gantry.grip(true)` is issued.
 
 ### 6.2 Safety
 
@@ -455,7 +455,7 @@ REQ-FM-001 — The bridge and scheduler shall emit `SKIP` messages drawn from th
 | `gantry_not_ready` | Not enabled, alarm active, or home/calibrate gate not satisfied | scheduler |
 | `pose_unreachable` | Planner rejected on soft limits | planner |
 | `outside_pick_zone` | `τ < τ_min` or `t_pick_local_us` in the past | planner |
-| `past_pickup_plane` | `D_mm ≤ 0` (battery already at or past pick line in `−Y`) | planner |
+| `past_pickup_plane` | `D_mm ≤ 0` (battery already at or past pick line in `+Y`) | planner |
 | `speed_invalid` | `abs(v) ≤ 1 mm/s` or NaN | planner |
 | `x_across_out_of_range` | `x_across_mm` not in `[0, width_mm]` | bridge |
 | `bat_id_validation_failed` | Schema/range/sanity rejection of `/BatID` | bridge |
@@ -508,9 +508,9 @@ REQ-VT-010 — Acceptance gate: tests REQ-VT-001 through REQ-VT-009 shall pass o
 
 ### A.1 `/BatID` (subscribe)
 
-Field naming follows the X / Y(=along-belt, −Y downstream) / Z(=up) convention:
+Field naming follows the X / Y(=along-belt, +Y downstream) / Z(=down) convention:
 
-- `y_bat_mm` — along-belt position of the battery centroid at `t_epoch_us`. Negative when the battery is downstream of the roller datum; less-negative values are farther upstream (closer to the camera or beyond).
+- `y_bat_mm` — along-belt position of the battery centroid at `t_epoch_us`. Positive when the battery is downstream of the roller datum; larger values are farther downstream (toward the pickup plane).
 - `x_across_mm` — across-belt position from the conveyor-side datum, `0 ≤ x_across_mm ≤ width_mm`.
 
 ```json
@@ -518,7 +518,7 @@ Field naming follows the X / Y(=along-belt, −Y downstream) / Z(=up) convention
   "t_epoch_us":   1747166400123456,
   "bat_id":       "batch-2026-05-13-00042",
   "seq":          42,
-  "y_bat_mm":     -480.0,
+  "y_bat_mm":     480.0,
   "x_across_mm":  310.0,
   "theta_deg":    12.4,
   "length_mm":    65.0,
@@ -574,7 +574,7 @@ Field naming follows the X / Y(=along-belt, −Y downstream) / Z(=up) convention
 struct BatteryDetection {
     uint64_t t_epoch_us;
     int64_t  t_local_us;       // filled at MQTT-receive time
-    float    y_bat_mm;         // along-belt (negative = downstream)
+    float    y_bat_mm;         // along-belt (+Y = downstream)
     float    x_across_mm;      // across-belt, [0, width_mm]
     float    theta_deg;        // rotation about Z
     float    length_mm;

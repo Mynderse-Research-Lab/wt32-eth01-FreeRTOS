@@ -18,7 +18,6 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 |----------|---------|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy |
 | [../AGENTS.md](../AGENTS.md) | AI agent entry point |
-| [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements |
 | [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design |
 | [MCP_SETUP.md](MCP_SETUP.md) | Cursor MCP server setup |
 | [SERIAL_OVER_LAN_PLAN.md](SERIAL_OVER_LAN_PLAN.md) | TCP ESP_LOG + console; free GPIO1/3; Python UI |
