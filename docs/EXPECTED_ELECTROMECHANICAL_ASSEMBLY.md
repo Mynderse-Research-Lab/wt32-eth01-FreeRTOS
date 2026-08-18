@@ -21,7 +21,7 @@ HCS01), **not** WT32 step/direction through an opto interface board.
 | Drive-native Position Absolute profiles to target | Host Speed+TM10 + StopMotion undershoot/overshoot at speed |
 | Fault / Homed / AtReference over assembly 154     | Custom opto board, MCP23S17, and PTI wiring complexity     |
 | Drive-side endstops (TBIO / X31)                  | MCP GPIO limit path removed in 2026-07 refactor            |
-| One daisy-chain for X (+ deferred Z/theta peers)  | Parallel pulse/dir/SON/ARST/ALM harness per axis           |
+| One daisy-chain for X / Z / HCS01 theta     | Parallel pulse/dir/SON/ARST/ALM harness per axis           |
 
 
 Legacy MCP23S17 **as a motion / limit / PTI path** is obsolete. MCP23S17 on
@@ -73,9 +73,9 @@ flowchart TB
 
 | Axis  | Meaning                       | Actuator        |
 | ----- | ----------------------------- | --------------- |
-| X     | Across belt                   | Beta 100-ZRS    |
-| Y     | Along belt, **−Y downstream** | None (conveyor) |
-| Z     | Vertical, **+Z up**           | Beta 80-SRS     |
+| X     | Across belt (sign unchanged)     | Beta 100-ZRS    |
+| Y     | Along belt, **+Y downstream**    | None (conveyor) |
+| Z     | Vertical, **+Z down** (belt)     | Beta 80-SRS     |
 | Theta | About Z                       | ERD 04-40       |
 
 
@@ -92,8 +92,11 @@ drive Absolute legality uses HomingMethod 34 (see software doc).
 | SPI3 MCP23S17 + TFT | Field I/O ×8 + operator display | SCLK14 MOSI4 MISO36; CS_MCP2; TFT CS=MCP PB2; BLK hardwired; KO=PB6 |
 | LAN8720 (RMII) | MQTT / plant / TCP console | Separate from EIP daisy-chain |
 
-EIP daisy-chain: WIZ850io → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 (→ HCS01).
-Plant switch (LAN8720 + PC + MQTT): **never** add drive Port 2 / WIZ — same `192.168.1.x` as plant causes IP clash (see LOW_LEVEL § Dual Ethernet).
+EIP daisy-chain: WIZ850io → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 → HCS01.
+HCS01 engineering (X24/X25) is `192.168.1.22` (HTTP/IndraWorks). CIP/FKM is
+`192.168.1.23` (TCP 44818). Plant switch (LAN8720 + PC + MQTT): **never** add
+drive Port 2 / WIZ — same `192.168.1.x` as plant causes IP clash (see LOW_LEVEL
+§ Dual Ethernet).
 
 ---
 
@@ -106,7 +109,7 @@ to the ESP32. Firmware does **not** dual-poll the same switches on GPIO.
 |------|-----------|-----------------|-----------------|--------|
 | X | TBIO | INPUT1 pin 9 | INPUT2 pin 10 | KNX5100C **Positive/Forward Limit (PL)** / **Negative/Reverse Limit (NL)** |
 | Z | TBIO | INPUT3 pin 34 | INPUT4 pin 8 | Same on Z drive |
-| Theta | X31 | X31.5 (E3) | X31.6 (E4) | Deferred with HCS01 |
+| Theta | X31 | X31.5 (E3) | X31.6 (E4) | Unused — HIPERFACE absolute; firmware soft-homes, does not seek X31 |
 
 **Drive vs joint frame (X + Z bench, 2026-08):** UM004D defines PL as the drive’s
 most-**positive** travel and NL as most-**negative**. On **X**, motor sense vs
@@ -117,8 +120,8 @@ assignment is the opposite polarity vs that X map:
 |-----------|---------|------------|---------------|
 | **−X** (min) | A014 | PL / positive | `home x` zero |
 | **+X** (max) | A015 | NL / negative | `calibrate x` max |
-| **−Z** (min / toward belt) | A015 | NL / negative | `home z` zero |
-| **+Z** (max / away from belt) | A014 | PL / positive | `calibrate z` max |
+| **−Z** (min / retracted / away from belt) | A015 | NL / negative | `home z` zero |
+| **+Z** (max / toward belt / down) | A014 | PL / positive | `calibrate z` max |
 
 Do not assume PL = joint +X/+Z. Firmware maps Z min→A015 / max→A014; if a
 physical end raises the wrong warning, reassign PL/NL on that drive (do not
@@ -167,7 +170,7 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel. Console on UART or TCP `
 | Item | Status |
 |------|--------|
 | X drive TBIO limits (KNX PL/NL on INPUT1/2) | **PASS** (2026-08-10 reconfirm after PL/NL swap; home/cal length ≈420 mm) |
-| Z drive TBIO limits | **PASS** (2026-08-10; A015 @ −Z, A014 @ +Z; Z Absolute invert; SAFE_Z = 30 mm from Z−) |
+| Z drive TBIO limits | **PASS** (2026-08-10; A015 @ −Z retract, A014 @ +Z toward belt; Z Absolute invert; SAFE_Z = 30 mm from Z−) |
 | Firmware drive-managed path | `CONFIG_EIP_ENDSTOP_FROM_DRIVE` → `GantryLimitSwitch` + move gate (X and Z) |
 
 ### 4.3 Bench validation (X + Z complete)
@@ -176,9 +179,10 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel.
 
 **X** — complete. A014 @ joint −X, A015 @ joint +X, home/cal length ≈420 mm.
 
-**Z** — complete (2026-08-10; map updated same day). **A015 @ joint −Z**,
-**A014 @ joint +Z** (swapped vs X). Z Absolute invert so − seeks A015.
-SAFE_Z = 30 mm from Z− (bottom band). Bring-up: `calibrate all`.
+**Z** — complete (2026-08-10; map updated same day). **A015 @ joint −Z**
+(retracted), **A014 @ joint +Z** (toward belt / down; swapped vs X).
+Z Absolute invert so − seeks A015. SAFE_Z = 30 mm from Z− (traverse /
+retract band). Bring-up: `calibrate all`.
 Measured soft max ≈ **147 mm** (axis dead-center stroke — not conveyor height).
 Conveyor-height sensor remains **unwired** (future Field DIN / TBIO).
 
@@ -201,7 +205,7 @@ Free ESP ADC: **12, 32, 33, 39**. ETH REFCLK = GPIO0_IN (not CLK-out on 17).
 | KO | PB6 | Module key input |
 | W5500 RSTn | PB7 | Active-low; MCP-driven (not hardwired) |
 
-IO0 reserved for boot/DTR + ETH REFCLK. UART0 on GPIO1/3. W5500 MOSI on GPIO17.
+IO0 = ETH REFCLK IN after boot. **Deployment:** programming harness (incl. IO0) unplugged at runtime so plant LAN works — accepted limitation, no carrier PCB change. Bench flash: RTS→EN / DTR policy per LOW_LEVEL; UART0 on GPIO1/3. W5500 MOSI on GPIO17.
 Class 1 (SPI2) has priority over SPI3 (task prio + SPI3 deferral during exchange).
 See [`pinout.csv`](../pinout.csv).
 

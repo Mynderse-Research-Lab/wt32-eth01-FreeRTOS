@@ -4,8 +4,8 @@
  * @version 2.0.0
  *
  * Coordinate convention:
- *   X = horizontal traverse, Y = along-belt (no actuator; -Y = downstream),
- *   Z = vertical (+Z = up). pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+ *   X = horizontal traverse, Y = along-belt (no actuator; +Y = downstream),
+ *   Z = vertical (+Z = down). pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
  *   (TCP height above physical belt/bed; see axis_drivetrain_params.h).
  *   Theta = rotation about Z.
  */
