@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/CellNetL2.cpp"
+    INCLUDE_DIRS
+        "src"
+        "../../include"
+    REQUIRES
+        esp_eth
+        esp_netif
+        esp_timer
+        log
+        freertos
+)

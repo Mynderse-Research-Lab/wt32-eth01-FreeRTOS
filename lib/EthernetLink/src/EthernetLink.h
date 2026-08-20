@@ -8,7 +8,9 @@
 #include "esp_eth.h"
 #include "esp_netif.h"
 
-namespace MqttBridge {
+#include <atomic>
+
+namespace Network {
 
 class EthernetLink {
 public:
@@ -23,14 +25,15 @@ public:
     bool start();
     bool waitForUp(uint32_t timeout_ms);
     bool isUp() const;
+    esp_eth_handle_t getEthHandle() const { return eth_handle_; }
 
 private:
     static void handleEthEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
     static void handleIpEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
 
     bool started_ = false;
-    bool link_up_ = false;
-    bool phy_link_connected_ = false;
+    std::atomic<bool> link_up_{false};
+    std::atomic<bool> phy_link_connected_{false};
     bool handlers_registered_ = false;
     bool configureNetwork();
     bool hasUsableIp() const;
@@ -39,6 +42,6 @@ private:
     esp_netif_t* netif_ = nullptr;
 };
 
-}  // namespace MqttBridge
+}  // namespace Network
 
 #endif  // MQTT_BRIDGE_ETHERNET_LINK_H

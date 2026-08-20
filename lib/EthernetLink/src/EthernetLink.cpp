@@ -14,7 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-namespace MqttBridge {
+namespace Network {
 
 static const char* TAG = "EthernetLink";
 // WT32-ETH01: GPIO16 gates the LAN8720 external crystal (not a PHY reset line).
@@ -379,4 +379,4 @@ void EthernetLink::handleIpEvent(void* handler_args, esp_event_base_t, int32_t e
 #endif
 }
 
-}  // namespace MqttBridge
+}  // namespace Network
