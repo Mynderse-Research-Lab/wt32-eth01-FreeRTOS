@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chip-recover X/Z.
 
 ### Fixed
+- Theta consecutive Absolute: `isBusy()` is `motion_active_` (not sticky
+  P-0-4078 bit4). Arrival requires leaving the previous pose then 3 ticks
+  in-band at the **new** target. Fixes `test_cycle` I (179.5→0) going idle
+  while still at ~179°. Theta-only path SM stays in `THETA_MOVING` until
+  that arrival.
 - Class 1 cadence: cached-dest O→T defers SENDOK to the next send; T→O
   drain is one RX burst of datagram views; `Sn_TX_WR` is software-cached;
   `Sn_IR` clear is write-only. `eiptiming` prints drain plus pace

@@ -133,3 +133,4 @@ esp_err_t withTft(const std::function<esp_err_t()>& fn) { return withLocked(fn);
 
 extern "C" void spi3_class1_critical_enter(void) { spi3::class1CriticalEnter(); }
 extern "C" void spi3_class1_critical_exit(void) { spi3::class1CriticalExit(); }
+extern "C" bool spi3_class1_critical_active(void) { return spi3::class1CriticalActive(); }

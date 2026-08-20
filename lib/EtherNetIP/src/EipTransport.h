@@ -103,7 +103,7 @@ class IUdpEndpoint {
   virtual void close() = 0;
 };
 
-// Shared Ethernet link state (firmware adapts MqttBridge::EthernetLink).
+// Shared Ethernet link state (firmware adapts Network::EthernetLink).
 class ILinkStatus {
  public:
   virtual ~ILinkStatus() = default;

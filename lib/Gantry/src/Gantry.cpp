@@ -7,6 +7,7 @@
 #include "Gantry.h"
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -100,6 +101,7 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
 // ============================================================================
 
 bool Gantry::begin() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (initialized_) {
         return true;
     }
@@ -178,6 +180,7 @@ bool Gantry::begin() {
 // ============================================================================
 
 void Gantry::enable() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED();
     abortRequested_ = false;
     // Always re-issue axis enable so ServoOn gets a fresh 0->1 edge. Skipping
@@ -202,6 +205,7 @@ void Gantry::enable() {
 }
 
 void Gantry::disable() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED();
     if (isBusy()) {
         stopAllMotion();
@@ -217,6 +221,7 @@ void Gantry::disable() {
 // ============================================================================
 
 void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     xMinPin_ = xMinPin;
     xMaxPin_ = xMaxPin;
     xMinSwitch_.configure(xMinPin_, true, true, 6);
@@ -224,6 +229,7 @@ void Gantry::setLimitPins(int xMinPin, int xMaxPin) {
 }
 
 void Gantry::configureDriveManagedLimits() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     xMinPin_ = -1;
     xMaxPin_ = -1;
     xMinSwitch_.configureExternal();
@@ -244,16 +250,19 @@ void Gantry::configureDriveManagedLimits() {
 }
 
 bool Gantry::driveManagedLimitsEnabled() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return xMinSwitch_.isConfigured() &&
            xMinSwitch_.source() == GantryLimitSwitch::Source::kDriveManaged;
 }
 
 void Gantry::setZAxisLimits(float minMm, float maxMm) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     config_.limits.z_min = minMm;
     config_.limits.z_max = maxMm;
 }
 
 void Gantry::setThetaLimits(float minDeg, float maxDeg) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisTheta_) {
         axisTheta_->setAngleRange(minDeg, maxDeg);
         config_.limits.theta_min = axisTheta_->getMinDeg();
@@ -267,6 +276,7 @@ void Gantry::setThetaLimits(float minDeg, float maxDeg) {
 void Gantry::setJointLimits(float xMin, float xMax,
                             float zMin, float zMax,
                             float thetaMin, float thetaMax) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     config_.limits.x_min     = xMin;
     config_.limits.x_max     = xMax;
     config_.limits.z_min     = zMin;
@@ -282,6 +292,7 @@ void Gantry::setJointLimits(float xMin, float xMax,
 }
 
 void Gantry::setEndEffectorPin(int pin, bool activeHigh) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     gripperPin_ = pin;
     endEffector_.configurePin(pin, activeHigh);
     if (initialized_) {
@@ -290,6 +301,7 @@ void Gantry::setEndEffectorPin(int pin, bool activeHigh) {
 }
 
 void Gantry::setSafeZHeight(float safeHeight_mm) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     // Argument is the margin above Z− / A015 (not an absolute joint plane).
     if (safeHeight_mm <= 0.0f) {
         return;
@@ -298,11 +310,13 @@ void Gantry::setSafeZHeight(float safeHeight_mm) {
 }
 
 float Gantry::traverseClearanceZMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     // Bottom-band ceiling: coordinated X+Z only while Z <= z_min + margin.
     return Path::bandCeilingFromZMinus(config_.limits.z_min, safeZMarginFromMaxMm_);
 }
 
 bool Gantry::zInTraverseBand() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const float z = axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_);
     return Path::zInTraverseBand(z, traverseClearanceZMm());
 }
@@ -338,6 +352,7 @@ bool Gantry::requireThetaTraverseInterlock(const char* what) {
 // ============================================================================
 
 void Gantry::moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !enabled_) {
         return;
     }
@@ -370,6 +385,7 @@ GantryError Gantry::moveTo(const JointConfig& joint,
                            uint32_t deceleration_mm_per_s2,
                            uint32_t acceleration_deg_per_s2,
                            uint32_t deceleration_deg_per_s2) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
     GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
@@ -404,6 +420,7 @@ GantryError Gantry::moveTo(const EndEffectorPose& pose,
                            uint32_t deceleration_mm_per_s2,
                            uint32_t acceleration_deg_per_s2,
                            uint32_t deceleration_deg_per_s2) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
     GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
@@ -429,6 +446,7 @@ GantryError Gantry::moveTo(const EndEffectorPose& pose,
 }
 
 bool Gantry::isBusy() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) {
         return false;
     }
@@ -439,18 +457,26 @@ bool Gantry::isBusy() const {
            homingInProgress_ || calibrationInProgress_;
 }
 
-bool Gantry::isEnabled() const { return initialized_ && enabled_; }
+bool Gantry::isEnabled() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return initialized_ && enabled_;
+}
 
 void Gantry::requestAbort() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     abortRequested_ = true;
     if (initialized_) {
         stopAllMotion();
     }
 }
 
-bool Gantry::isAbortRequested() const { return abortRequested_; }
+bool Gantry::isAbortRequested() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return abortRequested_;
+}
 
 void Gantry::update() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED();
 
     // Advance EIP axis state machines first so isBusy() reflects the latest
@@ -474,6 +500,7 @@ void Gantry::home() {
 }
 
 void Gantry::homeX() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED();
     GANTRY_CHECK_ENABLED();
     abortRequested_ = false;
@@ -526,6 +553,7 @@ void Gantry::homeX() {
 }
 
 void Gantry::homeZ() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED();
     GANTRY_CHECK_ENABLED();
     abortRequested_ = false;
@@ -545,6 +573,7 @@ void Gantry::homeZ() {
 }
 
 bool Gantry::homeTheta() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(false);
     GANTRY_CHECK_ENABLED_RET(false);
     abortRequested_ = false;
@@ -578,7 +607,7 @@ bool Gantry::homeTheta() {
 }
 
 void Gantry::softHomeJointDatum() {
-    GANTRY_CHECK_INITIALIZED();
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisX_) {
         axisX_->setCurrentPulses(0);
         currentX_mm_ = axisX_->getCurrentMm();
@@ -594,38 +623,48 @@ int Gantry::calibrate() {
 }
 
 int Gantry::calibrateZ() {
-    GANTRY_CHECK_INITIALIZED_RET(0);
-    GANTRY_CHECK_ENABLED_RET(0);
-    abortRequested_ = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        GANTRY_CHECK_INITIALIZED_RET(0);
+        GANTRY_CHECK_ENABLED_RET(0);
+        abortRequested_ = false;
 
-    if (!axisZ_) return 0;
-    if (axisZ_->isAlarmActive()) return 0;
+        if (!axisZ_) return 0;
+        if (axisZ_->isAlarmActive()) return 0;
 
-    if (!driveManagedLimitsEnabled()) {
-        ESP_LOGW(TAG,
-                 "[CAL] Z axis calibrate requires drive-managed EIP limits "
-                 "(GPIO Z switches not integrated)");
-        return 0;
-    }
+        if (!driveManagedLimitsEnabled()) {
+            ESP_LOGW(TAG,
+                     "[CAL] Z axis calibrate requires drive-managed EIP limits "
+                     "(GPIO Z switches not integrated)");
+            return 0;
+        }
 
-    // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
-    // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
-    // after a failed home (that left active=0 / rejected Absolute).
-    calibrationInProgress_ = true;
-    zAxisLength_ = 0;
-    if (eipLimitPhase_ == EipLimitPhase::kIdle) {
-        startEipPrecisionHome(EipLimitAxisRole::kZ);
+        // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
+        // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
+        // after a failed home (that left active=0 / rejected Absolute).
+        calibrationInProgress_ = true;
+        zAxisLength_ = 0;
+        if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+            startEipPrecisionHome(EipLimitAxisRole::kZ);
+        }
     }
     unsigned long start_ms = gantry_millis();
-    while (calibrationInProgress_ &&
-           (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
-        if (abortRequested_) {
-            stopAllMotion();
-            calibrationInProgress_ = false;
-            return 0;
+    while (true) {
+        {
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            if (!calibrationInProgress_ ||
+                (gantry_millis() - start_ms) >= TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+                break;
+            }
+            if (abortRequested_) {
+                stopAllMotion();
+                calibrationInProgress_ = false;
+                return 0;
+            }
         }
         gantry_delay(10);
     }
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (calibrationInProgress_) {
         ESP_LOGE(TAG, "[CAL] EIP Z calibrate timed out");
         stopAllMotion();
@@ -636,6 +675,7 @@ int Gantry::calibrateZ() {
 }
 
 int Gantry::calibrateTheta() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(0);
     GANTRY_CHECK_ENABLED_RET(0);
 
@@ -666,41 +706,65 @@ int Gantry::calibrateTheta() {
 }
 
 int Gantry::calibrateX() {
-    GANTRY_CHECK_INITIALIZED_RET(0);
-    GANTRY_CHECK_ENABLED_RET(0);
-    abortRequested_ = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        GANTRY_CHECK_INITIALIZED_RET(0);
+        GANTRY_CHECK_ENABLED_RET(0);
+        abortRequested_ = false;
 
-    if (!axisX_) return 0;
-    if (axisX_->isAlarmActive()) return 0;
+        if (!axisX_) return 0;
+        if (axisX_->isAlarmActive()) return 0;
 
-    if (!requireXTraverseInterlock("calibrate x")) {
-        return 0;
-    }
-
-    if (driveManagedLimitsEnabled()) {
-        // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
-        // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
-        // after a failed home.
-        calibrationInProgress_ = true;
-        axisLength_ = 0;
-        if (eipLimitPhase_ == EipLimitPhase::kIdle) {
-            startEipPrecisionHome(EipLimitAxisRole::kX);
-            if (eipLimitPhase_ == EipLimitPhase::kIdle) {
-                // Interlock or missing axis aborted before arming.
-                calibrationInProgress_ = false;
-                return 0;
-            }
+        if (!requireXTraverseInterlock("calibrate x")) {
+            return 0;
         }
-        unsigned long start_ms = gantry_millis();
-        while (calibrationInProgress_ &&
-               (gantry_millis() - start_ms) < TRAVEL_MEASUREMENT_TIMEOUT_MS) {
-            if (abortRequested_) {
+
+        if (driveManagedLimitsEnabled()) {
+            // Keep calibrationInProgress_ set through home→cal handoff in kHomeSettle.
+            // On EIP-LIMIT failure the SM clears the flag; do NOT restart cal from Idle
+            // after a failed home.
+            calibrationInProgress_ = true;
+            axisLength_ = 0;
+            if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+                startEipPrecisionHome(EipLimitAxisRole::kX);
+                if (eipLimitPhase_ == EipLimitPhase::kIdle) {
+                    // Interlock or missing axis aborted before arming.
+                    calibrationInProgress_ = false;
+                    return 0;
+                }
+            }
+            // Proceed to polling below outside the lock
+        } else {
+            calibrationInProgress_ = true;
+
+            if (!xMinSwitch_.isConfigured() || !xMaxSwitch_.isConfigured()) {
                 stopAllMotion();
                 calibrationInProgress_ = false;
                 return 0;
             }
+
+            homeX();
+        }
+    }
+
+    if (driveManagedLimitsEnabled()) {
+        unsigned long start_ms = gantry_millis();
+        while (true) {
+            {
+                std::lock_guard<std::recursive_mutex> lock(mutex_);
+                if (!calibrationInProgress_ ||
+                    (gantry_millis() - start_ms) >= TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+                    break;
+                }
+                if (abortRequested_) {
+                    stopAllMotion();
+                    calibrationInProgress_ = false;
+                    return 0;
+                }
+            }
             gantry_delay(10);
         }
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (calibrationInProgress_) {
             ESP_LOGE(TAG, "[CAL] EIP calibrate timed out");
             stopAllMotion();
@@ -848,7 +912,7 @@ int Gantry::calibrateX() {
 // ============================================================================
 
 void Gantry::grip(bool active) {
-    GANTRY_CHECK_INITIALIZED();
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (endEffector_.isConfigured()) {
         endEffector_.setActive(active);
         gripperActive_ = active;
@@ -860,6 +924,7 @@ void Gantry::grip(bool active) {
 // ============================================================================
 
 int Gantry::getXEncoder() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisX_) return 0;
     if (axisX_->isEncoderFeedbackEnabled()) {
         return axisX_->getEncoderPulses();
@@ -868,11 +933,13 @@ int Gantry::getXEncoder() const {
 }
 
 int Gantry::getXEncoderRaw() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisX_) return 0;
     return axisX_->getEncoderPulses();
 }
 
 int32_t Gantry::getXCommandedPulses() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisX_) return 0;
     if (homingInProgress_ || calibrationInProgress_) {
         return 0;
@@ -881,35 +948,42 @@ int32_t Gantry::getXCommandedPulses() const {
 }
 
 float Gantry::getXCommandedMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const float ppm = getPulsesPerMm();
     if (ppm <= 0.0f) return 0.0f;
     return (float)((double)getXCommandedPulses() / (double)ppm);
 }
 
 float Gantry::getXEncoderMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const float ppm = getPulsesPerMm();
     if (ppm <= 0.0f) return 0.0f;
     return (float)((double)getXEncoderRaw() / (double)ppm);
 }
 
 int Gantry::getCurrentZ() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return (int)(axisZ_ ? axisZ_->getCurrentMm() : (float)currentZ_);
 }
 
 float Gantry::getZCommandedMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisZ_ ? axisZ_->getTargetMm() : targetZ_mm_;
 }
 
 float Gantry::getZEncoderMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisZ_ ? axisZ_->getCurrentMm() : (float)currentZ_;
 }
 
 int32_t Gantry::getZEncoderPulses() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisZ_) return 0;
     return axisZ_->getEncoderPulses();
 }
 
 float Gantry::getZPulsesPerMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisZ_ && axisZ_->pulsesPerMm() > 0.0) {
         return static_cast<float>(axisZ_->pulsesPerMm());
     }
@@ -917,22 +991,27 @@ float Gantry::getZPulsesPerMm() const {
 }
 
 int Gantry::getCurrentTheta() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return static_cast<int>(getCurrentThetaDeg());
 }
 
 float Gantry::getCurrentThetaDeg() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisTheta_ ? axisTheta_->getCurrentDeg() : static_cast<float>(currentTheta_);
 }
 
 float Gantry::getThetaDriveAbsDeg() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisTheta_ ? axisTheta_->getDriveAbsDeg() : static_cast<float>(currentTheta_);
 }
 
 bool Gantry::isThetaDriveOriginAligned() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisTheta_ && axisTheta_->isDriveOriginAligned();
 }
 
 float Gantry::getThetaPulsesPerDeg() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisTheta_ && axisTheta_->pulsesPerDeg() > 0.0) {
         return static_cast<float>(axisTheta_->pulsesPerDeg());
     }
@@ -940,19 +1019,25 @@ float Gantry::getThetaPulsesPerDeg() const {
 }
 
 bool Gantry::setThetaPuuPerDeg(double puu_per_deg) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!axisTheta_) {
         return false;
     }
     return axisTheta_->setPuuPerDeg(puu_per_deg);
 }
 
-bool Gantry::hasThetaAxis() const { return axisTheta_ != nullptr; }
+bool Gantry::hasThetaAxis() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return axisTheta_ != nullptr;
+}
 
 bool Gantry::hasThetaLiveFeedback() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return axisTheta_ && axisTheta_->hasLiveFeedback();
 }
 
 bool Gantry::getThetaCipStatus(char* buf, size_t n) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!axisTheta_) {
         if (buf && n) buf[0] = '\0';
         return false;
@@ -961,6 +1046,7 @@ bool Gantry::getThetaCipStatus(char* buf, size_t n) const {
 }
 
 bool Gantry::getThetaDriveAlarmSummary(char* buf, size_t n) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!axisTheta_) {
         if (buf && n) buf[0] = '\0';
         return false;
@@ -973,6 +1059,7 @@ bool Gantry::getThetaDriveAlarmSummary(char* buf, size_t n) const {
 // ============================================================================
 
 bool Gantry::isAlarmActive() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) return false;
     const bool xAlarm = axisX_     && axisX_->isAlarmActive();
     const bool zAlarm = axisZ_     && axisZ_->isAlarmActive();
@@ -981,6 +1068,7 @@ bool Gantry::isAlarmActive() const {
 }
 
 bool Gantry::clearAlarm() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) return false;
     // Stop sequential motion before FaultReset so we do not switch the
     // mid-move command image out from under an axis (A603 ping-pong).
@@ -995,6 +1083,7 @@ bool Gantry::clearAlarm() {
 }
 
 void Gantry::logDriveAlarmSummaries() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     char buf[192];
     if (axisX_ && axisX_->getDriveAlarmSummary(buf, sizeof(buf))) {
         if (buf[0] && std::strcmp(buf, "clear") != 0) {
@@ -1014,6 +1103,7 @@ void Gantry::logDriveAlarmSummaries() const {
 }
 
 bool Gantry::getXDriveAlarmSummary(char* buf, size_t n) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!axisX_) {
         if (buf && n) buf[0] = '\0';
         return false;
@@ -1022,6 +1112,7 @@ bool Gantry::getXDriveAlarmSummary(char* buf, size_t n) const {
 }
 
 bool Gantry::getZDriveAlarmSummary(char* buf, size_t n) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!axisZ_) {
         if (buf && n) buf[0] = '\0';
         return false;
@@ -1030,12 +1121,14 @@ bool Gantry::getZDriveAlarmSummary(char* buf, size_t n) const {
 }
 
 void Gantry::setHomingSpeed(uint32_t speed_pps) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     // Homing is not supported in EIP-only mode. The speed is set via
     // the EIP assembly HomeReturnSpeed field (OutputAssembly104 byte 20).
     (void)speed_pps;
 }
 
 void Gantry::setAxisLogRateHz(uint32_t hz) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisX_)     axisX_->setLogRateHz(hz);
     if (axisZ_)     axisZ_->setLogRateHz(hz);
     if (axisTheta_) axisTheta_->setLogRateHz(hz);
@@ -1046,14 +1139,17 @@ void Gantry::setAxisLogRateHz(uint32_t hz) {
 // ============================================================================
 
 EndEffectorPose Gantry::forwardKinematics(const JointConfig& joint) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return Kinematics::forward(joint, kinematicParams_);
 }
 
 JointConfig Gantry::inverseKinematics(const EndEffectorPose& pose) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return Kinematics::inverse(pose, kinematicParams_);
 }
 
 JointConfig Gantry::getCurrentJointConfig() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     JointConfig joint;
     joint.x     = currentX_mm_;
     joint.z     = axisZ_     ? axisZ_->getCurrentMm()     : (float)currentZ_;
@@ -1062,6 +1158,7 @@ JointConfig Gantry::getCurrentJointConfig() const {
 }
 
 JointConfig Gantry::getTargetJointConfig() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     JointConfig joint;
     joint.x     = targetX_mm_;
     joint.z     = axisZ_ ? axisZ_->getTargetMm() : targetZ_mm_;
@@ -1070,10 +1167,12 @@ JointConfig Gantry::getTargetJointConfig() const {
 }
 
 EndEffectorPose Gantry::getCurrentEndEffectorPose() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return forwardKinematics(getCurrentJointConfig());
 }
 
 EndEffectorPose Gantry::getTargetEndEffectorPose() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return forwardKinematics(getTargetJointConfig());
 }
 
@@ -1082,12 +1181,14 @@ EndEffectorPose Gantry::getTargetEndEffectorPose() const {
 // ============================================================================
 
 void Gantry::setStepsPerRevolution(float steps_per_rev) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (steps_per_rev > 0) {
         stepsPerRev_ = steps_per_rev;
     }
 }
 
 float Gantry::getPulsesPerMm() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (xPulsesPerMmOverride_ > 0.0f) {
         return xPulsesPerMmOverride_;
     }
@@ -1596,10 +1697,12 @@ void Gantry::advanceEipLimitSequence() {
 // ============================================================================
 
 bool Gantry::eipBringUpInProgress() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return bringUpPhase_ != BringUpPhase::kIdle;
 }
 
 bool Gantry::startEipBringUp() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(false);
     GANTRY_CHECK_ENABLED_RET(false);
     if (!driveManagedLimitsEnabled()) {
@@ -2334,17 +2437,15 @@ void Gantry::startThetaOrIdle() {
                         ? thetaPendingSpeedDegS_
                         : static_cast<float>(speed_deg_per_s_);
                 thetaPending_ = false;
-#if CONFIG_GANTRY_THETA_SEQUENTIAL
+                if (!commandThetaMove(spd)) {
+                    return;
+                }
+                pathSegmentCount_ = 0;
+                pathSegmentIndex_ = 0;
+                pathSegXArmed_ = false;
+                pathSegZArmed_ = false;
                 motionState_ = MotionState::THETA_MOVING;
-                if (!commandThetaMove(spd)) {
-                    return;
-                }
                 return;
-#else
-                if (!commandThetaMove(spd)) {
-                    return;
-                }
-#endif
             }
         }
     }

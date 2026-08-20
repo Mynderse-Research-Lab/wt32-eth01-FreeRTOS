@@ -79,6 +79,7 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   bool publishHold();
   bool publishClearFaults();
   bool publishMove(bool start_edge);
+  void finishMoveHold();
   const char* tag() const;
   void logAfStatus(const char* why, const eip::hcs01::Hcs01PositioningActual& fb) const;
 
@@ -109,6 +110,10 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   int32_t cmd_acc_puu_;
   int32_t cmd_dec_puu_;
   uint8_t stuck_log_div_;
+  float start_deg_;
+  bool in_pos_armed_;
+  uint8_t arrival_stable_ticks_;
+  uint16_t run_ticks_;
 };
 
 }  // namespace Gantry

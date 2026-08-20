@@ -38,7 +38,8 @@ void sendAll(int fd, const char *text) {
 }
 
 void replyToSocket(void *ctx, const char *text) {
-  sendAll(*static_cast<int *>(ctx), text);
+  int fd = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+  sendAll(fd, text);
 }
 
 bool passwordsEqual(const char *attempt, const char *expected) {
@@ -220,10 +221,9 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
     return;
   }
 
-  // Hold a stable fd for the session log sink (replyToSocket expects int*).
-  int sink_fd = client_fd;
+  void *ctx_fd = reinterpret_cast<void *>(static_cast<intptr_t>(client_fd));
   if (CONSOLE_TCP_LOG_ENABLE) {
-    gantryConsoleAttachLogSink(replyToSocket, &sink_fd);
+    gantryConsoleAttachLogSink(replyToSocket, ctx_fd);
     ESP_LOGI(TAG, "TCP LAN log sink attached (min level=%d)", CONSOLE_TCP_LOG_LEVEL);
   } else {
     ESP_LOGI(TAG, "TCP LAN logging disabled (commands only)");
@@ -253,7 +253,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
             return;
           }
           ESP_LOGI(TAG, "[TCP RX] %s", line);
-          gantryConsoleProcessLine(cfg, line, replyToSocket, &sink_fd);
+          gantryConsoleProcessLine(cfg, line, replyToSocket, ctx_fd);
           sendAll(client_fd, "\r\n> ");
           len = 0;
         }

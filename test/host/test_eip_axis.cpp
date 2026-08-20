@@ -864,10 +864,56 @@ static void test_rotary_move_and_feedback(void) {
   TEST_ASSERT_BITS_HIGH(0x2000, readLeU16(started, 0));
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  image.setFeedback(makeHcs01Input102(4500, false, true));
-  axis.update();
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(makeHcs01Input102(4500, false, true));
+    axis.update();
+  }
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, axis.getCurrentDeg());
   TEST_ASSERT_FALSE(axis.isBusy());
+}
+
+static void test_rotary_consecutive_move_ignores_stale_in_pos(void) {
+  // Live test_cycle I: H leaves bit4=1 at ~179°, then 179→0 must stay busy
+  // until the new target, not halt at the previous pose.
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  image.setFeedback(makeHcs01Input102(0, false, true));
+  TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 30.0f, 0.0f, 0.0f));
+  for (int i = 0; i < 16; ++i) {
+    axis.update();
+  }
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(makeHcs01Input102(4500, false, true));
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, axis.getCurrentDeg());
+
+  TEST_ASSERT_TRUE(axis.moveToDeg(0.0f, 3600.0f, 18000.0f, 18000.0f));
+  TEST_ASSERT_TRUE(axis.isBusy());
+  for (int i = 0; i < 16; ++i) {
+    image.setFeedback(makeHcs01Input102(4500, false, true));
+    axis.update();
+    TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(),
+                             "stale in-pos at previous target cleared busy");
+  }
+  TEST_ASSERT_FLOAT_WITHIN(0.1f, 45.0f, axis.getCurrentDeg());
+
+  image.setFeedback(makeHcs01Input102(2000, false, false));
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(makeHcs01Input102(0, false, true));
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, axis.getCurrentDeg());
 }
 
 static void test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel(void) {
@@ -1116,6 +1162,7 @@ int main(void) {
   RUN_TEST(test_rotary_enable_holds_feedback_and_keeps_halt);
   RUN_TEST(test_rotary_arst_while_disabled_stays_drive_off);
   RUN_TEST(test_rotary_move_and_feedback);
+  RUN_TEST(test_rotary_consecutive_move_ignores_stale_in_pos);
   RUN_TEST(test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel);
   RUN_TEST(test_rotary_aligned_home_is_drive_identity);
   RUN_TEST(test_rotary_unaligned_small_delta_keeps_offset_command);

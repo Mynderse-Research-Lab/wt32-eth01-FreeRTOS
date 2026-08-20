@@ -17,7 +17,7 @@ namespace eip {
 class EipSession {
  public:
   static constexpr uint16_t kDefaultPort = 44818;
-  static constexpr size_t kMaxFrameSize = 4096;
+  static constexpr size_t kMaxFrameSize = 512;
 
   explicit EipSession(ITcpClient& tcp);
 

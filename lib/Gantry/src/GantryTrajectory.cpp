@@ -1,10 +1,6 @@
-/**
- * @file GantryTrajectory.cpp
- * @brief Trajectory planning implementation
- * @version 1.0.0
- */
-
 #include "GantryTrajectory.h"
+
+#include <cmath>
 
 namespace Gantry {
 
@@ -14,6 +10,14 @@ TrapezoidalProfile TrajectoryPlanner::calculateProfile(float start, float target
                                                        float deceleration) {
     TrapezoidalProfile profile;
     
+    // Check for finite inputs and positive dynamics
+    if (!std::isfinite(start) || !std::isfinite(target) ||
+        !std::isfinite(max_speed) || !std::isfinite(acceleration) || !std::isfinite(deceleration) ||
+        max_speed <= 1e-6f || acceleration <= 1e-6f || deceleration <= 1e-6f) {
+        profile.valid = false;
+        return profile;
+    }
+
     // Calculate distance
     float distance = target - start;
     float abs_distance = (distance < 0) ? -distance : distance;
@@ -70,29 +74,30 @@ float TrajectoryPlanner::interpolate(const TrapezoidalProfile& profile,
     
     float distance = target - start;
     float direction = (distance < 0) ? -1.0f : 1.0f;
-    float abs_distance = (distance < 0) ? -distance : distance;
     
     float current_pos = start;
     
-    if (elapsed_s < profile.t_accel) {
+    if (elapsed_s < profile.t_accel && profile.t_accel > 1e-6f) {
         // Acceleration phase: s = 0.5 * a * t²
         float t = elapsed_s;
         float dist = 0.5f * (profile.max_speed / profile.t_accel) * t * t;
         current_pos += direction * dist;
     } else if (elapsed_s < profile.t_accel + profile.t_cruise) {
         // Cruise phase: s = s_accel + v * (t - t_accel)
-        float dist_accel = 0.5f * (profile.max_speed / profile.t_accel) * profile.t_accel * profile.t_accel;
+        float dist_accel = (profile.t_accel > 1e-6f) ? (0.5f * profile.max_speed * profile.t_accel) : 0.0f;
         float t_cruise = elapsed_s - profile.t_accel;
         float dist_cruise = profile.max_speed * t_cruise;
         current_pos += direction * (dist_accel + dist_cruise);
-    } else {
+    } else if (profile.t_decel > 1e-6f) {
         // Deceleration phase: s = s_start + s_accel + s_cruise + (v*t_decel - 0.5*a*t²)
-        float dist_accel = 0.5f * (profile.max_speed / profile.t_accel) * profile.t_accel * profile.t_accel;
+        float dist_accel = (profile.t_accel > 1e-6f) ? (0.5f * profile.max_speed * profile.t_accel) : 0.0f;
         float dist_cruise = profile.max_speed * profile.t_cruise;
         float t_decel = elapsed_s - profile.t_accel - profile.t_cruise;
         float decel_rate = profile.max_speed / profile.t_decel;
         float dist_decel = profile.max_speed * t_decel - 0.5f * decel_rate * t_decel * t_decel;
         current_pos += direction * (dist_accel + dist_cruise + dist_decel);
+    } else {
+        current_pos = target;
     }
     
     return current_pos;

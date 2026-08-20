@@ -162,6 +162,27 @@ static void test_theta_only_to_joint_limits_in_band(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.01f, -180.0f, h.t->moves[1].target_deg);
 }
 
+static void test_theta_only_return_to_zero_stays_busy(void) {
+    // test_cycle I: in-band theta-only 179.5 → 0 must stay busy until complete.
+    Harness h = makeHarness(0.0f, 0.0f, 179.5f);
+    TEST_ASSERT_EQUAL(
+        GantryError::OK,
+        h.g->moveTo(JointConfig(0.0f, 0.0f, 0.0f), 50, 3600, 3000, 3000,
+                    18000, 18000));
+    if (h.t->moves.empty()) {
+        tick(*h.g);
+    }
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, h.t->moves[0].target_deg);
+    TEST_ASSERT_TRUE(h.g->isBusy());
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.g->isBusy());
+    TEST_ASSERT_FLOAT_WITHIN(0.05f, 179.5f, h.t->deg);
+    h.t->completeMove();
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isBusy());
+}
+
 #if !CONFIG_GANTRY_THETA_SEQUENTIAL
 
 static void test_theta_does_not_start_before_25_percent(void) {
@@ -366,6 +387,7 @@ int main(void) {
     RUN_TEST(test_theta_refused_no_in_band_segment);
     RUN_TEST(test_theta_only_while_deep_refused);
     RUN_TEST(test_theta_only_to_joint_limits_in_band);
+    RUN_TEST(test_theta_only_return_to_zero_stays_busy);
 #if !CONFIG_GANTRY_THETA_SEQUENTIAL
     RUN_TEST(test_theta_does_not_start_before_25_percent);
     RUN_TEST(test_theta_starts_at_25_percent_window_speed);

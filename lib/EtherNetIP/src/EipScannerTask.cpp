@@ -68,15 +68,19 @@ struct KeepaliveCtx {
 };
 
 // Tick-aligned Class 1 cadence. xTaskDelayUntil always blocks when on time so
-// IDLE1 can feed the task WDT. Sub-ms RPI fraction (if any) is spun only after
+// IDLE1 can feed the task WDT. Sub-ms RPI fraction (if any) is paced after
 // that block. On overrun, catch up without reseeding last_wake; yield one tick
 // every N consecutive overruns (TWDT safety if exchange > RPI).
 void paceClass1RemainderUs(uint32_t rem_us) {
   if (rem_us == 0) return;
   // Fractional top-up only (< 1 FreeRTOS tick). DelayUntil already blocked.
+#if defined(ESP_PLATFORM)
+  esp_rom_delay_us(rem_us);
+#else
   const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(rem_us);
   while (esp_timer_get_time() < deadline) {
   }
+#endif
 }
 
 void paceClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
@@ -134,14 +138,15 @@ void keepaliveTask(void* arg) {
 }
 
 // Chip recover after disconnect. After kMaxChipRecovers consecutive recovers
-// that still cannot sustain Class 1, hard-reset the ESP (matches bench recovery).
+// that still cannot sustain Class 1, back off and let supervision handle it.
 void escalateChipRecover(ScannerTaskCtx* ctx, unsigned& recover_streak,
                          uint32_t& backoff_ms) {
   if (chipRecoverOnFailure(recover_streak) == ChipRecoverDecision::kRestart) {
     ESP_LOGE(TAG,
-             "W5500 recover exhausted (%u) — esp_restart()",
+             "W5500 recover exhausted (%u) — backing off without hard reboot",
              recover_streak);
-    esp_restart();
+    vTaskDelay(pdMS_TO_TICKS(kReconnectIdleMs));
+    return;
   }
 
   const bool ok = ctx->chip != nullptr && ctx->chip->recover();
@@ -185,7 +190,7 @@ ScannerConfig makeThetaConfig() {
   return makeThetaScannerConfig(a);
 }
 
-void singleAxisTask(void* arg) {
+[[maybe_unused]] void singleAxisTask(void* arg) {
   auto* ctx = static_cast<ScannerTaskCtx*>(arg);
   uint32_t backoff_ms = 1000;
   unsigned recover_streak = 0;

@@ -39,6 +39,7 @@ extern "C" {
 #endif
 void spi3_class1_critical_enter(void);
 void spi3_class1_critical_exit(void);
+bool spi3_class1_critical_active(void);
 #ifdef __cplusplus
 }
 #endif

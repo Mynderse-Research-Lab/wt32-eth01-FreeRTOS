@@ -30,6 +30,10 @@ constexpr uint8_t kMoveReleaseHaltTicks = 4;  // bit13 0→1 (AH→AF) before bi
 constexpr uint8_t kMoveStartTicks = 4;
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
 constexpr uint16_t kWaitAfTicks = 300;       // 3 s @ 100 Hz
+constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at the new target
+constexpr uint16_t kMoveTimeoutTicks = 6000; // ~60 s @ 100 Hz
+// Wider than AXIS_THETA_POSITION_TOLERANCE (0.01°) — cyclic S-0-0051 noise.
+constexpr float kArrivalEpsDeg = 0.5f;
 
 const char* readyLabel(const eip::hcs01::Hcs01StatusWord& st) {
   using eip::hcs01::ReadyForOperation;
@@ -69,7 +73,11 @@ GantryEipRotaryAxis::GantryEipRotaryAxis(eip::EipProcessImage& image,
       cmd_vel_puu_(0),
       cmd_acc_puu_(0),
       cmd_dec_puu_(0),
-      stuck_log_div_(0) {}
+      stuck_log_div_(0),
+      start_deg_(0.0f),
+      in_pos_armed_(false),
+      arrival_stable_ticks_(0),
+      run_ticks_(0) {}
 
 const char* GantryEipRotaryAxis::tag() const {
   return (log_tag_ != nullptr && log_tag_[0] != '\0') ? log_tag_ : "Theta";
@@ -89,6 +97,9 @@ bool GantryEipRotaryAxis::enable() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
   move_phase_ticks_ = 0;
+  in_pos_armed_ = false;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
   // F4009 latches when bits 13/14/15 fall together. Pulse C0500 (bit5)
   // before Drive ON. Armed idle is AH (ready=3 + Drive Halt), not AF.
   arm_phase_ = ArmPhase::kClearFaults;
@@ -101,6 +112,9 @@ bool GantryEipRotaryAxis::disable() {
   stop_requested_ = false;
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
+  in_pos_armed_ = false;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
   arm_phase_ = ArmPhase::kIdle;
   arm_phase_ticks_ = 0;
   eip::hcs01::Hcs01PositioningCommand cmd;
@@ -201,6 +215,14 @@ bool GantryEipRotaryAxis::publishMove(bool start_edge) {
   return publishCommand(buildMoveCommand(start_edge));
 }
 
+void GantryEipRotaryAxis::finishMoveHold() {
+  motion_active_ = false;
+  move_phase_ = MovePhase::kIdle;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
+  (void)publishHold();
+}
+
 bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
                                     float accel_deg_per_s2,
                                     float decel_deg_per_s2) {
@@ -210,9 +232,12 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
   if (target_deg < min_deg_) target_deg = min_deg_;
   if (target_deg > max_deg_) target_deg = max_deg_;
   target_deg_ = target_deg;
+  start_deg_ = getCurrentDeg();
   stop_requested_ = false;
-  motion_active_ = true;
   stuck_log_div_ = 0;
+  in_pos_armed_ = false;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
   arm_phase_ = ArmPhase::kHolding;
   arm_phase_ticks_ = 0;
 
@@ -241,12 +266,15 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
 
   // Preload S-0-0282 while AH (Drive Halt). Next ticks: halt 0→1 (AF),
   // then bit0 toggle. Combining those edges dropped the drive to Ab.
+  // Phase before motion_active so a concurrent update cannot see kIdle+active
+  // and treat sticky command_value_reached as arrival at the previous pose.
   move_phase_ = MovePhase::kPreload;
   move_phase_ticks_ = kMovePreloadTicks;
+  motion_active_ = true;
   ESP_LOGI(tag(),
            "[THETA] START current=%.2f target=%.2f cmd_puu=%ld vel=%ld "
            "(scale=%.1f PUU/deg)",
-           static_cast<double>(getCurrentDeg()), static_cast<double>(target_deg),
+           static_cast<double>(start_deg_), static_cast<double>(target_deg),
            static_cast<long>(cmd_pos_puu_), static_cast<long>(cmd_vel_puu_),
            config_.puu_per_deg);
   eip::hcs01::Hcs01PositioningActual fb;
@@ -287,15 +315,10 @@ float GantryEipRotaryAxis::getCurrentDeg() const {
 float GantryEipRotaryAxis::getTargetDeg() const { return target_deg_; }
 
 bool GantryEipRotaryAxis::isBusy() const {
-  if (stop_requested_ || !motion_active_) return false;
-  if (move_phase_ == MovePhase::kPreload ||
-      move_phase_ == MovePhase::kReleaseHalt ||
-      move_phase_ == MovePhase::kStart) {
-    return true;
-  }
-  eip::hcs01::Hcs01PositioningActual fb;
-  if (!readFeedback(fb)) return true;
-  return !fb.status.command_value_reached;
+  // Sticky P-0-4078 bit4 (command_value_reached) stays 1 after the previous
+  // target. Consecutive in-range moves must stay busy until the NEW pose
+  // arrives — same pattern as GantryEipLinearAxis::motion_commanded_.
+  return motion_active_ && !stop_requested_;
 }
 
 bool GantryEipRotaryAxis::isMotionActive() const { return isBusy(); }
@@ -312,6 +335,9 @@ bool GantryEipRotaryAxis::clearAlarm() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
   move_phase_ticks_ = 0;
+  in_pos_armed_ = false;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
   arm_phase_ = ArmPhase::kClearFaults;
   arm_phase_ticks_ = kClearFaultTicks;
   return publishClearFaults();
@@ -391,6 +417,9 @@ bool GantryEipRotaryAxis::captureSoftHome() {
   motion_active_ = false;
   stop_requested_ = false;
   move_phase_ = MovePhase::kIdle;
+  in_pos_armed_ = false;
+  arrival_stable_ticks_ = 0;
+  run_ticks_ = 0;
   ESP_LOGI(tag(),
            "[THETA] origin %s drive_abs=%.3f zero_puu=%ld joint_lim=%.2f..%.2f",
            plan.aligned ? "ALIGNED (joint=drive)" : "OFFSET (C0300 needed)",
@@ -497,6 +526,8 @@ void GantryEipRotaryAxis::update() {
     (void)publishMove(/*start_edge=*/true);
     if (move_phase_ticks_ == 0) {
       move_phase_ = MovePhase::kRun;
+      run_ticks_ = 0;
+      arrival_stable_ticks_ = 0;
     }
     return;
   }
@@ -509,21 +540,43 @@ void GantryEipRotaryAxis::update() {
 
   eip::hcs01::Hcs01PositioningActual fb;
   if (!readFeedback(fb)) return;
+  const float now_deg = puuToDeg(fb.position_feedback - zero_puu_);
   if (axisLogDue(log_rate_hz_, esp_timer_get_time(), &last_axislog_us_)) {
     ESP_LOGI(tag(),
              "[THETA] MOVE joint=%.3f drive=%.3f target=%.3f st=0x%04X "
              "ready=%s c1err=%d",
-             static_cast<double>(puuToDeg(fb.position_feedback - zero_puu_)),
+             static_cast<double>(now_deg),
              static_cast<double>(puuToDeg(fb.position_feedback)),
              static_cast<double>(target_deg_), fb.status.encode(),
              readyLabel(fb.status), fb.status.class1_error ? 1 : 0);
   }
-  if (fb.status.command_value_reached) {
-    ESP_LOGI(tag(), "[THETA] END current=%.2f",
-             static_cast<double>(puuToDeg(fb.position_feedback - zero_puu_)));
-    motion_active_ = false;
-    move_phase_ = MovePhase::kIdle;
-    (void)publishHold();
+
+  // Bit4 stays 1 at the previous target until the new S-0-0282 is accepted.
+  // Arm only after the drive leaves that in-pos (bit4 fall or motion).
+  if (!fb.status.command_value_reached ||
+      std::fabs(now_deg - start_deg_) > kArrivalEpsDeg) {
+    in_pos_armed_ = true;
+  }
+  const bool at_target = std::fabs(now_deg - target_deg_) <= kArrivalEpsDeg &&
+                         (fb.status.command_value_reached ||
+                          fb.status.in_standstill);
+  if (in_pos_armed_ && at_target) {
+    if (arrival_stable_ticks_ < 255) ++arrival_stable_ticks_;
+    if (arrival_stable_ticks_ >= kArrivalStableTicks) {
+      ESP_LOGI(tag(), "[THETA] END current=%.2f", static_cast<double>(now_deg));
+      finishMoveHold();
+      return;
+    }
+  } else {
+    arrival_stable_ticks_ = 0;
+  }
+
+  if (run_ticks_ < 0xFFFF) ++run_ticks_;
+  if (run_ticks_ >= kMoveTimeoutTicks) {
+    ESP_LOGW(tag(),
+             "[THETA] move timeout (current=%.2f target=%.2f) — halt",
+             static_cast<double>(now_deg), static_cast<double>(target_deg_));
+    finishMoveHold();
     return;
   }
 

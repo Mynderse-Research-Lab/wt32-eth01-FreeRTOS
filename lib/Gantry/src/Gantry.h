@@ -45,6 +45,7 @@
 #include "GantryPathProfile.h"
 #include "GantryUtils.h"
 #include <memory>
+#include <mutex>
 #include <cstdint>
 #include <cstddef>
 
@@ -264,6 +265,8 @@ public:
     float getPulsesPerMm() const;
 
 private:
+    mutable std::recursive_mutex mutex_;
+
     std::unique_ptr<GantryLinearAxis> axisX_;
     std::unique_ptr<GantryLinearAxis> axisZ_;
     std::unique_ptr<GantryRotaryAxis> axisTheta_;

@@ -225,8 +225,12 @@ bool EipMultiScanner::openAxis(size_t i) {
   }
   if (ax.target_ip_host == 0) return false;
 
-  ax.session = std::make_unique<EipSession>(*ax.tcp);
-  ax.io = std::make_unique<EipIoConnection>(udp_);
+  if (ax.session == nullptr) {
+    ax.session = std::make_unique<EipSession>(*ax.tcp);
+  }
+  if (ax.io == nullptr) {
+    ax.io = std::make_unique<EipIoConnection>(udp_);
+  }
 
   if (!ax.tcp->connect(ax.config.target_ip, EipSession::kDefaultPort)) {
     return false;
@@ -571,8 +575,6 @@ void EipMultiScanner::disconnect() {
     }
     if (ax.image) ax.image->setOnline(false);
     if (ax.tcp) ax.tcp->close();
-    ax.session.reset();
-    ax.io.reset();
     ax.state = AxisState::kIdle;
     ax.open_reply = ForwardOpenReply{};
     ax.to_connection_id = 0;
