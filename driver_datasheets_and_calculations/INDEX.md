@@ -12,6 +12,7 @@ Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEM
 | `Technical Information_SCHUNK_ERD_04 Catalog section.pdf` | Theta ERD 04 catalog chapter |
 | `Technical Information_SCHUNK_ERD Catalog section.pdf` | Full ERD series catalog chapter |
 | `SCHUNK_ERD_Operating_Manual.pdf` | ERD assembly / operating manual |
+| `Optimization_Manual_Axis.pdf` | ERD manual tuning heuristic for Bosch-Rexroth/IndraWorks |
 | `SCHUNK_ERD-ERT_IndraDrive_CS_Commissioning_instructions.pdf` | IndraDrive CS commissioning |
 | `SCHUNK_ERD_motor_parameter-commissioning.zip` (+ extracted tree) | Motor params / IndraDrive `.par` / Motordatenblatt |
 | `SCHUNK_ERD04_Motordatenblatt_IndraDrive.pdf` / `SCHUNK_ERD04_Datasheet_IndraDrive.pdf` | ERD04 IndraDrive motor data (from zip) |
