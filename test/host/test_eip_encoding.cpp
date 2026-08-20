@@ -120,6 +120,25 @@ static void test_encapsulation_decode_rejects_length_overrun(void) {
   TEST_ASSERT_FALSE(eip::decodeEncapsulation(frame, out, off, len));
 }
 
+static void test_encapsulation_rejects_malformed_headers(void) {
+  eip::EncapHeader h;
+  h.setCommand(eip::EncapCommand::kRegisterSession);
+  h.session_handle = 0x0A0B0C0D;
+  h.status = 1; // Non-zero status!
+  const Bytes data = {0x01, 0x00, 0x00, 0x00};
+  Bytes frame = eip::encodeEncapsulation(h, data);
+  
+  uint32_t handle = 0;
+  // Should reject because status != 0
+  TEST_ASSERT_FALSE(eip::parseRegisterSessionReply(frame, handle));
+
+  // Change to wrong command
+  h.status = 0;
+  h.setCommand(eip::EncapCommand::kSendRRData);
+  frame = eip::encodeEncapsulation(h, data);
+  TEST_ASSERT_FALSE(eip::parseRegisterSessionReply(frame, handle));
+}
+
 static void test_register_session_reply_parse(void) {
   eip::EncapHeader h;
   h.setCommand(eip::EncapCommand::kRegisterSession);
@@ -433,6 +452,7 @@ int main(void) {
   RUN_TEST(test_encapsulation_decode_roundtrip);
   RUN_TEST(test_encapsulation_decode_rejects_short_frame);
   RUN_TEST(test_encapsulation_decode_rejects_length_overrun);
+  RUN_TEST(test_encapsulation_rejects_malformed_headers);
   RUN_TEST(test_register_session_reply_parse);
   RUN_TEST(test_cpf_encode_bytes);
   RUN_TEST(test_send_rr_data_wrap_unwrap);

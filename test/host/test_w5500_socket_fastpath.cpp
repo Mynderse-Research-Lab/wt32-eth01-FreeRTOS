@@ -412,6 +412,20 @@ static void test_sendto_rejects_bad_length(void) {
                            static_cast<uint32_t>(hal.txns.size()));
 }
 
+static void test_w5500_handles_spi_corruption(void) {
+  CountingHal hal;
+  // If MISO is disconnected or corrupted to all 1s:
+  for (int i = 0; i < 8; ++i) {
+    hal.sn_sr[i] = 0xFF;
+  }
+  
+  // socketOpen should fail because Sn_SR reads 0xFF on all sockets (none CLOSED)
+  TEST_ASSERT_EQUAL_INT(-1, w5500::socketOpen(hal, w5500::SocketMode::kUdp, 2222, 0));
+  
+  // socketConnect should fail because Sn_SR reads 0xFF (not SOCK_INIT)
+  TEST_ASSERT_FALSE(w5500::socketConnect(hal, 0, 0xC0A80114, 2222, 100));
+}
+
 static void test_socket_close_clears_dest_cache(void) {
   CountingHal hal;
   w5500::socketClose(hal, 0);
@@ -863,6 +877,31 @@ static void test_recv_batch_oversized_datagram_advances(void) {
   TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
 }
 
+static void test_w5500_sram_pointer_wraparound(void) {
+  CountingHal hal;
+  // Initialize tx_wr to 0xFFF0 (near 16-bit wraparound)
+  hal.tx_wr = 0xFFF0;
+  
+  // Use socketOpen to read tx_wr into software state
+  w5500::socketOpen(hal, w5500::SocketMode::kUdp, 2222, 0);
+  
+  const uint8_t data[32] = {0};
+  int ret = w5500::socketSendTo(hal, 0, data, sizeof(data), 0x01020304, 1234, false);
+  TEST_ASSERT_EQUAL_INT(sizeof(data), ret);
+  
+  // We wrote 32 bytes starting at 0xFFF0. The new tx_wr should be 0xFFF0 + 32 = 0x0010 (16).
+  // Check the recorded transactions.
+  bool found_tx_wr = false;
+  for (const auto& txn : hal.txns) {
+    if (txn.kind == Txn::Kind::kReg16 && txn.addr == 0x0024 && txn.is_write) {
+      found_tx_wr = true;
+    }
+  }
+  TEST_ASSERT_TRUE(found_tx_wr);
+  // We expect tx_wr to have wrapped around to 16 (0x0010). (0xFFF0 + 32 bytes)
+  TEST_ASSERT_EQUAL_UINT16(0x0010, hal.tx_wr);
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_dipr_dport_contiguous);
@@ -892,5 +931,7 @@ int main(void) {
   RUN_TEST(test_recv_batch_respects_max_out);
   RUN_TEST(test_recv_batch_bad_header_drains);
   RUN_TEST(test_recv_batch_oversized_datagram_advances);
+  RUN_TEST(test_w5500_sram_pointer_wraparound);
+  RUN_TEST(test_w5500_handles_spi_corruption);
   return UNITY_END();
 }

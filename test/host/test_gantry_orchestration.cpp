@@ -104,6 +104,14 @@ static void test_move_invalid_position(void) {
                       go(h, 999.0f, 0.0f, 0.0f));
 }
 
+static void test_orchestrator_bubbles_up_axis_rejection(void) {
+    Harness h = makeHarness();
+    h.x->reject_move = true;
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 0.0f, 0.0f));
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isBusy());
+}
+
 static void test_move_already_moving(void) {
     Harness h = makeHarness();
     TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 0.0f, 0.0f));
@@ -378,11 +386,31 @@ static void test_sequential_theta_gated_when_path_ends_deep(void) {
 
 #endif
 
+static void test_cross_axis_fault_stops_orchestrator(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 10.0f, 0.0f));
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.x->busy);
+    TEST_ASSERT_TRUE(h.z->busy);
+    
+    // Simulate Z axis faulting mid-move (e.g., EIP drop or limit hit).
+    h.z->alarm = true;
+    h.z->stopMotion();
+    
+    // Run the orchestrator. It should notice Z is idle but off-target,
+    // and invoke failPath(), stopping X.
+    tick(*h.g);
+    
+    TEST_ASSERT_GREATER_THAN(0, h.x->stop_count);
+    TEST_ASSERT_FALSE(h.g->isBusy());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_move_not_initialized);
     RUN_TEST(test_move_not_enabled);
     RUN_TEST(test_move_invalid_position);
+    RUN_TEST(test_orchestrator_bubbles_up_axis_rejection);
     RUN_TEST(test_move_already_moving);
     RUN_TEST(test_theta_refused_no_in_band_segment);
     RUN_TEST(test_theta_only_while_deep_refused);
@@ -407,5 +435,6 @@ int main(void) {
     RUN_TEST(test_sequential_theta_after_in_band_path);
     RUN_TEST(test_sequential_theta_gated_when_path_ends_deep);
 #endif
+    RUN_TEST(test_cross_axis_fault_stops_orchestrator);
     return UNITY_END();
 }

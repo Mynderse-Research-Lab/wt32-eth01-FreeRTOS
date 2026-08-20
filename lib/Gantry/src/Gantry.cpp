@@ -2594,6 +2594,16 @@ void Gantry::processSequentialMotion() {
         return;
     }
 
+    if (motionState_ != MotionState::IDLE) {
+        if ((axisX_ && axisX_->isAlarmActive()) ||
+            (axisZ_ && axisZ_->isAlarmActive()) ||
+            (axisTheta_ && axisTheta_->isAlarmActive())) {
+            ESP_LOGE(TAG, "[PATH] cross-axis alarm detected, aborting sequence");
+            failPath("axis alarm");
+            return;
+        }
+    }
+
     switch (motionState_) {
         case MotionState::Z_DESCENDING:
         case MotionState::Z_RETRACTING:

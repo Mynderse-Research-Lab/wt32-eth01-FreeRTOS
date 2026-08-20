@@ -66,7 +66,10 @@ public:
     }
     bool isEnabled() const override { return enabled; }
 
+    bool reject_move = false;
+
     bool moveToMm(float target, float speed, float accel, float decel) override {
+        if (reject_move) return false;
         moves.push_back({target, speed, accel, decel});
         target_mm = target;
         busy = std::fabs(target - mm) > 1.0e-4f;

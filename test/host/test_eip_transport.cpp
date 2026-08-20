@@ -1270,6 +1270,38 @@ static void test_exchange_reports_send_failure(void) {
   d.scanner->disconnect();
 }
 
+static void test_cip_sequence_number_wraparound(void) {
+  FakeUdpEndpoint udp;
+  eip::EipIoConnection io(udp);
+  eip::IoConnectionConfig cfg;
+  cfg.connection_id = 0x12345678;
+  cfg.ot_include_run_idle_header = false;
+  io.setConfig(cfg);
+  
+  // CIP sequence is a uint16_t, so it wraps at 0xFFFF.
+  // We force the underlying uint16_t to wrap by pushing 0x10000 frames.
+  // To avoid huge loops in unit tests, we'll just verify the EipIoConnection
+  // wraps cleanly. Let's just pump 65537 frames. It's fast on host.
+  const Bytes dummy_assembly = {0x01, 0x02, 0x03};
+  Bytes last_frame;
+  for (uint32_t i = 0; i < 65537; ++i) {
+    last_frame = io.buildOutputFrame(dummy_assembly);
+  }
+  
+  // Encap sequence should be 65537 (0x00010001), CIP sequence should wrap to 1
+  TEST_ASSERT_EQUAL_UINT32(65537, io.encapSequence());
+  TEST_ASSERT_EQUAL_UINT16(1, io.cipSequence());
+  
+  // And the frame should contain CIP sequence 1
+  // Sequence number is at byte 10,11 in the CPF payload usually.
+  // Let's decode it safely using the helper.
+  uint32_t cid = 0;
+  Bytes out_assy;
+  TEST_ASSERT_TRUE(eip::parseClass1InputCpf(last_frame, cid, out_assy, false));
+  TEST_ASSERT_EQUAL_UINT32(0x12345678, cid);
+  TEST_ASSERT_EQUAL_UINT32(dummy_assembly.size(), out_assy.size());
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_session_register);
@@ -1301,5 +1333,6 @@ int main(void) {
   RUN_TEST(test_batch_drain_is_bounded);
   RUN_TEST(test_feedback_age_resets_on_fresh_data);
   RUN_TEST(test_exchange_reports_send_failure);
+  RUN_TEST(test_cip_sequence_number_wraparound);
   return UNITY_END();
 }

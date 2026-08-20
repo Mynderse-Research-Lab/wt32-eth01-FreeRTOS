@@ -436,7 +436,74 @@ static void test_linear_arrival_requires_stable_ticks(void) {
   axis.update();
   TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "clears after 3 stable ticks");
 }
+static void test_axis_debounces_command_value_reached_jitter(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(5.0f, 50.0f, 0.0f, 0.0f));
 
+  Bytes mid = makeK5100Input154(1000, false, false, false);
+  mid[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(mid);
+  pumpAbsoluteToRun(axis, image, 1000);
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  Bytes at = makeK5100Input154(5000, false, false, true);
+  at[9] |= 0x04 | 0x08 | 0x20;
+  
+  Bytes at_jitter = makeK5100Input154(4999, false, false, false); // No AtReference bit
+  at_jitter[9] |= 0x04 | 0x08;
+  at_jitter[16] = 100; // Inject some velocity so band_stopped is FALSE
+
+  image.setFeedback(at);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Jitter! The bit drops, even though we are in position band
+  image.setFeedback(at_jitter);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Wait again
+  image.setFeedback(at);
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+  axis.update();
+  TEST_ASSERT_TRUE(axis.isBusy());
+  axis.update();
+  TEST_ASSERT_FALSE(axis.isBusy());
+}
+
+static void test_axis_handles_drive_power_loss_while_network_online(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  
+  TEST_ASSERT_TRUE(axis.moveToMm(10.0f, 50.0f, 0.0f, 0.0f));
+  pumpAbsoluteToRun(axis, image, 1000);
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Simulate Drive Power Loss: Network stays online, but Class 1 reports a fault
+  Bytes fault = makeK5100Input154(1000, true, false, false);
+  image.setFeedback(fault);
+  
+  axis.update();
+  // Axis enters kAbortStop state to command a stop, so it remains busy
+  TEST_ASSERT_TRUE(axis.isBusy());
+  TEST_ASSERT_TRUE(axis.isAlarmActive());
+}
 static void test_linear_soft_home_joint_frame(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -1204,6 +1271,8 @@ int main(void) {
   RUN_TEST(test_linear_second_absolute_preloads_before_start_edge);
   RUN_TEST(test_linear_move_stays_busy_until_target);
   RUN_TEST(test_linear_arrival_requires_stable_ticks);
+  RUN_TEST(test_axis_debounces_command_value_reached_jitter);
+  RUN_TEST(test_axis_handles_drive_power_loss_while_network_online);
   RUN_TEST(test_linear_soft_home_joint_frame);
   RUN_TEST(test_linear_absolute_keeps_target_on_overshoot_feedback);
   RUN_TEST(test_linear_move_does_not_stop_at_half_travel);
