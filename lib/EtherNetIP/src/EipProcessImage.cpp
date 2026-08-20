@@ -36,7 +36,7 @@ void EipProcessImage::setFeedback(const Bytes& feedback) {
 
 bool EipProcessImage::getFeedback(Bytes& out_feedback) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (feedback_.empty()) return false;
+  if (!online_ || feedback_.empty()) return false;
   out_feedback = feedback_;
   return true;
 }

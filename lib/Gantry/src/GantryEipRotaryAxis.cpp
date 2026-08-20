@@ -446,6 +446,18 @@ void GantryEipRotaryAxis::update() {
     image_.consumeFeedbackFresh();
   }
 
+  if (!image_.isOnline()) {
+    if (motion_active_ || arm_phase_ != ArmPhase::kIdle) {
+      const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : "EipRotary";
+      ESP_LOGW(tag, "EIP connection offline — aborting motion and disarming");
+      motion_active_ = false;
+      stop_requested_ = false;
+      move_phase_ = MovePhase::kIdle;
+      arm_phase_ = ArmPhase::kIdle;
+    }
+    return;
+  }
+
   if (arm_phase_ == ArmPhase::kClearFaults) {
     (void)publishClearFaults();
     if (arm_phase_ticks_ > 0) --arm_phase_ticks_;

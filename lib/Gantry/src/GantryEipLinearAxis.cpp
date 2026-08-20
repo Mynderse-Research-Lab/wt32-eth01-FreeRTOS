@@ -760,6 +760,19 @@ void GantryEipLinearAxis::update() {
   if (image_.feedbackFresh()) {
     image_.consumeFeedbackFresh();
   }
+  
+  if (!image_.isOnline()) {
+    if (motion_commanded_ || arm_phase_ != ArmPhase::kIdle) {
+      const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
+      ESP_LOGW(tag, "EIP connection offline — aborting motion and disarming");
+      motion_commanded_ = false;
+      stop_requested_ = false;
+      move_phase_ = MovePhase::kIdle;
+      arm_phase_ = ArmPhase::kIdle;
+    }
+    return;
+  }
+
   eip::k5100::InputAssembly154 fb;
   if (!readFeedback(fb)) return;
   logAlarmEdge(fb);

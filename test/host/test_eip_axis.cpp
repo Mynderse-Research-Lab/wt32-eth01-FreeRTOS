@@ -194,6 +194,7 @@ uint16_t readLeU16(const Bytes& data, size_t offset) {
 
 static void test_process_image_command_feedback(void) {
   eip::EipProcessImage image;
+  image.setOnline(true);
   const Bytes cmd = {0x01, 0x02, 0x03};
   const Bytes fb = {0xAA, 0xBB};
 
@@ -217,10 +218,23 @@ static void test_process_image_command_feedback(void) {
 static void test_process_image_online(void) {
   eip::EipProcessImage image;
   TEST_ASSERT_FALSE(image.isOnline());
+  
+  const Bytes fb = {0xAA, 0xBB};
+  image.setFeedback(fb);
+  Bytes out_fb;
+  
+  // Offline: should return false even with data
+  TEST_ASSERT_FALSE(image.getFeedback(out_fb));
+  
   image.setOnline(true);
   TEST_ASSERT_TRUE(image.isOnline());
+  // Online: should return true
+  TEST_ASSERT_TRUE(image.getFeedback(out_fb));
+  
   image.setOnline(false);
   TEST_ASSERT_FALSE(image.isOnline());
+  // Offline again: should return false
+  TEST_ASSERT_FALSE(image.getFeedback(out_fb));
 }
 
 static void armAxisForMove(Gantry::GantryEipLinearAxis& axis,
@@ -284,6 +298,28 @@ static void test_linear_x_belt_move_command(void) {
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_UINT8(2, cmd[26]);
   TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);  // Run
+}
+
+static void test_linear_offline_aborts_move(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  
+  TEST_ASSERT_TRUE(axis.moveToMm(12.5f, 50.0f, 0.0f, 0.0f));
+  pumpAbsoluteToRun(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // Connection lost mid-move
+  image.setOnline(false);
+  axis.update(); // Should detect offline and abort immediately
+
+  TEST_ASSERT_FALSE(axis.isBusy()); // Move phase reset to Idle
 }
 
 static void test_linear_second_absolute_preloads_before_start_edge(void) {
@@ -872,6 +908,26 @@ static void test_rotary_move_and_feedback(void) {
   TEST_ASSERT_FALSE(axis.isBusy());
 }
 
+static void test_rotary_offline_aborts_move(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 30.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  for (int i = 0; i < 4; ++i) {
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  image.setOnline(false);
+  axis.update();
+  TEST_ASSERT_FALSE(axis.isBusy());
+}
 static void test_rotary_consecutive_move_ignores_stale_in_pos(void) {
   // Live test_cycle I: H leaves bit4=1 at ~179°, then 179→0 must stay busy
   // until the new target, not halt at the previous pose.
@@ -1036,6 +1092,7 @@ static void test_rotary_halt_clears_start_bit(void) {
 
 static void test_rotary_alarm(void) {
   eip::EipProcessImage image;
+  image.setOnline(true);
   Gantry::EipRotaryAxisConfig cfg;
   cfg.puu_per_deg = 100.0;
   Gantry::GantryEipRotaryAxis axis(image, cfg);
@@ -1143,6 +1200,7 @@ int main(void) {
   RUN_TEST(test_process_image_command_feedback);
   RUN_TEST(test_process_image_online);
   RUN_TEST(test_linear_x_belt_move_command);
+  RUN_TEST(test_linear_offline_aborts_move);
   RUN_TEST(test_linear_second_absolute_preloads_before_start_edge);
   RUN_TEST(test_linear_move_stays_busy_until_target);
   RUN_TEST(test_linear_arrival_requires_stable_ticks);
@@ -1162,6 +1220,7 @@ int main(void) {
   RUN_TEST(test_rotary_enable_holds_feedback_and_keeps_halt);
   RUN_TEST(test_rotary_arst_while_disabled_stays_drive_off);
   RUN_TEST(test_rotary_move_and_feedback);
+  RUN_TEST(test_rotary_offline_aborts_move);
   RUN_TEST(test_rotary_consecutive_move_ignores_stale_in_pos);
   RUN_TEST(test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel);
   RUN_TEST(test_rotary_aligned_home_is_drive_identity);
