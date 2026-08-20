@@ -1,6 +1,7 @@
 #ifndef W5500_H
 #define W5500_H
 
+#include <cstddef>
 #include <cstdint>
 
 #ifdef __cplusplus
