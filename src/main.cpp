@@ -30,10 +30,12 @@
 #include "gantry_test_console.h"
 #include "gantry_net_console.h"
 #include "gantry_app_constants.h"
+#include "gantry_ota.h"
 #include "axis_drivetrain_params.h"
 #include "mqtt_topics.h"
 #include "ethernet_app_config.h"
-#include "MqttBridge.h"
+#include "CellNetL2.h"
+#include "EthernetLink.h"
 #include "pick_scheduler.h"
 #include "Spi3Bus.h"
 #include "SpiDisplay.h"
@@ -76,10 +78,11 @@ void gantryUpdateTask(void* param) {
 
     const TickType_t updateInterval = pdMS_TO_TICKS(10);
     ESP_LOGI(TAG, "Gantry update task started (100 Hz)");
+    TickType_t lastWakeTime = xTaskGetTickCount();
 
     while (1) {
         cfg->gantry->update();
-        vTaskDelay(updateInterval);
+        vTaskDelayUntil(&lastWakeTime, updateInterval);
     }
 }
 
@@ -99,7 +102,7 @@ extern "C" void app_main(void) {
 
     // Enable WT32 LAN8720 crystal (GPIO16) before other bring-up so REFCLK and
     // RJ45 LEDs can come up; EthernetLink::start() will re-assert if needed.
-    if (!MqttBridge::EthernetLink::enablePhyOscillator()) {
+    if (!Network::EthernetLink::enablePhyOscillator()) {
         ESP_LOGW(TAG, "LAN8720 crystal enable failed — plant ETH / TCP :2323 may be unavailable");
     }
 
@@ -286,14 +289,12 @@ extern "C" void app_main(void) {
 #endif
 
     // ------------------------------------------------------------------
-    // FreeRTOS tasks first — do not block console / motion behind MQTT wait.
-    // Construct Bridge before tasks take its address; start() runs after.
+    // FreeRTOS tasks first — do not block console / motion behind network wait.
     // ------------------------------------------------------------------
-    static MqttBridge::EthernetLink ethernetLink;
-    static MqttBridge::Bridge mqttBridge(&ethernetLink);
+    static Network::EthernetLink ethernetLink;
 
     BaseType_t result;
-    static PickSchedulerTaskConfig pickCfg = { &gantry, &mqttBridge };
+    static PickSchedulerTaskConfig pickCfg = { &gantry, &CellNetL2::instance() };
     result = xTaskCreatePinnedToCore(
         pickSchedulerTask, "PickScheduler",
         PICK_SCHEDULER_TASK_STACK, &pickCfg,
@@ -333,8 +334,7 @@ extern "C" void app_main(void) {
 #endif
 
     // ------------------------------------------------------------------
-    // LAN8720 first so TCP console works even if MQTT broker is down.
-    // Bridge::start() reuses EthernetLink (idempotent start()).
+    // LAN8720 first so TCP console and Layer-2 link come online.
     // ------------------------------------------------------------------
     bool ethUp = false;
     if (ethernetLink.start() && ethernetLink.waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
@@ -342,6 +342,15 @@ extern "C" void app_main(void) {
         gantryNetConsoleStart(&consoleCfg);
         ESP_LOGI(TAG, "Net console listening on TCP %d (plant / LAN8720)",
                  CONSOLE_TCP_PORT);
+        gantryOtaStartServer(&gantry, 8032, CONSOLE_TCP_PASSWORD);
+        ESP_LOGI(TAG, "OTA server listening on TCP 8032 (plant / LAN8720)");
+
+        // Initialize High-Speed OSI Layer-2 Cell Network transceiver
+        if (CellNetL2::instance().begin(ethernetLink.getEthHandle(), CellNodeId::GANTRY) == ESP_OK) {
+            ESP_LOGI(TAG, "CellNet OSI Layer-2 bus ACTIVE (EtherType 0x%04X)", CELL_NET_L2_ETHERTYPE);
+        } else {
+            ESP_LOGW(TAG, "CellNet Layer-2 initialization failed");
+        }
     } else {
 #if CONSOLE_UART_ENABLE
         ESP_LOGW(TAG, "LAN8720 not up — UART console only; net console skipped");
@@ -350,26 +359,12 @@ extern "C" void app_main(void) {
 #endif
     }
 
-    // ------------------------------------------------------------------
-    // MQTT bridge (non-fatal — eth may already be up; EIP/console already live)
-    // ------------------------------------------------------------------
-    const char* mqtt_state = "disabled";
-#if MQTT_BRIDGE_ENABLE
-    if (mqttBridge.start(MQTT_GANTRY_ID_DEFAULT)) {
-        mqtt_state = "started";
-        // Publish only lands after MQTT_EVENT_CONNECTED (see Bridge::isConnected).
-        (void)mqttBridge.publishStatusJson("{\"state\":\"LINK_INIT\",\"source\":\"main\"}");
-    } else {
-        mqtt_state = "offline";
-        ESP_LOGW(TAG, "MQTT bridge failed to start — EIP and console will still work; "
-                 "pick scheduling unavailable until LAN8720 link is restored.");
-    }
-#else
-    ESP_LOGI(TAG, "MQTT bridge disabled (CONFIG_MQTT_BRIDGE_ENABLE=n)");
-#endif
+    ESP_LOGI(TAG, "All tasks created successfully (ETH %s, L2 %s)",
+             ethUp ? "up" : "down", CellNetL2::instance().isReady() ? "active" : "offline");
 
-    ESP_LOGI(TAG, "All tasks created successfully (ETH %s, MQTT %s)",
-             ethUp ? "up" : "down", mqtt_state);
+    // Confirm healthy boot to cancel OTA rollback timer/watchdog
+    gantryOtaConfirmBootValid();
+
 #if CONSOLE_UART_ENABLE
     ESP_LOGI(TAG, "System ready - type 'help' (UART and/or TCP %d)", CONSOLE_TCP_PORT);
     gantryTestPrintHelp();

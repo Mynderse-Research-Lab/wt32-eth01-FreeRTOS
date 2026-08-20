@@ -10,6 +10,7 @@ set(APP_SRCS
     "${APP_ROOT}/src/pick_scheduler.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
     "${APP_ROOT}/src/gantry_net_console.cpp"
+    "${APP_ROOT}/src/gantry_ota.cpp"
     "${APP_ROOT}/src/gpio_expander.c"
 )
 
@@ -28,7 +29,8 @@ idf_component_register(
         "${APP_ROOT}/src"
     REQUIRES
         Gantry
-        MqttBridge
+        CellNetL2
+        EthernetLink
         EtherNetIP
         MCP23S17
         Spi3Bus
@@ -40,6 +42,8 @@ idf_component_register(
         freertos
         lwip
         esp_netif
+        app_update
+        esp_partition
 )
 
 # ESP-IDF v6 treats #warning as -Werror=cpp. When enabled via menuconfig (or

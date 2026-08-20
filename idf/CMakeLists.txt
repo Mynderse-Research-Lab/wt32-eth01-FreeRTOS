@@ -10,7 +10,8 @@ cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Gantry"
-    "${CMAKE_CURRENT_LIST_DIR}/../lib/MqttBridge"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/CellNetL2"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/EthernetLink"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/EtherNetIP"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/W5500"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
