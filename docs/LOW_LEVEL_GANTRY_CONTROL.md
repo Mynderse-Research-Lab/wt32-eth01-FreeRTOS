@@ -78,35 +78,34 @@ flowchart TD
 **Decision:** EIP — drive-native Position Absolute meets ±1 mm
 at 200 mm/s; host Speed+TM10 StopMotion does **not** meet that accuracy at speed.
 
-### Dual Ethernet
+### Dual Ethernet & Cell Network Architecture
 
-| PHY | Role | Network |
-|-----|------|---------|
-| **W5500** (SPI / WIZ850io) | EtherNet/IP Class 1 to X/Z (daisy-chain) | Lab EIP segment (e.g. 192.168.1.0/24) |
-| **LAN8720** (RMII on WT32) | MQTT / plant Ethernet (`MqttBridge`) | Separate from EIP daisy-chain |
+The WT32-ETH01 gantry controller utilizes dual independent Ethernet controllers to separate cell-level coordination from real-time servo bus communication:
 
-EIP and MQTT do **not** share one cable to the drives. LAN8720 down does not stop EIP.
+| PHY | Role | Network Segment | Connected Subsystems |
+|-----|------|-----------------|----------------------|
+| **LAN8720** (RMII on WT32) | Closed Cell Bus / Telemetry | Closed Cell Switch (100BASE-TX) | `zDdsNode_vision` (Ubuntu), `zDdsNode_conveyor` (WT32), `zDdsNode_supervisor` (Raspberry Pi Gateway) |
+| **W5500** (SPI / WIZ850io) | Hard Real-Time Motion Bus | Dedicated EIP Daisy-Chain | Kinetix X (`.20`), Kinetix Z (`.21`), Rexroth HCS01 Theta (`.23`) |
 
-#### Plant switch vs EIP daisy-chain (do not merge)
+LAN8720 and W5500 do **not** share physical cabling. An outage or packet flood on the cell network cannot disrupt the hard real-time $2\text{ ms}$ EtherNet/IP servo loop.
 
-Both networks currently use addresses in `192.168.1.0/24`, but they must stay on **separate L2 segments**:
-
-| Segment | Devices on this L2 |
-|---------|--------------------|
-| **Plant** (SW-008 / LAN8720) | PC `192.168.1.10`, WT32 LAN8720 `192.168.1.100`, MQTT, TCP `:2323` |
-| **EIP** (WIZ daisy-chain only) | WT32 W5500 `192.168.1.10`, Kinetix X `.20` / Z `.21`, HCS01 CIP `.23` (eng HTTP stays `.22`) |
-
-**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the plant unmanaged switch. That merges the domains: PC and W5500 both appear as `.10`, ARP/Class 1 flood the switch (all port LEDs blink), and `lan_debug_ui.py` / ping to `.100` fail until the EIP uplink is removed.
+#### Closed Cell Switch vs EIP Motion Daisy-Chain (Do Not Merge)
 
 ```
-OK:   PC ── plant SW ── WT32 LAN8720
-      WIZ ── X ── Z ── HCS01   (EIP only; Port 2 stays on chain or open)
+[Closed Cell Switch]
+  ├── Ubuntu IPC (Vision Detection)
+  ├── Conveyor WT32 (500-PPR Encoder Tracking)
+  ├── Gantry WT32 LAN8720 (Trajectory & Intercept Execution)
+  └── Raspberry Pi (Identifier & Gateway to External Plant L4 via eth0)
 
-BAD:  PC ── plant SW ── WT32 LAN8720
-                 └── HCS01 Port 2 / EIP uplink   ← IP clash + broadcast storm
+[Dedicated Motion Bus (W5500 SPI Daisy-Chain Only)]
+  └── WT32 W5500 ──► Kinetix X ──► Kinetix Z ──► Rexroth Theta (HCS01)
 ```
 
-Same numeric `.10` on PC (plant) vs W5500 (EIP) is intentional **only while the cables stay separate**. To put both on one switch later, renumber EIP to another subnet (e.g. `192.168.2.0/24`).
+**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the cell unmanaged switch. That merges the domains, causing IP collisions (`.10`), ARP storms, and lost packets.
+
+* **Cell Subnet (LAN8720):** `192.168.1.0/24` (WT32 LAN8720 = `.100`, TCP console `:2323`, Zenoh / Raw L2 frames).
+* **Motion Subnet (W5500):** `192.168.1.0/24` isolated segment (W5500 = `.10`, X = `.20`, Z = `.21`, Theta = `.23`).
 
 ### W5500 pins and IPs
 
@@ -726,10 +725,11 @@ Firmware `EIP_TARGET_IP_THETA` defaults to **`.23`**. RegisterSession on `.22` t
 - Assemblies **101/102** (18 / 14 bytes), freely configurable profile (`P-0-4084 = 0xFFFE`). Map: `P-0-4081` = 4077, 0282, 0259, 0260, 0359; `P-0-4080` = 4078, 0051, 0040, 0390. See `Hcs01Assembly.h`.
 - Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
 - `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t`.
-- Theta Absolute: enable holds current S-0-0282 with **Drive Halt active** (bit13=0). Drive display **AH** is ready=3 + halt (firmware used to log that as AF). `moveToDeg` preloads the target while AH, releases halt (AH→AF), then toggles command-accept. Keep S-0-0282 in its continuous absolute frame: the live drive permits ±36000° and S-0-0076 is non-modulo `0x0002`; manually wrapping at ±180° could command the long way around. Busy is a motion-active flag (idle `command_value_reached` is not “busy”). Halt 1→0 is `makeDriveHalt` / `stop`.
+- Theta Absolute: enable holds current S-0-0282 with **Drive Halt active** (bit13=0). Drive display **AH** is ready=3 + halt (firmware used to log that as AF). `moveToDeg` preloads the target while AH, releases halt (AH→AF), then toggles command-accept. Keep S-0-0282 in its continuous absolute frame: the live drive permits ±36000° and S-0-0076 is non-modulo `0x0002`; manually wrapping at ±180° could command the long way around. Busy is a motion-active flag (idle `command_value_reached` is not “busy”). Consecutive commands stay busy until the **new** joint target is in band for 3 ticks — sticky bit4 from the previous slew must not halt at the old pose. Halt 1→0 is `makeDriveHalt` / `stop`.
 - **Home** = HIPERFACE origin capture (no X31). If `|S-0-0051| ≤ 2°` after **C0300** (S-0-0447) at the mechanical/cable-neutral pose, joint **is** drive abs (`zero_puu_ = 0`) and thetalim is the full firmware envelope ∩ drive travel. If HIPERFACE is still ~178° (not C0300'd), firmware **offsets** so that pose is joint 0 (does not slew to encoder-native 0 — that would wrap the gripper cable) but **shrinks thetalim** to remaining drive travel (about **+1° / −180°** at 178.5° with ±180 drive limits). That is the F2057 root cause: a firmware-only origin does not move S-0-0278. **Calibrate** applies the captured envelope. **Do not** seek X31.
 - Bench 2026-08-18: AH→AF sequencing is proven (`-10°` reached `-9.95°`, return reached `-0.08°`). A `+10°` joint command from drive absolute `178.4921°` correctly produced continuous S-0-0282 `188.4921°`, but the drive rejected it with **F2057 Target position out of travel range** because live S-0-0278 is `180.0000°` (S-0-0049/S-0-0050=`0`). Do not hide this by wrapping. Align with **surgical** HTTP writes (do not load a full `.par`): (1) `py tools/hcs01_eng.py travel --yes` (**S-0-0278=36000**, **S-0-0049=+180**, **S-0-0050=−180**); (2) at cable-neutral pose `c0300 --yes` so S-0-0051→0; (3) `save --yes` (C2200); (4) reboot / 24 V cycle then `verify-origin`; (5) `home t` — `status` must show origin **ALIGNED**. Then joint ±180 maps to drive ±180.
-- Console: `home t` / `calibrate t`; `calibrate all` runs theta after X/Z bring-up (X/Z gates stay set if theta CIP is down). Theta-only `move` does not require X/Z home. `status` prints drive abs vs ALIGNED/OFFSET and a **Theta CIP** line (`T->O live` vs STALE, `in_ref`, ready AH/AF, **c1err** = P-0-4078 bit13 drive interlock — not EtherNet/IP Class 1). `faults` / `arst` print theta diag; `arst` already pulses HCS01 C0500 bit5, but that only reaches the drive while T→O is live — otherwise use `hcs01_eng.py c0500`. `arst` while motors are disabled does **not** Drive ON / WaitAf (stays Ab). Theta profile knobs match X/Z: `speed <mm/s> [deg/s]`, `accel <a> [d] [deg/s2] [decel_deg]`, `puu t <scale>`, `puucal t c m` (applies live), `thetalim <min> <max>`, `rangelimit`. After OFFSET home, `thetalim` is **clamped** to the captured envelope (cannot restore ±180 without C0300 + `home t` ALIGNED). `test_theta_path` runs a combined in-band X+Z+theta move with a thetalim-safe dθ.
+- Console: `home t` / `calibrate t`; `calibrate all` runs theta after X/Z bring-up (X/Z gates stay set if theta CIP is down). Theta-only `move` does not require X/Z home. `status` prints drive abs vs ALIGNED/OFFSET and a **Theta CIP** line (`T->O live` vs STALE, `in_ref`, ready AH/AF, **c1err** = P-0-4078 bit13 drive interlock — not EtherNet/IP Class 1). `faults` / `arst` print theta diag; `arst` already pulses HCS01 C0500 bit5, but that only reaches the drive while T→O is live — otherwise use `hcs01_eng.py c0500`. `arst` while motors are disabled does **not** Drive ON / WaitAf (stays Ab). Theta profile knobs match X/Z: `speed <mm/s> [deg/s]`, `accel <a> [d] [deg/s2] [decel_deg]`, `puu t <scale>`, `puucal t c m` (applies live), `thetalim <min> <max>`, `rangelimit`. After OFFSET home, `thetalim` is **clamped** to the captured envelope (cannot restore ±180 without C0300 + `home t` ALIGNED). `test_theta_path` runs a combined in-band X+Z+theta move with a thetalim-safe dθ. `autotune [theta|t]` guides / verifies driver-level load inertia auto-tuning.
+- **Inertia Auto-Tuning (C1800)**: With the ~2 kg end-effector mounted, execute automatic control loop optimization directly via `py tools/hcs01_eng.py autotune --yes --save` or `py tools/tune_theta_inertia.py --autotune` (or console `autotune theta`). The HCS01 performs test oscillation movements ($\pm 45^\circ$), identifies total load inertia (`P-0-4010`), and optimizes velocity/position gains (`S-0-0100`, `S-0-0101`, `S-0-0104`, `S-0-0348`) with non-volatile flash backup (`C2200`).
 - `CONFIG_GANTRY_THETA_SEQUENTIAL` default **n**: theta is scheduled on the
   in-band X+Z segment (start 25%, finish 75%) unless sequential choreography
   is enabled (theta after the linear path, still SAFE_Z-gated).
@@ -806,3 +806,37 @@ Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII C
   (OM=0 TM=10 settle/hold/abort remains)
 - CIP Motion / Motion Group / assembly 106 ECAM for picks
 - LVGL / encoder menu on TFT (stub only)
+
+---
+
+## 13. Dual-OTA & Ethernet Firmware Flashing
+
+The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`192.168.1.100:8032`).
+
+### 13.1 Partition Map (4 MB Flash)
+
+```
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   16 KB
+otadata,  data, ota,     0xd000,   8 KB
+phy_init, data, phy,     0xf000,   4 KB
+ota_0,    app,  ota_0,   0x10000,  1920 KB (1.875 MB)
+ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
+```
+
+- **Rollback Safety:** Bootloader automatic rollback (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`) cancels and switches back to the previous partition if a newly flashed firmware panics or fails to confirm valid boot via `gantryOtaConfirmBootValid()`.
+- **Motion Safety:** OTA flash requests are strictly rejected if the gantry is `ENABLED` or `BUSY`.
+
+### 13.2 How to Flash Over Ethernet
+
+1. **Build firmware:**
+   ```powershell
+   idf.py -C idf build
+   ```
+2. **Execute OTA update:**
+   ```powershell
+   py tools/eth_ota_flash.py --host 192.168.1.100 idf/build/wt32_eth01_gantry.bin
+   ```
+3. **Console commands:**
+   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, and rollback status.
+

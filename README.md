@@ -1,8 +1,10 @@
 # WT32-ETH01 Gantry Controller
 
-ESP-IDF firmware for a SCHUNK gantry pick-and-place controller on WT32-ETH01:
-EtherNet/IP originator (W5500) for Kinetix X/Z, MQTT over LAN8720, and a
-diagnostic console on UART plus TCP on the plant Ethernet.
+ESP-IDF firmware for the SCHUNK multi-axis gantry pick-and-place motion controller on WT32-ETH01.
+Part of the distributed battery sorting cell:
+- **Motion Bus (W5500 SPI):** Hard real-time EtherNet/IP Class 1 originator ($2\text{ ms}$ RPI) for Kinetix X/Z and Rexroth Theta drives.
+- **Closed Cell Bus (LAN8720 RMII):** High-speed peer-to-peer messaging (Zenoh-DDS / Layer-2) connecting Ubuntu Vision, Conveyor WT32, and Raspberry Pi Gateway.
+- **Diagnostics:** UART0 console + secure TCP line console on port `2323`.
 
 **Canonical docs:** see [`docs/INDEX.md`](docs/INDEX.md).
 

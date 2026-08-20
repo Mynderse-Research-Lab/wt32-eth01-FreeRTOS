@@ -84,19 +84,71 @@ drive Absolute legality uses HomingMethod 34 (see software doc).
 
 ---
 
-## 3. Networks
+## 3. Networks & Cell Topology
 
-| Interface | Role | Notes |
-|-----------|------|-------|
-| WIZ850io (W5500 SPI) | EtherNet/IP Class 1 to X/Z | SPI2: MOSI17 MISO35 SCLK5 **CS15** (VDM needs CS edges; not hardwireable); **RST=MCP PB7**; INT unused |
-| SPI3 MCP23S17 + TFT | Field I/O ×8 + operator display | SCLK14 MOSI4 MISO36; CS_MCP2; TFT CS=MCP PB2; BLK hardwired; KO=PB6 |
-| LAN8720 (RMII) | MQTT / plant / TCP console | Separate from EIP daisy-chain |
+The WT32-ETH01 Gantry Controller operates across two physically isolated network segments:
 
-EIP daisy-chain: WIZ850io → X PORT1 → X PORT2 → Z PORT1 → Z PORT2 → HCS01.
-HCS01 engineering (X24/X25) is `192.168.1.22` (HTTP/IndraWorks). CIP/FKM is
-`192.168.1.23` (TCP 44818). Plant switch (LAN8720 + PC + MQTT): **never** add
-drive Port 2 / WIZ — same `192.168.1.x` as plant causes IP clash (see LOW_LEVEL
-§ Dual Ethernet).
+```
+                  ┌────────────────────────────────────────────────────────┐
+                  │          External Factory / Plant Network (Layer 4)    │
+                  │             (SCADA / MES / Web Dashboard)             │
+                  └───────────────────────────┬────────────────────────────┘
+                                              │  (Single Wired L4 Drop)
+                                              ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                   CLOSED CELL NETWORK (Layer-2 Switch / Unmanaged 100BASE-TX)            │
+│                                                                                          │
+│   ┌────────────────────┐   ┌────────────────────┐   ┌────────────────────────────────┐   │
+│   │   Ubuntu IPC       │   │  Conveyor WT32     │   │     Raspberry Pi               │   │
+│   │ (Vision Detection) │   │ (500-PPR Tracking) │   │ (Identifier / Cell Gate)       │   │
+│   │  zDdsNode_vision   │   │  zDdsNode_conveyor │   │  zDdsNode_supervisor           │   │
+│   └─────────┬──────────┘   └─────────┬──────────┘   │  • Closed L2 Sockets (0x88B5)  │   │
+│             │                        │              │  • External L4 Sockets on eth0 │   │
+│             │                        │              └───────────────┬────────────────┘   │
+│             │                        │                              │                    │
+│             ▼                        ▼                              ▼                    │
+│   ═══════════════════════════ UNMANAGED SWITCH ═══════════════════════════════════════   │
+│                                      ▲                                                   │
+│                                      │ (LAN8720 RMII Drop)                               │
+│                                      ▼                                                   │
+│                        ┌───────────────────────────┐                                     │
+│                        │     GANTRY CONTROLLER     │                                     │
+│                        │      (This WT32-ETH01)    │                                     │
+│                        │      zDdsNode_gantry      │                                     │
+│                        └─────────────┬─────────────┘                                     │
+└──────────────────────────────────────┼───────────────────────────────────────────────────┘
+                                       │ (W5500 SPI Drop - Isolated Segment)
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                        MOTION BUS (Dedicated EtherNet/IP Daisy-Chain)                    │
+│                                                                                          │
+│      WIZ850io (W5500) ──────► Kinetix X ──────► Kinetix Z ──────► Rexroth Theta (HCS01)  │
+│        (192.168.1.10)       (192.168.1.20)    (192.168.1.21)         (192.168.1.23)      │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Interface | Role | Physical Link | Segment & Protocol |
+|-----------|------|---------------|--------------------|
+| **LAN8720 (RMII)** | Closed Cell Subsystem Bus | Onboard RJ45 $\rightarrow$ Unmanaged Switch | Closed Cell Switch: Zenoh-DDS / Layer-2 frames (`0x88B5`) to Vision, Conveyor, and Raspberry Pi |
+| **WIZ850io (W5500 SPI)** | Dedicated Motion Bus | SPI2 $\rightarrow$ Drive PORT1 daisy-chain | Private EIP segment: EtherNet/IP Class 1 cyclic I/O ($2\text{ ms}$ RPI) strictly to X/Z/Theta servo drives |
+| **SPI3 MCP23S17 + TFT** | Field I/O + Operator UI | SCLK14 MOSI4 MISO36 CS2 | Local 24 V Field I/O (gripper valve, sensors) + local ST7789 display |
+
+**Network Isolation Rule:** The EIP daisy-chain (W5500 and Drive Port 2) must **never** be plugged into the cell unmanaged switch. The Motion Bus must remain an isolated daisy-chain loop to guarantee zero jitter and prevent MAC/IP conflicts.
+
+---
+
+## 3.1 Service, Maintenance & OTA Architecture
+
+In production, the sorting cell utilizes a **Centralized Web HMI Architecture** hosted on the **Raspberry Pi Cell Coordinator**:
+
+1. **Zero-Install Service Interface:** 
+   - Maintenance engineers and operators connect a service laptop or tablet to the plant network and navigate to `https://<raspberry-pi-ip>/` in any standard browser.
+   - The Web HMI displays real-time health, telemetry, and active firmware versions for all cell subsystems (Ubuntu Vision, Conveyor WT32, Gantry WT32).
+2. **Centralized OTA Orchestration:**
+   - When updating embedded firmware, the service engineer uploads the compiled `.bin` file directly via the Raspberry Pi Web HMI.
+   - The Raspberry Pi validates cell safety (asserting conveyor is halted, gantry is parked/disabled), streams the binary image across the closed Layer-2 switch to the target WT32, verifies the post-update boot handshake, and records the new version in the maintenance audit log.
+3. **Embedded MCU Lean Principle:**
+   - The WT32 firmware remains deterministic and lightweight. It runs **no** HTTP web servers or heavy asset stores, exposing only a lean, authenticated binary OTA stream receiver behind its motion safety interlocks.
 
 ---
 
