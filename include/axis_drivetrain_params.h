@@ -249,6 +249,9 @@
 #if defined(CONFIG_AXIS_THETA_ACCEL_DEG_PER_S2)
 #define AXIS_THETA_ACCEL_DEG_PER_S2        ((float)CONFIG_AXIS_THETA_ACCEL_DEG_PER_S2)
 #else
+// TODO: The Theta axis (ERD-04) is currently NOT inertially tuned.
+// Do not exceed baseline placeholder dynamics until the manual tuning heuristic 
+// (see driver_datasheets_and_calculations/Optimization_Manual_Axis.pdf) is applied.
 #define AXIS_THETA_ACCEL_DEG_PER_S2        18000.0f  /* placeholder; respect inertia limit */
 #endif
 #if defined(CONFIG_AXIS_THETA_DECEL_DEG_PER_S2)

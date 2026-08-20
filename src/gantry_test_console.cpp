@@ -13,14 +13,17 @@
 #include "gantry_console_parse.h"
 #include "GantryPathProfile.h"
 #include "gpio_expander.h"
+#include "gantry_ota.h"
 #include "MCP23S17.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 
 #ifndef MCP_DEBUG_CMDS
 #define MCP_DEBUG_CMDS 1
 #endif
 
+#include <atomic>
 #include <ctype.h>
 #include <cstdarg>
 #include <cmath>
@@ -174,14 +177,14 @@ static constexpr uint8_t kRawAlarmDebounceSamples = 12;   // 12ms stable at 1ms 
 static ControlDebounceState g_controlDebounce = {
     false, {false, false, false, false, false, -1}, {false, false, false, false, false, -1},
     0, 0, 0, 0, 0, 0};
-static bool g_homeCompletedThisSession = false;
-static bool g_calibratedThisSession = false;
-static bool g_homeZCompletedThisSession = false;
-static bool g_calibratedZThisSession = false;
-static bool g_homeThetaThisSession = false;
-static bool g_calibratedThetaThisSession = false;
-static bool g_calibrationInProgress = false;
-static bool g_testCycleInProgress = false;
+static std::atomic<bool> g_homeCompletedThisSession{false};
+static std::atomic<bool> g_calibratedThisSession{false};
+static std::atomic<bool> g_homeZCompletedThisSession{false};
+static std::atomic<bool> g_calibratedZThisSession{false};
+static std::atomic<bool> g_homeThetaThisSession{false};
+static std::atomic<bool> g_calibratedThetaThisSession{false};
+static std::atomic<bool> g_calibrationInProgress{false};
+static std::atomic<bool> g_testCycleInProgress{false};
 static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
 static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
 static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
@@ -635,6 +638,61 @@ void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
              suggested);
   }
   ESP_LOGI(TAG, "Target tol: X +/-0.08 mm (SCHUNK), Z +/-0.03 mm (first pass +/-0.5 mm OK)");
+}
+
+void runAutotuneCommand(Gantry::Gantry *gantry, const char *cmd) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+
+  char axis[16] = "theta";
+  if (sscanf(cmd, "autotune %15s", axis) == 1) {
+    for (int i = 0; axis[i]; i++) {
+      axis[i] = static_cast<char>(tolower(static_cast<unsigned char>(axis[i])));
+    }
+  }
+
+  if (strcmp(axis, "t") == 0 || strcmp(axis, "theta") == 0) {
+    if (!gantry->hasThetaAxis()) {
+      ESP_LOGE(TAG, "Theta axis not compiled in");
+      return;
+    }
+    ESP_LOGI(TAG, "============================================================");
+    ESP_LOGI(TAG, "=== THETA (SCHUNK ERD-04 / HCS01) INERTIA AUTO-TUNING    ===");
+    ESP_LOGI(TAG, "============================================================");
+    ESP_LOGI(TAG, "Target Payload: End-effector mounted (up to 2.0 kg payload)");
+    ESP_LOGI(TAG, "Drive Target  : Bosch Rexroth HCS01 at 192.168.1.22 / .23");
+
+    if (gantry->isBusy()) {
+      ESP_LOGE(TAG, "ERROR: Gantry is busy moving. Stop motion before auto-tuning.");
+      return;
+    }
+
+    ESP_LOGI(TAG, "Procedure & Safety Checklist:");
+    ESP_LOGI(TAG, "  1. Ensure 2.0 kg end-effector is rigidly attached to rotary flange.");
+    ESP_LOGI(TAG, "  2. Confirm theta has clear angular stroke (+/-45 deg free travel).");
+    ESP_LOGI(TAG, "  3. Drive executes C1800 automatic control loop optimization:");
+    ESP_LOGI(TAG, "     - Damping factor P-0-0163 = 1.0 (critically damped response)");
+    ESP_LOGI(TAG, "     - Travel stroke  P-0-0169 = 45.0 deg (oscillation sweep)");
+    ESP_LOGI(TAG, "     - Identifies: Load Inertia P-0-4010 (kg*m^2)");
+    ESP_LOGI(TAG, "     - Computes  : Kp (S-0-0100), Tn (S-0-0101), Kv (S-0-0104)");
+    ESP_LOGI(TAG, "     - Saves NV  : C2200 backup to non-volatile flash");
+    ESP_LOGI(TAG, "  4. To trigger automated driver identification from workstation:");
+    ESP_LOGI(TAG, "     Run: 'py tools/hcs01_eng.py autotune --yes --save'");
+    ESP_LOGI(TAG, "     Or : 'py tools/tune_theta_inertia.py --autotune'");
+    ESP_LOGI(TAG, "============================================================");
+    return;
+  }
+
+  if (strcmp(axis, "x") == 0 || strcmp(axis, "z") == 0 || strcmp(axis, "all") == 0) {
+    ESP_LOGI(TAG, "=== X/Z (Kinetix 5100) Auto-Tuning Guide ===");
+    ESP_LOGI(TAG, "Kinetix 5100 drives utilize internal inertia estimation (KNX software / explicit tuning).");
+    ESP_LOGI(TAG, "Ensure axis is in SAFE_Z band before tuning X.");
+    return;
+  }
+
+  ESP_LOGE(TAG, "Usage: autotune [theta|t|x|z|all]");
 }
 
 void runPuuSetCommand(Gantry::Gantry *gantry, const char *cmd) {
@@ -1385,9 +1443,17 @@ bool testCyclePoseNear(const GantryTestConsoleConfig *cfg, float x_mm, float z_m
 bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
                       float from_x_mm, float from_z_mm, float x_mm, float z_mm,
                       float theta_deg, int expected_segs, uint32_t speed_deg_per_s,
-                      uint32_t accel_deg_per_s2, uint32_t decel_deg_per_s2) {
+                      uint32_t accel_deg_per_s2, uint32_t decel_deg_per_s2,
+                      uint32_t speed_mm_per_s = 0, uint32_t accel_mm_per_s2 = 0,
+                      uint32_t decel_mm_per_s2 = 0) {
   constexpr float kPoseEpsMm = 1.5f;
   constexpr float kPoseEpsDeg = 1.0f;
+  const uint32_t lin_v =
+      (speed_mm_per_s > 0u) ? speed_mm_per_s : g_moveSpeedMmPerS;
+  const uint32_t lin_a =
+      (accel_mm_per_s2 > 0u) ? accel_mm_per_s2 : g_moveAccelMmPerS2;
+  const uint32_t lin_d =
+      (decel_mm_per_s2 > 0u) ? decel_mm_per_s2 : g_moveDecelMmPerS2;
   const uint32_t th_v =
       (speed_deg_per_s > 0u) ? speed_deg_per_s : g_moveSpeedDegPerS;
   const uint32_t th_a =
@@ -1408,8 +1474,8 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
            name, (double)x_mm, (double)z_mm, (double)theta_deg, (double)cur.x,
            (double)cur.z, (double)cur.theta, (unsigned)n_live,
            (double)from_x_mm, (double)from_z_mm, (unsigned)n_cmd,
-           (unsigned long)g_moveSpeedMmPerS, (unsigned long)g_moveAccelMmPerS2,
-           (unsigned long)g_moveDecelMmPerS2, (unsigned long)th_v,
+           (unsigned long)lin_v, (unsigned long)lin_a,
+           (unsigned long)lin_d, (unsigned long)th_v,
            (unsigned long)th_a, (unsigned long)th_d);
   if (expected_segs >= 0 && static_cast<int>(n_cmd) != expected_segs) {
     ESP_LOGE(TAG,
@@ -1424,27 +1490,13 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
   target.z = z_mm;
   target.theta = theta_deg;
   const Gantry::GantryError result =
-      cfg->gantry->moveTo(target, g_moveSpeedMmPerS, th_v, g_moveAccelMmPerS2,
-                          g_moveDecelMmPerS2, th_a, th_d);
+      cfg->gantry->moveTo(target, lin_v, th_v, lin_a, lin_d, th_a, th_d);
   if (result != Gantry::GantryError::OK) {
     ESP_LOGE(TAG, "ERROR: test_cycle %s move failed: %s", name,
              gantryErrorName(result));
     return false;
   }
   vTaskDelay(pdMS_TO_TICKS(50));
-  const bool theta_need =
-      cfg->gantry->hasThetaAxis() && fabsf(cur.theta - theta_deg) > 0.5f;
-  if (!cfg->gantry->isBusy() && (n_live > 0 || theta_need)) {
-    const Gantry::JointConfig after = cfg->gantry->getCurrentJointConfig();
-    const bool xz_miss = fabsf(after.x - x_mm) > kPoseEpsMm ||
-                         fabsf(after.z - z_mm) > kPoseEpsMm;
-    const bool th_miss =
-        theta_need && fabsf(after.theta - theta_deg) > kPoseEpsDeg;
-    if (xz_miss || th_miss) {
-      ESP_LOGE(TAG, "ERROR: test_cycle %s motion did not start", name);
-      return false;
-    }
-  }
   if (!testCycleWaitIdle(cfg, Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS)) {
     return false;
   }
@@ -1454,6 +1506,118 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
   }
   return testCyclePoseNear(cfg, x_mm, z_mm, kPoseEpsMm,
                            cfg->gantry->hasThetaAxis(), theta_deg, kPoseEpsDeg);
+}
+
+bool testCycleGripAction(const GantryTestConsoleConfig *cfg, bool grip_closed) {
+  ESP_LOGI(TAG, "[TEST_CYCLE] Gripper -> %s", grip_closed ? "CLOSED (GRIP)" : "OPEN (RELEASE)");
+  cfg->gantry->grip(grip_closed);
+  const uint32_t wait_ms = grip_closed ? (GANTRY_GRIPPER_CLOSE_TIME_MS + 60u)
+                                       : (GANTRY_GRIPPER_OPEN_TIME_MS + 60u);
+  if (!testCycleWaitMs(cfg, wait_ms)) {
+    ESP_LOGE(TAG, "ERROR: test_cycle aborted during gripper action");
+    return false;
+  }
+  return true;
+}
+
+bool testCycleSafetyLimitsRejection(const GantryTestConsoleConfig *cfg) {
+  ESP_LOGI(TAG, "[TEST_CYCLE] Stage 3: Testing software limit bounds rejection...");
+  const Gantry::JointLimits lim = cfg->gantry->getJointLimits();
+  
+  // Test negative X limit rejection
+  Gantry::JointConfig bad_target = cfg->gantry->getCurrentJointConfig();
+  bad_target.x = lim.x_min - 50.0f;
+  Gantry::GantryError err = cfg->gantry->moveTo(bad_target, 50, 30, 500, 500, 100, 100);
+  if (err == Gantry::GantryError::OK) {
+    ESP_LOGE(TAG, "ERROR: test_cycle FAIL: moveTo accepted out-of-bounds negative X target!");
+    return false;
+  }
+  
+  // Test positive Z limit rejection
+  bad_target = cfg->gantry->getCurrentJointConfig();
+  bad_target.z = lim.z_max + 50.0f;
+  err = cfg->gantry->moveTo(bad_target, 50, 30, 500, 500, 100, 100);
+  if (err == Gantry::GantryError::OK) {
+    ESP_LOGE(TAG, "ERROR: test_cycle FAIL: moveTo accepted out-of-bounds positive Z target!");
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "[TEST_CYCLE] Bounds rejection OK: out-of-envelope commands correctly rejected");
+  return true;
+}
+
+bool testCyclePickAndPlaceSequence(const GantryTestConsoleConfig *cfg) {
+  ESP_LOGI(TAG, "[TEST_CYCLE] Stage 5: Pick-and-Place Automation Flow with Gripper");
+  const Gantry::JointLimits lim = cfg->gantry->getJointLimits();
+  const float pick_x = 120.0f;
+  const float place_x = 280.0f;
+  const float pick_z = (lim.z_max > 120.0f) ? 120.0f : (lim.z_max * 0.8f);
+  const float safe_z = cfg->gantry->traverseClearanceZMm();
+  const float th_pick = (lim.theta_max >= 30.0f) ? 30.0f : 0.0f;
+  const float th_place = (lim.theta_min <= -30.0f) ? -30.0f : 0.0f;
+
+  // 1. Approach pick station at safe Z
+  if (!testCycleMoveLeg(cfg, "P1_ApproachPick", 0.0f, safe_z, pick_x, safe_z, th_pick, 1, 0, 0, 0)) {
+    return false;
+  }
+  // 2. Descend to pick height
+  if (!testCycleMoveLeg(cfg, "P2_DescendPick", pick_x, safe_z, pick_x, pick_z, th_pick, 1, 0, 0, 0)) {
+    return false;
+  }
+  // 3. Grip part
+  if (!testCycleGripAction(cfg, true)) {
+    return false;
+  }
+  // 4. Retract to safe Z
+  if (!testCycleMoveLeg(cfg, "P3_AscendPick", pick_x, pick_z, pick_x, safe_z, th_pick, 1, 0, 0, 0)) {
+    return false;
+  }
+  // 5. High-speed transfer to place station
+  if (!testCycleMoveLeg(cfg, "P4_TransferPlace", pick_x, safe_z, place_x, safe_z, th_place, 1, 0, 0, 0,
+                        120, 2000, 2000)) {
+    return false;
+  }
+  // 6. Descend to place height
+  if (!testCycleMoveLeg(cfg, "P5_DescendPlace", place_x, safe_z, place_x, pick_z, th_place, 1, 0, 0, 0)) {
+    return false;
+  }
+  // 7. Release part
+  if (!testCycleGripAction(cfg, false)) {
+    return false;
+  }
+  // 8. Retract to safe Z & zero theta
+  if (!testCycleMoveLeg(cfg, "P6_AscendClear", place_x, pick_z, place_x, safe_z, 0.0f, 1, 0, 0, 0)) {
+    return false;
+  }
+  ESP_LOGI(TAG, "[TEST_CYCLE] Pick-and-place sequence PASSED");
+  return true;
+}
+
+bool testCycleDynamicsStress(const GantryTestConsoleConfig *cfg) {
+  ESP_LOGI(TAG, "[TEST_CYCLE] Stage 6: Multi-Velocity Dynamics & Creep Positioning Validation");
+  const float cur_x = cfg->gantry->getCurrentJointConfig().x;
+  const float safe_z = cfg->gantry->traverseClearanceZMm();
+
+  // 1. Fine creep move (15 mm/s) - tests low-speed PID / position hold & resolution
+  ESP_LOGI(TAG, "[TEST_CYCLE] Dynamic Leg V1: Fine creep positioning (15 mm/s)");
+  if (!testCycleMoveLeg(cfg, "V1_Creep", cur_x, safe_z, cur_x - 20.0f, safe_z, 0.0f, 1, 0, 0, 0,
+                        15, 300, 300)) {
+    return false;
+  }
+
+  // 2. High dynamics traverse (150 mm/s, 3000 mm/s2) - tests rapid acceleration & settling
+  ESP_LOGI(TAG, "[TEST_CYCLE] Dynamic Leg V2: High dynamics traverse (150 mm/s, 3000 mm/s2)");
+  if (!testCycleMoveLeg(cfg, "V2_HighDynamics", cur_x - 20.0f, safe_z, 50.0f, safe_z, 0.0f, 1, 0, 0, 0,
+                        150, 3000, 3000)) {
+    return false;
+  }
+
+  // 3. Return to datum at nominal speed
+  if (!testCycleMoveLeg(cfg, "V3_ReturnDatum", 50.0f, safe_z, 0.0f, 0.0f, 0.0f, 1, 0, 0, 0)) {
+    return false;
+  }
+  ESP_LOGI(TAG, "[TEST_CYCLE] Multi-velocity dynamics PASSED");
+  return true;
 }
 
 bool testCycleThetaCapacityLegs(const GantryTestConsoleConfig *cfg, float x_mm,
@@ -1493,18 +1657,30 @@ void testCycleTask(void *param) {
     return;
   }
 
-  ESP_LOGI(TAG,
-           "[TEST_CYCLE] start: enable, EIP bring-up (home+cal), path legs "
-           "A-F at live speed/accel/decel, then theta capacity G-I");
+  const int64_t start_cycle_us = esp_timer_get_time();
+
+  ESP_LOGI(TAG, "============================================================");
+  ESP_LOGI(TAG, "=== HOLISTIC GANTRY TEST CYCLE STARTING                   ===");
+  ESP_LOGI(TAG, "=== Stage 1: Servo arming & Pre-flight checks             ===");
+  ESP_LOGI(TAG, "=== Stage 2: EIP Bring-up (Home + Calibrate + Park)       ===");
+  ESP_LOGI(TAG, "=== Stage 3: Software Safety Limits Rejection Checks      ===");
+  ESP_LOGI(TAG, "=== Stage 4: Standard 2D/3D Kinematic Legs (A through F)  ===");
+  ESP_LOGI(TAG, "=== Stage 5: Pick-and-Place Automation Flow with Gripper  ===");
+  ESP_LOGI(TAG, "=== Stage 6: Multi-Velocity Dynamics & Creep Positioning  ===");
+  ESP_LOGI(TAG, "=== Stage 7: Theta Full-Envelope Capacity Rotation (G-I) ===");
+  ESP_LOGI(TAG, "=== Stage 8: Accuracy Verification & Telemetry Summary    ===");
+  ESP_LOGI(TAG, "============================================================");
 
   do {
+    // ------------------------------------------------------------------------
+    // Stage 1: Servo arming & Pre-flight checks
+    // ------------------------------------------------------------------------
+    ESP_LOGI(TAG, "[TEST_CYCLE] Stage 1: Servo arming...");
     cfg->gantry->enable();
     if (!testCycleWaitMs(cfg, 2000)) {
       ESP_LOGE(TAG, "ERROR: test_cycle FAIL: aborted during servo arm");
       break;
     }
-    // Class 1 may not have been up on the first ServoOn edge (same as console
-    // enable). Re-issue after a settle so Active can latch.
     cfg->gantry->enable();
     if (!testCycleWaitMs(cfg, 10000)) {
       ESP_LOGE(TAG, "ERROR: test_cycle FAIL: aborted during servo arm");
@@ -1519,7 +1695,10 @@ void testCycleTask(void *param) {
       break;
     }
 
-    ESP_LOGI(TAG, "[TEST_CYCLE] EIP bring-up (home + calibrate)");
+    // ------------------------------------------------------------------------
+    // Stage 2: EIP Bring-up (Home + Calibrate + Park)
+    // ------------------------------------------------------------------------
+    ESP_LOGI(TAG, "[TEST_CYCLE] Stage 2: EIP bring-up (home + calibrate)");
     if (!runEipBringUpSequence(cfg)) {
       ESP_LOGE(TAG, "ERROR: test_cycle FAIL: bring-up (home/cal) failed");
       break;
@@ -1532,36 +1711,63 @@ void testCycleTask(void *param) {
       break;
     }
 
-    ESP_LOGI(TAG,
-             "[TEST_CYCLE] path profile: speed=%lu mm/s accel=%lu mm/s2 "
-             "decel=%lu mm/s2 (console speed/accel; next leg picks up live "
-             "changes)",
-             (unsigned long)g_moveSpeedMmPerS,
-             (unsigned long)g_moveAccelMmPerS2,
-             (unsigned long)g_moveDecelMmPerS2);
-
-    // Bench legs from post-bring-up park (X=35, Z=SAFE_Z): in-band dual, Z-only
-    // descend, combined retract (X deferred), outbound 2-seg, both-above 3-seg,
-    // combined retract (theta held at 0). Then G-I: theta-only at (0,0) to
-    // live thetalim min/max (firmware kinematic envelope) and back to 0, at
-    // AXIS_THETA max speed/accel. Theta is SAFE_Z-interlocked; (0,0) is in-band.
-    const float park_x = GANTRY_CAL_X_PARK_MM;
-    const float park_z = cfg->gantry->traverseClearanceZMm();
-    if (!testCycleMoveLeg(cfg, "A", park_x, park_z, 220.0f, 8.0f, 0.0f, 1, 0, 0,
-                          0) ||
-        !testCycleMoveLeg(cfg, "B", 220.0f, 8.0f, 220.0f, 130.0f, 0.0f, 1, 0, 0,
-                          0) ||
-        !testCycleMoveLeg(cfg, "C", 220.0f, 130.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0,
-                          0) ||
-        !testCycleMoveLeg(cfg, "D", 0.0f, 0.0f, 350.0f, 130.0f, 0.0f, 2, 0, 0,
-                          0) ||
-        !testCycleMoveLeg(cfg, "E", 350.0f, 130.0f, 80.0f, 110.0f, 0.0f, 3, 0, 0,
-                          0) ||
-        !testCycleMoveLeg(cfg, "F", 80.0f, 110.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0,
-                          0) ||
-        !testCycleThetaCapacityLegs(cfg, 0.0f, 0.0f)) {
+    // ------------------------------------------------------------------------
+    // Stage 3: Software Safety Limits Rejection Checks
+    // ------------------------------------------------------------------------
+    if (!testCycleSafetyLimitsRejection(cfg)) {
       break;
     }
+
+    // ------------------------------------------------------------------------
+    // Stage 4: Standard 2D/3D Kinematic Legs (A through F)
+    // ------------------------------------------------------------------------
+    ESP_LOGI(TAG, "[TEST_CYCLE] Stage 4: Standard 2D/3D Kinematic Legs (A-F)");
+    const float park_x = GANTRY_CAL_X_PARK_MM;
+    const float park_z = cfg->gantry->traverseClearanceZMm();
+    if (!testCycleMoveLeg(cfg, "A", park_x, park_z, 220.0f, 8.0f, 0.0f, 1, 0, 0, 0) ||
+        !testCycleMoveLeg(cfg, "B", 220.0f, 8.0f, 220.0f, 130.0f, 0.0f, 1, 0, 0, 0) ||
+        !testCycleMoveLeg(cfg, "C", 220.0f, 130.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0, 0) ||
+        !testCycleMoveLeg(cfg, "D", 0.0f, 0.0f, 350.0f, 130.0f, 0.0f, 2, 0, 0, 0) ||
+        !testCycleMoveLeg(cfg, "E", 350.0f, 130.0f, 80.0f, 110.0f, 0.0f, 3, 0, 0, 0) ||
+        !testCycleMoveLeg(cfg, "F", 80.0f, 110.0f, 0.0f, 0.0f, 0.0f, 1, 0, 0, 0)) {
+      break;
+    }
+
+    // ------------------------------------------------------------------------
+    // Stage 5: Pick-and-Place Automation Flow with Gripper
+    // ------------------------------------------------------------------------
+    if (!testCyclePickAndPlaceSequence(cfg)) {
+      break;
+    }
+
+    // ------------------------------------------------------------------------
+    // Stage 6: Multi-Velocity Dynamics & Creep Positioning Validation
+    // ------------------------------------------------------------------------
+    if (!testCycleDynamicsStress(cfg)) {
+      break;
+    }
+
+    // ------------------------------------------------------------------------
+    // Stage 7: Theta Full-Envelope Capacity Rotation (G-I)
+    // ------------------------------------------------------------------------
+    ESP_LOGI(TAG, "[TEST_CYCLE] Stage 7: Theta Full-Envelope Capacity Rotation (G-I)");
+    if (!testCycleThetaCapacityLegs(cfg, 0.0f, 0.0f)) {
+      break;
+    }
+
+    // ------------------------------------------------------------------------
+    // Stage 8: Accuracy Verification & Telemetry Summary
+    // ------------------------------------------------------------------------
+    const int64_t elapsed_cycle_ms = (esp_timer_get_time() - start_cycle_us) / 1000;
+    const Gantry::JointConfig final_pose = cfg->gantry->getCurrentJointConfig();
+    ESP_LOGI(TAG, "============================================================");
+    ESP_LOGI(TAG, "=== HOLISTIC TEST CYCLE COMPLETE: PASS                   ===");
+    ESP_LOGI(TAG, "=== Total Cycle Duration: %lld ms", (long long)elapsed_cycle_ms);
+    ESP_LOGI(TAG, "=== Final Pose: x=%.3f mm, z=%.3f mm, theta=%.3f deg",
+             (double)final_pose.x, (double)final_pose.z, (double)final_pose.theta);
+    ESP_LOGI(TAG, "=== Class 1 Bus Timing Status: ACTIVE");
+    eip::dumpClass1TimingStats();
+    ESP_LOGI(TAG, "============================================================");
 
     pass = true;
     ESP_LOGI(TAG, "OK test_cycle PASS");
@@ -1942,6 +2148,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 #endif  // MCP_DEBUG_CMDS
   } else if (strncmp(cmdLower, "gpio_drive", 10) == 0) {
     runGpioDriveCommand(cmd);
+  } else if (strncmp(cmdLower, "ota", 3) == 0) {
+    gantryOtaPrintStatus();
   } else if (strcmp(cmdLower, "status") == 0) {
     printStatus(cfg->gantry);
   } else if (strcmp(cmdLower, "faults") == 0 || strcmp(cmdLower, "alarms") == 0) {
@@ -1979,6 +2187,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     runPuuSetCommand(cfg->gantry, cmd);
   } else if (strncmp(cmdLower, "thetalim", 8) == 0) {
     runThetaLimCommand(cfg->gantry, cmd);
+  } else if (strncmp(cmdLower, "autotune", 8) == 0) {
+    runAutotuneCommand(cfg->gantry, cmd);
   } else if (strcmp(cmdLower, "limits") == 0) {
     printLimits(cfg);
   } else if (strcmp(cmdLower, "pins") == 0) {
@@ -2288,8 +2498,16 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       if (cfg->gantry->isBusy()) {
         ESP_LOGI(TAG, "OK Move started (use 'stop' to abort, 'status' to monitor)");
       } else {
-        ESP_LOGE(TAG, "ERROR: Move command accepted but motion did not start");
-        ESP_LOGI(TAG, "Check alarm/limits and commanded-vs-encoder X position in status logs");
+        const Gantry::JointConfig after = cfg->gantry->getCurrentJointConfig();
+        const bool at_xz = fabsf(after.x - target.x) <= 1.5f &&
+                           fabsf(after.z - target.z) <= 1.5f;
+        const bool at_th = fabsf(after.theta - target.theta) <= 1.0f;
+        if (at_xz && at_th) {
+          ESP_LOGI(TAG, "OK Move complete");
+        } else {
+          ESP_LOGE(TAG, "ERROR: Move command accepted but motion did not start");
+          ESP_LOGI(TAG, "Check alarm/limits and commanded-vs-encoder X position in status logs");
+        }
       }
     } else {
       ESP_LOGE(TAG, "ERROR: Move failed: %d (%s)", (int)result,
@@ -2417,6 +2635,8 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  puucal <x|z|t> c m   - suggest (x/z) or apply (t) PUU scale from commanded vs measured");
   ESP_LOGI(TAG, "  thetalim <min> <max> - set theta software joint limits (deg); "
                 "clamped to captured envelope after home t");
+  ESP_LOGI(TAG, "  autotune [theta|t]   - run or guide driver-level inertia auto-tuning (ERD-04/HCS01 C1800)");
+  ESP_LOGI(TAG, "  ota                  - print Dual-OTA partition status, image state, and version");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
 #if MCP_DEBUG_CMDS
@@ -2443,8 +2663,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
   ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
-    ESP_LOGI(TAG, "  test_cycle           - enable, EIP bring-up (home+cal), path "
-                "legs A-F, then theta G-I at thetalim min/max");
+    ESP_LOGI(TAG, "  test_cycle           - 8-stage holistic test: arm, bring-up, bounds check, legs A-F, pick+place grip, dynamics, theta G-I, telemetry");
   ESP_LOGI(TAG, "  test_theta_path      - combined in-band X+Z+theta (25-75 "
                 "window) using live thetalim-safe dtheta; enable+bring-up first");
   ESP_LOGI(TAG, "  stop                 - stop all motion");

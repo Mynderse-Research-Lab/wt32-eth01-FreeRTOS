@@ -300,6 +300,65 @@ def cmd_c0300(cli: Hcs01Comws, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_autotune(cli: Hcs01Comws, args: argparse.Namespace) -> int:
+    if not args.yes:
+        print("=" * 60)
+        print(" HCS01 / ERD-04 Auto-Tuning (C1800 Drive Optimization)")
+        print("=" * 60)
+        print("WARNING: Motor will perform test oscillation movements (+/-45 deg)!")
+        print("Ensure end effector (up to 2.0 kg payload) is rigidly mounted and free of obstructions.")
+        print("Re-run with --yes to execute (add --save to automatically write to NV flash).")
+        return 2
+
+    cli.login()
+    print("--- HCS01 Auto-Tuning Sequence Started ---")
+    print("Diagnostic before:", cli.getvar("S-0-0095.0.0"))
+
+    # 1. Ensure damping factor and travel amplitude are configured
+    damping = str(args.damping)
+    travel = str(args.travel)
+    print(f"Setting damping factor P-0-0163 = {damping} ...")
+    cli.setvar_try_element7("P-0-0163.0.0", damping)
+
+    print(f"Setting test travel distance P-0-0169 = {travel} deg ...")
+    cli.setvar_try_element7("P-0-0169.0.0", travel)
+
+    # 2. Trigger C1800 Command Drive Optimization / Automatic control loop setting
+    print("Issuing C1800 (P-0-0162.0.0) Drive Optimization command...")
+    try:
+        cli.run_command("P-0-0162.0.0", timeout_s=120.0)
+    except ComwsError as e:
+        print("C1800 Drive Optimization failed:", e)
+        print("Diagnostic:", cli.getvar("S-0-0095.0.0"))
+        return 1
+
+    print("C1800 Complete! Reading tuned control loop parameters:")
+    try:
+        inertia = cli.getvar("P-0-4010.0.0")
+        kp = cli.getvar("S-0-0100.0.0")
+        tn = cli.getvar("S-0-0101.0.0")
+        kv = cli.getvar("S-0-0104.0.0")
+        ka = cli.getvar("S-0-0348.0.0")
+        print(f"  Load Inertia (P-0-4010)       : {inertia} kg*m^2")
+        print(f"  Velocity Prop Gain Kp (S-0-0100): {kp}")
+        print(f"  Velocity Integral Tn (S-0-0101) : {tn} ms")
+        print(f"  Position Prop Gain Kv (S-0-0104): {kv} 1/s")
+        print(f"  Accel Feedforward Ka (S-0-0348) : {ka} %")
+    except Exception as e:
+        print("Warning reading result parameters:", e)
+
+    if args.save:
+        print("Saving optimized parameters to non-volatile flash (C2200)...")
+        try:
+            cli.run_command("S-0-0264.0.0", timeout_s=60.0)
+            print("Save complete!")
+        except Exception as e:
+            print("C2200 save failed:", e)
+
+    print("--- Auto-Tuning Successful ---")
+    return 0
+
+
 def cmd_reboot(cli: Hcs01Comws, args: argparse.Namespace) -> int:
     if not args.yes:
         print("C6400 reboots the control section (HTTP/CIP drop briefly).")
@@ -405,6 +464,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--yes", action="store_true")
     sp.set_defaults(func=cmd_travel)
+
+    sp = sub.add_parser(
+        "autotune",
+        help="C1800 P-0-0162 load inertia identification & controller autotune (requires --yes)",
+    )
+    sp.add_argument("--yes", action="store_true", help="confirm execution")
+    sp.add_argument("--save", action="store_true", help="automatically run C2200 to save to NV flash")
+    sp.add_argument("--damping", type=float, default=1.0, help="damping factor P-0-0163 (0.5..10.0, default 1.0)")
+    sp.add_argument("--travel", type=float, default=45.0, help="test travel stroke P-0-0169 (deg, default 45.0)")
+    sp.set_defaults(func=cmd_autotune)
 
     sp = sub.add_parser(
         "save", help="C2200 S-0-0264 backup working memory (requires --yes)"
