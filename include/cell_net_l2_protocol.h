@@ -111,8 +111,23 @@ struct L2CellCommandPayload {
 };
 
 /**
+ * @brief Payload for Message Type 0x00: Heartbeat.
+ */
+struct L2HeartbeatPayload {
+  uint32_t uptime_ms;
+  uint16_t status_flags;
+  uint8_t reserved[2];
+};
+
+/**
  * @brief Full Wire Frames.
  */
+struct L2HeartbeatFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2HeartbeatPayload payload;
+};
+
 struct L2VisionDetectFrame {
   L2EthernetHeader eth;
   L2CellHeader cell;

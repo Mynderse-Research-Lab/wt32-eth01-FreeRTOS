@@ -1,151 +1,258 @@
 /**
  * @file CellNetL2.cpp
- * @brief High-speed OSI Layer-2 Communication Manager implementation.
+ * @brief High-speed, reusable OSI Layer-2 Communication Node implementation.
  */
 
 #include "CellNetL2.h"
 
-#include "esp_log.h"
-#include "esp_mac.h"
-#include "esp_timer.h"
-#include "lwip/def.h"
-
+#include <chrono>
 #include <cstring>
 
-static const char *TAG = "CellNetL2";
+#ifdef ESP_PLATFORM
+#include "esp_timer.h"
+#endif
 
-static esp_err_t (*s_original_eth_input)(esp_eth_handle_t, uint8_t *, uint32_t, void *) = nullptr;
+namespace CellNet {
 
-static esp_err_t cell_net_l2_rx_hook(esp_eth_handle_t hdl, uint8_t *buffer, uint32_t length, void *priv) {
-  if (buffer != nullptr && length >= sizeof(L2EthernetHeader) + sizeof(L2CellHeader)) {
-    uint16_t ethertype = (static_cast<uint16_t>(buffer[12]) << 8) | buffer[13];
-    if (ethertype == CELL_NET_L2_ETHERTYPE) {
-      if (CellNetL2::instance().processIncomingFrame(buffer, length)) {
-        // Intercepted and handled at Layer 2: free or return OK without passing to LwIP
-        free(buffer);
-        return ESP_OK;
-      }
-    }
-  }
+namespace {
 
-  if (s_original_eth_input != nullptr) {
-    return s_original_eth_input(hdl, buffer, length, priv);
-  }
-  return ESP_OK;
+uint32_t getCurrentTimestampUs() {
+#ifdef ESP_PLATFORM
+  return static_cast<uint32_t>(esp_timer_get_time() & 0xFFFFFFFF);
+#else
+  const auto now = std::chrono::steady_clock::now();
+  return static_cast<uint32_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          now.time_since_epoch())
+          .count() &
+      0xFFFFFFFF);
+#endif
 }
 
-CellNetL2 &CellNetL2::instance() {
-  static CellNetL2 s_instance;
-  return s_instance;
+}  // namespace
+
+CellNetL2Node::CellNetL2Node(IL2Transport& transport, CellNodeId node_id)
+    : transport_(transport), node_id_(node_id) {}
+
+bool CellNetL2Node::begin() {
+  if (!transport_.getMacAddress(self_mac_)) {
+    // If MAC retrieval fails, use zeros or continue gracefully
+    std::memset(self_mac_, 0, sizeof(self_mac_));
+  }
+
+  // Register the incoming frame listener on the transport
+  transport_.setRxCallback(
+      [this](const uint8_t* buffer, size_t length) {
+        processIncomingFrame(buffer, length);
+      });
+
+  initialized_ = true;
+  return true;
 }
 
-esp_err_t CellNetL2::begin(esp_eth_handle_t eth_handle, CellNodeId self_node_id) {
-  if (eth_handle == nullptr) {
-    ESP_LOGE(TAG, "Cannot begin CellNetL2 with null Ethernet handle");
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  eth_handle_ = eth_handle;
-  self_node_id_ = self_node_id;
-
-  esp_err_t err = esp_read_mac(self_mac_, ESP_MAC_ETH);
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "Could not query MAC address from EFUSE / Ethernet");
-  }
-
-  // Hook raw Layer-2 input filter
-  err = esp_eth_update_input_path(eth_handle_, cell_net_l2_rx_hook, &s_original_eth_input);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to hook Ethernet input path for Layer-2 frames: %d", (int)err);
-    return err;
-  }
-
-  ready_ = true;
-  ESP_LOGI(TAG, "CellNet Layer-2 transceiver initialized (Node ID 0x%02X, EtherType 0x%04X, MAC %02X:%02X:%02X:%02X:%02X:%02X)",
-           static_cast<uint8_t>(self_node_id_), CELL_NET_L2_ETHERTYPE,
-           self_mac_[0], self_mac_[1], self_mac_[2], self_mac_[3], self_mac_[4], self_mac_[5]);
-
-  return ESP_OK;
+bool CellNetL2Node::isReady() const {
+  return initialized_ && transport_.isLinkUp();
 }
 
-esp_err_t CellNetL2::sendGantryStatus(uint8_t motion_state, uint8_t active_slot,
-                                     float x_mm, float z_mm, float theta_deg,
-                                     float cycle_ms, uint16_t fault_flags) {
-  if (!ready_ || eth_handle_ == nullptr) {
-    return ESP_ERR_INVALID_STATE;
-  }
-
-  L2GantryStatusFrame frame;
-  // Destination: Broadcast
-  memset(frame.eth.dest_mac, 0xFF, 6);
-  memcpy(frame.eth.src_mac, self_mac_, 6);
-  frame.eth.ethertype = htons(CELL_NET_L2_ETHERTYPE);
-
-  frame.cell.version = CELL_NET_L2_VERSION;
-  frame.cell.msg_type = static_cast<uint8_t>(CellMsgType::GANTRY_STATUS);
-  frame.cell.sender_id = static_cast<uint8_t>(self_node_id_);
-  frame.cell.sequence = sequence_++;
-  frame.cell.timestamp_us_low = static_cast<uint32_t>(esp_timer_get_time() & 0xFFFFFFFF);
-
-  frame.payload.motion_state = motion_state;
-  frame.payload.active_slot = active_slot;
-  frame.payload.fault_flags = fault_flags;
-  frame.payload.x_pos_mm = x_mm;
-  frame.payload.z_pos_mm = z_mm;
-  frame.payload.theta_deg = theta_deg;
-  frame.payload.last_cycle_time_ms = cycle_ms;
-
-  esp_err_t err = esp_eth_transmit(eth_handle_, &frame, sizeof(frame));
-  if (err != ESP_OK) {
-    ESP_LOGD(TAG, "esp_eth_transmit failed: %d", (int)err);
-  }
-  return err;
-}
-
-bool CellNetL2::processIncomingFrame(const uint8_t *buffer, uint32_t length) {
-  if (buffer == nullptr || length < sizeof(L2EthernetHeader) + sizeof(L2CellHeader)) {
+bool CellNetL2Node::sendHeartbeat(uint32_t uptime_ms, uint16_t status_flags,
+                                  const uint8_t dest_mac[6]) {
+  if (!initialized_) {
     return false;
   }
 
-  const auto *cell_hdr = reinterpret_cast<const L2CellHeader *>(buffer + sizeof(L2EthernetHeader));
-  if (cell_hdr->version != CELL_NET_L2_VERSION) {
+  L2HeartbeatPayload payload{};
+  payload.uptime_ms = uptime_ms;
+  payload.status_flags = status_flags;
+
+  const uint32_t ts_us = getCurrentTimestampUs();
+  const auto frame = CellNetL2Framing::buildHeartbeatFrame(
+      self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
+
+  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  if (ok) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.tx_frames++;
+  }
+  return ok;
+}
+
+bool CellNetL2Node::sendVisionDetect(uint32_t item_id, float x_across_mm,
+                                     float y_bat_mm, float theta_deg,
+                                     uint8_t battery_class,
+                                     const uint8_t dest_mac[6]) {
+  if (!initialized_) {
     return false;
   }
 
-  const uint8_t *payload_ptr = buffer + sizeof(L2EthernetHeader) + sizeof(L2CellHeader);
-  uint32_t payload_len = length - (sizeof(L2EthernetHeader) + sizeof(L2CellHeader));
+  L2VisionDetectPayload payload{};
+  payload.item_id = item_id;
+  payload.x_across_mm = x_across_mm;
+  payload.y_bat_mm = y_bat_mm;
+  payload.theta_deg = theta_deg;
+  payload.battery_class = battery_class;
 
-  switch (static_cast<CellMsgType>(cell_hdr->msg_type)) {
-    case CellMsgType::VISION_DETECT: {
-      if (payload_len >= sizeof(L2VisionDetectPayload) && vision_cb_ != nullptr) {
-        L2VisionDetectPayload payload;
-        memcpy(&payload, payload_ptr, sizeof(payload));
-        vision_cb_(payload, cell_hdr->timestamp_us_low);
-        return true;
+  const uint32_t ts_us = getCurrentTimestampUs();
+  const auto frame = CellNetL2Framing::buildVisionDetectFrame(
+      self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
+
+  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  if (ok) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.tx_frames++;
+  }
+  return ok;
+}
+
+bool CellNetL2Node::sendConveyorSpeed(float speed_mm_s, float displacement_m,
+                                      int32_t raw_encoder_cnt,
+                                      const uint8_t dest_mac[6]) {
+  if (!initialized_) {
+    return false;
+  }
+
+  L2ConveyorSpeedPayload payload{};
+  payload.speed_mm_s = speed_mm_s;
+  payload.displacement_m = displacement_m;
+  payload.raw_encoder_cnt = raw_encoder_cnt;
+
+  const uint32_t ts_us = getCurrentTimestampUs();
+  const auto frame = CellNetL2Framing::buildConveyorSpeedFrame(
+      self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
+
+  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  if (ok) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.tx_frames++;
+  }
+  return ok;
+}
+
+bool CellNetL2Node::sendGantryStatus(uint8_t motion_state, uint8_t active_slot,
+                                     float x_pos_mm, float z_pos_mm,
+                                     float theta_deg, float last_cycle_time_ms,
+                                     uint16_t fault_flags,
+                                     const uint8_t dest_mac[6]) {
+  if (!initialized_) {
+    return false;
+  }
+
+  L2GantryStatusPayload payload{};
+  payload.motion_state = motion_state;
+  payload.active_slot = active_slot;
+  payload.fault_flags = fault_flags;
+  payload.x_pos_mm = x_pos_mm;
+  payload.z_pos_mm = z_pos_mm;
+  payload.theta_deg = theta_deg;
+  payload.last_cycle_time_ms = last_cycle_time_ms;
+
+  const uint32_t ts_us = getCurrentTimestampUs();
+  const auto frame = CellNetL2Framing::buildGantryStatusFrame(
+      self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
+
+  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  if (ok) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.tx_frames++;
+  }
+  return ok;
+}
+
+bool CellNetL2Node::sendCellCommand(uint8_t command_id, uint8_t param_u8,
+                                    uint16_t param_u16, float param_float,
+                                    const uint8_t dest_mac[6]) {
+  if (!initialized_) {
+    return false;
+  }
+
+  L2CellCommandPayload payload{};
+  payload.command_id = command_id;
+  payload.param_u8 = param_u8;
+  payload.param_u16 = param_u16;
+  payload.param_float = param_float;
+
+  const uint32_t ts_us = getCurrentTimestampUs();
+  const auto frame = CellNetL2Framing::buildCellCommandFrame(
+      self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
+
+  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  if (ok) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.tx_frames++;
+  }
+  return ok;
+}
+
+bool CellNetL2Node::processIncomingFrame(const uint8_t* buffer, size_t length) {
+  ParsedFrame parsed{};
+  if (!CellNetL2Framing::parseFrame(buffer, length, parsed)) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.rx_invalid_frames++;
+    return false;
+  }
+
+  // Sequence drop tracking per sender node
+  const uint8_t sender = parsed.cell.sender_id;
+  {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    stats_.rx_frames++;
+    if (sender_seen_[sender]) {
+      const auto expected_seq =
+          static_cast<uint8_t>((last_sender_seq_[sender] + 1) & 0xFF);
+      if (parsed.cell.sequence != expected_seq) {
+        const uint8_t lost = (parsed.cell.sequence - expected_seq) & 0xFF;
+        stats_.rx_sequence_drops += lost;
+      }
+    } else {
+      sender_seen_[sender] = true;
+    }
+    last_sender_seq_[sender] = parsed.cell.sequence;
+  }
+
+  // Dispatch to registered type handler
+  const auto type = static_cast<CellMsgType>(parsed.cell.msg_type);
+  switch (type) {
+    case CellMsgType::HEARTBEAT:
+      if (heartbeat_cb_) {
+        heartbeat_cb_(parsed.payload.heartbeat, parsed.cell);
       }
       break;
-    }
-    case CellMsgType::CONVEYOR_SPEED: {
-      if (payload_len >= sizeof(L2ConveyorSpeedPayload) && conveyor_cb_ != nullptr) {
-        L2ConveyorSpeedPayload payload;
-        memcpy(&payload, payload_ptr, sizeof(payload));
-        conveyor_cb_(payload, cell_hdr->timestamp_us_low);
-        return true;
+    case CellMsgType::VISION_DETECT:
+      if (vision_cb_) {
+        vision_cb_(parsed.payload.vision_detect, parsed.cell);
       }
       break;
-    }
-    case CellMsgType::CELL_COMMAND: {
-      if (payload_len >= sizeof(L2CellCommandPayload) && cmd_cb_ != nullptr) {
-        L2CellCommandPayload payload;
-        memcpy(&payload, payload_ptr, sizeof(payload));
-        cmd_cb_(payload);
-        return true;
+    case CellMsgType::CONVEYOR_SPEED:
+      if (conveyor_cb_) {
+        conveyor_cb_(parsed.payload.conveyor_speed, parsed.cell);
       }
       break;
-    }
+    case CellMsgType::GANTRY_STATUS:
+      if (gantry_cb_) {
+        gantry_cb_(parsed.payload.gantry_status, parsed.cell);
+      }
+      break;
+    case CellMsgType::CELL_COMMAND:
+      if (cmd_cb_) {
+        cmd_cb_(parsed.payload.cell_command, parsed.cell);
+      }
+      break;
     default:
-      break;
+      return false;
   }
 
-  return false;
+  return true;
 }
+
+CellNetStats CellNetL2Node::getStats() const {
+  std::lock_guard<std::mutex> lock(stats_mutex_);
+  return stats_;
+}
+
+void CellNetL2Node::resetStats() {
+  std::lock_guard<std::mutex> lock(stats_mutex_);
+  stats_ = {};
+  std::memset(sender_seen_, 0, sizeof(sender_seen_));
+  std::memset(last_sender_seq_, 0, sizeof(last_sender_seq_));
+}
+
+}  // namespace CellNet

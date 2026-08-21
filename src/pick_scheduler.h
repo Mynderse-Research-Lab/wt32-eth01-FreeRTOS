@@ -11,9 +11,10 @@
 
 struct PickSchedulerTaskConfig {
   Gantry::Gantry *gantry;
-  CellNetL2 *net_l2;
+  CellNet::CellNetL2Node *net_l2;
 };
 
 void pickSchedulerTask(void *param);
 
 #endif  // PICK_SCHEDULER_H
+

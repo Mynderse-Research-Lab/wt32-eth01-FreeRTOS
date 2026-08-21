@@ -259,6 +259,20 @@ target_include_directories(test_drivetrain_params PRIVATE
 target_link_libraries(test_drivetrain_params PRIVATE unity)
 add_test(NAME test_drivetrain_params COMMAND test_drivetrain_params)
 
+# CellNet Layer-2 framing and node dispatch tests
+add_executable(test_cell_net_l2
+    "test_cell_net_l2.cpp"
+    "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2Framing.cpp"
+    "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2.cpp"
+)
+target_include_directories(test_cell_net_l2 PRIVATE
+    "${REPO_ROOT}/lib/CellNetL2/src"
+    "${REPO_ROOT}/include"
+)
+target_link_libraries(test_cell_net_l2 PRIVATE unity)
+add_test(NAME test_cell_net_l2 COMMAND test_cell_net_l2)
+
+
 # Optional gcovr report: cmake -S test/host -B build/host -DGANTRY_HOST_COVERAGE=ON
 # then cmake --build build/host --target coverage
 # Invoke ctest as its own COMMAND so paths with spaces (Program Files) are not

@@ -35,6 +35,7 @@
 #include "mqtt_topics.h"
 #include "ethernet_app_config.h"
 #include "CellNetL2.h"
+#include "EspEthL2Transport.h"
 #include "EthernetLink.h"
 #include "pick_scheduler.h"
 #include "Spi3Bus.h"
@@ -292,9 +293,11 @@ extern "C" void app_main(void) {
     // FreeRTOS tasks first — do not block console / motion behind network wait.
     // ------------------------------------------------------------------
     static Network::EthernetLink ethernetLink;
+    static CellNet::EspEthL2Transport l2Transport;
+    static CellNet::CellNetL2Node l2Node(l2Transport, CellNodeId::GANTRY);
 
     BaseType_t result;
-    static PickSchedulerTaskConfig pickCfg = { &gantry, &CellNetL2::instance() };
+    static PickSchedulerTaskConfig pickCfg = { &gantry, &l2Node };
     result = xTaskCreatePinnedToCore(
         pickSchedulerTask, "PickScheduler",
         PICK_SCHEDULER_TASK_STACK, &pickCfg,
@@ -347,8 +350,10 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "OTA server listening on TCP 8032 (plant / LAN8720)");
 
         // Initialize High-Speed OSI Layer-2 Cell Network transceiver
-        if (CellNetL2::instance().begin(ethernetLink.getEthHandle(), CellNodeId::GANTRY) == ESP_OK) {
-            ESP_LOGI(TAG, "CellNet OSI Layer-2 bus ACTIVE (EtherType 0x%04X)", CELL_NET_L2_ETHERTYPE);
+        if (l2Transport.attachEthHandle(ethernetLink.getEthHandle()) == ESP_OK &&
+            l2Node.begin()) {
+            ESP_LOGI(TAG, "CellNet OSI Layer-2 bus ACTIVE (EtherType 0x%04X, Node 0x%02X)",
+                     CELL_NET_L2_ETHERTYPE, static_cast<uint8_t>(CellNodeId::GANTRY));
         } else {
             ESP_LOGW(TAG, "CellNet Layer-2 initialization failed");
         }
@@ -361,7 +366,7 @@ extern "C" void app_main(void) {
     }
 
     ESP_LOGI(TAG, "All tasks created successfully (ETH %s, L2 %s)",
-             ethUp ? "up" : "down", CellNetL2::instance().isReady() ? "active" : "offline");
+             ethUp ? "up" : "down", l2Node.isReady() ? "active" : "offline");
 
     // Confirm healthy boot to cancel OTA rollback timer/watchdog
     gantryOtaConfirmBootValid();

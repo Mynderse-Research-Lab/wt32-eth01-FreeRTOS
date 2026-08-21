@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS
+        "src/CellNetL2Framing.cpp"
         "src/CellNetL2.cpp"
+        "src/EspEthL2Transport.cpp"
     INCLUDE_DIRS
         "src"
         "../../include"
@@ -11,3 +13,4 @@ idf_component_register(
         log
         freertos
 )
+

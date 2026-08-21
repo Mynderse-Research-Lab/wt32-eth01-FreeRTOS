@@ -16,16 +16,6 @@ static const char *TAG = "PickScheduler";
 static QueueHandle_t s_pick_queue = nullptr;
 static float s_live_belt_speed_mm_s = 1524.0f;
 
-static void onVisionDetectReceived(const L2VisionDetectPayload &payload, uint32_t timestamp_us) {
-  if (s_pick_queue != nullptr) {
-    xQueueSend(s_pick_queue, &payload, 0);
-  }
-}
-
-static void onConveyorSpeedReceived(const L2ConveyorSpeedPayload &payload, uint32_t timestamp_us) {
-  s_live_belt_speed_mm_s = payload.speed_mm_s;
-}
-
 void pickSchedulerTask(void *param) {
   auto *cfg = static_cast<PickSchedulerTaskConfig *>(param);
   if (cfg == nullptr || cfg->gantry == nullptr) {
@@ -42,8 +32,14 @@ void pickSchedulerTask(void *param) {
   }
 
   if (cfg->net_l2 != nullptr) {
-    cfg->net_l2->setVisionCallback(onVisionDetectReceived);
-    cfg->net_l2->setConveyorCallback(onConveyorSpeedReceived);
+    cfg->net_l2->onVisionDetect([](const L2VisionDetectPayload &payload, const L2CellHeader &) {
+      if (s_pick_queue != nullptr) {
+        xQueueSend(s_pick_queue, &payload, 0);
+      }
+    });
+    cfg->net_l2->onConveyorSpeed([](const L2ConveyorSpeedPayload &payload, const L2CellHeader &) {
+      s_live_belt_speed_mm_s = payload.speed_mm_s;
+    });
   }
 
   ESP_LOGI(TAG, "Pick scheduler started with OSI Layer-2 link");

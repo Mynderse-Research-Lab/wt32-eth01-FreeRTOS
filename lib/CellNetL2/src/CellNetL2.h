@@ -1,69 +1,134 @@
 /**
  * @file CellNetL2.h
- * @brief High-speed OSI Layer-2 Communication Manager for WT32-ETH01.
+ * @brief High-speed, reusable OSI Layer-2 Communication Node for cell subsystems.
+ *
+ * Implements subsystem-agnostic transmission, callback dispatching, and link
+ * statistics over the abstract IL2Transport interface.
  */
 
 #ifndef CELL_NET_L2_H
 #define CELL_NET_L2_H
 
+#include "CellNetL2Framing.h"
+#include "IL2Transport.h"
 #include "cell_net_l2_protocol.h"
-#include "esp_err.h"
-#include "esp_eth_driver.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <mutex>
 
-typedef void (*CellNetVisionCallback)(const L2VisionDetectPayload &payload, uint32_t timestamp_us);
-typedef void (*CellNetConveyorCallback)(const L2ConveyorSpeedPayload &payload, uint32_t timestamp_us);
-typedef void (*CellNetCommandCallback)(const L2CellCommandPayload &payload);
+namespace CellNet {
 
-class CellNetL2 {
+using HeartbeatCallback =
+    std::function<void(const L2HeartbeatPayload& payload, const L2CellHeader& header)>;
+using VisionDetectCallback =
+    std::function<void(const L2VisionDetectPayload& payload, const L2CellHeader& header)>;
+using ConveyorSpeedCallback =
+    std::function<void(const L2ConveyorSpeedPayload& payload, const L2CellHeader& header)>;
+using GantryStatusCallback =
+    std::function<void(const L2GantryStatusPayload& payload, const L2CellHeader& header)>;
+using CellCommandCallback =
+    std::function<void(const L2CellCommandPayload& payload, const L2CellHeader& header)>;
+
+struct CellNetStats {
+  uint32_t tx_frames = 0;
+  uint32_t rx_frames = 0;
+  uint32_t rx_invalid_frames = 0;
+  uint32_t rx_sequence_drops = 0;
+};
+
+class CellNetL2Node {
  public:
-  static CellNetL2 &instance();
+  explicit CellNetL2Node(IL2Transport& transport,
+                         CellNodeId node_id = CellNodeId::UNKNOWN);
+  ~CellNetL2Node() = default;
+
+  // Non-copyable
+  CellNetL2Node(const CellNetL2Node&) = delete;
+  CellNetL2Node& operator=(const CellNetL2Node&) = delete;
 
   /**
-   * @brief Initialize Layer-2 transceiver on top of the active Ethernet EMAC handle.
-   * @param eth_handle The active LAN8720 esp_eth driver handle.
-   * @param self_node_id Node identifier for this device (e.g. CellNodeId::GANTRY).
+   * @brief Initialize Layer-2 node, bind RX callbacks, and query local MAC.
    */
-  esp_err_t begin(esp_eth_handle_t eth_handle, CellNodeId self_node_id);
+  bool begin();
 
   /**
-   * @brief Check if Layer-2 link is initialized.
+   * @brief Check if transport link is up and node is ready.
    */
-  bool isReady() const { return ready_; }
+  bool isReady() const;
+
+  CellNodeId getNodeId() const { return node_id_; }
+  void setNodeId(CellNodeId node_id) { node_id_ = node_id; }
+
+  // --------------------------------------------------------------------------
+  // Message Transmission Methods (Subsystem-Agnostic)
+  // --------------------------------------------------------------------------
+
+  bool sendHeartbeat(uint32_t uptime_ms, uint16_t status_flags = 0,
+                     const uint8_t dest_mac[6] = nullptr);
+
+  bool sendVisionDetect(uint32_t item_id, float x_across_mm, float y_bat_mm,
+                        float theta_deg, uint8_t battery_class,
+                        const uint8_t dest_mac[6] = nullptr);
+
+  bool sendConveyorSpeed(float speed_mm_s, float displacement_m,
+                         int32_t raw_encoder_cnt,
+                         const uint8_t dest_mac[6] = nullptr);
+
+  bool sendGantryStatus(uint8_t motion_state, uint8_t active_slot,
+                        float x_pos_mm, float z_pos_mm, float theta_deg,
+                        float last_cycle_time_ms, uint16_t fault_flags = 0,
+                        const uint8_t dest_mac[6] = nullptr);
+
+  bool sendCellCommand(uint8_t command_id, uint8_t param_u8 = 0,
+                       uint16_t param_u16 = 0, float param_float = 0.0f,
+                       const uint8_t dest_mac[6] = nullptr);
+
+  // --------------------------------------------------------------------------
+  // Callback Handlers Registration
+  // --------------------------------------------------------------------------
+
+  void onHeartbeat(HeartbeatCallback cb) { heartbeat_cb_ = std::move(cb); }
+  void onVisionDetect(VisionDetectCallback cb) { vision_cb_ = std::move(cb); }
+  void onConveyorSpeed(ConveyorSpeedCallback cb) { conveyor_cb_ = std::move(cb); }
+  void onGantryStatus(GantryStatusCallback cb) { gantry_cb_ = std::move(cb); }
+  void onCellCommand(CellCommandCallback cb) { cmd_cb_ = std::move(cb); }
+
+  // --------------------------------------------------------------------------
+  // Reception & Diagnostics
+  // --------------------------------------------------------------------------
 
   /**
-   * @brief Register callbacks for incoming peer messages.
+   * @brief Process an incoming raw Ethernet frame.
+   * @return true if frame was a valid 0x88B5 message and dispatched.
    */
-  void setVisionCallback(CellNetVisionCallback cb) { vision_cb_ = cb; }
-  void setConveyorCallback(CellNetConveyorCallback cb) { conveyor_cb_ = cb; }
-  void setCommandCallback(CellNetCommandCallback cb) { cmd_cb_ = cb; }
+  bool processIncomingFrame(const uint8_t* buffer, size_t length);
 
-  /**
-   * @brief Send Gantry status telemetry frame over Layer-2 broadcast.
-   */
-  esp_err_t sendGantryStatus(uint8_t motion_state, uint8_t active_slot,
-                             float x_mm, float z_mm, float theta_deg,
-                             float cycle_ms, uint16_t fault_flags = 0);
-
-  /**
-   * @brief Handle raw incoming Ethernet MAC frame (called from input interceptor).
-   */
-  bool processIncomingFrame(const uint8_t *buffer, uint32_t length);
+  CellNetStats getStats() const;
+  void resetStats();
 
  private:
-  CellNetL2() = default;
-  ~CellNetL2() = default;
+  IL2Transport& transport_;
+  CellNodeId node_id_;
+  uint8_t self_mac_[6]{};
+  uint8_t sequence_{0};
+  bool initialized_{false};
 
-  esp_eth_handle_t eth_handle_ = nullptr;
-  CellNodeId self_node_id_ = CellNodeId::GANTRY;
-  uint8_t self_mac_[6] = {};
-  uint8_t sequence_ = 0;
-  bool ready_ = false;
+  mutable std::mutex stats_mutex_;
+  CellNetStats stats_{};
 
-  CellNetVisionCallback vision_cb_ = nullptr;
-  CellNetConveyorCallback conveyor_cb_ = nullptr;
-  CellNetCommandCallback cmd_cb_ = nullptr;
+  // Track expected sequence numbers per sender node (256 slots)
+  uint8_t last_sender_seq_[256]{};
+  bool sender_seen_[256]{};
+
+  HeartbeatCallback heartbeat_cb_{nullptr};
+  VisionDetectCallback vision_cb_{nullptr};
+  ConveyorSpeedCallback conveyor_cb_{nullptr};
+  GantryStatusCallback gantry_cb_{nullptr};
+  CellCommandCallback cmd_cb_{nullptr};
 };
+
+}  // namespace CellNet
 
 #endif  // CELL_NET_L2_H
