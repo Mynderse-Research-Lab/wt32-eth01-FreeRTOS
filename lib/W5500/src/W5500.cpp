@@ -155,7 +155,7 @@ bool W5500::init(const W5500Config& cfg) {
 }
 
 bool W5500::configureAfterReset() {
-    uint8_t ver = getVersion();
+    uint8_t ver = readReg(kBlockCommon(), REG_VERSIONR);
     if (ver != 0x04) {
         ESP_LOGE(TAG, "Unexpected W5500 version: 0x%02X (expected 0x04)", ver);
         return false;
@@ -498,14 +498,17 @@ int W5500::recvFrame(uint8_t* buf, uint16_t bufSize) {
 // ==========================================================================
 
 uint8_t W5500::getVersion() {
+    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
     return readReg(kBlockCommon(), REG_VERSIONR);
 }
 
 void W5500::getMacAddress(uint8_t mac[6]) {
+    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
     readBuf(kBlockCommon(), REG_SHAR, mac, 6);
 }
 
 bool W5500::isLinkUp() {
+    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
     // PHYCFGR register is at offset 0x002E in common block
     // Bit 0 = LNK (link status)
     uint8_t phyCfgr = readReg(kBlockCommon(), 0x002E);
