@@ -64,8 +64,10 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100ParamAccess.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01ControlStatus.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01Assembly.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01ComwsClient.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipSession.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipIoConnection.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipScanner.cpp"
@@ -95,9 +97,17 @@ add_executable(test_eip_encoding "test_eip_encoding.cpp")
 target_link_libraries(test_eip_encoding PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_encoding COMMAND test_eip_encoding)
 
+add_executable(test_k5100_param_access "test_k5100_param_access.cpp")
+target_link_libraries(test_k5100_param_access PRIVATE ethernet_ip unity)
+add_test(NAME test_k5100_param_access COMMAND test_k5100_param_access)
+
 add_executable(test_hcs01_assembly "test_hcs01_assembly.cpp")
 target_link_libraries(test_hcs01_assembly PRIVATE ethernet_ip unity)
 add_test(NAME test_hcs01_assembly COMMAND test_hcs01_assembly)
+
+add_executable(test_hcs01_comws_client "test_hcs01_comws_client.cpp")
+target_link_libraries(test_hcs01_comws_client PRIVATE ethernet_ip unity)
+add_test(NAME test_hcs01_comws_client COMMAND test_hcs01_comws_client)
 
 add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)

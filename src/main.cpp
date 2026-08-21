@@ -319,6 +319,7 @@ extern "C" void app_main(void) {
     consoleCfg.limit_max_pin          = -1;
     consoleCfg.use_mcp23s17           = (gpio_expander_get_mcp_handle() != nullptr);
     consoleCfg.limit_switches_active  = false;
+    consoleCfg.w5500_hal              = &w5500Hal;
 
 #if CONSOLE_UART_ENABLE
     result = xTaskCreatePinnedToCore(

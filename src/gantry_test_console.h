@@ -3,6 +3,7 @@
 
 #include "Gantry.h"
 #include <stdint.h>
+#include "W5500Hal.h"
 
 /**
  * @struct GantryTestConsoleConfig
@@ -35,6 +36,7 @@ struct GantryTestConsoleConfig {
   int z_pulse_ledc_channel = -1;
   int theta_pulse_ledc_channel = -1;
   int theta_pulse_pin = -1;  // theta pulse STEP GPIO
+  w5500::W5500Hal* w5500_hal = nullptr; // W5500 SPI driver for EtherNet/IP / COMWS
 };
 
 /** Optional reply sink for Ethernet console (tees ESP_LOG during a command). */
