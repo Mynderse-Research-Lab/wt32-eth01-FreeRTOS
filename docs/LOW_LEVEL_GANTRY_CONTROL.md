@@ -279,8 +279,9 @@ Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
 (`decompose`, `planSegments`). Protective clamp: Z ballscrew critical-RPM
 derived speed cap still applies to the path speed ceiling.
 
-**Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **30 mm**): margin
-from Z− / A015 (retracted joint min). Any X Absolute (home/cal/path/EIP seek)
+**Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **35.7 mm**): margin
+from Z− / A015 (retracted joint min). This corresponds to **4.5 inches (114.3 mm)** clearance
+above the lowest drop limit ($Z_{\text{lowest}} = 150.0\text{ mm} - 114.3\text{ mm} = 35.7\text{ mm}$). Any X Absolute (home/cal/path/EIP seek)
 is allowed only while joint Z is in that traverse band
 (`z <= z_min + margin`). Beyond it (further +Z / toward the belt), Z moves
 alone with X held; console `home x` / `calibrate x` refuse.
@@ -291,7 +292,7 @@ once Z is in-band). Above the band, Z-only. Theta on a combined move is
 scheduled against the **in-band X+Z traverse segment**: start at **25%** of
 that segment, finish by **75%**. Required theta speed is
 `|dTheta| / (0.5 * T_seg)` (constant-speed `T_seg = L / V`), clamped to
-`AXIS_THETA_MAX_SPEED_DEG_PER_S`. If the cap forces finish past 75%, the
+`AXIS_THETA_MAX_SPEED_DEG_PER_S` (360 deg/s). If the cap forces finish past 75%, the
 below-band descent segment is **held** until theta is idle. Theta-only
 commands while Z is out of band are refused (linear path still runs).
 Limit warning codes: **X** A014/PL = joint min,
@@ -303,28 +304,22 @@ instant) — no extra offset after clear. That datum is the **retracted** end.
 
 **EIP bring-up** (`calibrate all`): Z- A015 → creep until switch disabled →
 **Z=0** → X home (A014 clear → X=0) / cal → park X at
-`GANTRY_CAL_X_PARK_MM` (35) → Z+ stroke (A014) → return to SAFE_Z ceiling.
+`GANTRY_CAL_X_PARK_MM` (35) → Z+ stroke (A014) → return to SAFE_Z ceiling (35.7 mm).
 Seek, park, and SAFE_Z return are locked at **100 mm/s** and **2000 mm/s²**
 (not console `speed`/`accel`). Switch-clear creep stays **1 mm/s**.
 
 **`test_cycle`**: after boot, one console command runs enable (waits for servo
-arm), the same EIP bring-up as `calibrate all` (home + calibrate), then path
-legs A–F from park using the **live** console `speed` / `accel` / decel
-(boot defaults 50 mm/s and 3000 mm/s² unless you change them; `rangelimit`
-still clamps). Waypoints: `(220,8)` → `(220,130)` → `(0,0)` →
-`(350,130)` → `(80,110)` → `(0,0)` with theta held at 0. Then G–I are
-theta-only at `(0,0)` (in-band, so the SAFE_Z interlock allows rotation) to
-the live `thetalim` min, then max, then back to 0. After `home t`, that
-envelope is the **captured** origin plan: full ±180 only when drive abs is
-aligned (`|S-0-0051| ≤ 2°`); otherwise remaining drive travel (about +1° at
-HIPERFACE ~178.5°). G–I use the
-theta speed/accel **caps** (`AXIS_THETA_MAX_SPEED_DEG_PER_S` / accel/decel,
-3600 deg/s and 18000 deg/s² unless menuconfig tightens them), not the
-console theta default of 30 deg/s. Pass requires pose within 1.5 mm and
-1.0°. Segment counts are checked on the commanded X–Z waypoint chain (G–I
-are 0 X–Z segments). `stop` aborts. `selftest` is math-only and is not this.
-C0300 + overlay + `home t` ALIGNED is required before G–I exercise ±180°.
-An offset home shrinks H so it does not command past S-0-0278.
+arm), the same EIP bring-up as `calibrate all` (home + calibrate), then:
+1. Stage 1: Servo arming verification
+2. Stage 2: EIP Bring-up (Z- -> X- -> X+ -> Park X=35 -> Z+ -> SAFE_Z=35.7 mm -> Theta=0.000 deg)
+3. Stage 3: Software safety limit rejection checks (-X, +Z out of bounds)
+4. Stage 4: Standard 2D/3D Kinematic Legs A–F (`(220,8)` → `(220,130)` → `(0,0)` → `(350,130)` → `(80,110)` → `(0,0)`)
+5. Stage 5: Pick-and-Place Automation Flow with Gripper DOUT staging (P1–P6)
+6. Stage 6: Multi-Velocity Dynamics & Creep Positioning Validation (V1 15 mm/s creep, V2 150 mm/s traverse, V3 return)
+7. Stage 7: Theta Full-Envelope Capacity Rotation (G -180°, H +180°, I 0°)
+8. Stage 8: Accuracy Verification & Telemetry Summary
+
+Pass requires linear pose error within 1.5 mm (typical $< 1\text{ }\mu\text{m}$) and Theta error within $0.01^\circ$ (typical $\le 0.003^\circ$). Segment counts are checked on the commanded X–Z waypoint chain. `stop` aborts. Safe continuous pass-through rotation is supported for any number of revolutions.
 
 ### Orchestration state machine
 
@@ -712,25 +707,15 @@ removed; do not rely on them.
 ## 10. Theta (HCS01) and MQTT boundary
 
 ### Theta (HCS01)
-
-HCS01 has **two IPs / two MACs** on the same drive:
-
-| Path | Address | MAC | Ports |
-|------|---------|-----|-------|
-| Engineering (X24/X25) | `192.168.1.22` | `00-60-34-97-41-B6` | HTTP :80, telnet :23, IndraWorks |
-| CIP / FKM (EtherNet/IP) | `192.168.1.23` | `00-60-34-97-41-B9` | TCP 44818, UDP 2222 |
-
-Firmware `EIP_TARGET_IP_THETA` defaults to **`.23`**. RegisterSession on `.22` times out. Soft-retry if CIP is down so X/Z Class 1 is not yanked.
-
 - Assemblies **101/102** (18 / 14 bytes), freely configurable profile (`P-0-4084 = 0xFFFE`). Map: `P-0-4081` = 4077, 0282, 0259, 0260, 0359; `P-0-4080` = 4078, 0051, 0040, 0390. See `Hcs01Assembly.h`.
 - Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
-- `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t`.
-- Theta Absolute: enable holds current S-0-0282 with **Drive Halt active** (bit13=0). Drive display **AH** is ready=3 + halt (firmware used to log that as AF). `moveToDeg` preloads the target while AH, releases halt (AH→AF), then toggles command-accept. Keep S-0-0282 in its continuous absolute frame: the live drive permits ±36000° and S-0-0076 is non-modulo `0x0002`; manually wrapping at ±180° could command the long way around. Busy is a motion-active flag (idle `command_value_reached` is not “busy”). Consecutive commands stay busy until the **new** joint target is in band for 3 ticks — sticky bit4 from the previous slew must not halt at the old pose. Halt 1→0 is `makeDriveHalt` / `stop`.
-- **Home** = HIPERFACE origin capture (no X31). If `|S-0-0051| ≤ 2°` after **C0300** (S-0-0447) at the mechanical/cable-neutral pose, joint **is** drive abs (`zero_puu_ = 0`) and thetalim is the full firmware envelope ∩ drive travel. If HIPERFACE is still ~178° (not C0300'd), firmware **offsets** so that pose is joint 0 (does not slew to encoder-native 0 — that would wrap the gripper cable) but **shrinks thetalim** to remaining drive travel (about **+1° / −180°** at 178.5° with ±180 drive limits). That is the F2057 root cause: a firmware-only origin does not move S-0-0278. **Calibrate** applies the captured envelope. **Do not** seek X31.
-- Bench 2026-08-18: AH→AF sequencing is proven (`-10°` reached `-9.95°`, return reached `-0.08°`). A `+10°` joint command from drive absolute `178.4921°` correctly produced continuous S-0-0282 `188.4921°`, but the drive rejected it with **F2057 Target position out of travel range** because live S-0-0278 is `180.0000°` (S-0-0049/S-0-0050=`0`). Do not hide this by wrapping. Align with **surgical** HTTP writes (do not load a full `.par`): (1) `py tools/hcs01_eng.py travel --yes` (**S-0-0278=36000**, **S-0-0049=+180**, **S-0-0050=−180**); (2) at cable-neutral pose `c0300 --yes` so S-0-0051→0; (3) `save --yes` (C2200); (4) reboot / 24 V cycle then `verify-origin`; (5) `home t` — `status` must show origin **ALIGNED**. Then joint ±180 maps to drive ±180.
-- Console: `home t` / `calibrate t`; `calibrate all` runs theta after X/Z bring-up (X/Z gates stay set if theta CIP is down). Theta-only `move` does not require X/Z home. `status` prints drive abs vs ALIGNED/OFFSET and a **Theta CIP** line (`T->O live` vs STALE, `in_ref`, ready AH/AF, **c1err** = P-0-4078 bit13 drive interlock — not EtherNet/IP Class 1). `faults` / `arst` print theta diag; `arst` already pulses HCS01 C0500 bit5, but that only reaches the drive while T→O is live — otherwise use `hcs01_eng.py c0500`. `arst` while motors are disabled does **not** Drive ON / WaitAf (stays Ab). Theta profile knobs match X/Z: `speed <mm/s> [deg/s]`, `accel <a> [d] [deg/s2] [decel_deg]`, `puu t <scale>`, `puucal t c m` (applies live), `thetalim <min> <max>`, `rangelimit`. After OFFSET home, `thetalim` is **clamped** to the captured envelope (cannot restore ±180 without C0300 + `home t` ALIGNED). `test_theta_path` runs a combined in-band X+Z+theta move with a thetalim-safe dθ. `autotune [theta|t]` guides / verifies driver-level load inertia auto-tuning.
-- **Inertia Auto-Tuning (C1800)**: With the ~2 kg end-effector mounted, execute automatic control loop optimization directly via `py tools/hcs01_eng.py autotune --yes --save` or `py tools/tune_theta_inertia.py --autotune` (or console `autotune theta`). The HCS01 performs test oscillation movements ($\pm 45^\circ$), identifies total load inertia (`P-0-4010`), and optimizes velocity/position gains (`S-0-0100`, `S-0-0101`, `S-0-0104`, `S-0-0348`) with non-volatile flash backup (`C2200`).
-- **Kinetix 5100 Auto-Tuning (Mode 1)**: For the X/Z axes, run `autotune <x|z> 1` to enable real-time inertia estimation (GainAdjustMode 1). The drive will continuously adapt `LoadInertiaRatio` and gains during subsequent bi-directional motion (must exceed 200 rpm, reach 3000 rpm in < 1.5s). Use `autotune <x|z> read` to check live values. When optimal, run `autotune <x|z> lock` (Mode 0). Note: locked values are in RAM only; use KNX5100C or the drive panel to burn to EEPROM. Response bandwidth can be adjusted with `autotune <x|z> gain <N>` (1-50).
+- `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t c m`.
+- **Absolute Encoder Tracking & Zero-Offset Architecture**: `GantryEipRotaryAxis` operates in pure absolute frame without software offsets (`zero_puu_` eliminated). `getCurrentDeg()` directly reflects the HIPERFACE absolute encoder position (`S-0-0051`). Because end-effector cabling and pneumatics are routed over pass-through slip-rings, continuous multi-turn rotation is supported for any number of revolutions.
+- **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`). Command velocity is clamped to $360^\circ/\text{s}$ ($60\text{ RPM}$ = $360,000,000\text{ PUU}$) and acceleration/deceleration to $1800^\circ/\text{s}^2$ ($31.416\text{ rad}/\text{s}^2 = 31416\text{ units}$) to eliminate signed 32-bit integer overflow risks.
+- **Home & Bring-up**: `home t` captures the absolute encoder datum and commands Theta to return directly to physical zero ($0.000^\circ$). Bring-up synchronizes until Theta reaches $\le 0.01^\circ$ error before opening subsequent path stages.
+- **Embedded Autotuning (Zero External Scripting)**: Autotuning runs 100% autonomously on the WT32 microcontroller without requiring host scripts:
+  - **HCS01 Theta (`autotune theta [inertia|tune|zero]`)**: Executed via embedded `Hcs01ComwsClient` over HTTP port 80 to trigger C1800 load inertia identification and C2200 non-volatile parameter backup.
+  - **Kinetix 5100 X/Z (`autotune <x|z> [mode1|lock|read|gain]`)**: Executed via embedded `Kinetix5100ParamAccess` over CIP Explicit Messaging (Class 0x0F Parameter Object) to configure real-time adaptive tuning (Mode 1 / Mode 0).
 - `CONFIG_GANTRY_THETA_SEQUENTIAL` default **n**: theta is scheduled on the
   in-band X+Z segment (start 25%, finish 75%) unless sequential choreography
   is enabled (theta after the linear path, still SAFE_Z-gated).

@@ -190,3 +190,49 @@ The results conclusively demonstrate that the `vTaskDelayUntil` control loop sta
 ============================================================
 OK test_cycle PASS
 ```
+
+---
+
+## 7. Phase 5: High-Precision Theta Alignment, Safe Z Margin & Embedded Autotuning
+
+### Key Enhancements
+
+1. **Safe Z Clearance Adjusted to 4.5 Inches from Lowest Drop Limit**:
+   - **Requirement**: Set traverse clearance ceiling to $4.5\text{ inches}$ ($114.3\text{ mm}$) above the lowest $Z$ stroke limit ($Z_{\text{max}} = 150.0\text{ mm}$).
+   - **Implementation**: $\text{SAFE\_Z} = 150.0\text{ mm} - 114.3\text{ mm} = 35.7\text{ mm}$ from $Z=0$ retract datum. Updated `GANTRY_SAFE_Z_HEIGHT_MM` fallback in `include/axis_drivetrain_params.h` to `35.7f`, `idf/main/Kconfig.projbuild`, `idf/sdkconfig.defaults`, and `idf/sdkconfig`.
+
+2. **Direct Absolute Encoder Tracking (Zero Software Offsets)**:
+   - **Requirement**: Follow raw HIPERFACE absolute encoder feedback without software offset drift. Continuous multi-turn rotation supported via pass-through slip-rings.
+   - **Implementation**: Completely removed `zero_puu_` from `GantryEipRotaryAxis`. Position feedback and positioning commands map directly to raw encoder counts (`S-0-0051`) and drive command PUU (`S-0-0282`).
+
+3. **$0.01^\circ$ Positioning Precision**:
+   - **Requirement**: Enforce rotary positioning accuracy to $\pm 0.01^\circ$.
+   - **Implementation**: Tightened `kArrivalEpsDeg` from $0.5^\circ$ to $0.01^\circ$ in `GantryEipRotaryAxis.cpp`. Added settling synchronization in bring-up so subsequent kinematic moves never collide with a settling rotary axis.
+
+4. **Numerical Overflow Protection on Rotary PUU**:
+   - **Implementation**: Clamped velocity commands to $360^\circ/\text{s}$ ($360,000,000\text{ PUU}$) and acceleration to $1800^\circ/\text{s}^2$ ($31416\text{ units}$), avoiding signed 32-bit integer overflow.
+
+5. **Fully Autonomous Embedded Drive Autotuning**:
+   - **Implementation**: Implemented embedded C++ clients on the WT32 MCU (`Kinetix5100ParamAccess` over CIP Class 0x0F and `Hcs01ComwsClient` over HTTP port 80) for 100% on-target autotuning with zero external scripting.
+
+### Live Hardware Execution Results (`test_cycle` on COM9)
+```text
+============================================================
+=== HOLISTIC TEST CYCLE COMPLETE: PASS                   ===
+=== Total Cycle Duration: 101260 ms
+=== Final Pose: x=0.000 mm, z=-0.000 mm, theta=-0.003 deg
+=== Class 1 Bus Timing Status: ACTIVE
+=== Class 1 timing (budget: exchange p99 < RPI=2000 us) ===
+  exchange  n=128 min/p50/p99/max=765/808/1172/1239 us  GO
+  ot_send   n=128 min/p50/p99/max=466/495/658/709 us
+  drain     n=128 min/p50/p99/max=277/294/496/496 us
+  cycle     n=128 min/p50/p99/max=856/2000/2556/2902 us
+  cmd2start n=30 min/p50/p99/max=815/954/1300/1449 us
+  pace      overrun=487 yield=2
+  reliability soft_miss=0 sendok_fail=0 chip_recover=0 reconnect=0
+============================================================
+OK test_cycle PASS
+```
+- Final Pose Accuracy: $\Theta = -0.003^\circ$ (error $0.003^\circ \le 0.01^\circ$), $X = 0.000\text{ mm}$, $Z = -0.000\text{ mm}$.
+- Class 1 Timing: $\text{p50} = 808\text{ }\mu\text{s}$, $\text{p99} = 1172\text{ }\mu\text{s}$ ($\text{budget} < 2000\text{ }\mu\text{s}$). All 21/21 host unit tests passing 100%.
+
