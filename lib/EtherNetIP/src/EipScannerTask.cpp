@@ -141,13 +141,14 @@ void keepaliveTask(void* arg) {
 // that still cannot sustain Class 1, back off and let supervision handle it.
 void escalateChipRecover(ScannerTaskCtx* ctx, unsigned& recover_streak,
                          uint32_t& backoff_ms) {
-  if (chipRecoverOnFailure(recover_streak) == ChipRecoverDecision::kRestart) {
-    ESP_LOGE(TAG,
-             "W5500 recover exhausted (%u) — backing off without hard reboot",
-             recover_streak);
-    vTaskDelay(pdMS_TO_TICKS(kReconnectIdleMs));
-    return;
-  }
+    if (chipRecoverOnFailure(recover_streak) == ChipRecoverDecision::kRestart) {
+      ESP_LOGE(TAG,
+               "W5500 recover exhausted (%u) — backing off, will retry",
+               recover_streak);
+      vTaskDelay(pdMS_TO_TICKS(10000));
+      recover_streak = 0;
+      backoff_ms = 1000;
+    }
 
   const bool ok = ctx->chip != nullptr && ctx->chip->recover();
   reliabilityStats().noteChipRecover();

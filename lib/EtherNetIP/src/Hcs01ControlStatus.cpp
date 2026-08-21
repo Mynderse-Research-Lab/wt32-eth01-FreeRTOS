@@ -52,6 +52,7 @@ Hcs01ControlWord Hcs01ControlWord::makeDriveEnable() {
   cw.drive_on = true;
   cw.drive_enable = true;
   cw.drive_halt = true;  // Drive Start via 0->1 on bit13
+  cw.immediate_block_change = true;  // Immediate positioning execution
   return cw;
 }
 
