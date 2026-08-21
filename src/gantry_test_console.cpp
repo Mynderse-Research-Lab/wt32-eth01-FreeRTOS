@@ -685,15 +685,33 @@ void runAutotuneCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       ESP_LOGE(TAG, "Theta axis not compiled in");
       return;
     }
-    ESP_LOGI(TAG, "=== THETA (HCS01) INERTIA AUTO-TUNING ===");
-    ESP_LOGI(TAG, "Connecting to HCS01 COMWS at " CONFIG_EIP_TARGET_IP_THETA ":80...");
+    ESP_LOGI(TAG, "=== THETA (HCS01) COMWS INTERFACE ===");
+    ESP_LOGI(TAG, "Connecting to HCS01 COMWS at %s:80...", hcs01::kDefaultEngIp);
     
     eip::EipSocketW5500Tcp tcp(*(cfg->w5500_hal));
     hcs01::Hcs01ComwsClient client(tcp);
-    if (!client.connect(CONFIG_EIP_TARGET_IP_THETA)) {
+    if (!client.connect(hcs01::kDefaultEngIp)) {
         ESP_LOGE(TAG, "Failed to connect/login to HCS01");
         return;
     }
+
+    if (strcmp(action, "zero") == 0) {
+        ESP_LOGI(TAG, "Login OK. Executing C0300 (Set Absolute Position) to zero the encoder...");
+        if (client.runCommand("S-0-0447.0.0", 15000)) {
+            ESP_LOGI(TAG, "C0300 succeeded. Saving to NV flash (C2200)...");
+            if (client.runCommand("S-0-0264.0.0", 60000)) {
+                ESP_LOGI(TAG, "C2200 saved! Origin zeroed at current physical pose.");
+                ESP_LOGI(TAG, "You must now run 'home t' to capture ALIGNED origin.");
+            } else {
+                ESP_LOGE(TAG, "C2200 NV save failed.");
+            }
+        } else {
+            ESP_LOGE(TAG, "C0300 failed. Check drive diagnostic log.");
+        }
+        client.disconnect();
+        return;
+    }
+
     ESP_LOGI(TAG, "Login OK. Starting C1800 Identification Sweep (+/- 45 deg)...");
     
     hcs01::TuningResult res = client.runAutotune();
@@ -1437,6 +1455,15 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
                  (double)cfg->gantry->getThetaDriveAbsDeg(),
                  (double)cfg->gantry->getJointLimits().theta_min,
                  (double)cfg->gantry->getJointLimits().theta_max);
+        // Wait for Theta to finish settling at physical zero (0.000 deg)
+        const TickType_t th_start = xTaskGetTickCount();
+        while (cfg->gantry->isBusy()) {
+          if ((xTaskGetTickCount() - th_start) > pdMS_TO_TICKS(15000)) {
+            ESP_LOGW(TAG, "Bring-up: timeout waiting for theta to settle at 0 deg");
+            break;
+          }
+          vTaskDelay(pdMS_TO_TICKS(50));
+        }
       } else {
         ESP_LOGW(TAG,
                  "Bring-up: X/Z OK; theta home/cal failed "
@@ -1549,7 +1576,7 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
                       uint32_t speed_mm_per_s = 0, uint32_t accel_mm_per_s2 = 0,
                       uint32_t decel_mm_per_s2 = 0) {
   constexpr float kPoseEpsMm = 1.5f;
-  constexpr float kPoseEpsDeg = 1.0f;
+  constexpr float kPoseEpsDeg = 0.015f;
   const uint32_t lin_v =
       (speed_mm_per_s > 0u) ? speed_mm_per_s : g_moveSpeedMmPerS;
   const uint32_t lin_a =
@@ -1729,20 +1756,22 @@ bool testCycleThetaCapacityLegs(const GantryTestConsoleConfig *cfg, float x_mm,
     return true;
   }
   const Gantry::JointLimits lim = cfg->gantry->getJointLimits();
+  const float test_min = (lim.theta_min < -180.0f) ? -180.0f : lim.theta_min;
+  const float test_max = (lim.theta_max > 180.0f) ? 180.0f : lim.theta_max;
   const uint32_t th_v = maxThetaSpeedDegPerS();
   const uint32_t th_a = maxThetaAccelDegPerS2();
   const uint32_t th_d = maxThetaDecelDegPerS2();
   ESP_LOGI(TAG,
-           "[TEST_CYCLE] theta capacity G-I at (%.1f, %.1f): thetalim "
-           "%.1f .. %.1f deg (hard envelope %.1f .. %.1f) at v=%lu deg/s "
+           "[TEST_CYCLE] theta capacity G-I at (%.1f, %.1f): test sweep "
+           "%.1f .. %.1f deg (joint envelope %.1f .. %.1f) at v=%lu deg/s "
            "a=%lu d=%lu deg/s2",
-           (double)x_mm, (double)z_mm, (double)lim.theta_min,
-           (double)lim.theta_max, (double)AXIS_THETA_HARD_LIMIT_MIN_DEG,
-           (double)AXIS_THETA_HARD_LIMIT_MAX_DEG, (unsigned long)th_v,
+           (double)x_mm, (double)z_mm, (double)test_min,
+           (double)test_max, (double)lim.theta_min,
+           (double)lim.theta_max, (unsigned long)th_v,
            (unsigned long)th_a, (unsigned long)th_d);
-  return testCycleMoveLeg(cfg, "G", x_mm, z_mm, x_mm, z_mm, lim.theta_min, 0,
+  return testCycleMoveLeg(cfg, "G", x_mm, z_mm, x_mm, z_mm, test_min, 0,
                           th_v, th_a, th_d) &&
-         testCycleMoveLeg(cfg, "H", x_mm, z_mm, x_mm, z_mm, lim.theta_max, 0,
+         testCycleMoveLeg(cfg, "H", x_mm, z_mm, x_mm, z_mm, test_max, 0,
                           th_v, th_a, th_d) &&
          testCycleMoveLeg(cfg, "I", x_mm, z_mm, x_mm, z_mm, 0.0f, 0, th_v, th_a,
                           th_d);
@@ -1806,8 +1835,8 @@ void testCycleTask(void *param) {
       break;
     }
     if (!testCyclePoseNear(cfg, GANTRY_CAL_X_PARK_MM,
-                           cfg->gantry->traverseClearanceZMm(), 5.0f, false,
-                           0.0f, 1.0f)) {
+                           cfg->gantry->traverseClearanceZMm(), 5.0f,
+                           cfg->gantry->hasThetaAxis(), 0.0f, 0.015f)) {
       ESP_LOGE(TAG,
                "ERROR: test_cycle FAIL: not at X park / SAFE_Z after bring-up");
       break;
@@ -1887,17 +1916,19 @@ void testCycleTask(void *param) {
 }
 
 float pickThetaPathDeltaDeg(const Gantry::JointLimits &lim) {
-  float d = (lim.theta_min < 0.0f) ? (0.5f * lim.theta_min)
-                                   : (0.5f * lim.theta_max);
+  const float min_clamped = (lim.theta_min < -90.0f) ? -90.0f : lim.theta_min;
+  const float max_clamped = (lim.theta_max > 90.0f) ? 90.0f : lim.theta_max;
+  float d = (min_clamped < 0.0f) ? (0.5f * min_clamped)
+                                 : (0.5f * max_clamped);
   if (fabsf(d) < 5.0f) {
-    d = (fabsf(lim.theta_min) >= fabsf(lim.theta_max)) ? lim.theta_min
-                                                       : lim.theta_max;
+    d = (fabsf(min_clamped) >= fabsf(max_clamped)) ? min_clamped
+                                                   : max_clamped;
   }
-  if (d < lim.theta_min) {
-    d = lim.theta_min;
+  if (d < min_clamped) {
+    d = min_clamped;
   }
-  if (d > lim.theta_max) {
-    d = lim.theta_max;
+  if (d > max_clamped) {
+    d = max_clamped;
   }
   return d;
 }

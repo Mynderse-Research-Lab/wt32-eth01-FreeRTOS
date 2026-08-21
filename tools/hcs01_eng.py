@@ -215,8 +215,8 @@ def cmd_travel(cli: Hcs01Comws, args: argparse.Namespace) -> int:
         return 1
     for idn, value in (
         ("S-0-0278.0.0", "36000.0000"),
-        ("S-0-0049.0.0", "180.0000"),
-        ("S-0-0050.0.0", "-180.0000"),
+        ("S-0-0049.0.0", "36000.0000"),
+        ("S-0-0050.0.0", "-36000.0000"),
     ):
         try:
             r = cli.setvar_try_element7(idn, value)

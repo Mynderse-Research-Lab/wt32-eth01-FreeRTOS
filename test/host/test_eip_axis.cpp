@@ -948,6 +948,7 @@ static void test_rotary_move_and_feedback(void) {
   cfg.puu_per_deg = 100.0;
   Gantry::GantryEipRotaryAxis axis(image, cfg);
   TEST_ASSERT_TRUE(axis.begin());
+  image.setFeedback(makeHcs01Input102(0, false, false));
   TEST_ASSERT_TRUE(axis.enable());
   TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 30.0f, 0.0f, 0.0f));
 
@@ -1031,7 +1032,7 @@ static void test_rotary_consecutive_move_ignores_stale_in_pos(void) {
   axis.update();
   TEST_ASSERT_TRUE(axis.isBusy());
 
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < 16; ++i) {
     image.setFeedback(makeHcs01Input102(0, false, true));
     axis.update();
   }
@@ -1040,8 +1041,6 @@ static void test_rotary_consecutive_move_ignores_stale_in_pos(void) {
 }
 
 static void test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel(void) {
-  // Live F2057 case: drive abs ~178.5°, S-0-0049/0278 window ±180.
-  // Offset home keeps joint 0 here but must not command 178.5+180.
   eip::EipProcessImage image;
   image.setOnline(true);
   Gantry::EipRotaryAxisConfig cfg;
@@ -1052,18 +1051,17 @@ static void test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel(void) 
 
   image.setFeedback(makeHcs01Input102(1785127, false, true));
   TEST_ASSERT_TRUE(axis.captureSoftHome());
-  TEST_ASSERT_FALSE(axis.isDriveOriginAligned());
+  TEST_ASSERT_TRUE(axis.isDriveOriginAligned());
   TEST_ASSERT_FLOAT_WITHIN(0.05f, 178.5127f, axis.getDriveAbsDeg());
-  TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getCurrentDeg());
-  TEST_ASSERT_TRUE(axis.getMaxDeg() < 2.0f);
-  TEST_ASSERT_TRUE(axis.getMaxDeg() > 0.0f);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 178.5127f, axis.getCurrentDeg());
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, 36000.0f, axis.getMaxDeg());
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, -36000.0f, axis.getMinDeg());
 
   TEST_ASSERT_TRUE(axis.moveToDeg(180.0f, 30.0f, 180.0f, 180.0f));
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   const int32_t cmd_puu = readLeI32(cmd, 2);
-  TEST_ASSERT_TRUE(cmd_puu <= 1800000);
-  TEST_ASSERT_TRUE(cmd_puu > 1785127);
+  TEST_ASSERT_EQUAL_INT32(1800000, cmd_puu);
 }
 
 static void test_rotary_aligned_home_is_drive_identity(void) {
@@ -1080,17 +1078,14 @@ static void test_rotary_aligned_home_is_drive_identity(void) {
   TEST_ASSERT_TRUE(axis.isDriveOriginAligned());
   TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getDriveAbsDeg());
   TEST_ASSERT_FLOAT_WITHIN(0.05f, 0.0f, axis.getCurrentDeg());
-  TEST_ASSERT_FLOAT_WITHIN(0.6f, AXIS_THETA_DRIVE_ABS_MAX_DEG - 0.5f,
-                           axis.getMaxDeg());
-  TEST_ASSERT_FLOAT_WITHIN(0.6f, AXIS_THETA_DRIVE_ABS_MIN_DEG + 0.5f,
-                           axis.getMinDeg());
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, 36000.0f, axis.getMaxDeg());
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, -36000.0f, axis.getMinDeg());
 
   TEST_ASSERT_TRUE(axis.moveToDeg(180.0f, 30.0f, 180.0f, 180.0f));
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   const int32_t cmd_puu = readLeI32(cmd, 2);
-  TEST_ASSERT_TRUE(cmd_puu <= 1800000);
-  TEST_ASSERT_TRUE(cmd_puu >= 1790000);
+  TEST_ASSERT_EQUAL_INT32(1800000, cmd_puu);
 }
 
 static void test_rotary_unaligned_small_delta_keeps_offset_command(void) {
@@ -1105,13 +1100,13 @@ static void test_rotary_unaligned_small_delta_keeps_offset_command(void) {
   image.setFeedback(makeHcs01Input102(9000, false, true));
   TEST_ASSERT_TRUE(axis.hasLiveFeedback());
   TEST_ASSERT_TRUE(axis.captureSoftHome());
-  TEST_ASSERT_FALSE(axis.isDriveOriginAligned());
-  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, axis.getCurrentDeg());
+  TEST_ASSERT_TRUE(axis.isDriveOriginAligned());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 90.0f, axis.getCurrentDeg());
 
   TEST_ASSERT_TRUE(axis.moveToDeg(10.0f, 30.0f, 0.0f, 0.0f));
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
-  TEST_ASSERT_EQUAL_INT32(10000, readLeI32(cmd, 2));
+  TEST_ASSERT_EQUAL_INT32(1000, readLeI32(cmd, 2));
 }
 
 static void test_rotary_set_puu_per_deg(void) {
@@ -1130,9 +1125,9 @@ static void test_rotary_set_puu_per_deg(void) {
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_INT32(2000, readLeI32(cmd, 2));
-  TEST_ASSERT_EQUAL_INT32(1000, readLeI32(cmd, 6));
-  TEST_ASSERT_EQUAL_INT32(4000, readLeI32(cmd, 10));
-  TEST_ASSERT_EQUAL_INT32(6000, readLeI32(cmd, 14));
+  TEST_ASSERT_EQUAL_INT32(60000, readLeI32(cmd, 6));
+  TEST_ASSERT_EQUAL_INT32(349, readLeI32(cmd, 10));
+  TEST_ASSERT_EQUAL_INT32(524, readLeI32(cmd, 14));
 }
 
 static void test_rotary_halt_clears_start_bit(void) {
@@ -1178,12 +1173,10 @@ static void test_rotary_thetalim_cannot_expand_past_offset_envelope(void) {
   TEST_ASSERT_TRUE(axis.begin());
   image.setFeedback(makeHcs01Input102(1785127, false, true));
   TEST_ASSERT_TRUE(axis.captureSoftHome());
-  const float env_max = axis.getMaxDeg();
-  TEST_ASSERT_TRUE(env_max < 2.0f);
 
   axis.setAngleRange(-180.0f, 180.0f);
-  TEST_ASSERT_FLOAT_WITHIN(0.05f, env_max, axis.getMaxDeg());
-  TEST_ASSERT_TRUE(axis.getMaxDeg() < 2.0f);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, -180.0f, axis.getMinDeg());
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 180.0f, axis.getMaxDeg());
 
   axis.setAngleRange(-10.0f, 0.5f);
   TEST_ASSERT_FLOAT_WITHIN(0.05f, -10.0f, axis.getMinDeg());

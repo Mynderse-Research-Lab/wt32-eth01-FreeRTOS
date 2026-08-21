@@ -46,7 +46,7 @@
 #if defined(CONFIG_AXIS_X_HOMING_SPEED_PPS)
 #define AXIS_X_HOMING_SPEED_PPS              ((uint32_t)CONFIG_AXIS_X_HOMING_SPEED_PPS)
 #else
-#define AXIS_X_HOMING_SPEED_PPS              8000u
+#define AXIS_X_HOMING_SPEED_PPS              4000u
 #endif
 #define AXIS_X_LIMIT_DEBOUNCE_CYCLES           10u
 #define AXIS_X_LIMIT_SAMPLE_INTERVAL_MS         3u
@@ -78,7 +78,7 @@
 #if defined(CONFIG_AXIS_Z_HOMING_SPEED_PPS)
 #define AXIS_Z_HOMING_SPEED_PPS              ((uint32_t)CONFIG_AXIS_Z_HOMING_SPEED_PPS)
 #else
-#define AXIS_Z_HOMING_SPEED_PPS              8000u
+#define AXIS_Z_HOMING_SPEED_PPS              4000u
 #endif
 #define AXIS_Z_LIMIT_DEBOUNCE_CYCLES           10u
 #define AXIS_Z_LIMIT_SAMPLE_INTERVAL_MS         3u
@@ -105,7 +105,7 @@
 #if defined(CONFIG_AXIS_THETA_HOMING_SPEED_PPS)
 #define AXIS_THETA_HOMING_SPEED_PPS          ((uint32_t)CONFIG_AXIS_THETA_HOMING_SPEED_PPS)
 #else
-#define AXIS_THETA_HOMING_SPEED_PPS          6000u
+#define AXIS_THETA_HOMING_SPEED_PPS          3000u
 #endif
 #define AXIS_THETA_LIMIT_DEBOUNCE_CYCLES       10u
 #define AXIS_THETA_LIMIT_SAMPLE_INTERVAL_MS     3u

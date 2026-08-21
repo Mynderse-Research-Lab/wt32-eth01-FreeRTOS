@@ -244,20 +244,17 @@
 #if defined(CONFIG_AXIS_THETA_MAX_SPEED_DEG_PER_S)
 #define AXIS_THETA_MAX_SPEED_DEG_PER_S     ((float)CONFIG_AXIS_THETA_MAX_SPEED_DEG_PER_S)
 #else
-#define AXIS_THETA_MAX_SPEED_DEG_PER_S     3600.0f  /* 600 rpm datasheet cap */
+#define AXIS_THETA_MAX_SPEED_DEG_PER_S     360.0f  /* 60 rpm operational ceiling (clamped by S-0-0091) */
 #endif
 #if defined(CONFIG_AXIS_THETA_ACCEL_DEG_PER_S2)
 #define AXIS_THETA_ACCEL_DEG_PER_S2        ((float)CONFIG_AXIS_THETA_ACCEL_DEG_PER_S2)
 #else
-// TODO: The Theta axis (ERD-04) is currently NOT inertially tuned.
-// Do not exceed baseline placeholder dynamics until the manual tuning heuristic 
-// (see driver_datasheets_and_calculations/Optimization_Manual_Axis.pdf) is applied.
-#define AXIS_THETA_ACCEL_DEG_PER_S2        18000.0f  /* placeholder; respect inertia limit */
+#define AXIS_THETA_ACCEL_DEG_PER_S2        1800.0f  /* ~31.4 rad/s2 */
 #endif
 #if defined(CONFIG_AXIS_THETA_DECEL_DEG_PER_S2)
 #define AXIS_THETA_DECEL_DEG_PER_S2        ((float)CONFIG_AXIS_THETA_DECEL_DEG_PER_S2)
 #else
-#define AXIS_THETA_DECEL_DEG_PER_S2        18000.0f  /* placeholder */
+#define AXIS_THETA_DECEL_DEG_PER_S2        1800.0f  /* ~31.4 rad/s2 */
 #endif
 #if defined(CONFIG_AXIS_THETA_POSITION_TOLERANCE_DEG)
 #define AXIS_THETA_POSITION_TOLERANCE_DEG  ((float)CONFIG_AXIS_THETA_POSITION_TOLERANCE_DEG)
@@ -322,7 +319,7 @@
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #define GANTRY_SAFE_Z_HEIGHT_MM            ((float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #else
-#define GANTRY_SAFE_Z_HEIGHT_MM            30.0f
+#define GANTRY_SAFE_Z_HEIGHT_MM            35.7f  /* 4.5 inches (114.3 mm) above 150.0 mm Z lowest drop limit */
 #endif
 
 /* After X home/cal during bring-up, park here before seeking Z+ (joint mm). */

@@ -26,14 +26,14 @@ namespace Gantry {
 
 namespace {
 constexpr uint8_t kMovePreloadTicks = 4;     // ~40 ms @ 100 Hz — latch S-0-0282 while AH
-constexpr uint8_t kMoveReleaseHaltTicks = 4;  // bit13 0→1 (AH→AF) before bit0
-constexpr uint8_t kMoveStartTicks = 4;
+constexpr uint8_t kMoveReleaseHaltTicks = 10; // ~100 ms wait for AF
+constexpr uint8_t kMoveStartTicks = 4;        // ~40 ms wait for bit10 command ack
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
 constexpr uint16_t kWaitAfTicks = 300;       // 3 s @ 100 Hz
-constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at the new target
+constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at target
 constexpr uint16_t kMoveTimeoutTicks = 6000; // ~60 s @ 100 Hz
-// Wider than AXIS_THETA_POSITION_TOLERANCE (0.01°) — cyclic S-0-0051 noise.
-constexpr float kArrivalEpsDeg = 0.5f;
+// Theta positioning tolerance: 0.01 deg
+constexpr float kArrivalEpsDeg = 0.01f;
 
 const char* readyLabel(const eip::hcs01::Hcs01StatusWord& st) {
   using eip::hcs01::ReadyForOperation;
@@ -54,7 +54,6 @@ GantryEipRotaryAxis::GantryEipRotaryAxis(eip::EipProcessImage& image,
       enabled_(false),
       stop_requested_(false),
       motion_active_(false),
-      zero_puu_(0),
       target_deg_(0.0f),
       min_deg_(-180.0f),
       max_deg_(180.0f),
@@ -241,25 +240,27 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
   arm_phase_ = ArmPhase::kHolding;
   arm_phase_ticks_ = 0;
 
-  // S-0-0282 is configured for -36000..+36000 deg (non-modulo scaling
-  // type 0x0002). Preserve the continuous absolute frame; wrapping a
-  // soft-home-relative target at +/-180 could command the long way around.
-  cmd_pos_puu_ = zero_puu_ + degToPuu(target_deg);
+  cmd_pos_puu_ = degToPuu(target_deg);
   if (speed_deg_per_s > 0.0f) {
-    cmd_vel_puu_ =
-        static_cast<int32_t>(llround(speed_deg_per_s * config_.puu_per_deg));
+    double v = speed_deg_per_s * 60.0 * config_.puu_per_deg;
+    if (v > 360000000.0) v = 360000000.0;
+    cmd_vel_puu_ = static_cast<int32_t>(llround(v));
   } else {
     cmd_vel_puu_ = config_.default_velocity_puu;
   }
   if (accel_deg_per_s2 > 0.0f) {
-    cmd_acc_puu_ =
-        static_cast<int32_t>(llround(accel_deg_per_s2 * config_.puu_per_deg));
+    // S-0-0260 is 0.001 rad/s^2 (10^-3 rad/s^2). 1 deg/s^2 = (pi/180) * 1000 units.
+    double a = accel_deg_per_s2 * (1000.0 * 3.141592653589793 / 180.0);
+    if (a > 1000000.0) a = 1000000.0;
+    cmd_acc_puu_ = static_cast<int32_t>(llround(a));
   } else {
     cmd_acc_puu_ = config_.default_accel_puu;
   }
   if (decel_deg_per_s2 > 0.0f) {
-    cmd_dec_puu_ =
-        static_cast<int32_t>(llround(decel_deg_per_s2 * config_.puu_per_deg));
+    // S-0-0359 is 0.001 rad/s^2 (10^-3 rad/s^2). 1 deg/s^2 = (pi/180) * 1000 units.
+    double d = decel_deg_per_s2 * (1000.0 * 3.141592653589793 / 180.0);
+    if (d > 1000000.0) d = 1000000.0;
+    cmd_dec_puu_ = static_cast<int32_t>(llround(d));
   } else {
     cmd_dec_puu_ = config_.default_decel_puu;
   }
@@ -309,7 +310,7 @@ bool GantryEipRotaryAxis::stopMotion() {
 float GantryEipRotaryAxis::getCurrentDeg() const {
   eip::hcs01::Hcs01PositioningActual fb;
   if (!readFeedback(fb)) return 0.0f;
-  return puuToDeg(fb.position_feedback - zero_puu_);
+  return puuToDeg(fb.position_feedback);
 }
 
 float GantryEipRotaryAxis::getTargetDeg() const { return target_deg_; }
@@ -395,35 +396,32 @@ bool GantryEipRotaryAxis::setPuuPerDeg(double puu_per_deg) {
 bool GantryEipRotaryAxis::captureSoftHome() {
   eip::hcs01::Hcs01PositioningActual fb;
   if (!readFeedback(fb)) return false;
+  
   const float abs_deg = puuToDeg(fb.position_feedback);
-  const ThetaOrigin::Plan plan = ThetaOrigin::plan(
-      abs_deg, AXIS_THETA_DRIVE_ABS_MIN_DEG, AXIS_THETA_DRIVE_ABS_MAX_DEG,
-      AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
-  if (!plan.ok) {
-    ESP_LOGW(tag(),
-             "[THETA] origin plan empty: drive_abs=%.3f drive=%.1f..%.1f",
-             static_cast<double>(abs_deg),
-             static_cast<double>(AXIS_THETA_DRIVE_ABS_MIN_DEG),
-             static_cast<double>(AXIS_THETA_DRIVE_ABS_MAX_DEG));
-    return false;
-  }
-  origin_aligned_ = plan.aligned;
-  zero_puu_ = plan.aligned ? 0 : fb.position_feedback;
-  envelope_min_deg_ = plan.joint_min_deg;
-  envelope_max_deg_ = plan.joint_max_deg;
+  
+  // Permanent physical alignment: joint 0 is drive 0.
+  // We assume the drive has been zeroed (C0300) so abs_deg=0 is the desired mechanical zero.
+  // If it hasn't, the user is still commanding relative to drive_abs=0.
+  // Because the end-effector uses a pass-through, we don't need to prevent wrapping.
+  origin_aligned_ = true;
+  
+  // The drive limit is typically configured for +/- 36000 in this continuous mode.
+  envelope_min_deg_ = -36000.0f;
+  envelope_max_deg_ = 36000.0f;
   min_deg_ = envelope_min_deg_;
   max_deg_ = envelope_max_deg_;
-  target_deg_ = 0.0f;
+  
+  target_deg_ = abs_deg; // Will be immediately overwritten by homeTheta() calling moveToTheta(0.0)
   motion_active_ = false;
   stop_requested_ = false;
   move_phase_ = MovePhase::kIdle;
   in_pos_armed_ = false;
   arrival_stable_ticks_ = 0;
   run_ticks_ = 0;
+  
   ESP_LOGI(tag(),
-           "[THETA] origin %s drive_abs=%.3f zero_puu=%ld joint_lim=%.2f..%.2f",
-           plan.aligned ? "ALIGNED (joint=drive)" : "OFFSET (C0300 needed)",
-           static_cast<double>(abs_deg), static_cast<long>(zero_puu_),
+           "[THETA] origin ALIGNED (continuous slip-ring). drive_abs=%.3f joint_lim=%.2f..%.2f",
+           static_cast<double>(abs_deg),
            static_cast<double>(min_deg_), static_cast<double>(max_deg_));
   return true;
 }
@@ -516,15 +514,18 @@ void GantryEipRotaryAxis::update() {
   }
 
   if (move_phase_ == MovePhase::kReleaseHalt) {
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
     (void)publishMove(/*start_edge=*/true);
+    if (move_phase_ticks_ > 0) --move_phase_ticks_;
     bool following = false;
     eip::hcs01::Hcs01PositioningActual fb;
     if (readFeedback(fb)) {
       following = !fb.status.not_following_command &&
                   fb.status.ready == eip::hcs01::ReadyForOperation::kInOperation;
     }
-    if (move_phase_ticks_ == 0 || following) {
+    if (following || move_phase_ticks_ == 0) {
+      if (!following) {
+        ESP_LOGW(tag(), "[THETA] release-halt timeout waiting for AF");
+      }
       move_phase_ = MovePhase::kStart;
       move_phase_ticks_ = kMoveStartTicks;
       command_accept_level_ = !command_accept_level_;
@@ -534,9 +535,14 @@ void GantryEipRotaryAxis::update() {
   }
 
   if (move_phase_ == MovePhase::kStart) {
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
     (void)publishMove(/*start_edge=*/true);
-    if (move_phase_ticks_ == 0) {
+    if (move_phase_ticks_ > 0) --move_phase_ticks_;
+    bool acked = false;
+    eip::hcs01::Hcs01PositioningActual fb;
+    if (readFeedback(fb)) {
+      acked = (fb.status.command_value_ack == command_accept_level_);
+    }
+    if (acked || move_phase_ticks_ == 0) {
       move_phase_ = MovePhase::kRun;
       run_ticks_ = 0;
       arrival_stable_ticks_ = 0;
@@ -552,7 +558,7 @@ void GantryEipRotaryAxis::update() {
 
   eip::hcs01::Hcs01PositioningActual fb;
   if (!readFeedback(fb)) return;
-  const float now_deg = puuToDeg(fb.position_feedback - zero_puu_);
+  const float now_deg = puuToDeg(fb.position_feedback);
   if (axisLogDue(log_rate_hz_, esp_timer_get_time(), &last_axislog_us_)) {
     ESP_LOGI(tag(),
              "[THETA] MOVE joint=%.3f drive=%.3f target=%.3f st=0x%04X "
@@ -575,7 +581,7 @@ void GantryEipRotaryAxis::update() {
   if (in_pos_armed_ && at_target) {
     if (arrival_stable_ticks_ < 255) ++arrival_stable_ticks_;
     if (arrival_stable_ticks_ >= kArrivalStableTicks) {
-      ESP_LOGI(tag(), "[THETA] END current=%.2f", static_cast<double>(now_deg));
+      ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
       finishMoveHold();
       return;
     }
@@ -586,7 +592,7 @@ void GantryEipRotaryAxis::update() {
   if (run_ticks_ < 0xFFFF) ++run_ticks_;
   if (run_ticks_ >= kMoveTimeoutTicks) {
     ESP_LOGW(tag(),
-             "[THETA] move timeout (current=%.2f target=%.2f) — halt",
+             "[THETA] move timeout (current=%.3f target=%.3f) — halt",
              static_cast<double>(now_deg), static_cast<double>(target_deg_));
     finishMoveHold();
     return;
@@ -596,10 +602,10 @@ void GantryEipRotaryAxis::update() {
   if (stuck_log_div_ >= 100) {
     stuck_log_div_ = 0;
     ESP_LOGW(tag(),
-             "[THETA] waiting in-pos (current=%.2f target=%.2f st=0x%04X "
+             "[THETA] waiting in-pos (current=%.3f target=%.3f st=0x%04X "
              "reached=%d standstill=%d not_follow=%d ready=%u (%s) "
              "diag=0x%08lX)",
-             static_cast<double>(puuToDeg(fb.position_feedback - zero_puu_)),
+             static_cast<double>(now_deg),
              static_cast<double>(target_deg_),
              fb.status.encode(), fb.status.command_value_reached ? 1 : 0,
              fb.status.in_standstill ? 1 : 0,

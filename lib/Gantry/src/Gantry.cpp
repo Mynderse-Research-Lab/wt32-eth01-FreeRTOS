@@ -1,7 +1,7 @@
 /**
  * @file Gantry.cpp
  * @brief Implementation of Gantry class.
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 #include "Gantry.h"
@@ -598,11 +598,15 @@ bool Gantry::homeTheta() {
     currentTheta_ = static_cast<int32_t>(axisTheta_->getCurrentDeg());
     ESP_LOGI(TAG,
              "[HOME] Theta origin: drive_abs=%.3f deg aligned=%d joint_lim=%.2f..%.2f "
-             "(C0300 then home t for joint=drive / full thetalim; no X31)",
+             "(continuous slip-ring mode)",
              static_cast<double>(axisTheta_->getDriveAbsDeg()),
              axisTheta_->isDriveOriginAligned() ? 1 : 0,
              static_cast<double>(axisTheta_->getMinDeg()),
              static_cast<double>(axisTheta_->getMaxDeg()));
+
+    ESP_LOGI(TAG, "[HOME] Rotating Theta back to physical zero...");
+    axisTheta_->moveToDeg(0.0f, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+
     return true;
 }
 

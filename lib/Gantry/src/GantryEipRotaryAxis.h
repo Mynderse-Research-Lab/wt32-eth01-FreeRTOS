@@ -20,9 +20,11 @@ namespace Gantry {
 struct EipRotaryAxisConfig {
   // Live HCS01 S-0-0051/S-0-0282 are 0.0001 deg increments (3600000 / rev).
   double puu_per_deg = 10000.0;
-  int32_t default_velocity_puu = 100000;  // 10 deg/s at 10000 PUU/deg
-  int32_t default_accel_puu = 1000000;
-  int32_t default_decel_puu = 1000000;
+  // S-0-0259 velocity scaling (S-0-0044=2) is 0.0001 deg/min (600,000 units per deg/s).
+  int32_t default_velocity_puu = 6000000;  // 10 deg/s = 600 deg/min
+  // S-0-0260 / S-0-0359 scaling (S-0-0160=2) is 0.001 rad/s2.
+  int32_t default_accel_puu = 31416;       // 1800 deg/s2 = 31.416 rad/s2
+  int32_t default_decel_puu = 31416;       // 1800 deg/s2 = 31.416 rad/s2
 };
 
 class GantryEipRotaryAxis : public GantryRotaryAxis {
@@ -89,7 +91,6 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   bool enabled_;
   bool stop_requested_;
   bool motion_active_;
-  int32_t zero_puu_;
   float target_deg_;
   float min_deg_;
   float max_deg_;

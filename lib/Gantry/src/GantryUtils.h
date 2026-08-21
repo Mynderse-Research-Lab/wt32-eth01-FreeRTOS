@@ -23,7 +23,7 @@ namespace Constants {
     // Margin above Z- (mm). Coordinated X+Z / X traverse only while
     // joint Z >= z_max - this margin. Was DEFAULT_SAFE_Y_HEIGHT_MM.
     constexpr float DEFAULT_SAFE_Z_HEIGHT_MM = GANTRY_SAFE_Z_HEIGHT_MM;
-    constexpr uint32_t DEFAULT_HOMING_SPEED_PPS = 6000;
+    constexpr uint32_t DEFAULT_HOMING_SPEED_PPS = 3000;
     constexpr uint32_t DEFAULT_SPEED_MM_PER_S = GANTRY_DEFAULT_SPEED_MM_PER_S;
     constexpr uint32_t DEFAULT_SPEED_DEG_PER_S = GANTRY_DEFAULT_SPEED_DEG_PER_S;
     constexpr uint32_t GRIPPER_ACTUATE_TIME_MS = 100;
@@ -31,7 +31,8 @@ namespace Constants {
     constexpr uint32_t TRAVEL_MEASUREMENT_TIMEOUT_MS = 90000;
     // Home / calibrate / bring-up seek, park, and SAFE_Z return. Independent
     // of console speed/accel. Creep toward switch-clear stays slower.
-    constexpr float EIP_HOME_CAL_SPEED_MM_S = 100.0f;
+    constexpr float EIP_HOME_CAL_SPEED_MM_S = 50.0f;
+    constexpr float EIP_HOME_THETA_SPEED_DEG_S = 15.0f;
     constexpr float EIP_HOME_CAL_ACCEL_MM_S2 = 2000.0f;
     constexpr float EIP_CREEP_SPEED_MM_S = 1.0f;
 } // namespace Constants
