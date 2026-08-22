@@ -3,23 +3,23 @@
 This guide provides the mechanical engineering (MECH) team with the exact steps to export the cell's physical topology. 
 
 **Why are we doing this?**
-The firmware for the WT32-ETH01 gantry controller does not use hardcoded mechanical values. Instead, during compilation, it reads a `datums.csv` file from the network drive. If you change the length of the gripper jaws or move the camera mount, you simply update the CAD and overwrite the CSV. The firmware will automatically adjust its kinematics and crash-prevention limits based on your new geometry.
+The firmware for the WT32-ETH01 gantry controller does not use hardcoded mechanical values. Instead, during compilation, it reads a `datums.csv` file from the network drive. If you change the length of the gripper jaws or move the camera mount, you simply update the CAD and hit the export macro. The firmware will automatically adjust its kinematics and crash-prevention limits based on your new geometry. Furthermore, the Foxglove 3D visualizer will automatically update its models.
 
 ---
 
 ## Step 1: Establish the Firmware Coordinate System
-CAD software typically defaults to Z-up, but the firmware kinematics require a specific frame. In your top-level CAD assembly, create a **Reference Coordinate System** named `FIRMWARE_ORIGIN` with the following orientation:
+CAD software typically defaults to Z-up, but the firmware kinematics require a specific frame. In your top-level SolidWorks assembly, create a **Coordinate System** named `FIRMWARE_ORIGIN` with the following orientation:
 * **Origin (0,0,0):** A fixed structural point (e.g., a corner of the main conveyor frame).
 * **+X Axis:** Across the conveyor belt (along the gantry span).
 * **+Y Axis:** Downstream along the conveyor belt.
 * **+Z Axis:** Pointing **DOWN** toward the conveyor belt surface.
 
-*All points exported in Step 3 MUST be evaluated relative to this `FIRMWARE_ORIGIN` coordinate system.*
+*All datums and meshes exported in Step 3 will be evaluated relative to this `FIRMWARE_ORIGIN`.*
 
 ---
 
-## Step 2: Define the Datum Points
-Place Reference Points (Datums) in your assembly at the following physical locations. **You must name the points exactly as written below** in your CAD feature tree.
+## Step 2: Define the Target Datums
+Place Coordinate Systems in your assembly at the following physical locations. **You must name the coordinate systems exactly as written below** in your CAD feature tree.
 
 | Exact Feature Name | Physical Placement in CAD | Why Firmware Needs It |
 | :--- | :--- | :--- |
@@ -34,26 +34,21 @@ Place Reference Points (Datums) in your assembly at the following physical locat
 
 ---
 
-## Step 3: Export the Point Table
-Create a point evaluation table or BOM in your CAD software (SolidWorks, Inventor, Fusion360) that measures the X, Y, and Z distances of the 8 points above **relative to `FIRMWARE_ORIGIN`**. 
+## Step 3: Run the SolidWorks Macro (Dual-Export)
+Instead of manually measuring these points and aligning 3D meshes by hand, we have provided a SolidWorks VBA macro: `ExportFirmwareDatums.swp`.
 
-Ensure your export settings meet these rules:
-1. **Units:** Millimeters (mm).
-2. **Format:** CSV (Comma Separated Values).
-3. **Columns:** The export must contain exactly these headers: `Datum_Name, X_mm, Y_mm, Z_mm, Description`
+1. Add the macro to your SolidWorks toolbar.
+2. Click the macro button.
 
-*Example Export:*
-```csv
-Datum_Name,X_mm,Y_mm,Z_mm,Description
-DATUM_CAM_LENS,500.0,336.55,-800.0,Overhead Vision Camera Center
-DATUM_TOOL_CENTER_POINT,0.0,0.0,152.4,Tip of pneumatic gripper
-```
+**What the macro does automatically:**
+1. **The CSV:** It traverses your feature tree, extracts the X/Y/Z (in mm) and Roll/Pitch/Yaw (in degrees) for every `DATUM_` relative to `FIRMWARE_ORIGIN`, and formats it into `datums.csv`.
+2. **The STLs:** It selects the corresponding subassemblies (like the gripper tooling or camera housing) and exports them as `.STL` files. Crucially, it instructs SolidWorks to use the local `DATUM_` coordinate system as the `0,0,0` origin for that specific STL.
 
 ---
 
 ## Step 4: Publish to the Network
-Save or overwrite the exported file to the shared engineering network drive at the agreed location:
-`\\SERVER\Engineering\Cell_Config\datums.csv`
+The macro will prompt you to save the output. Select the shared engineering network drive at the agreed location:
+`\\SERVER\Engineering\Cell_Config\`
 
 **You are done.** 
-The CI/CD pipeline and firmware developers will pull this file automatically over the network during the next software build. Your physical design changes are now live in the robot's brain.
+The CI/CD pipeline and firmware developers will pull this file automatically over the network during the next software build. Your physical design changes are now live in the robot's brain, and your perfectly aligned CAD meshes are live in the Foxglove 3D shadow mode visualizer.
