@@ -2,8 +2,7 @@
  * @file GantryLinearAxis.h
  * @brief Abstract interface for a linear (mm-domain) gantry axis.
  *
- * Implemented by concrete classes (e.g. GantryPulseMotorLinearAxis) that back
- * this interface with a specific driver + drivetrain combination. The Gantry
+ * Implemented by GantryEipLinearAxis (Kinetix 5100 Absolute PTP). The Gantry
  * class holds its X (horizontal traverse) and Z (vertical descent) axes as
  * std::unique_ptr<GantryLinearAxis> so the axis topology can be chosen per
  * axis at construction time without any compile-time flags.
@@ -12,9 +11,12 @@
 #ifndef GANTRY_LINEAR_AXIS_H
 #define GANTRY_LINEAR_AXIS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace Gantry {
+
+class GantryLimitSwitch;
 
 /**
  * @class GantryLinearAxis
@@ -53,6 +55,28 @@ public:
     // ---------- Faults ----------
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// @brief EIP: fill buf with FAULT/WARN summary (e.g. "WARN A603 ...").
+    ///        Pulse-motor backends return false / "n/a".
+    virtual bool getDriveAlarmSummary(char* buf, size_t n) const {
+        if (buf != nullptr && n > 0) {
+            buf[0] = '\0';
+        }
+        return false;
+    }
+    virtual uint16_t getDriveFaultCode() const { return 0; }
+    virtual uint16_t getDriveWarningCode() const { return 0; }
+    /// EIP overtravel: A014/PL. Default false for non-EIP fakes.
+    virtual bool isA014WarningActive() const { return false; }
+    /// EIP overtravel: A015/NL. Default false for non-EIP fakes.
+    virtual bool isA015WarningActive() const { return false; }
+    /// Optional: sync drive overtravel into GantryLimitSwitch objects.
+    virtual void attachLimitSwitches(GantryLimitSwitch* min_sw,
+                                     GantryLimitSwitch* max_sw) {
+        (void)min_sw;
+        (void)max_sw;
+    }
+    /// When true, A015 maps to joint-min and A014 to joint-max (Z).
+    virtual void setJointMinWarningA015(bool enable) { (void)enable; }
 
     // ---------- Scaling ----------
     virtual double pulsesPerMm() const = 0;

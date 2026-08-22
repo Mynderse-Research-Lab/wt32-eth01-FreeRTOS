@@ -8,4 +8,6 @@ idf_component_register(
         esp_driver_gpio
         esp_common
         log
+        freertos
+        Spi3Bus
 )

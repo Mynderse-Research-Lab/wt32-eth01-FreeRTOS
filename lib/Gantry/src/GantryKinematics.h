@@ -5,12 +5,13 @@
  *
  * Coordinate convention (firmware-wide):
  *   - X: horizontal traverse along the gantry beam.
- *   - Y: along-belt direction; -Y is conveyor downstream. The gantry has no
+ *   - Y: along-belt direction; +Y is conveyor downstream. The gantry has no
  *        Y actuator, so JointConfig has no y member; the workspace pose Y
  *        field is filled from kinematic parameters (z_axis_y_offset_mm).
- *   - Z: vertical (+Z = up). Joint z = homing datum; pose.z = height above
- *        physical bed via GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (see axis_drivetrain_params.h).
- *   - Theta: rotation about Z.
+ *   - Z: vertical (+Z = down / toward belt). Joint z = A015 retract datum;
+ *        pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
+ *        (see axis_drivetrain_params.h).
+ *   - Theta: rotation about Z (right-handed about +Z).
  */
 
 #ifndef GANTRY_KINEMATICS_H
@@ -46,8 +47,7 @@ public:
      *   - pose.x = joint.x + theta_x_offset (theta rotates about Z, doesn't
      *              change pose.x in the simple TCP model)
      *   - pose.y = z_axis_y_offset_mm (along-belt placement is fixed)
-     *   - pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (+Z = up;
-     *              TCP height above physical belt/bed when offset non-zero)
+     *   - pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (+Z = down)
      *   - pose.theta = joint.theta
      */
     static EndEffectorPose forward(const JointConfig& joints,

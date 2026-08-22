@@ -1,43 +1,46 @@
 # driver_datasheets_and_calculations
 
-Reference hardware documents that the PulseMotor-based firmware depends on
-for per-axis commissioning. File names are normalized so the firmware headers
-can cite them unambiguously.
+Vendor PDFs and generated panel artifacts for the gantry. Firmware mechanical
+constants cite these documents from `include/axis_drivetrain_params.h`.
+Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`).
 
-## Present
+## Present (selection)
 
-| File                                      | Describes                                                                                       | Commissioning values supplied                                                   |
-|-------------------------------------------|--------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| `SDF08NK8X_manual_V3.0_2024.pdf`          | Bergerda SDF08NK8X servo driver manual (legacy X-axis driver; kept as a pulse-train reference). | PN parameter map, pulse-input bandwidth, I/O wiring.                            |
-| `AB_Kinetix5100_user_manual.pdf`          | Allen-Bradley Kinetix 5100 servo drive user manual (X and Y axis drivers).                       | PTI pulse-input bandwidth, electronic gear (`AXIS_{X,Y}_ENCODER_PPR`), alarm and enable wiring. |
-| `AB_Kinetix_drive_specs.pdf`              | Kinetix 5100 drive specifications.                                                               | Supply rails, torque, I/O limits.                                              |
-| `AB_Kinetix_motor_specs.pdf`              | Kinetix 5100 motor specifications.                                                               | Reflected inertia inputs, torque curves.                                       |
-| `AB_Kinetix_motion_control_selection_guide.pdf` | Motion-control sizing methodology for the Kinetix family.                                   | Trap-move / sizing inputs that fill the reserved block in `axis_drivetrain_params.h` Section 3.2.7. |
-| `SCHUNK_design_technical_info.pdf`        | SCHUNK gantry-hardware selection (Beta 100-ZRS, Beta 80-SRS, KGG 100-80).                        | X belt lead (200 mm/rev), Y ballscrew pitch (20 mm), 3000 rpm critical speed, gripper open/close times, repeatability tolerances. |
+| File | Role |
+|------|------|
+| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
+| `Technical Information_SCHUNK_ERD_04 Catalog section.pdf` | Theta ERD 04 catalog chapter |
+| `Technical Information_SCHUNK_ERD Catalog section.pdf` | Full ERD series catalog chapter |
+| `SCHUNK_ERD_Operating_Manual.pdf` | ERD assembly / operating manual |
+| `Optimization_Manual_Axis.pdf` | ERD manual tuning heuristic for Bosch-Rexroth/IndraWorks |
+| `SCHUNK_ERD-ERT_IndraDrive_CS_Commissioning_instructions.pdf` | IndraDrive CS commissioning |
+| `SCHUNK_ERD_motor_parameter-commissioning.zip` (+ extracted tree) | Motor params / IndraDrive `.par` / Motordatenblatt |
+| `SCHUNK_ERD04_Motordatenblatt_IndraDrive.pdf` / `SCHUNK_ERD04_Datasheet_IndraDrive.pdf` | ERD04 IndraDrive motor data (from zip) |
+| `Technical Information_Beta 100-ZRS*.pdf` | X belt actuator |
+| `Technical Information_Beta 80-SRS*.pdf` | Z ballscrew actuator |
+| `Technical Information_SCHUNK KGG 100-80*.pdf` | Gripper |
+| `AB_Kinetix5100_user_manual.pdf` | Kinetix 5100 |
+| `AB_Kinetix_drive_specs.pdf` / `AB_Kinetix_motor_specs.pdf` | Drive / motor specs |
+| `2198-in003_-en-p.pdf` | Kinetix installation |
+| `R911325518_*HCS01_Commissioning Manual.pdf` | HCS01 connectors |
+| `Rexroth HCS-01 Drive Project Planning Manual*.pdf` | HCS01 type code |
+| `OA 1693058*.pdf` / `McMc order acknowledgement.pdf` | Purchase records |
+| `SDF08NK8X_manual_V3.0_2024.pdf` | Legacy pulse driver (reference only) |
 
 ## Missing / pending
 
-Documents referenced by the firmware headers but not yet committed to this
-folder. Each row lists where to obtain the document and which firmware values
-it will supply.
-
-| Document                              | Source                                                                                  | Commissioning values it will supply                                                  |
-|---------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| SCHUNK ERD 04-40-D-H-N datasheet      | <https://schunk.com/us/en/automation-technology/rotary-actuators/erd/erd-04-40-d-h-n/p/000000000000331220> | Detailed torque-speed curve, HIPERFACE resolution, mechanical envelope (beyond the datasheet values already captured in `axis_drivetrain_params.h`). |
-| Custom ERD pulse-train driver parameter sheet | Not yet released by the controls vendor.                                             | `AXIS_THETA_MAX_PULSE_FREQ_HZ`, electronic gear setup (confirms the 36000 ppr default), alarm/enable wiring details. |
-| SCHUNK Trap Move attachments (Beta 100-ZRS, Beta 80-SRS, KGG 100-80) | The four PDFs referenced on the final page of `SCHUNK_design_technical_info.pdf`; were not saved with the quote. Rick Hunsucker (SCHUNK) can resend. | Reflected inertia, required torque, cycle-time target. Populate the reserved macro block in `include/axis_drivetrain_params.h` (Section 3.2.7). |
-
-Add rows above when new drivers or actuators are commissioned. Keep the
-"Present" and "Missing / pending" tables in sync with the files actually
-checked in.
+| Document | Needed for |
+|----------|------------|
+| SCHUNK Trap Move attachments | Inertia / torque commissioning slots in `axis_drivetrain_params.h` |
+| 2198-IN020 | Formal TBIO pin drawing |
+| MPB-xxVRS Functional Description | HCS01 X31 details if needed beyond EIP |
 
 ## Generated artifacts
 
-These spreadsheets are generated by scripts in `tools/` (re-run after edits):
+| File | Generator |
+|------|-----------|
+| `BOM.xlsx` | `tools/generate_bom.py` |
+| `WIRE_SIZE_SELECTION.xlsx` | `tools/generate_wire_size_selection.py` |
 
-| File                        | Generator                          | Contents                                                                                  |
-|-----------------------------|------------------------------------|-------------------------------------------------------------------------------------------|
-| `WIRE_SIZE_SELECTION.xlsx`  | `tools/generate_wire_size_selection.py` | Per-axis wire/cable selection, on-hand inventory map, panel breaker assignment.       |
-| `BOM.xlsx`                  | `tools/generate_bom.py`            | Multi-unit bill of materials: Gantry panel (LT-BPG-PNL-001), Conveyor panel (LT-CONV-CU-001), Vision system panel (stub), plus branch schedule, 80% sizing basis, and wiring reference. |
-
-Markdown text extractions of every PDF in this folder live in [`pdf_markdown/`](pdf_markdown/INDEX.md). Regenerate with `py tools/convert_pdfs_to_markdown.py`.
+Optional PDF→markdown extraction: `tools/convert_pdfs_to_markdown.py` (output not
+kept in-repo; regenerate locally if needed for search).

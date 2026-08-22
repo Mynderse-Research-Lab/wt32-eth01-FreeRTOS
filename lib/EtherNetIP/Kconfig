@@ -1,0 +1,224 @@
+menu "EtherNet/IP originator"
+
+    config EIP_SCANNER_ENABLED
+        bool "Enable EtherNet/IP scanner task"
+        default n
+        help
+            When enabled, starts a background FreeRTOS task that waits for
+            Ethernet link-up, then runs RegisterSession, ForwardOpen, cyclic
+            Class 1 I/O at RPI, and ForwardClose on loss.
+            Default off so MQTT / non-EIP bring-up is unchanged.
+            Bench validation against a real drive is still required.
+
+    config EIP_AXIS_X
+        bool "X axis over EtherNet/IP (Kinetix 5100)"
+        depends on EIP_SCANNER_ENABLED
+        default y
+        help
+            Class 1 originator for the X (belt) Kinetix 5100.
+            Can be enabled together with Z (shared UDP 2222 demux).
+
+    config EIP_AXIS_Z
+        bool "Z axis over EtherNet/IP (Kinetix 5100)"
+        depends on EIP_SCANNER_ENABLED
+        default y
+        help
+            Class 1 originator for the Z (ballscrew) Kinetix 5100.
+            Can be enabled together with X (shared UDP 2222 demux).
+
+    config EIP_AXIS_THETA
+        bool "Theta axis over EtherNet/IP (HCS01)"
+        depends on EIP_SCANNER_ENABLED
+        default n
+        help
+            HCS01 theta over EtherNet/IP Class 1 (assemblies 101/102).
+            CIP listens on EIP_TARGET_IP_THETA (FKM MAC), not the
+            engineering HTTP/IndraWorks address.
+
+    config EIP_TARGET_IP_X
+        string "X-axis drive IP address"
+        default "192.168.1.20"
+        depends on EIP_AXIS_X
+        help
+            IP of the X Kinetix 5100 (TCP 44818 / UDP 2222).
+
+    config EIP_TARGET_IP_Z
+        string "Z-axis drive IP address"
+        default "192.168.1.21"
+        depends on EIP_AXIS_Z
+        help
+            IP of the Z Kinetix 5100 (TCP 44818 / UDP 2222).
+
+    config EIP_TARGET_IP_THETA
+        string "Theta-axis CIP / FKM IP address"
+        default "192.168.1.23"
+        depends on EIP_AXIS_THETA
+        help
+            EtherNet/IP (FKM) IP of the HCS01 — TCP 44818 / UDP 2222.
+            Distinct from engineering-over-IP (X24/X25, typically
+            192.168.1.22, MAC …B6). CIP is on the FKM MAC (…B9).
+            Must not collide with X .20 / Z .21 / W5500 .10.
+
+    config EIP_TARGET_IP
+        string "Target drive IP address (legacy idle scanner)"
+        default "192.168.1.20"
+        depends on EIP_SCANNER_ENABLED && !EIP_AXIS_X && !EIP_AXIS_Z && !EIP_AXIS_THETA
+        help
+            Used only when no axis is enabled (idle scanner). Prefer
+            EIP_TARGET_IP_X / EIP_TARGET_IP_Z / EIP_TARGET_IP_THETA.
+
+    config EIP_W5500_IP
+        string "W5500 source IP address (this device on EIP daisy-chain)"
+        default "192.168.1.10"
+        depends on EIP_SCANNER_ENABLED
+        help
+            IP address assigned to the W5500/WIZ850io interface on the
+            EtherNet/IP daisy-chain. Must be unique and on the same
+            subnet as the drives.
+
+    config EIP_W5500_SUBNET
+        string "W5500 subnet mask"
+        default "255.255.255.0"
+        depends on EIP_SCANNER_ENABLED
+
+    config EIP_W5500_GATEWAY
+        string "W5500 gateway address"
+        default "192.168.1.1"
+        depends on EIP_SCANNER_ENABLED
+        help
+            Gateway for the W5500's hardware TCP/IP stack. Required
+            even for local-subnet traffic (set to 0.0.0.0 only if no
+            gateway is needed).
+
+    config EIP_W5500_SPI_HZ
+        int "W5500 SPI clock (Hz)"
+        default 20000000
+        depends on EIP_SCANNER_ENABLED
+        range 1000000 80000000
+        help
+            SPI clock for WIZ850io / W5500. Default 20 MHz — ESP-IDF v6
+            full-duplex on GPIO-matrix pins rejects >~26.67 MHz. Chip max
+            is 80 MHz; raise only with IOMUX pins or SPI_DEVICE_NO_DUMMY
+            and SI validation.
+    config EIP_AXIS_X_PUU_PER_MM
+        float "X-axis PUU/mm scaling (Kinetix 5100)"
+        default 52428.8
+        depends on EIP_AXIS_X
+        help
+            Position-units-per-mm for the X (belt) axis Kinetix 5100.
+            Default assumes 2097152 PUU/motor-rev, i=5 gearbox, 200 mm/rev
+            lead (2097152*5/200). Calibrate with console
+            `puucal x <commanded_mm> <measured_mm>` after mounting:
+            new = current * (commanded / measured).
+
+    config EIP_AXIS_Z_PUU_PER_MM
+        float "Z-axis PUU/mm scaling (Kinetix 5100)"
+        default 104857.6
+        depends on EIP_AXIS_Z
+        help
+            Position-units-per-mm for the Z (ballscrew) axis Kinetix 5100.
+            Default assumes 2097152 PUU/motor-rev, direct drive (i=1),
+            20 mm/rev lead (2097152/20). Calibrate with
+            `puucal z <commanded_mm> <measured_mm>` then update this value.
+
+    config EIP_AXIS_THETA_PUU_PER_DEG
+        float "Theta-axis PUU/deg scaling (HCS01)"
+        default 10000.0
+        depends on EIP_AXIS_THETA
+        help
+            Position-units-per-degree for HCS01 S-0-0282 / S-0-0051.
+            Live drive uses 0.0001 deg LSB (3600000 increments/rev → 10000).
+            Confirm with puuinfo after a known-degree move.
+
+    config EIP_X_RPI_US
+        int "X/Z axis RPI (microseconds)"
+        default 2000
+        depends on EIP_AXIS_X || EIP_AXIS_Z
+        help
+            Requested packet interval for the Kinetix 5100 Class 1
+            implicit I/O connection, in microseconds. Default 2000 us —
+            Kinetix rejects 1000 us with FO extended 0x0112 (RPI not
+            acceptable). Dual-axis exchange must complete under this
+            budget (polling SPI + produce-then-drain). Raise toward
+            5000 only if FO still returns 0x0112.
+
+    config EIP_THETA_RPI_US
+        int "Theta axis RPI (microseconds)"
+        default 2000
+        depends on EIP_AXIS_THETA
+        help
+            Requested packet interval for the HCS01 Class 1 implicit
+            I/O connection, in microseconds. Drive minimum API is 2 ms.
+
+    choice EIP_ENDSTOP_SOURCE
+        prompt "Endstop limit switch reporting path"
+        depends on EIP_SCANNER_ENABLED
+        default EIP_ENDSTOP_FROM_DRIVE
+        help
+            Select where the firmware reads limit switch status. When
+            endstops are wired to drive digital inputs (TBIO/X31), the
+            drive stops internally and reports Fault/Stopped via EIP
+            assembly feedback. When endstops stay on MCP23S17, the
+            firmware reads them via GPIO expander (step/dir fallback).
+
+        config EIP_ENDSTOP_FROM_DRIVE
+            bool "Drive digital inputs (via EIP assembly status)"
+            help
+                Limit switches wired to Kinetix 5100 TBIO INPUT1-4 or
+                HCS01 X31.5/X31.6. The drive monitors them internally;
+                firmware reads Fault/Stopped bits from the assembly.
+
+        config EIP_ENDSTOP_FROM_MCP
+            bool "MCP23S17 GPIO expander"
+            help
+                Limit switches wired to MCP23S17 (PIN_X_LIMIT_MIN/MAX,
+                PIN_Z_LIMIT_MIN/MAX). Firmware reads GPIO via the
+                GantryLimitSwitch debounced path. Used for step/dir
+                fallback mode.
+    endchoice
+
+    config EIP_CONFIG_ASSEMBLY_INSTANCE
+        int "Config assembly instance for ForwardOpen"
+        default 191
+        depends on EIP_SCANNER_ENABLED
+        help
+            CIP config-assembly instance used in the ForwardOpen
+            connection path. CONFIRMED from Kinetix 5100 EDS: the
+            drive uses a dummy config assembly instance 0xBF (191)
+            since it does not support a config assembly.
+            (CfgAssembly = 0 in EDS; Rockwell convention uses 0xBF
+            as the dummy placeholder in the connection path.)
+
+    config EIP_INCLUDE_RUN_IDLE_HEADER
+        bool "Include 32-bit Run/Idle header in cyclic O->T frames"
+        default y
+        depends on EIP_SCANNER_ENABLED
+        help
+            When enabled, a 32-bit Run/Idle header is placed in the
+            CIP sequence count slot of each cyclic output frame.
+            CONFIRMED: Kinetix 5100 requires the 4-byte Run/Idle header
+            data on the wire (connection size becomes 46 = 40 + 2 + 4),
+            but does NOT set bit 8 (Run/Idle format) in the network
+            connection parameters. This is a Rockwell-specific deviation.
+            HCS01 uses standard ODVA Run/Idle with bit 8 set.
+
+    config EIP_TO_POINT_TO_POINT
+        bool "Use Point-to-Point T->O (unicast) instead of multicast"
+        default y
+        depends on EIP_SCANNER_ENABLED
+        help
+            When enabled, ForwardOpen requests unicast T->O to this
+            device's IP. When disabled, T->O uses multicast per the
+            Kinetix 5100 EDS default. P2P is the default for this
+            bench setup because it was observed to work.
+
+    config EIP_ORIGINATOR_VENDOR_ID
+        int "Originator vendor ID for ForwardOpen"
+        default 1
+        depends on EIP_SCANNER_ENABLED
+        help
+            Vendor ID sent in the ForwardOpen request.
+            Confirmed from Kinetix 5100 EDS: Vendor ID = 1
+            (Rockwell Automation - Allen-Bradley).
+
+endmenu

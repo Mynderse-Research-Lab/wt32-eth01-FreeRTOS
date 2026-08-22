@@ -37,24 +37,43 @@
 
 struct mcp23s17_handle {
     spi_device_handle_t spi_device;
-    spi_host_device_t spi_host;  // Stored for proper cleanup in deinit
-    SemaphoreHandle_t spi_mutex; // Serialize SPI device access across tasks
+    spi_host_device_t spi_host;
+    SemaphoreHandle_t spi_mutex;
     uint8_t device_address;
-    uint8_t port_a_dir;      // Cached direction register
+    uint8_t port_a_dir;
     uint8_t port_b_dir;
-    uint8_t port_a_output;   // Cached output latch
+    uint8_t port_a_output;
     uint8_t port_b_output;
-    uint8_t port_a_pullup;   // Cached pull-up register
+    uint8_t port_a_pullup;
     uint8_t port_b_pullup;
+    bool owns_bus;
 };
 
 static const char *TAG = "MCP23S17";
+
+#include "Spi3Bus.h"
 
 static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (handle == NULL || handle->spi_mutex == NULL) {
         return false;
     }
-    return xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) == pdTRUE;
+    
+    if (xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    // Defer when on shared SPI3 bus and Class 1 scanner critical section is active
+    if (!handle->owns_bus) {
+        while (spi3_class1_critical_active()) {
+            xSemaphoreGive(handle->spi_mutex);
+            vTaskDelay(pdMS_TO_TICKS(1));
+            if (xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) != pdTRUE) {
+                return false;
+            }
+        }
+    }
+    
+    return true;
 }
 
 static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
@@ -63,12 +82,7 @@ static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
     }
 }
 
-static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
-    if (!mcp23s17_lock(handle)) {
-        ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X", reg);
-        return ESP_ERR_INVALID_STATE;
-    }
-
+static esp_err_t mcp23s17_write_register_unlocked(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
     uint8_t tx_data[3];
     tx_data[0] = MCP23S17_WRITE_OPCODE | (handle->device_address << 1);
     tx_data[1] = reg;
@@ -83,16 +97,10 @@ static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, 
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Write register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
-    mcp23s17_unlock(handle);
     return ret;
 }
 
-static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
-    if (!mcp23s17_lock(handle)) {
-        ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X", reg);
-        return ESP_ERR_INVALID_STATE;
-    }
-
+static esp_err_t mcp23s17_read_register_unlocked(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
     uint8_t tx_data[3];
     uint8_t rx_data[3];
     
@@ -111,6 +119,25 @@ static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, u
     } else {
         ESP_LOGE(TAG, "Read register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
+    return ret;
+}
+
+static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
+    if (!mcp23s17_lock(handle)) {
+        ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X", reg);
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, value);
+    mcp23s17_unlock(handle);
+    return ret;
+}
+
+static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
+    if (!mcp23s17_lock(handle)) {
+        ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X", reg);
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = mcp23s17_read_register_unlocked(handle, reg, value);
     mcp23s17_unlock(handle);
     return ret;
 }
@@ -128,8 +155,9 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
     memset(handle, 0, sizeof(struct mcp23s17_handle));
-    handle->device_address = config->device_address & 0x07;  // Lower 3 bits only
+    handle->device_address = config->device_address & 0x07;
     handle->spi_host = config->spi_host;
+    handle->owns_bus = !config->skip_bus_init;
     handle->spi_mutex = xSemaphoreCreateMutex();
     if (handle->spi_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create SPI mutex");
@@ -137,45 +165,43 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Configure SPI bus
-    spi_bus_config_t bus_cfg = {};
-    bus_cfg.miso_io_num = config->miso_pin;
-    bus_cfg.mosi_io_num = config->mosi_pin;
-    bus_cfg.sclk_io_num = config->sclk_pin;
-    bus_cfg.quadwp_io_num = -1;
-    bus_cfg.quadhd_io_num = -1;
-    bus_cfg.max_transfer_sz = 32;
+    if (handle->owns_bus) {
+        spi_bus_config_t bus_cfg = {};
+        bus_cfg.miso_io_num = config->miso_pin;
+        bus_cfg.mosi_io_num = config->mosi_pin;
+        bus_cfg.sclk_io_num = config->sclk_pin;
+        bus_cfg.quadwp_io_num = -1;
+        bus_cfg.quadhd_io_num = -1;
+        bus_cfg.max_transfer_sz = 32;
 
-    esp_err_t ret = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(ret));
-        vSemaphoreDelete(handle->spi_mutex);
-        free(handle);
-        return NULL;
+        esp_err_t bus_ret = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
+        if (bus_ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(bus_ret));
+            vSemaphoreDelete(handle->spi_mutex);
+            free(handle);
+            return NULL;
+        }
     }
 
-    // Configure SPI device
     spi_device_interface_config_t dev_cfg = {};
-    dev_cfg.clock_speed_hz = config->clock_speed_hz;
-    dev_cfg.mode = 0;  // SPI mode 0
+    dev_cfg.clock_speed_hz = config->clock_speed_hz > 0 ? config->clock_speed_hz : 10000000;
+    dev_cfg.mode = 0;
     dev_cfg.spics_io_num = config->cs_pin;
     dev_cfg.queue_size = 1;
     dev_cfg.flags = 0;
     dev_cfg.pre_cb = NULL;
 
-    ret = spi_bus_add_device(config->spi_host, &dev_cfg, &handle->spi_device);
+    esp_err_t ret = spi_bus_add_device(config->spi_host, &dev_cfg, &handle->spi_device);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI device add failed: %s", esp_err_to_name(ret));
-        spi_bus_free(config->spi_host);
+        if (handle->owns_bus) {
+            spi_bus_free(config->spi_host);
+        }
         vSemaphoreDelete(handle->spi_mutex);
         free(handle);
         return NULL;
     }
 
-    // Note: CS pin is managed automatically by the SPI driver (spics_io_num).
-    // No manual gpio_set_direction/gpio_set_level needed.
-
-    // Initialize IOCON register (sequential mode, hardware addressing)
     ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x00);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "IOCON init failed");
@@ -183,7 +209,6 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Initialize all pins as inputs with pull-ups disabled
     handle->port_a_dir = 0xFF;
     handle->port_b_dir = 0xFF;
     mcp23s17_write_register(handle, MCP23S17_IODIRA, 0xFF);
@@ -196,7 +221,8 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     handle->port_a_pullup = 0x00;
     handle->port_b_pullup = 0x00;
 
-    ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X)", 0x20 | handle->device_address);
+    ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X, shared_bus=%d)",
+             0x20 | handle->device_address, config->skip_bus_init ? 1 : 0);
     return handle;
 }
 
@@ -205,8 +231,11 @@ void mcp23s17_deinit(mcp23s17_handle_t handle) {
 
     if (handle->spi_device) {
         spi_bus_remove_device(handle->spi_device);
+        handle->spi_device = NULL;
     }
-    spi_bus_free(handle->spi_host);
+    if (handle->owns_bus) {
+        spi_bus_free(handle->spi_host);
+    }
     if (handle->spi_mutex) {
         vSemaphoreDelete(handle->spi_mutex);
         handle->spi_mutex = NULL;
@@ -217,6 +246,9 @@ void mcp23s17_deinit(mcp23s17_handle_t handle) {
 esp_err_t mcp23s17_set_pin_direction(mcp23s17_handle_t handle, mcp23s17_pin_t pin, bool is_output) {
     if (handle == NULL || pin > 15) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!mcp23s17_lock(handle)) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     uint8_t bit = pin & 0x07;
@@ -229,12 +261,17 @@ esp_err_t mcp23s17_set_pin_direction(mcp23s17_handle_t handle, mcp23s17_pin_t pi
         *dir_cache |= (1 << bit);
     }
 
-    return mcp23s17_write_register(handle, reg, *dir_cache);
+    esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, *dir_cache);
+    mcp23s17_unlock(handle);
+    return ret;
 }
 
 esp_err_t mcp23s17_set_pin_pullup(mcp23s17_handle_t handle, mcp23s17_pin_t pin, bool enable) {
     if (handle == NULL || pin > 15) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!mcp23s17_lock(handle)) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     uint8_t bit = pin & 0x07;
@@ -247,12 +284,17 @@ esp_err_t mcp23s17_set_pin_pullup(mcp23s17_handle_t handle, mcp23s17_pin_t pin, 
         *pullup_cache &= ~(1 << bit);
     }
 
-    return mcp23s17_write_register(handle, reg, *pullup_cache);
+    esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, *pullup_cache);
+    mcp23s17_unlock(handle);
+    return ret;
 }
 
 esp_err_t mcp23s17_write_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin, uint8_t level) {
     if (handle == NULL || pin > 15) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!mcp23s17_lock(handle)) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     uint8_t bit = pin & 0x07;
@@ -265,7 +307,9 @@ esp_err_t mcp23s17_write_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin, uint8
         *output_cache &= ~(1 << bit);
     }
 
-    return mcp23s17_write_register(handle, reg, *output_cache);
+    esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, *output_cache);
+    mcp23s17_unlock(handle);
+    return ret;
 }
 
 uint8_t mcp23s17_read_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin) {
@@ -274,7 +318,7 @@ uint8_t mcp23s17_read_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin) {
     }
 
     uint8_t reg = (pin < 8) ? MCP23S17_GPIOA : MCP23S17_GPIOB;
-    uint8_t value;
+    uint8_t value = 0;
     
     if (mcp23s17_read_register(handle, reg, &value) != ESP_OK) {
         return 0;
@@ -288,6 +332,9 @@ esp_err_t mcp23s17_write_port(mcp23s17_handle_t handle, mcp23s17_port_t port, ui
     if (handle == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!mcp23s17_lock(handle)) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
     uint8_t reg = (port == MCP23S17_PORT_A) ? MCP23S17_OLATA : MCP23S17_OLATB;
     if (port == MCP23S17_PORT_A) {
@@ -296,7 +343,9 @@ esp_err_t mcp23s17_write_port(mcp23s17_handle_t handle, mcp23s17_port_t port, ui
         handle->port_b_output = value;
     }
 
-    return mcp23s17_write_register(handle, reg, value);
+    esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, value);
+    mcp23s17_unlock(handle);
+    return ret;
 }
 
 uint8_t mcp23s17_read_port(mcp23s17_handle_t handle, mcp23s17_port_t port) {
@@ -305,7 +354,7 @@ uint8_t mcp23s17_read_port(mcp23s17_handle_t handle, mcp23s17_port_t port) {
     }
 
     uint8_t reg = (port == MCP23S17_PORT_A) ? MCP23S17_GPIOA : MCP23S17_GPIOB;
-    uint8_t value;
+    uint8_t value = 0;
     
     if (mcp23s17_read_register(handle, reg, &value) != ESP_OK) {
         return 0;
@@ -319,6 +368,9 @@ esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pi
     if (handle == NULL || pin > 15) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!mcp23s17_lock(handle)) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
     uint8_t bit = pin & 0x07;
     uint8_t inten_reg = (pin < 8) ? MCP23S17_GPINTENA : MCP23S17_GPINTENB;
@@ -327,35 +379,52 @@ esp_err_t mcp23s17_set_pin_interrupt(mcp23s17_handle_t handle, mcp23s17_pin_t pi
     esp_err_t ret;
 
     // Enable/disable interrupt
-    uint8_t inten_val;
-    ret = mcp23s17_read_register(handle, inten_reg, &inten_val);
-    if (ret != ESP_OK) return ret;
+    uint8_t inten_val = 0;
+    ret = mcp23s17_read_register_unlocked(handle, inten_reg, &inten_val);
+    if (ret != ESP_OK) {
+        mcp23s17_unlock(handle);
+        return ret;
+    }
     if (enable) {
         inten_val |= (1 << bit);
     } else {
         inten_val &= ~(1 << bit);
     }
-    ret = mcp23s17_write_register(handle, inten_reg, inten_val);
-    if (ret != ESP_OK) return ret;
+    ret = mcp23s17_write_register_unlocked(handle, inten_reg, inten_val);
+    if (ret != ESP_OK) {
+        mcp23s17_unlock(handle);
+        return ret;
+    }
 
     // Configure interrupt trigger (compare to DEFVAL)
-    uint8_t intcon_val;
-    ret = mcp23s17_read_register(handle, intcon_reg, &intcon_val);
-    if (ret != ESP_OK) return ret;
+    uint8_t intcon_val = 0;
+    ret = mcp23s17_read_register_unlocked(handle, intcon_reg, &intcon_val);
+    if (ret != ESP_OK) {
+        mcp23s17_unlock(handle);
+        return ret;
+    }
     intcon_val |= (1 << bit);
-    ret = mcp23s17_write_register(handle, intcon_reg, intcon_val);
-    if (ret != ESP_OK) return ret;
+    ret = mcp23s17_write_register_unlocked(handle, intcon_reg, intcon_val);
+    if (ret != ESP_OK) {
+        mcp23s17_unlock(handle);
+        return ret;
+    }
 
     // Set default value for comparison
-    uint8_t defval_val;
-    ret = mcp23s17_read_register(handle, defval_reg, &defval_val);
-    if (ret != ESP_OK) return ret;
+    uint8_t defval_val = 0;
+    ret = mcp23s17_read_register_unlocked(handle, defval_reg, &defval_val);
+    if (ret != ESP_OK) {
+        mcp23s17_unlock(handle);
+        return ret;
+    }
     if (trigger_on_rising) {
         defval_val &= ~(1 << bit);  // Trigger when pin goes HIGH (was LOW)
     } else {
         defval_val |= (1 << bit);   // Trigger when pin goes LOW (was HIGH)
     }
-    return mcp23s17_write_register(handle, defval_reg, defval_val);
+    ret = mcp23s17_write_register_unlocked(handle, defval_reg, defval_val);
+    mcp23s17_unlock(handle);
+    return ret;
 }
 
 esp_err_t mcp23s17_debug_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t *value) {

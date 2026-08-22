@@ -1,0 +1,261 @@
+{
+  "dataset_name": "Rockwell KNX5100C-2198 Servo Drive Manual \u2014 RAG Corpus",
+  "publication": "Rockwell Automation Publication 2198-UM004D-EN-P - December 2022",
+  "num_chapters": 26,
+  "num_chunks": 639,
+  "chunk_target_tokens": 650,
+  "chunk_overlap_tokens": 80,
+  "chapters": [
+    {
+      "chapter": -2,
+      "section_type": "front_matter",
+      "title": "Cover and Table of Contents",
+      "source_pdf": "00_Cover_and_TOC.pdf",
+      "markdown_file": "00_front_02_cover_and_table_of_contents.md",
+      "num_pages": 12,
+      "num_chunks": 14
+    },
+    {
+      "chapter": -1,
+      "section_type": "front_matter",
+      "title": "Preface",
+      "source_pdf": "01_Preface.pdf",
+      "markdown_file": "00_front_01_preface.md",
+      "num_pages": 4,
+      "num_chunks": 4
+    },
+    {
+      "chapter": 1,
+      "section_type": "chapter",
+      "title": "Start",
+      "source_pdf": "02_Ch01_Start.pdf",
+      "markdown_file": "chapter_01_start.md",
+      "num_pages": 14,
+      "num_chunks": 13
+    },
+    {
+      "chapter": 2,
+      "section_type": "chapter",
+      "title": "Plan and Install the Drive System",
+      "source_pdf": "03_Ch02_Plan_and_Install.pdf",
+      "markdown_file": "chapter_02_plan_and_install_the_drive_system.md",
+      "num_pages": 19,
+      "num_chunks": 23
+    },
+    {
+      "chapter": 3,
+      "section_type": "chapter",
+      "title": "Connector Data and Feature Descriptions",
+      "source_pdf": "04_Ch03_Connector_Data.pdf",
+      "markdown_file": "chapter_03_connector_data_and_feature_descriptions.md",
+      "num_pages": 29,
+      "num_chunks": 40
+    },
+    {
+      "chapter": 4,
+      "section_type": "chapter",
+      "title": "Connect the Drive",
+      "source_pdf": "05_Ch04_Connect_the_Drive.pdf",
+      "markdown_file": "chapter_04_connect_the_drive.md",
+      "num_pages": 33,
+      "num_chunks": 52
+    },
+    {
+      "chapter": 5,
+      "section_type": "chapter",
+      "title": "Set Up EtherNet/IP Communication",
+      "source_pdf": "06_Ch05_Setup_EtherNetIP.pdf",
+      "markdown_file": "chapter_05_set_up_ethernet_ip_communication.md",
+      "num_pages": 5,
+      "num_chunks": 4
+    },
+    {
+      "chapter": 6,
+      "section_type": "chapter",
+      "title": "Keypad Interface",
+      "source_pdf": "07_Ch06_Keypad_Interface.pdf",
+      "markdown_file": "chapter_06_keypad_interface.md",
+      "num_pages": 12,
+      "num_chunks": 12
+    },
+    {
+      "chapter": 7,
+      "section_type": "chapter",
+      "title": "KNX5100C Software",
+      "source_pdf": "08_Ch07_KNX5100C_Software.pdf",
+      "markdown_file": "chapter_07_knx5100c_software.md",
+      "num_pages": 60,
+      "num_chunks": 38
+    },
+    {
+      "chapter": 8,
+      "section_type": "chapter",
+      "title": "Studio 5000",
+      "source_pdf": "09_Ch08_Studio_5000.pdf",
+      "markdown_file": "chapter_08_studio_5000.md",
+      "num_pages": 11,
+      "num_chunks": 5
+    },
+    {
+      "chapter": 9,
+      "section_type": "chapter",
+      "title": "Tuning",
+      "source_pdf": "10_Ch09_Tuning.pdf",
+      "markdown_file": "chapter_09_tuning.md",
+      "num_pages": 34,
+      "num_chunks": 30
+    },
+    {
+      "chapter": 10,
+      "section_type": "chapter",
+      "title": "Modes of Operation",
+      "source_pdf": "11_Ch10_Modes_of_Operation.pdf",
+      "markdown_file": "chapter_10_modes_of_operation.md",
+      "num_pages": 52,
+      "num_chunks": 51
+    },
+    {
+      "chapter": 11,
+      "section_type": "chapter",
+      "title": "Motion Control - PR Mode",
+      "source_pdf": "12_Ch11_Motion_Control_PR_Mode.pdf",
+      "markdown_file": "chapter_11_motion_control_pr_mode.md",
+      "num_pages": 85,
+      "num_chunks": 112
+    },
+    {
+      "chapter": 12,
+      "section_type": "chapter",
+      "title": "Motion Control Applications",
+      "source_pdf": "13_Ch12_Motion_Control_Apps.pdf",
+      "markdown_file": "chapter_12_motion_control_applications.md",
+      "num_pages": 39,
+      "num_chunks": 41
+    },
+    {
+      "chapter": 13,
+      "section_type": "chapter",
+      "title": "Safe Torque Off (STO)",
+      "source_pdf": "14_Ch13_Safe_Torque_Off.pdf",
+      "markdown_file": "chapter_13_safe_torque_off_sto.md",
+      "num_pages": 13,
+      "num_chunks": 22
+    },
+    {
+      "chapter": 14,
+      "section_type": "chapter",
+      "title": "Absolute Position Recovery",
+      "source_pdf": "15_Ch14_Absolute_Pos_Recovery.pdf",
+      "markdown_file": "chapter_14_absolute_position_recovery.md",
+      "num_pages": 8,
+      "num_chunks": 5
+    },
+    {
+      "chapter": 15,
+      "section_type": "chapter",
+      "title": "Programming Parameters",
+      "source_pdf": "16_Ch15_Programming_Parameters.pdf",
+      "markdown_file": "chapter_15_programming_parameters.md",
+      "num_pages": 18,
+      "num_chunks": 28
+    },
+    {
+      "chapter": 16,
+      "section_type": "chapter",
+      "title": "Troubleshooting",
+      "source_pdf": "17_Ch16_Troubleshooting.pdf",
+      "markdown_file": "chapter_16_troubleshooting.md",
+      "num_pages": 8,
+      "num_chunks": 9
+    },
+    {
+      "chapter": 101,
+      "section_type": "appendix",
+      "title": "Appendix A - Interconnect Diagrams",
+      "source_pdf": "18_AppA_Interconnect_Diagrams.pdf",
+      "markdown_file": "appendix_a_appendix_a_interconnect_diagrams.md",
+      "num_pages": 20,
+      "num_chunks": 53
+    },
+    {
+      "chapter": 102,
+      "section_type": "appendix",
+      "title": "Appendix B - Upgrade Firmware",
+      "source_pdf": "19_AppB_Upgrade_Firmware.pdf",
+      "markdown_file": "appendix_b_appendix_b_upgrade_firmware.md",
+      "num_pages": 12,
+      "num_chunks": 11
+    },
+    {
+      "chapter": 103,
+      "section_type": "appendix",
+      "title": "Appendix C - Add-On Instructions",
+      "source_pdf": "20_AppC_AddOn_Instructions.pdf",
+      "markdown_file": "appendix_c_appendix_c_add_on_instructions.md",
+      "num_pages": 37,
+      "num_chunks": 48
+    },
+    {
+      "chapter": 104,
+      "section_type": "appendix",
+      "title": "Appendix D - Full Closed Loop",
+      "source_pdf": "21_AppD_Full_Closed_Loop.pdf",
+      "markdown_file": "appendix_d_appendix_d_full_closed_loop.md",
+      "num_pages": 3,
+      "num_chunks": 3
+    },
+    {
+      "chapter": 105,
+      "section_type": "appendix",
+      "title": "Appendix E - Scope Function",
+      "source_pdf": "22_AppE_Scope_Function.pdf",
+      "markdown_file": "appendix_e_appendix_e_scope_function.md",
+      "num_pages": 10,
+      "num_chunks": 6
+    },
+    {
+      "chapter": 106,
+      "section_type": "appendix",
+      "title": "Appendix F - Automatic Device Configuration",
+      "source_pdf": "23_AppF_Automatic_Device_Config.pdf",
+      "markdown_file": "appendix_f_appendix_f_automatic_device_configuration.md",
+      "num_pages": 6,
+      "num_chunks": 5
+    },
+    {
+      "chapter": 107,
+      "section_type": "appendix",
+      "title": "Appendix G - History of Changes",
+      "source_pdf": "24_AppG_History_of_Changes.pdf",
+      "markdown_file": "appendix_g_appendix_g_history_of_changes.md",
+      "num_pages": 2,
+      "num_chunks": 1
+    },
+    {
+      "chapter": 200,
+      "section_type": "index",
+      "title": "Index",
+      "source_pdf": "25_Index.pdf",
+      "markdown_file": "zz_index_index.md",
+      "num_pages": 10,
+      "num_chunks": 9
+    }
+  ],
+  "schema": {
+    "chunks.csv": {
+      "chunk_id": "16-char md5 hash, stable id",
+      "section_type": "str, one of: front_matter, chapter, appendix, index",
+      "chapter": "int, chapter order key (-2 cover, -1 preface, 1-16 chapters, 101-107 App A-G, 200 index)",
+      "chapter_title": "str",
+      "section": "str, best-effort heading detected",
+      "page_start": "int, 1-indexed first page in chunk",
+      "page_end": "int, 1-indexed last page in chunk",
+      "is_table": "bool, true if chunk is an extracted table",
+      "n_chars": "int",
+      "approx_tokens": "int, len(text)//4",
+      "text": "str, chunk content in Markdown",
+      "source_pdf": "str, original file name",
+      "markdown_file": "str, per-chapter markdown filename"
+    }
+  }
+}

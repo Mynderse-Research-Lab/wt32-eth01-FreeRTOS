@@ -1,28 +1,22 @@
 # Top-level ESP-IDF project for the WT32-ETH01 gantry controller.
 #
-# Layout:
-#   idf/                      <- this folder (the ESP-IDF project root)
-#     CMakeLists.txt          <- this file
-#     main/                   <- main app component (pulls src/*.cpp)
-#     components/             <- project-private components (gpio_expander)
-#   ../src/                   <- application sources (main.cpp, console, etc.)
-#   ../include/               <- application headers (pin map, params)
-#   ../lib/PulseMotor/        <- PulseMotor component
-#   ../lib/Gantry/            <- Gantry component
-#   ../lib/MCP23S17/          <- MCP23S17 SPI expander component
+# Drive control: EtherNet/IP over W5500 (SPI2).
+# SPI3 shared: MCP23S17 (Field I/O + TFT control) + Amazon SPI TFT.
 #
 # Build:   idf.py -C idf build
 # Flash:   idf.py -C idf -p COM3 flash monitor
 
 cmake_minimum_required(VERSION 3.16)
 
-# Point ESP-IDF at the repo's "lib/" dir so every library under lib/<Name>/
-# with a CMakeLists.txt is picked up as an ESP-IDF component.
 set(EXTRA_COMPONENT_DIRS
-    "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
-    "${CMAKE_CURRENT_LIST_DIR}/../lib/PulseMotor"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Gantry"
-    "${CMAKE_CURRENT_LIST_DIR}/../lib/MqttBridge"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/CellNetL2"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/EthernetLink"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/EtherNetIP"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/W5500"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/Spi3Bus"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/SpiDisplay"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

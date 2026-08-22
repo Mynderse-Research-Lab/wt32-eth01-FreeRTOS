@@ -1,0 +1,700 @@
+﻿,,,,,,
+Kinetix 5100 Fault Codes,,,,,,
+,,,,,,
+For more information see:,,,,,,
+"Kinetix 5100 Servo Drive User Manual, publication 2198-UM004",,,,,,
+,,,,,,
+"Fault Type
+","Fault Code
+",Display Text,Fault,Corrective Action,Servo ON,Servo OFF
+Major Recoverable Fault,E 001,Over current,"Over current 
+Current is 1.5 times more than the drive's rated peak current output.
+Causes:
+1. The drive output is short-circuited.
+2. Motor wiring error.
+3. IGBT error.
+4. Control parameter setting error.
+5. Unreasonable command issued.","1a. Check the wiring connection between the drive and motor. 
+1b. Check that the wires are not short-circuited.
+1c. Correct the wiring and avoid exposing any conductors. 
+2a. Check that the wiring steps are all correct when connecting the motor to the drive.
+2b. Follow the wiring instructions in the user manual. 
+3a. The temperature of heat sink is abnormal. 
+3b. If the issue persists, contact your distributor or Rockwell Automation representative. 
+4a. Check whether the setting value is greater than the default value.
+4b. Reset to the default settings and then gradually adjust the value.
+5a. Check that the command is within a reasonable acceleration time.
+5b. Increase the acceleration time. 
+5c. Apply a filter for a smooth command.",,○
+Major Recoverable Fault,E 002,Over voltage,"Over voltage
+The main circuit voltage is higher than the rated voltage.
+Causes:
+1. The input voltage of main circuit is higher than the rated allowable voltage.
+2. The drive may be damaged.","1a. Check the main input voltage.
+1b. Apply the correct voltage.
+2.  If the issue persists, contact your distributor or Rockwell Automation representative.
+",,○
+Major Recoverable Fault,E 003,Under voltage,"Under voltage
+Voltage of the main circuit is lower than the rated voltage. 
+Causes:
+1. The input voltage of main circuit is lower than the allowable voltage.
+2. No voltage is supplied to the power circuit.","1a. Check the main input voltage.
+1b. Check the input voltage wiring.
+2a. Check the main input voltage.
+2b. Check the input voltage wiring.",,○
+Major Unrecoverable Fault,E 004,Motor combination error,"Motor Combination Error
+Drive and motor combination error.
+Causes:
+1. The wrong motor is connected to the servo drive.",1. Connect to the right motor.,,○
+Major Recoverable Fault,E 005,Regeneration error,"Regeneration error
+Causes:
+1. The shunt resistor is not connected or its value is too low.
+2. ID158 (P1.053) ShuntResistorPower is not set to zero when the shunt resistor is not connected. The regenerative switch transistor may be short-circuited.
+3. Wrong parameter setting. ","1a. Check the connection of the shunt resistor.
+1b. Connect the shunt resistor or recalculate the value of the shunt resistor.
+2a. Check if the regenerative switch transistor is short-circuited. 
+2b. Set parameterID158 (P1.053) ShuntResistorPower to zero when the shunt resistor is not in use.
+3a. Check the settings of parameters ID157 (P1.052) ShuntResistorValue and ID158 (P1.053) ShuntResistorPower.
+3b. Set the correct value.",,○
+Major Recoverable Fault,E 006,Motor overload,"Motor overload
+
+Causes:
+1. Motor ratings have been exceeded.
+2. Control parameters are inappropriate.
+3. Wiring between the motor and encoder is incorrect.
+4. The motor encoder is malfunctioning.","1a. Set parameter ID102 (P0 - 002) LEDMonitorSelection to 12 and check if the average torque % is over 100% all of the time. 
+1b. Change the motor or reduce the load.
+2a. Check for mechanical vibration.
+2b. Adjust the tuning parameters.
+2c. Check the acceleration or deceleration settings.
+2d. Reduce the acceleration or deceleration settings.
+3a. Check the wiring between the motor and the encoder.
+3b. Correct the wiring.
+4. If the motor encoder is malfunctioning, contact your distributor or Rockwell Automation representative.",,○
+Major Recoverable Fault,E 007,Excessive deviation of speed command,"Excessive deviation of speed command
+The speed of the motor exceeds the maximum set speed. 
+Causes: 
+1. Abnormal analog command.
+2. Inappropriate parameter setting.
+3. Excessive command.","1a. Use the scope to check the analog voltage signal. 
+1b. Use the analog filter to smooth the command speed.
+2a. Check whether the setting of ID218 (P2.034) VelocityErrorTolerance is too small (the over-speed warning condition).
+2b. Set ID218 (P2.034) VelocityErrorTolerance (the overspeed warning condition) correctly.
+3a. Check the command speed.
+3b. Command speed too aggressive.",,○
+Major Recoverable Fault,E 008,Abnormal pulse command,"Abnormal pulse command
+Causes: 
+1. The pulse command frequency is higher than the rated input frequency.","1a. Use the scope to check if the input frequency is higher than the rated input frequency.
+1b. Correct the input pulse frequency setting.",,○
+Major Recoverable Fault,E 009,Excessive deviation of position command,"Excessive deviation of position command
+The deviation of the posistion command exceeds the allowable setting value.
+Causes:
+1. Parameter ID219 (P2.035) PositionErrorTolerance is set too small.
+2. The tuning parameters are set inappropriately. 
+3. The torque limit is too low.
+4. Excessive external load.","
+1a. Check the setting value of ID219 (P2.035) PositionErrorTolerance (the warning condition of excessive position deviation).
+1b. Increase the setting value of ID219 (P2.035) PositionErrorTolerance.
+2a. Check the value of the tuning parameters.
+2b. Correct the value of the tuning parameters.
+3a. Check the torque limit value.
+3b. Correctly adjust the torque limit value.
+4a. Check the external load.
+4b. Reduce the external load or re-evaluate the motor capacity. ",,○
+Major Unrecoverable Fault,E 011,Encoder error,"Encoder error
+The encoder has an abnormal pulse.
+Causes:
+1. The encoder is wired incorrectly.
+2. The encoder connector is loose.
+3. The encoder is damaged.","1a. Check the wiring to the encoder by following the instructions in the user manual.
+1b. Correct the wiring.
+2a. Check the drive connector and the motor encoder connectors.
+2b. Correct the connectors.
+3a. Check the motor and encoder for damage. 
+3b. Replace the motor.",,○
+Major Recoverable Fault,E 012,Analog input calibration error,"Analog input calibration error
+The calibration value exceeds the allowable value during electronic calibration.
+Causes:
+1. The analog input port is incorrectly set to zero.
+2. The measurement device is damaged. ","1a. Check grounding signals. 
+1b. Correctly connect the analog input port to ground.
+2a. Reset the power supply.
+2b. Contact your distributor or Rockwell Automation representative.",,○
+Major Recoverable Fault,E 013,Emergency stop,"Emergency stop
+The emergency stop button is activated.","1a. Check if the emergency stop button is activated. 
+1b. Deactivate the emergency stop by using the DI.EMGS signal. ",,○
+Minor Recoverable Fault (Warning),A 014,Reverse limit warning,"Reverse limit warning
+Causes:
+1. The reverse limit switch is activated.
+2. The servo system is unstable.","1a. Check if the limit switch is activated.
+1b. Move the axis away from the reverse limit switch.
+2a. Check the control parameter and inertia ratio.
+2b. Re-adjust the parameter or re-evaluate the motor capacity.",○,
+Minor Recoverable Fault (Warning),A 015,Forward limit warning,"Forward limit warning
+Causes:
+1. The forward limit switch is activated.
+2. The servo system is unstable.","1a. Check if the limit switch is activated.
+1b. Move the axis away from the forward limit switch.
+2a. Check the control parameter and inertia ratio.
+2b. Re-adjust the parameter or re-evaluate the motor capacity.",○,
+Major Recoverable Fault,E 016,IGBT overheat,"IGBT overheat
+The temperature of the IGBT is too high.
+Causes:
+1. The load is greater than the drive rating and excessive use.
+2. The drive output is short-circuited.","1a. Check for overloading or if the motor current is too high.
+1b. Change the motor or reduce loading.
+2a. Check the drive output wiring.
+2b. Correct the wiring.",,○
+Major Recoverable Fault,E 017,Abnormal EEPROM,"Abnormal EEPROM
+An EEPROM error has occurred.",1. Contact your distributor or Rockwell Automation representative.,,○
+Major Recoverable Fault,E 018,Abnormal pulse output,"Abnormal pulse output
+Causes:
+1. An error in the encoder.
+2. The output pulse exceeds the allowable hardware range.
+3. Interference or cable damage.","1a. Check if E 011, E 024, E025, or E 026 are present in the fault history. See ID274 (P4.000) …ID 278 (P4.005) FaultRecordNx.
+1b. If a fault exists, correct the fault.
+2. Check that the value of ID175 (P1.076) MaxEncoderOutputSpeed is less than the motor speed or that 
+(Motor Speed/60)x(MaxEncoderOutputSpeed x4) > (19.8 x 106).
+3a. Set ID102 (P0.002) LEDMonitorSelection to 112. If interference is present, the value increments.
+3b. Check that the motor is properly grounded.
+3c. Check whether the encoder cable is separated from the power supply or the high-current circuit.
+3d. Check whether shielded cables are used.
+",,○
+Major Recoverable Fault,E 022,Input voltage phase loss,"Input voltage phase loss
+Causes:
+1. The input voltage is abnormal.
+","1a. Check RST wiring.
+1b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 024,Encoder Hall sensor effect error,"Encoder Hall sensor effect error
+Error in the U, V, W magnetic field of the encoder signal.
+Causes: 
+1. The motor is not properly grounded.
+2. Interference or cable damage.
+3. The Hall sensor is not wired.","1. Check that the motor is properly grounded.
+2a. Check that feedback cable is separated from  the power supply or the high-current cables.
+2b. Check whether shielded cables were used.
+2c. Use shielding mesh.
+3. Verify that the Hall sensor is wired.
+4. Contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 025,Internal encoder error,"Internal encoder error
+Causes: 
+1. The motor is not properly grounded.
+2. Interference or cable damage.","1a. Check that the motor is properly grounded.
+1b. Wire the motor grounding cable.
+2a. Check that feedback cable is separated from  the power supply or the high-current cables.
+2b. Check whether shielded cables were used.
+2c. Use shielding mesh.
+3. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 027,Encoder reset error,"Encoder reset error
+An internal encoder error has occurred.
+Causes: 
+1. The motor is not properly grounded.
+2. Interference or cable damage.","
+1a. Check that the motor is properly grounded.
+1b. Wire the motor grounding cable.
+2a. Check that feedback cable is separated from  the power supply or the high-current cables.
+2b. Check whether shielded cables were used.
+3. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 028,Encoder overvoltage error,"Encoder overvoltage error
+Causes:
+1. Battery is over voltage.","1a. Check whether the voltage of the installed battery is greater than 3.8 V.
+1b. Replace the battery.",,○
+Major Unrecoverable Fault,E 029,Gray Code error,"Gray Code error
+Encoder error occurred.
+Causes:
+1. An absolute position error occurred.","1a. Cycle power and check if the fault re-occurs.
+1b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Recoverable Fault,E 02C,Drive overload,"Drive overload
+Causes:
+1. The drive rating has been exceeded.
+2. The control parameters are set inappropriately.
+3. The accel/decel settings are inappropriate.
+4. Wiring between the motor and encoder is incorrect.
+5. The motor controller is malfunctioning. ","1a. Set parameter ID102 (P0 - 002) LEDMonitorSelection to 113 and check if the average torque is over 100% all of the time.  When the monitored value is higher than 100%, then fault E02C occurs.
+1b. Change the drive or the motor or reduce the load.
+2a. Check for mechanical vibration.
+2b. Adjust the tuning parameters.
+2c. Check the acceleration or deceleration settings.
+2d. Reduce the acceleration or deceleration settings.
+3a. Check the wiring between the motor and the encoder.
+3b. Correct the wiring.
+4. If the motor encoder is malfunctioning, contact your distributor or Rockwell Automation representative.",,○
+Major Recoverable Fault,E 030,Exceed torque limit,"Exceed torque limit
+Torque limit or time setting exceeded.
+Causes:
+1. Parameter ID162 (P1.057) CrashProtectionTorqueThreshold is not set correctly.
+2. Parameter ID162 (P1.057) CrashProtectionTorqueThreshold and ID163 (P1.058) CrashProtectionFilterTime are not set correctly. ","1a. Check whether ID162 (P1.057) CrashProtectionTorqueThreshold is not set to 0.
+1b. Set ID162 (P1.057) to 0 if it is not in use.
+2a. Check the values of  ID162 (P1.057) and ID163 (P1.058).
+2b. Set ID162 (P1.057) and ID (P1.058) to a higher value.",,○
+Major Unrecoverable Fault,E 031,Incorrect or disconnected motor power cable wiring,"Incorrect or disconnected motor power cable wiring
+Causes:
+1. Incorrect or disconnected motor power cable wiring. ","1a. Check motor power cable wiring.
+1b. Correct the motor power cable wiring.",,○
+Major Unrecoverable Fault,E 034,Encoder communication error,"Encoder communication error
+Causes:
+1. Internal communication error of the encoder (absolute or other encoder).","
+1. Change the motor. 
+",,○
+Major Unrecoverable Fault,E 035,Encoder over temperature,"Encoder over temperature
+Causes:
+1. Encoder temperature exceeded the maximum of 100°C (212°F).
+","1a. Set ID102 (P0.002) LEDMonitorSelection to 114 to read the temperature and check if it is below 100°C (212°F). 
+1b. If the encoder temperature is higher than 100°C (212°F),  improve the heat dissipation to lower the temperature. 
+1c. If the temperature difference between the motor and the
+displayed temperature value is over 30˚C (86 °F) , contact your distributor or Rockwell Automation representative.
+1d. Restart the system when the TLP motor temperature is below 100°C (212°F).",,○
+Major Recoverable Fault,E 040,Excessive deviation of full closed-loop position control,"Excessive deviation of full closed-loop position control
+Causes:
+1. ID172 (P1.073) MotorAndAuxFeedbackErrorLimit is set too small. 
+2. Connection problem.
+","1a. Check if the value of ID172 (P1.073) is too small. 
+1b. Increase the value of ID172 (P1.073).
+2a. Check whether the connector is loose or there is any mechanism connection problem.
+2b. Fix the connection.",,○
+Major Recoverable Fault,E 041,Auxiliary feedback error,"Auxiliary feedback error
+Causes:
+1. Wiring issue with auxiliary feedback. ","1a. Check the wiring for the auxiliary feedback.
+1b. Correct the wiring, if necessary. ",,○
+Major Recoverable Fault,E 042,Analog input voltage error,"Analog input voltage error
+Causes:
+1. The analog input voltage is higher than the value of ID176 (P1.083) AbnormalAnalogInputVoltageLevel over 50ms.","1a. Check if analog input voltage is higher than the value of ID176 (P1.083) AbnormalAnalogInputVoltageLevel.
+1b. Correct the analog input source or the value of ID176 (P1.083) AbnormalAnalogInputVoltageLevel setting.",,○
+Major Unrecoverable Fault,E 045,E-Gear ratio setting error,"E-Gear ratio setting error
+Causes: 
+1. E-Gear ratio exceeds the allowable range (0.25…262144)","1a. Check that the E-gear ratio parameter is within the allowable range.
+1b. Adjust the parameter value to within the allowable range. 
+1c. Cycle power to the drive.",,○
+Major Unrecoverable Fault,E 050,Auto detection of motor parameters is complete,"Auto detection of motor parameters is complete
+Causes:
+1. When executing motor analyzer or test commutation, this fault occurs when the auto detection is complete.",1. Cycle power or reset the drive.,,○
+Major Recoverable Fault,E 052,Initial magnetic field detection error,"Initial magnetic field detection error
+The drive could not detect a magnetic field when using self sense.
+Causes:
+1. The motor move distance is too large during the magnetic field detection.  
+2. The motor brake is not released or motor is not rotating smoothly, or the motion platform cannot work because the set screw has not been pulled out.","1a. Check that the motor parameter ID599 (PM.003) EncoderType is set  correctly.
+1b. Check whether the feedback signal is abnormal.
+1c. Check whether the moving distance is too large during the initial magnetic field detection when the motor is powered on.
+1d. Check for interference and verify that shielded cable is used for the feedback signal.
+2a. Make sure that the motor and mechanism can operate properly. 
+2b. Check whether the friction between the motor and mechanism is too large.",,○
+Major Unrecoverable Fault,E 055,Motor magnetic field error,"Motor magnetic field error
+Causes:
+1. The drive detects the motor’s current magnetic field position and compares it with that of the Hall sensor. When the deviation between the two is too big, this alarm occurs.
+","1a. Check if noise is interfering with the encoder feedback,  causing pulse loss. 
+1b. Assuming that the feedback type of the encoder is a square wave digital signal, check if the motor speed is too fast and exceeds the hardware limit of 20 MHz (the limit of quadruple frequency). 
+1c. Check if the Hall sensor is malfunctioning.",,○
+Major Recoverable Fault,E 058,Excessive deviation of initial magnetic pole position detection when power on,"Excessive deviation of initial magnetic pole position detection when power on
+The controller issued commands during initial magnetic field detection.
+Causes:
+1. After the initial magnetic field detection is complete, the servo system then attempts, but fails to reduce the existing position error.
+2. If the controller issues commands when the servo system is not fully settled, the position error might therefore be greater and cannot be reduced.","1a. Check if the controller has issued the command immediately when it is powered on. Use the software scope and select 'Command position' to monitor whether there is a command issued. If so, increase the delay time for the controller to issue the command after it is powered on.
+2a.  If the controller time sequence cannot be modified due to surge interference or other factors when powered on, set ID682 (P2.088) [bit4] to 1 to prohibit the servo from receiving controller commands during the initial magnetic field detection.",,○
+Major Recoverable Fault,E 05C,Motor position feedback error,"Motor position feedback error
+A sharp change of motor feedback position occurred.
+Causes:
+1. Encoder feedback is abnormal or the encoder is damaged.
+2. The encoder feedback signal experienced interference.","1. Check whether the feedback signal is abnormal. Rotate the motor by hand and observe whether feedback signal has an abnormally large change.
+2. Check for interference and verify that shielded cable is used for the feedback signal.
+3. Clear the fault.",,○
+Major Recoverable Fault,E 05D,Motor UVW offset error,PM.007 detects error (test commutation).,"1. Check whether PM.003, PM.004 and PM.028 are set correctly.
+2. Check whether motor can be rotated by hand.
+3. Check whether the friction between the motor and the mechanism is too large.
+4. Check whether feedback signal is abnormal.
+5. Check whether the interference exist and shielded cable for the feedback signal cable is used ",,○
+Minor Recoverable Fault (Warning),A 060,Absolution position lost,"Absolution position lost
+Causes:
+1. Absolute position is not initialized.
+2. Battery undervoltage.
+","
+1a. Check if the absolute position was initialized. 
+1b. Conduct the homing procedure to initialize the absolute position.
+2. Check battery and replace, if necessary.",○,
+Minor Recoverable Fault (Warning),A 061,Encoder under voltage,"Encoder under voltage
+Causes:
+1. The battery is undervoltage.","1.  Check battery and replace, if necessary.",○,
+Minor Recoverable Fault (Warning),A 065,Absolute position cannot sync with EEPROM data,"Absolute position cannot sync with EEPROM data
+The drive cannot compute the absolute position  reliably when booting up.
+Causes:
+The motor moved while power was off.","1. Check if the motor has moved more than 1/4 multi-turn.
+2. This fault is cleared automatically when absolute position is initialized.",○,
+Minor Recoverable Fault (Warning),A 068,Error transmitting absolute data via I/O,"Error transmitting absolute data via I/O
+Causes:
+1. Sequence error occurred. 
+2. Read time out occurred.","1. Correct the I/O reading sequence by switching DI.ABSQ off until DO.ABSR is off and switching DI.ABSQ on once DO.ABSR is on.
+2a. Check if the time between switching ON DO ABSR and switching ON ABSQ exceeds 200 ms.
+2b. After switching DO.ABSR (the absolute position data is ready) on,
+ read DO.ABSD and switch DI.ABSQ on within 200 ms to inform the servo drive that data reading is complete.",○,
+Major Unrecoverable Fault,E 069,Wrong motor encoder type,"Wrong motor encoder type
+Wrong motor encoder type selected
+Causes:
+1. Incremental motor does not support absolute function.
+2. Absolute encoder function required.","1a. Check that ID242 (P2.069) AbsoluteSystemSetting is set for an incremental motor.
+1b. Set ID242 (P2.069) AbsoluteSystemSetting to 0 for an incremental motor.
+2a. Check the motor encoder type.
+2b. Change motor to an absolute encoder type.",,○
+Minor Recoverable Fault (Warning),A 06A,"Absolute position is not initialized 
+","Absolute position is not initialized
+Causes:
+1. The motor is being used for the first time or absolute position was lost due to a battery change.","1a. Check if the absolute position was initialized.
+1b. Initialize the absolute postion.",○,
+Major Unrecoverable Fault,E 071,TLP Motor encoder MT error,"TLP Motor encoder MT error
+TLP motor MT error due to lower encoder voltage.
+Causes:
+1. The encoder entered the non-operation state and it is unable to serve as an encoder. This occurs when the higher voltage between the built-in backup capacitor in the encoder or the external battery becomes 2.76V or less.",1. Replace the motor if the fault continues.,,○
+Major Unrecoverable Fault,E 072,Encoder overspeed,"Encoder overspeed
+The encoder exceeded 8800 rpm.
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1. Check that the motor is properly grounded.
+2a. Check that the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 073,Encoder memory error,"Encoder memory error
+An error has occurred when the encoder was reading or writing data in EEPROM.
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1a. Check that the motor is properly grounded.
+2a. Check that the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 074,Absolute encoder single-turn position error,"Absolute encoder single-turn position error
+A single-turn position error on the absolute encoder occurred.
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1. Check that the motor is properly grounded.
+2a. Check that the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 075,Absolute encoder multi-turn position error,"Absolute encoder multi-turn position error
+A multi-turn position error occurred on the absolute encoder. 
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1. Check that the motor is properly grounded.
+2a. Check whether the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 077,Encoder computing error,"Encoder computing error
+A computing error occurred on the encoder.
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1. Check that the motor is properly grounded.
+2a. Check whether the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 07B,Encoder memory is busy,"Encoder memory is busy
+Causes:
+1. The motor is not grounded properly.
+2. Interference or cable damage.
+3. The motor speed is not within range.","1. Check that the motor is properly grounded.
+2a. Check whether the encoder cable is separated from the power supply or the high-current circuit.
+2b. Check whether shielded cables are used.
+3a. Check whether motor speed is within range.
+3b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Minor Recoverable Fault (Warning),A 07C,Clearing absolute position is issued when motor speed is over 200 rpm,"Clearing absolute position is issued when motor speed is over 200 rpm
+Causes: 
+1. The command for clearing absolute position was issued when motor speed is over 200 rpm.",1. Follow the procedure for clearing absolute position to clear this warning or set ID244 (P2.071) ResetAbsolutePosition to 1.,○,
+Major Unrecoverable Fault,E 07D,A 07C fault not cleared,"A 07C fault not cleared
+Causes: 
+1. A 07C was not cleared.",1. Clear the fault.,,○
+Major Unrecoverable Fault,E 07E,Encoder clearing procedure error,"Encoder clearing procedure error
+Causes:
+1. The clearing procedure for the encoder exceeded the limit.","1a. Set ID102 (P0.002) LEDMonitorSelection to -80 to check the quality of encoder communication.
+1b. Clear the fault.",,○
+Major Unrecoverable Fault,E 07F,Encoder version error,"Encoder version error
+Causes:
+1. The encoder version read by the drive is wrong. ",1. Replace the motor.,,○
+Major Recoverable Fault,E 083,Excessive over current,"Excessive over current
+Servo drive output exceeds 95% of hardware overcurrent.
+Causes:
+1. The drive output is short-circuited.
+2. Motor wiring is incorrect.
+3. Unreasonable acceleration time command.","1a. Check the wiring connections between drive and motor.
+1b. Check if the wire is short-circuited.
+1c. Eliminate the short-circuit and verify that the metal conductor is not exposed.
+2a. Check that the wiring steps are all correct when connecting the motor to the drive.
+2b. Follow the wiring description from the user manual.
+3a. Check if the command is using a reasonable acceleration time.
+3b. Reduce the steepness of the command or apply a filter to smooth the command.",,○
+Major Recoverable Fault,E 085,Shunt resistor error,"Shunt resistor error
+Causes: 
+1. The shunt resistor is not in operation, but the DC bus voltage remains 400V over 110 ms.","1a. Check the shunt resistor connection.
+1b. Re-calculate the value for shunt resistor, and reset the value of ID157 (P1.052) ShuntResistorValue and ID158 (P1.053) ShuntResistorPower.
+1c. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Minor Recoverable Fault (Warning),A 089,Current detection interference,"Current detection interference
+Causes:
+1. External interference has been detected by the drive.
+ ","1a. Check for a source of interference.
+1b. Remove the source of interference.
+1c. Set ID266 (P2.112) SpecialFunctionConfiguration4, Bit 1 to 0 to disable the warning.
+1d. If the issue persists, contact your distributor or Rockwell Automation representative.",○,
+Major Recoverable Fault,E 08A,Auto-tuning command error,"Auto-tuning command error
+Command issued error during the auto-tuning procedure.
+Causes:
+1. The external source command was not issued.
+2. Cable connection error. 
+3. Position 1 and Position 2 were the same when the command was issued. ","1. Check the external source command.
+2. Check the cable connection.
+3. Reconfigure Position 1 and Position 2. ",,○
+Major Recoverable Fault,E 08B,Dwell time too short,"Dwell time too short
+Causes:
+1. The dwell time is set too short during the autotuning procedure.",1. Setting the dwell time is required. Increase the dwell time to more than 1 second.,,○
+Major Recoverable Fault,E 08C,Inertia estimation error,"Inertia estimation error
+An inertia estimation error occurred during the auto-tuning procedure.
+Causes:
+1. Acceleration/deceleration time was too long.
+2. Speed is too slow.
+3. Inertia mismatch.
+4. Inertia variation is too vigorous.","1. Verify that the acceleration/deceleration time for motor to start from 0 … 3000 rpm is within 1.5 sec.
+2. The recommended speed setting is 500 rpm. The lowest possible speed setting is 200 rpm.
+3. Verify that load inertia is not more than 50 times the motor inertia.
+4. Resize the system requirements.",,○
+Major Unrecoverable Fault,E 099,DSP parameter value is out of range.,"DSP parameter value is out of range.
+Causes:
+1. The DSP parameter is out of range.","1a. Check whether the firmware is updated. 
+1b. Update the firmware.",,○
+Major Unrecoverable Fault,E 09C,Parameter reset failure,"Parameter reset failure
+Causes:
+1. Parameter reset was not successful.",1. Perform the parameter reset again.,,○
+Major Recoverable Fault,E 207,Download parameter or data array (PR mode) group out of range,"Download parameter or data array (PR mode) group out of range
+Causes:
+1. Group is out of range.","1a. Check parameter group and value.
+1b. Clear the fault.",,○
+Major Recoverable Fault,E 209,Download parameter or data array (PR mode) number out of range,"Download parameter or data array' (PR mode) number out of range
+Causes:
+1. Number is out of range.","1a. Check parameter number and value.
+1b. Clear the fault.",,○
+Major Recoverable Fault,E 213,Download parameter or data array (PR mode) data out of range,"Download parameter or data array' (PR mode) data out of range
+Causes:
+1. Data is out of range.","1a. Check parameter value.
+1b. Clear the fault.",,○
+Major Recoverable Fault,E 215,Download to read only parameters,"Download to read only parameters
+Causes:
+1. Writing to read only parameters.","1a. Verify that parameter is read only. 
+1b. Clear the fault.
+1c. Adjust the PR command and parameters.",,○
+Major Recoverable Fault,E 217,Downloading parameter which is not allowed to write during servo-on,"Downloading parameter which is not allowed to write during servo-on
+Causes:
+1. Downloading to a parameter that cannot be written to while the servo is on.","1a. Check whether the drive status is servo on. 
+1b. Clear the fault.
+1c. Adjust the PR command and parameters.
+1d. Execute the command when the drive status is servo off.",,○
+Major Recoverable Fault,E 219,Downloading parameter which is locked,"Downloading parameter which is locked
+Causes: 
+1. Downloading to parameter which is locked","1a. Check whether parameter protection is enabled. 
+1b. Clear the fault.
+1c. Adjust the PR command and parameters.",,○
+Major Recoverable Fault,E 21F,Downloading invalid value to parameter,"Downloading invalid value to parameter
+Causes:
+1. Downloading an invalid value to a parameter","1a. Check the parameter value.
+1b. Clear the fault. 
+1c. Adjust the PR command and parameter",,○
+Major Recoverable Fault,E 231,Download parameter or data array (PR mode) monitored item out of range,"Download parameter or data array' (PR mode) monitored item out of range
+Causes:
+1. Monitored item  is out of range.","1a. Check monitored item range.
+1b. Clear the fault.",,○
+Major Recoverable Fault,E 235,Absolute move command error,"Absolute move command error
+1. This fault occurs if you execute the absolute move command in the following situation:
+a. ID117 (P1.001.Z) ControlMode has changed and the homing procedure was not executed. 
+b.The E-gear ratio is modified by using [ID151 (P1.044) GearRatioFollowerCountsN1 and ID152 (P1.045) GearRatioMasterCounts] and the homing procedure was not executed.
+c. The homing procedure was not completed before the command was triggered.
+d. A 060 (Absolute Position Lost) or A 065 (Absolute Position Cannot Synch with EEPROM Data) or and A 06A (Absolute position is not initialized) occurred. 
+2. Incremental type: PR mode continuously operates in one direction and causes feedback register (FB_PUU) overflows. 
+The coordinate system cannot reflect the correct position. The error occurs if the absolute positioning command is issued at during this time period.
+3. Absolute type: The error occurs in following situations:
+a.Feedback register (FB_PUU) overflows. 
+b. After ID117 (P1.001.Z) ControlMode is modified, the system neither returns to the original point nor conducts homing procedure.
+c. The system does not conduct the homing procedure after the E-gear ratio is modified by using [ID151 (P1.044) GearRatioFollowerCountsN1 and ID152 (P1.045) GearRatioMasterCounts] . 
+d. Returning to the original point is triggered while the homing procedure is not complete.
+e. A 060 or A 062 or A 065 or A 06A occur.",Conduct homing procedure.,,○
+Major Recoverable Fault,E 237,Indexing mode cannot start,"Indexing mode cannot start
+Causes:
+1. Homing is not defined.",1. Define a homing function. ,,○
+Major Unrecoverable Fault ,E 245,Motion Wait Event Timeout,"Motion Wait Event Timeout
+The needed signal was not received when a specific motion event was executed.
+Causes:
+1. The motion event could not be completed due to a missing signal. ","1. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Recoverable Fault,E 249,The number of PR commands exceeds the range,"The number of PR commands exceeds the range
+1. The range of PR command must be between 0 and 99.","1a. Clear the fault.
+1b. Re-adjust the PR commands and parameters within the limits.",,○
+Minor Recoverable Fault (Warning),A 283,Software positive limit,"Software positive limit
+Software positive limit activated.
+Causes:
+1. Software positive limit is reached.",1. Clear the fault.,○,
+Minor Recoverable Fault (Warning),A 285,Software negative limit,"Software negative limit
+Software negative limit activated.
+Causes:
+1. Software negative limit is reached.",1. Clear the fault.,○,
+Minor Recoverable Fault (Warning),A 289,Feedback position [PUU] counter overflow,"Feedback position [PUU] counter overflow
+Causes:
+1. Feedback position [PUU] counter overflowed.","1. Check Gear Ratio settings.
+2. Clear the fault.",○,
+Minor Recoverable Fault (Warning),A 35F,Emergency stop during deceleration,"Emergency stop during deceleration
+Causes:
+1. An emergency stop was triggered on the rising-edge of DI:PFQS [0x47], then the motor decelerated to 0 and triggered an E 3CF fault.","1a. Check if the parameter settings caused DI:PRQS [0x47] to be triggered by mistake.
+1b. Cycle control power.
+",○,
+Major Recoverable Fault,E 3CF,Emergency stop,"Emergency stop
+Causes:
+1. An A 35F Emergency stop during deceleration warning occurred and the motor has decelerated to 0.","1a. Check if the parameter settings caused DI:PRQS [0x47] to be triggered by mistake.
+1b. Cycle control power.
+",,○
+Minor Recoverable Fault (Warning),A 380,Position deviation fault of DO:MC_OK,"Position deviation fault of DO:MC_OK
+See the description of parameter ID155 (P1.048) ToSpeedAction.
+Causes:
+1. After DO.MC_OK turns ON, then DO.TPOS turns OFF causing the deviation fault.
+2. Deviation was caused by the external force after position completed.","1a. See the description of parameter ID155 (P1.048) ToSpeedAction.
+1b. Clear the fault by using the DI.ARST command or set ID101 (P0.001) FltWarnCode to 0.
+2a. Clear the fault by using the DI.ARST signal.
+2b. Set ID155.Y (P1.048.Y) to 0.",○,
+Major Recoverable Fault,E 400,ID234 (P2.052) value incorrect,"ID234 (P2.052) value incorrect
+Causes:
+1. The value of ID 234 (P2.052) IndexingCoordinatesScale is too small.",1. Adjust the value of ID 234 (P2.052) IndexingCoordinatesScale so that it is greater than 1.05 x [ID8 (PM.032) MotorMaxSpeed] rpm x [ID600 (PM.004) EncoderResolution/60000 (0.1)rpm] x [ID152 (P1.045) GearRatioMasterCounts /ID151 (P1.044) GearRatioFollowerCountsN1],,○
+Major Unrecoverable Fault,E 422 ,EEPROM write fail on power off,"EEPROM write fail on power off
+Causes:
+1. EEPROM damaged.",1. Replace the drive.,,○
+Major Unrecoverable Fault,E 425 ,Control voltage phase difference,"Control voltage phase difference
+Causes:
+1. Input voltage is not within AC 50…60 Hz.",1. Check the control input voltage supply.,,○
+Major Recoverable Fault,E 500,STO enabled,"STO enabled
+The safe torque off function (STO) is enabled.
+Causes:
+1. STO is enabled.","1a. Check if STO is activated.
+1b. If STO is not used, check bypass wiring. 
+1c. Check STO wiring.
+",,○
+Major Unrecoverable Fault,E 501,STO_A signal loss ,"STO_A signal loss 
+Causes:
+1. STO_A signal is OFF and is not synchronized with STO_B for more than 1 second.","1a. Check STO_A wiring.
+1b. Correct STO_A wiring.",,○
+Major Unrecoverable Fault,E 502,STO_B signal loss,"STO_B signal loss
+Causes:
+1. STO_B signal is OFF and is not synchronized with STO_A for more than 1 second.","1a. Check STO_B wiring.
+1b. Correct STO_B wiring.",,○
+Major Unrecoverable Fault,E 503,STO self-diagnostic error,"STO self-diagnostic error
+An error occured during STO self-diagnosis.
+Causes:
+1. Incorrect wiring. ","1a. Correct the wiring by following the information in the user manual.
+1b. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Minor Recoverable Fault (Warning),A 510,Low speed of DSP processing data,Low speed of DSP processing data,"If the issue persists, contact your distributor or Rockwell Automation representative.",○,
+Major Unrecoverable Fault,E 555,Malfunction of the system,"Malfunction of the system 
+Causes:
+1. A DSP processing error occurred.","1. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 600,Boot failure,"Boot failure
+
+Causes:
+1. Wrong drive firmware or hardware damaged:
+• FPGA DSP initial error
+• EEPROM error
+• DSP memory error
+• EEPROM FAT error
+• Critical parameter error
+• DI/DO default setting error ","1a. Cycle power.
+1b. Update the firmware.
+1c. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E 601,Duplicate IP address,"Duplicate IP address
+The IP address is already in use. 
+Cause:
+1. Incorrect IP address setting.",1. Set an IP address that is not already in use on the network.,,○
+Major Unrecoverable Fault,E 602,Control connection loss fault,"Control connection loss fault
+Communication with the controller has been lost.
+Causes:
+1. Faulty Ethernet cable.
+2. Ethernet cable disconnected.
+3. The controller lost power. ","1. Check Ethernet cable.
+2. Check Ethernet cable connection.
+3. Check controller operation.",,○
+Minor Recoverable Fault (Warning),A 603,Invalid I/O command data warning,"Invalid I/O command data warning
+Causes:
+1. The user input invalid command data during I/O mode, so the controller sent an invalid I/O command. ","1a. Send a valid I/O command.
+1b. Cycle control power.
+1c. Clear the fault.",○,
+Major Unrecoverable Fault,E 604,Watchdog fault,"Watchdog fault
+The processor failed to update within the time limit.
+Causes:
+1. Incorrect drive firmware or damage to the hardware.","1a. Cycle control power.
+1b. Update drive firmware.
+1c. If the condition persists, contact your distributor or Rockwell Automation representative.",,○
+Minor Recoverable Fault (Warning),A 605,Internal communication warning,"Internal communication warning
+Causes:
+1. Drive internal communication has an error.","1a. Re-send the previous command.
+1b. Cycle control power.
+1c. If the condition persists, contact your distributor or Rockwell Automation representative. ",○,
+Minor Recoverable Fault (Warning),A 606,Sensor not assigned fault,"Sensor not assigned fault
+Causes:
+1. Homing was attempted without a sensor assigned.",1. Assign a sensor to a digital input to clear the fault automatically.,○,
+Major Unrecoverable Fault,E 607,Internal communication fault,"Internal communication fault
+Causes:
+1. An error in internal communication occurred multiple times.","1a. Cycle control power.
+1b. If the condition persists, contact your distributor or Rockwell Automation representative. ",,○
+Major Unrecoverable Fault,E 60A,Catalog number match error,"Catalog number match error
+Causes:
+1. Catalog number setting is incorrect.","1a. Correct catalog number setting.
+1b. If the condition persists, replace the motor. ",,○
+Major Unrecoverable Fault,E 60B,Motor selection match error,"Motor selection match error
+Causes:
+1. Motor Selection setting is incorrect.
+2. Issue with 3rd party sin/cos encoder wiring","1a. Correct motor selection setting.
+1b. If the condition persists, replace the motor. 
+2a.Correct encoder wiring issue.
+2b. If the condition persists, replace motor.",,○
+Major Unrecoverable Fault,E 60C,Internal fault,"Internal fault
+Causes:
+1. Drive entered an infinite loop due to an internal unknown fault.","1a. Cycle control power.
+1b. If the condition persists, contact your distributor or Rockwell Automation representative. ",,○
+Major Recoverable Fault,E 60E,Position overflow,"Position overflow
+Causes:
+1. Feedback position counter (PUU) overflowed and executed the absolute move command.",1. Perform the homing procedure.,,○
+Major Unrecoverable Fault,E 611,Feedback serial comms,"Feedback serial comms
+Communication was not established with an intelligent encoder.
+Causes:
+1. Incorrect motor selected.
+2. Motor encoder wiring is incorrect.
+3. Motor vibration is affecting communication.","1a. Verify motor selection.
+1b. Verify that motor supports automatic identification.
+2a. Check the motor encoder wiring.
+2b. Check the feedback shield connection.
+3a. Reduce shock and vibration to the motor.
+3b. Replace the motor or encoder. ",,○
+Major Unrecoverable Fault,E 612,Feedback filter,"Feedback filter
+Excessive levels of noise have been detected by the digital feedback filter.
+Causes:
+1. The  motor feedback wiring is open, shorted, or missing.
+","1a. Use shielded, twisted-pair cables.
+1b. Route feedback away from potential noise sources. 
+1c. Check system grounding.
+1d. Replace the motor or encoder.",,○
+Major Unrecoverable Fault,E 613,AUX Feedback Filter,"AUX Feedback Filter
+Excessive levels of noise have been detected by the digital feedback filter.
+Causes:
+1. The aux feedback wiring is open, shorted, or missing.","1a. Use shielded, twisted-pair cables.
+1b. Route feedback away from potential noise sources. 
+1c. Check system grounding.
+1d. Replace the motor or encoder.",,○
+Major Unrecoverable Fault,E 615,Motor data range error,"Motor data range error
+Data within a motor data blob is out of range.
+Causes:
+1. Faulty intelligent encoder or incorrect motor file.","1. Cycle power or reset the drive.
+1b. Check the validity of the motion database.
+1c. If the issue persists, replace the motor. ",,○
+Major Unrecoverable Fault,E 619,MP motor overspeed on power on,"MP motor overspeed on power on
+Causes:
+1. Drive is powered on when motor speed is over 8000 rpm.",1. Verify that motor speed is less than 8000 rpm before drive is power on.,,○
+Major Recoverable Fault,E 61A,Z phase lost protect ,Drive detect z phase lost while perform the homing which need Z phase signal.,"1. Check Motor Z phase signal.
+2. Check Homing method.",,○
+Major Unrecoverable Fault,E 809,PR arithmetic operation parameter error or secondary platform error,"PR arithmetic operation parameter error or secondary platform error
+Causes:
+1. A DSP processing error occurred.","1. If the issue persists, contact your distributor or Rockwell Automation representative.",,○
+Major Unrecoverable Fault,E D10,Incremental position loss,"Incremental position loss
+Causes:
+1. The  motor feedback wiring is open, shorted, or missing.",1. Check motor and encoder wiring.,,○
