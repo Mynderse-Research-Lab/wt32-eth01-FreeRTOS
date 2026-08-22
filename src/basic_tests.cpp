@@ -29,8 +29,7 @@ BasicTestSummary runBasicTests() {
   };
 
   // Coordinate frame: X = horizontal traverse, Y = along-belt (no actuator;
-  // -Y = downstream), Z = vertical (+Z = up). Joint z=0 is homing datum; physical
-  // bed vs TCP height in pose uses GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (see axis_drivetrain_params.h).
+  // +Y = downstream), Z = vertical (+Z = down). Joint z=0 is A015 retract.
   // therefore carries z_axis_y_offset_mm (along-belt offset of the Z column)
   // instead of the pre-2026-05 y_axis_z_offset_mm.
   Gantry::KinematicParameters params;

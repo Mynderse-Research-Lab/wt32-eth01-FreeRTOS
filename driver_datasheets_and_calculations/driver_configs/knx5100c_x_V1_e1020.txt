@@ -1,0 +1,980 @@
+Kinetix 5100 Servo
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P0.000                     1.0302                 -3.2768       3.2767      0.0000 DSP Firmware Version
+      P0.001                     0x0000                  0x0000       0xFFFF      0x0000 Fault/Warning Code
+      P0.002                          1                    -300          127           1 LED Monitor Selection
+      P0.003                     0x0000                  0x0000       0x0088      0x0000 Analog Output Monitor Selection
+      P0.004                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.005                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.006                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.007                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.008                 0x00000001       Hour   0x00000000   0xFFFFFFFF  0x00000000 Power On Time
+      P0.009                         -1             -2147483648   2147483647           0 System Variable Monitor 1 Value
+      P0.010                         -1             -2147483648   2147483647           0 System Variable Monitor 2 Value
+      P0.011                         -1             -2147483648   2147483647           0 System Variable Monitor 3 Value
+      P0.012                         -1             -2147483648   2147483647           0 System Variable Monitor 4 Value
+      P0.013                         -1             -2147483648   2147483647           0 System Variable Monitor 5 Value
+      P0.014                          0                  -32768        32767           0 Reserved
+      P0.015                          0                  -32768        32767           0 Reserved
+      P0.016                          0                  -32768        32767           0 Reserved
+      P0.017                          0                    -300          127           0 System Variable Monitor 1 Selection
+      P0.018                          0                    -300          127           0 System Variable Monitor 2 Selection
+      P0.019                          0                    -300          127           0 System Variable Monitor 3 Selection
+      P0.020                          0                    -300          127           0 System Variable Monitor 4 Selection
+      P0.021                          0                    -300          127           0 System Variable Monitor 5 Selection
+      P0.022                          0                  -32768        32767           0 Reserved
+      P0.023                          0                  -32768        32767           0 Reserved
+      P0.024                          0                  -32768        32767           0 Reserved
+      P0.025                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Parameter Monitor 1 Value
+      P0.026                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Parameter Monitor 2 Value
+      P0.027                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Parameter Monitor 3 Value
+      P0.028                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Parameter Monitor 4 Value
+      P0.029                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Parameter Monitor 5 Value
+      P0.030                          0                  -32768        32767           0 Reserved
+      P0.031                          0                  -32768        32767           0 Reserved
+      P0.032                          0                  -32768        32767           0 Reserved
+      P0.033                          0                  -32768        32767           0 Reserved
+      P0.034                          0                  -32768        32767           0 Reserved
+      P0.035                          1                       1          687           1 Parameter Monitor 1 Selection
+      P0.036                          1                       1          687           1 Parameter Monitor 2 Selection
+      P0.037                          1                       1          687           1 Parameter Monitor 3 Selection
+      P0.038                          1                       1          687           1 Parameter Monitor 4 Selection
+      P0.039                          1                       1          687           1 Parameter Monitor 5 Selection
+      P0.040                          0                  -32768        32767           0 Reserved
+      P0.041                          0                  -32768        32767           0 Reserved
+      P0.042                          0                  -32768        32767           0 Reserved
+      P0.043                          0                  -32768        32767           0 Reserved
+      P0.044                          0             -2147483648   2147483647           0 Monitor Value for PC
+      P0.045                       -195                    -300          127           0 Monitor Selection for PC
+      P0.046                     0x0004                  0x0000       0xFFFF      0x0000 Servo Output Status
+      P0.047                          0                  -32768        32767           0 Reserved
+      P0.048                          0                  -32768        32767           0 Reserved
+      P0.049                     0x0000                  0x0000       0x0002      0x0000 Encoder Data Update Configuration
+      P0.050                     0x0000                  0x0000       0x001F      0x0000 Absolute System Status
+      P0.051                          0        Rev       -32768        32767           0 Absolute Position (Multiturn)
+      P0.052                          0     Counts  -2147483648   2147483647           0 Absolute Position (Singalturn)
+      P0.053                     0x0000         ms       0x0000       0x000F      0x0000 System Variable Monitor Filtering Time
+      P0.054                          0             -2147483648   2147483647           0 System Variable Monitor Lower Limit
+      P0.055                          0             -2147483648   2147483647           0 System Variable Monitor Upper Limit
+      P0.056                          0                  -32768        32767           0 Reserved
+      P0.057                          0                  -32768        32767           0 Reserved
+      P0.058                          0                  -32768        32767           0 Reserved
+      P0.059                          0                  -32768        32767           0 Reserved
+      P0.060                          0                  -32768        32767           0 Reserved
+      P0.061                          0                  -32768        32767           0 Reserved
+      P0.062                          0                  -32768        32767           0 Reserved
+      P0.063                          0         ms            0   2147483647           0 Duration of Voltage Exceeding 400V
+      P0.064                          0                  -32768        32767           0 Reserved
+      P0.065                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.066                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.067                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.068                 0x00000000              0x00000000   0x30FFFFFF  0x00000000 Reserved
+      P0.069                          0                  -32768        32767           0 Reserved
+      P0.070                          0                  -32768        32767           0 Reserved
+      P0.071                          0                  -32768        32767           0 Reserved
+      P0.072                          0                  -32768        32767           0 Reserved
+      P0.073                          0                  -32768        32767           0 Reserved
+      P0.074                          0                  -32768        32767           0 Reserved
+      P0.075                          0                  -32768        32767           0 Reserved
+      P0.076                          0                  -32768        32767           0 Reserved
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P1.000                     0x1042                  0x0000       0x11F7      0x1042 External Pulse Input Type
+      P1.001                     0x000C                  0x0000       0x110F      0x1000 Control Mode
+      P1.002                     0x0000                  0x0000       0x0011      0x0000 Velocity and Torque Limit Action
+      P1.003                     0x0000                  0x0000       0x0013      0x0000 Encoder Output Polarity
+      P1.004                        100          %            0          100         100 Analog Output 1 Scale
+      P1.005                        100          %            0          100         100 Analog Output 2 Scale
+      P1.006                          0         ms            0         1000           0 Velocity Command Low Pass Filter Time Constant
+      P1.007                          0         ms            0         1000           0 Torque Command Low Pass Filter Time Constant
+      P1.008                          0       10ms            0         1000           0 Position Command Low Pass Filter Time Constant
+      P1.009                      100.0        RPM     -28500.0      28500.0       100.0 Preset Velocity Command/Limit 1
+      P1.010                      200.0        RPM     -28500.0      28500.0       200.0 Preset Velocity Command/Limit 2
+      P1.011                      300.0        RPM     -28500.0      28500.0       300.0 Preset Velocity Command/Limit 3
+      P1.012                        100          %         -420          420         100 Preset Torque Command/Limit 1
+      P1.013                        100          %         -420          420         100 Preset Torque Command/Limit 2
+      P1.014                        100          %         -420          420         100 Preset Torque Command/Limit 3
+      P1.015                          0                  -32768        32767           0 Reserved
+      P1.016                          0                  -32768        32767           0 Reserved
+      P1.017                          0                  -32768        32767           0 Reserved
+      P1.018                          0                  -32768        32767           0 Reserved
+      P1.019                 0x2D000000              0x00000000   0x6F000101  0x2D000000 DI9 Capture And Compare Configuration
+      P1.020                          0                       0    100000000           0 DI9 Capture Mask Range
+      P1.021                          0                  -32768        32767           0 Reserved
+      P1.022                     0x0000       10ms       0x0000       0x107F      0x0000 PR Command Filter Time
+      P1.023                          0               -10000000     10000000           0 Compare Data Offset (Non-Volatile)
+      P1.024                          0                  -32768        32767           0 Compare Data Offset (Volatile)
+      P1.025                      100.0         Hz          1.0        100.0       100.0 Low-frequency Vibration Suppression 1 Frequency
+      P1.026                          0                       0            9           0 Low-frequency Vibration Suppression 1 Gain
+      P1.027                      100.0         Hz          1.0        100.0       100.0 Low-frequency Vibration Suppression 2 Frequency
+      P1.028                          0                       0            9           0 Low-frequency Vibration Suppression 2 Gain
+      P1.029                          0                       0            1           0 Low-frequency Vibration Suppression Mode Setting
+      P1.030                       8000     Counts            1       128000        8000 Low-frequency Vibration Detection Level
+      P1.031                          0                  -32768        32767           0 Reserved
+      P1.032                     0x0010                  0x0000       0x0030      0x0010 Motor Stop Mode
+      P1.033                     0x0000                  0x0000       0x0001      0x0000 Reserved
+      P1.034                        200         ms            1        65500         200 Acceleration Time Constant of S-Curve Velocity Profile
+      P1.035                        200         ms            1        65500         200 Deceleration Time Constant of S-Curve Velocity Profile
+      P1.036                          0         ms            0        65500           0 Smoothing Time of S-curve
+      P1.037                        6.0 Load Inertia/Motor IΫQn@~\(ό‡ξ‡          0.0        200.0         6.0 Load Inertia Ratio
+      P1.038                       10.0        RPM          0.1        200.0        10.0 Zero Speed Window
+      P1.039                       3000        RPM            0        25000        3000 Up to Speed Limit
+      P1.040                       8000        RPM            0        28500 Depend on Devices Analog To Velocity Scale
+      P1.041                        100          %        -1000         1000         100 Analog To Torque Scale
+      P1.042                          0         ms            0         1000           0 Magnetic Brake On Delay
+      P1.043                          0         ms        -1000         1000           0 Magnetic Brake Off Delay
+      P1.044                   16777216     Counts            1    536870911    16777216 Gear Ratio Follower Counts (N1)
+      P1.045                     100000     Counts            1   2147483647      100000 Gear Ratio Master Counts (M)
+      P1.046                       2500     Counts            1    536870912        2500 Encoder Output Resolution
+      P1.047                         10        RPM            0          300          10 Speed Window
+      P1.048                     0x0000                  0x0000       0x0011      0x0000 To Speed Action
+      P1.049                          0         ms            0        65535           0 Speed Window Time
+      P1.050                          0                  -32768        32767           0 Reserved
+      P1.051                          0                  -32768        32767           0 Reserved
+      P1.052                         20       Ohms            5          750 Depend on Devices Shunt Resistor Value
+      P1.053                         40          W            0        15000 Depend on Devices Shunt Resistor Power
+      P1.054                     167772     Counts            0     16777216      167772 In Position Window
+      P1.055                       5000        RPM           10        28501       28501 Maximum Speed
+      P1.056                        120          %            0          120         120 User defined threshold for overload warning
+      P1.057                          0          %            0          300           0 Crash Protection Torque Threshold
+      P1.058                          1         ms            1         1000           1 Crash Protection Filter Time
+      P1.059                        0.0         ms          0.0          4.0         0.0 Velocity Command Moving Filter Time Constant
+      P1.060                          0          %         -300          300           0 Homing Collision Torque Limit Offset
+      P1.061                          0                  -32768        32767           0 Reserved
+      P1.062                          0          %            0          100           0 Friction compensation
+      P1.063                          1         ms            1         1000           1 Friction Compensation Smooth Time Constant
+      P1.064                     0x0000                  0x0000       0x0011      0x0000 Analog To Position Command Startup Configuration
+      P1.065                          1       10ms            0         1000           1 Analog To Position Command Smooth Time Constant
+      P1.066                        0.0        Rev          0.0        200.0         0.0 Analog To Position Command Max Rotation Number
+      P1.067                          0                  -32768        32767           0 Reserved
+      P1.068                          4         ms            0          100           4 Position Command Moving Filter Time Constant
+      P1.069                          0                  -32768        32767           0 Reserved
+      P1.070                          0                  -32768        32767           0 Reserved
+      P1.071                          0                  -32768        32767           0 Reserved
+      P1.072                       5000 Counts/Rev           50     16777216        5000 Auxiliary Feedback Counts For One Turn Of Main Encoder
+      P1.073                      30000     Counts            1   2147483647       30000 Error Limit between Motor and Auxiliary Feedback
+      P1.074                     0x0000                  0x0000       0xF131      0x0000 Full-closed Loop Control Configuration
+      P1.075                        100         ms            0         1000         100 Full/Half-closed Loop Control Low Pass Filter Time Constant
+      P1.076                       8000        RPM            0        28500        8000 Max Encoder Output Speed
+      P1.077                          0                  -32768        32767           0 Reserved
+      P1.078                          0                  -32768        32767           0 Reserved
+      P1.079                          0                  -32768        32767           0 Reserved
+      P1.080                          0                  -32768        32767           0 Reserved
+      P1.081                       8000        RPM            0        28500 Depend on Devices Analog To Velocity Scale 2
+      P1.082                          0         ms            0         1000           0 Filter Switching Time of Analog To Velocity Scale 1 and 2
+      P1.083                          0         mV            0        12000           0 Abnormal Analog Input Voltage Level
+      P1.084                     0x0000                  0x0000       0x0001      0x0000 Full Closed Loop Position Error Reset Configuration
+      P1.085                          0        Rev            0        32767           0 Full Closed Loop Position Error Auto Reset Threshold
+      P1.086                          0                  -32768        32767           0 Reserved
+      P1.087                          1          %            1          300           1 Homing Collision Torque Limit
+      P1.088                       2000         ms            2         2000        2000 Homing Collision Torque Limit Time
+      P1.089                          0                  -32768        32767           0 Reserved
+      P1.090                          0                  -32768        32767           0 Reserved
+      P1.091                          0                  -32768        32767           0 Reserved
+      P1.092                          0                  -32768        32767           0 Reserved
+      P1.093                          0                  -32768        32767           0 Reserved
+      P1.094                          0                  -32768        32767           0 Reserved
+      P1.095                          0                  -32768        32767           0 Reserved
+      P1.096                          0                  -32768        32767           0 Reserved
+      P1.097                          0                       0       160000           0 Encoder Output Denominator
+      P1.098                          0         ms            0          800           0 Power Loss Diagnostic Time
+      P1.099                          0                  -32768        32767           0 Reserved
+      P1.100                          0                  -32768        32767           0 Reserved
+      P1.101                          0         mV       -10000        10000           0 Preset Analog Output Value 1
+      P1.102                          0         mV       -10000        10000           0 Preset Analog Output Value 2
+      P1.103                 0x00000000              0x00000000   0x00000101  0x00000000 DI10 Capture Configuration
+      P1.104                          0                       0    100000000           0 DI10 Capture Mask Range
+      P1.105                          0                  -32768        32767           0 Reserved
+      P1.106                          0                  -32768        32767           0 Reserved
+      P1.107                          0         mV            0          100           0 Analog input dead-band for analog to torque
+      P1.108                          0                  -32768        32767           0 Reserved
+      P1.109                          0                  -32768        32767           0 Reserved
+      P1.110                          0         mV            0          100           0 Analog input dead-band for analog to velocity/position
+      P1.111                          0                  -32768        32767           0 Reserved
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P2.000                         36      rad/s            0         2047          35 Position Proportional Gain
+      P2.001                        100          %           10          500         100 Position Proportional Gain Changing Rate
+      P2.002                         50          %            0          100          50 Velocity Feedforward Gain
+      P2.003                          5         ms            2          100           5 Velocity Feedforward Low Pass Filter Time Constant
+      P2.004                        144      rad/s            0         8191         500 Velocity Proportional Gain
+      P2.005                        100          %           10          500         100 Velocity Proportional Gain Changing Rate
+      P2.006                         23      rad/s            0         1023         100 Velocity Integral Gain
+      P2.007                          0          %            0          100           0 Acceleration Feedforward Gain
+      P2.008                         36                       0          501           1 Force Function
+      P2.009                          2         ms            0           20           2 Digital Input Debouncing Time
+      P2.010                     0x0100                  0x0000       0x014F      0x0100 Digital Input 1 Configuration
+      P2.011                     0x0100                  0x0000       0x014F      0x0100 Digital Input 2 Configuration
+      P2.012                     0x0100                  0x0000       0x014F      0x0100 Digital Input 3 Configuration
+      P2.013                     0x0100                  0x0000       0x014F      0x0100 Digital Input 4 Configuration
+      P2.014                     0x0100                  0x0000       0x014F      0x0100 Digital Input 5 Configuration
+      P2.015                     0x0100                  0x0000       0x014F      0x0100 Digital Input 6 Configuration
+      P2.016                     0x0100                  0x0000       0x014F      0x0100 Digital Input 7 Configuration
+      P2.017                     0x0100                  0x0000       0x014F      0x0100 Digital Input 8 Configuration
+      P2.018                     0x0100                  0x0000       0x013F      0x0100 Digital Output 1 Configuration
+      P2.019                     0x0100                  0x0000       0x013F      0x0100 Digital Output 2 Configuration
+      P2.020                     0x0100                  0x0000       0x013F      0x0100 Digital Output 3 Configuration
+      P2.021                     0x0100                  0x0000       0x013F      0x0100 Digital Output 4 Configuration
+      P2.022                     0x0100                  0x0000       0x013F      0x0100 Digital Output 5 Configuration
+      P2.023                       1000         Hz           50         5000        1000 Notch Filter 1 Frequency
+      P2.024                          0        -dB            0           40           0 Notch Filter 1 Depth
+      P2.025                        0.8         ms          0.0        100.1         1.0 Resonance Suppression Low Pass Filter Time Constant
+      P2.026                          0      rad/s            0         1023           0 Anti-interference Gain
+      P2.027                     0x0000                  0x0000       0x0018      0x0000 Gain Switching Selection
+      P2.028                         10         ms            0         1000          10 Gain Switching Time Constant
+      P2.029                   16777216                       0     50331648    16777216 Gain Switching Threshold
+      P2.030                          0                      -7            8           0 Auxiliary Function
+      P2.031                         19                       1           50          19 System Gain Response Level
+      P2.032                     0x0001                  0x0000       0x0004      0x0001 Gain Adjustment Mode
+      P2.033                          0                  -32768        32767           0 Reserved
+      P2.034                       8000        RPM            1        28500        8000 Velocity Error Tolerance
+      P2.035                   50331648     Counts            1   1677721600    50331648 Position Error Tolerance
+      P2.036                     0x0100                  0x0000       0x014F      0x0100 Digital Input 9 Configuration
+      P2.037                     0x0100                  0x0000       0x014F      0x0100 Digital Input 10 Configuration
+      P2.038                     0x0100                  0x0000       0x014F      0x0100 Virtual Digital Input 11 Configuration
+      P2.039                     0x0100                  0x0000       0x014F      0x0100 Virtual Digital Input 12 Configuration
+      P2.040                     0x0100                  0x0000       0x014F      0x0100 Virtual Digital Input 13 Configuration
+      P2.041                     0x0100                  0x0000       0x013F      0x0100 Digital Output 6 Configuration
+      P2.042                          0                  -32768        32767           0 Reserved
+      P2.043                       1000         Hz           50         5000        1000 Notch Filter 2 Frequency
+      P2.044                          0        -dB            0           40           0 Notch Filter 2 Depth
+      P2.045                       1000         Hz           50         5000        1000 Notch Filter 3 Frequency
+      P2.046                          0        -dB            0           40           0 Notch Filter 3 Depth
+      P2.047                     0x0001                  0x0000       0x01F2      0x0001 Resonance Suppression Configuration
+      P2.048                        100                       0         1000         100 Resonance Diagnostic Level
+      P2.049                        0.8         ms          0.0        100.1         1.0 Velocity Feedback Low Pass Filter Time Constant
+      P2.050                     0x0000                  0x0000       0x0001      0x0000 Pulse Clear Mode
+      P2.051                          0                  -32768        32767           0 Reserved
+      P2.052                 1073741824        PUU           32   1073741824  1073741824 Indexing Coordinates Scale
+      P2.053                          0      rad/s            0         1023           0 Position Integral Gain
+      P2.054                          0                  -32768        32767           0 Reserved
+      P2.055                          0                  -32768        32767           0 Reserved
+      P2.056                          0                  -32768        32767           0 Reserved
+      P2.057                          0                  -32768        32767           0 Reserved
+      P2.058                          0                  -32768        32767           0 Reserved
+      P2.059                          0                  -32768        32767           0 Reserved
+      P2.060                   16777216     Counts            1    536870911    16777216 Gear Ratio Follower Counts (N2)
+      P2.061                   16777216     Counts            1    536870911    16777216 Gear Ratio Follower Counts (N3)
+      P2.062                   16777216     Counts            1    536870911    16777216 Gear Ratio Follower Counts (N4)
+      P2.063                          0                  -32768        32767           0 Reserved
+      P2.064                          0                  -32768        32767           0 Reserved
+      P2.065                     0x1000                  0x0000       0xBF48      0x1000 Special Function Configuration 1
+      P2.066                     0x0021                  0x0000       0x0031      0x0021 Special Function Configuration 2
+      P2.067                        1.5                     0.0        200.0         1.5 Reserved
+      P2.068                     0x0000                  0x0000       0x0101      0x0000 Following Error Compensation Configuration
+      P2.069                     0x0000                  0x0000       0x0101      0x0000 Absolute System Setting
+      P2.070                     0x0000                  0x0000       0x0007      0x0000 Data Read Unit Selection
+      P2.071                     0x0000                  0x0000       0x0001      0x0000 Reset Absolute Position
+      P2.072                          0                  -32768        32767           0 Reserved
+      P2.073                 0x00000000              0x00000000   0x5F3F6F5F  0x00000000 E-CAM Configuration
+      P2.074                      0.000         ms      -25.000       25.000       0.000 E-CAM DI Delay Time Compensation
+      P2.075                          0             -1000000000   1000000000           0 E-CAM Alignment Position Reference
+      P2.076                     0x0000                  0x0000       0x6FF7      0x0000 E-CAM Control Configuration
+      P2.077                          0                  -32768        32767           0 Reserved
+      P2.078                        270    Degrees            0          360         270 Ecam DO.Cam Area2 Rising Edge Angle
+      P2.079                        360    Degrees            0          360         360 Ecam DO.Cam Area2 Falling Edge Angle
+      P2.080                     0x0000                  0x0000       0x0011      0x0000 Z Phase Homing Source
+      P2.081                          0         ms            0        65535           0 Position Error Tolerance Time
+      P2.082                          0                  -32768        32767           0 Reserved
+      P2.083                          0                  -32768        32767           0 Reserved
+      P2.084                     0x0000                  0x0000       0x111F      0x0000 SpecialFunctionConfiguration5
+      P2.085                     0x0000                  0x0000       0x0001      0x0000 Induction Motor Position/Speed mode switch function
+      P2.086                        275        RPM           10         7000         275 Induction Motor Position/Speed mode switch velocity (low level)
+      P2.087                       1575        RPM          300        27500        1575 Induction Motor Position/Speed mode switch velocity (high level)
+      P2.088                     0x0000                  0x0000       0x003F      0x0000 SpecialFunctionConfiguration6
+      P2.089                          0                  -32768        32767           0 Reserved
+      P2.090                          0                  -32768        32767           0 Reserved
+      P2.091                          0                  -32768        32767           0 Reserved
+      P2.092                          0                  -32768        32767           0 Reserved
+      P2.093                     0x0012                  0x0012       0x0022      0x0012 STO Feedback Configuration
+      P2.094                     0x0010                  0x0000       0x0030      0x0010 Special Function Configuration 3
+      P2.095                          5                       1           10           5 Notch Filter 1 Qvalue
+      P2.096                          5                       1           10           5 Notch Filter 2 Qvalue
+      P2.097                          5                       1           10           5 Notch Filter 3 Qvalue
+      P2.098                       1000         Hz           50         5000        1000 Notch Filter 4 Frequency
+      P2.099                          0        -dB            0           40           0 Notch Filter 4 Depth
+      P2.100                          5                       1           10           5 Notch Filter 4 Qvalue
+      P2.101                       1000         Hz           50         5000        1000 Notch Filter 5 Frequency
+      P2.102                          0        -dB            0           40           0 Notch Filter 5 Depth
+      P2.103                          5                       1           10           5 Notch Filter 5 Qvalue
+      P2.104                        800          %            1          800         800 Torque Threshold to switch from PI to P
+      P2.105                         11                       1           21          11 Auto Tuning Bandwidth Configuration
+      P2.106                       2000                       1     50331648        2000 Auto Tuning Overshoot Configuration
+      P2.107                          0                  -32768        32767           0 Reserved
+      P2.108                          0                  -32768        32767           0 Reserved
+      P2.109                          0                  -32768        32767           0 Reserved
+      P2.110                          0                  -32768        32767           0 Reserved
+      P2.111                          0                  -32768        32767           0 Reserved
+      P2.112                     0x000C                  0x0000       0x000F      0x000C Special Function Configuration 4
+      P2.113                          0                  -32768        32767           0 Reserved
+      P2.114                          0                  -32768        32767           0 Reserved
+      P2.115                          0                  -32768        32767           0 Reserved
+      P2.116                          0                  -32768        32767           0 Reserved
+      P2.117                          0                  -32768        32767           0 Reserved
+      P2.118                          0                  -32768        32767           0 Reserved
+      P2.119                          0                  -32768        32767           0 Reserved
+      P2.120                          0                  -32768        32767           0 Reserved
+      P2.121                          0                  -32768        32767           0 Reserved
+      P2.122                          0                  -32768        32767           0 Reserved
+      P2.123                          0                       0   2147483647           0 Position Loop Izone
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P3.000                     0x007F                  0x0001       0x007F      0x007F Reserved
+      P3.001                     0x0203                  0x0000       0x0405      0x0203 Reserved
+      P3.002                     0x0006                  0x0000       0x0008      0x0006 Reserved
+      P3.003                     0x0000                  0x0000       0x0001      0x0000 Reserved
+      P3.004                          0          s            0           20           0 USB Communication Time Out
+      P3.005                     0x0000                  0x0000       0x0002      0x0000 Reserved
+      P3.006                     0x0000                  0x0000       0x1FFF      0x0000 Digital Input Control Source
+      P3.007                          0      0.5ms            0         1000           0 USB Communication Response Delay Time
+      P3.008                     0x0000                  0x0000       0x00F5      0x0000 Reserved
+      P3.009                          0                  -32768        32767           0 Reserved
+      P3.010                          0                  -32768        32767           0 Reserved
+      P3.011                          0                  -32768        32767           0 Reserved
+      P3.012                          0                  -32768        32767           0 Reserved
+      P3.013                     0x0000                  0x0000       0x0022      0x0000 Full Closed Loop Monitoring Configuration
+      P3.014                          0                  -32768        32767           0 Reserved
+      P3.015                          0                  -32768        32767           0 Reserved
+      P3.016                          0                  -32768        32767           0 Reserved
+      P3.017                          0                  -32768        32767           0 Reserved
+      P3.018                          0                  -32768        32767           0 Reserved
+      P3.019                          0                  -32768        32767           0 Reserved
+      P3.020                          0                  -32768        32767           0 Reserved
+      P3.021                          0                  -32768        32767           0 Reserved
+      P3.022                          0                  -32768        32767           0 Reserved
+      P3.023                          0                  -32768        32767           0 Reserved
+      P3.024                          0                  -32768        32767           0 Reserved
+      P3.025                          0                  -32768        32767           0 Reserved
+      P3.026                          0                  -32768        32767           0 Reserved
+      P3.027                          0                  -32768        32767           0 Reserved
+      P3.028                          0                  -32768        32767           0 Reserved
+      P3.029                          0                  -32768        32767           0 Reserved
+      P3.030                          0                  -32768        32767           0 Reserved
+      P3.031                          0                  -32768        32767           0 Reserved
+      P3.032                          0                  -32768        32767           0 Reserved
+      P3.033                          0                  -32768        32767           0 Reserved
+      P3.034                          0                  -32768        32767           0 Reserved
+      P3.035                          0                  -32768        32767           0 Reserved
+      P3.036                          0                  -32768        32767           0 Reserved
+      P3.037                          0                  -32768        32767           0 Reserved
+      P3.038                          0                  -32768        32767           0 Reserved
+      P3.039                 0xC0A80114              0x00000000   0xFFFFFFFF  0xC0A80101 IP Address
+      P3.040                 0xFFFFFF00              0x00000000   0xFFFFFFFF  0xFFFFFF00 Subnet Mask
+      P3.041                 0xC0A801FE              0x00000000   0xFFFFFFFF  0xC0A801FE Default Gateway
+      P3.042                 0x00000000              0x00000000   0x00000001  0x00000000 DHCP Enable
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P4.000                 0x00000022              0x00000000   0xFFFFFFFF  0x00000000 Fault Record N
+      P4.001                 0x00000022              0x00000000   0xFFFFFFFF  0x00000000 Fault Record N1
+      P4.002                 0x00000011              0x00000000   0xFFFFFFFF  0x00000000 Fault Record N2
+      P4.003                 0x00000011              0x00000000   0xFFFFFFFF  0x00000000 Fault Record N3
+      P4.004                 0x00000011              0x00000000   0xFFFFFFFF  0x00000000 Fault Record N4
+      P4.005                         20        RPM            0         5000          20 Jog Operation
+      P4.006                     0x0000                  0x0000       0x00FF      0x0000 Digital Output Override
+      P4.007                     0x0000                  0x0000       0x1FFF      0x0000 Digital Input Override
+      P4.008                     0x0000                  0x0000       0x00FF      0x0000 Drive Keypad Input Status
+      P4.009                     0x0000                  0x0000       0x003F      0x0000 Digital Output Status
+      P4.010                          0                       0           14           0 Hardware Calibration Function Execution
+      P4.011                      16369                       0        32767       16384 Preset Analog to Velocity Offset
+      P4.012                      16384                       0        32767       16384 Reserved
+      P4.013                      16367                       0        32767       16384 Preset Analog to Torque Offset
+      P4.014                      16384                       0        32767       16384 Reserved
+      P4.015                      16382                       0        32767       16384 V1 Phase Current Sensing Offset
+      P4.016                      16384                       0        32767       16384 Reserved
+      P4.017                      16384                       0        32767       16384 W1 Phase Current Sensing Offset
+      P4.018                      16384                       0        32767       16384 Reserved
+      P4.019                          2                       1            4           2 IGBT NTC Offset
+      P4.020                          0         mV         -800          800           0 Analog Output 1 Offset
+      P4.021                          0         mV         -800          800           0 Analog Output 2 Offset
+      P4.022                          0         mV        -5000         5000           0 User-defined Analog to Velocity Offset
+      P4.023                          0         mV        -5000         5000           0 User-defined Analog to Torque Offset
+      P4.024                        150                      40          381         381 DC Bus Undervoltage Threshold
+      P4.025                          0                  -32768        32767           0 Reserved
+      P4.026                          0                  -32768        32767           0 Reserved
+      P4.027                          0                  -32768        32767           0 Reserved
+      P4.028                          0                  -32768        32767           0 Reserved
+      P4.029                          0                  -32768        32767           0 Reserved
+      P4.030                        100                      50          200         100 Reserved
+      P4.031                        600                     500         1500         600 Reserved
+      P4.032                          0                  -32768        32767           0 Reserved
+      P4.033                          0                       0   2147483647           0 Reserved
+      P4.034                        150                       0         1000         150 Reserved
+      P4.035                         10                       0          200          10 Reserved
+      P4.036                          0                    -200          200           0 Reserved
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P5.000                   12509082             -2147483648   2147483647           0 DSP Firmware Subversion
+      P5.001                     0x0001                  0x0000       0x002D      0x0000 Reserved
+      P5.002                     0x0000                  0x0000       0x1001      0x0000 Reserved
+      P5.003                 0xEEEFEEFF              0x00000000   0xFFFFFFFF  0xEEEFEEFF Auto Protection Decel Time
+      P5.004                     0x0000                  0x0000       0x012A      0x0000 Homing Mode
+      P5.005                      100.0        RPM          0.1       2000.0       100.0 Homing Velocity
+      P5.006                       20.0        RPM          0.1        500.0        20.0 Homing Creep Velocity
+      P5.007                          0                       0        20099           0 PR Command Trigger
+      P5.008                 2147483647        PUU  -2147483648   2147483647  2147483647 Soft Travel Limit Positive
+      P5.009                -2147483648        PUU  -2147483648   2147483647 -2147483648 Soft Travel Limit Negative
+      P5.010                        800                       0        32767           0 Data Array Size
+      P5.011                          0                       0        32767           0 Data Array Read/Write Address
+      P5.012                          0             -2147483648   2147483647           0 Data Array Read/Write Value1
+      P5.013                          0             -2147483648   2147483647           0 Data Array Read/Write Value2
+      P5.014                          0                  -32768        32767           0 Reserved
+      P5.015                     0x0000                  0x0000       0x0011      0x0000 PR CMD#1#2 Power Loss Retention Configuration
+      P5.016                         -1        PUU  -2147483648   2147483647           0 Feedback Position
+      P5.017                          0     Counts  -2147483648   2147483647           0 Auxiliary Encoder Position
+      P5.018                          0     Counts  -2147483648   2147483647           0 Pulse Command Position
+      P5.019                   1.000000            -2147.000000  2147.000000    1.000000 E-Cam Curve Scale
+      P5.020                        200         ms            1        65500         200 Accel / Decel Time 0
+      P5.021                        300         ms            1        65500         300 Accel / Decel Time 1
+      P5.022                        500         ms            1        65500         500 Accel / Decel Time 2
+      P5.023                        600         ms            1        65500         600 Accel / Decel Time 3
+      P5.024                        800         ms            1        65500         800 Accel / Decel Time 4
+      P5.025                        900         ms            1        65500         900 Accel / Decel Time 5
+      P5.026                       1000         ms            1        65500        1000 Accel / Decel Time 6
+      P5.027                       1200         ms            1        65500        1200 Accel / Decel Time 7
+      P5.028                       1500         ms            1        65500        1500 Accel / Decel Time 8
+      P5.029                       2000         ms            1        65500        2000 Accel / Decel Time 9
+      P5.030                       2500         ms            1        65500        2500 Accel / Decel Time 10
+      P5.031                       3000         ms            1        65500        3000 Accel / Decel Time 11
+      P5.032                       5000         ms            1        65500        5000 Accel / Decel Time 12
+      P5.033                       8000         ms            1        65500        8000 Accel / Decel Time 13
+      P5.034                         50         ms            1         1500          50 Accel / Decel Time 14
+      P5.035                         30         ms            1         1200          30 Accel / Decel Time 15
+      P5.036                          0                       0          799           0 CAPTURE Start Address (DI9)
+      P5.037                          0             -2147483648   2147483647           0 CAPTURE Axis Position (DI9)
+      P5.038                          1                       0          800           1 CAPTURE Remained Count (DI9)
+      P5.039                 0x32002010              0x00000000   0x6F00F13F  0x32002010 CAPTURE Control (DI9)
+      P5.040                          0         ms            0        32767           0 Position Completed Delay 0
+      P5.041                        100         ms            0        32767         100 Position Completed Delay 1
+      P5.042                        200         ms            0        32767         200 Position Completed Delay 2
+      P5.043                        400         ms            0        32767         400 Position Completed Delay 3
+      P5.044                        500         ms            0        32767         500 Position Completed Delay 4
+      P5.045                        800         ms            0        32767         800 Position Completed Delay 5
+      P5.046                       1000         ms            0        32767        1000 Position Completed Delay 6
+      P5.047                       1500         ms            0        32767        1500 Position Completed Delay 7
+      P5.048                       2000         ms            0        32767        2000 Position Completed Delay 8
+      P5.049                       2500         ms            0        32767        2500 Position Completed Delay 9
+      P5.050                       3000         ms            0        32767        3000 Position Completed Delay 10
+      P5.051                       3500         ms            0        32767        3500 Position Completed Delay 11
+      P5.052                       4000         ms            0        32767        4000 Position Completed Delay 12
+      P5.053                       4500         ms            0        32767        4500 Position Completed Delay 13
+      P5.054                       5000         ms            0        32767        5000 Position Completed Delay 14
+      P5.055                       5500         ms            0        32767        5500 Position Completed Delay 15
+      P5.056                         50                       0          799          50 COMPARE Start Address
+      P5.057                          0             -2147483648   2147483647           0 COMPARE Axis Position
+      P5.058                          1                       0          800           1 COMPARE Remained Count
+      P5.059                 0x00640010              0x00010000   0x0FFF313F  0x00640010 COMPARE Control
+      P5.060                       20.0        RPM          0.0       8000.0        20.0 Preset Velocity 0
+      P5.061                       50.0        RPM          0.0       8000.0        50.0 Preset Velocity 1
+      P5.062                      100.0        RPM          0.0       8000.0       100.0 Preset Velocity 2
+      P5.063                      200.0        RPM          0.0       8000.0       200.0 Preset Velocity 3
+      P5.064                      300.0        RPM          0.0       8000.0       300.0 Preset Velocity 4
+      P5.065                      500.0        RPM          0.0       8000.0       500.0 Preset Velocity 5
+      P5.066                      600.0        RPM          0.0       8000.0       600.0 Preset Velocity 6
+      P5.067                      800.0        RPM          0.0       8000.0       800.0 Preset Velocity 7
+      P5.068                     1000.0        RPM          0.0       8000.0      1000.0 Preset Velocity 8
+      P5.069                     1300.0        RPM          0.0       8000.0      1300.0 Preset Velocity 9
+      P5.070                     1500.0        RPM          0.0       8000.0      1500.0 Preset Velocity 10
+      P5.071                     1800.0        RPM          0.0       8000.0      1800.0 Preset Velocity 11
+      P5.072                     2000.0        RPM          0.0       8000.0      2000.0 Preset Velocity 12
+      P5.073                     2300.0        RPM          0.0       8000.0      2300.0 Preset Velocity 13
+      P5.074                     2500.0        RPM          0.0       8000.0      2500.0 Preset Velocity 14
+      P5.075                     3000.0        RPM          0.0       8000.0      3000.0 Preset Velocity 15
+      P5.076                          0             -1073741824   1073741823           0 First Capture Reset Position (DI9)
+      P5.077                          0                  -32768        32767           0 Reserved
+      P5.078                          0                  -32768        32767           0 Reserved
+      P5.079                          0                  -32768        32767           0 Reserved
+      P5.080                          0                  -32768        32767           0 Reserved
+      P5.081                        100                       0          795         100 E-Cam Start Address
+      P5.082                          5                       5          720           5 E-Cam Area Number
+      P5.083                          1                       1        32767           1 E-CAM Slave Cycle Number M
+      P5.084                       3600                      10   1073741823        3600 E-CAM Master Pulse Number P
+      P5.085                          0                       0          719           0 E-CAM Engaged Area Number
+      P5.086                          0             -2147483648   2147483647           0 E-CAM Master Axis Position
+      P5.087                          0             -1073741824   1073741823           0 E-CAM Lead Pulse Before Engaged
+      P5.088                 0x00000010              0x00000010   0x006FF147  0x00000010 Enable E-CAM Control
+      P5.089                          0             -1073741824   1073741823           0 E-CAM Master Position to Disengage
+      P5.090                        270    Degrees            0          360         270 ECam DO.Cam Area1 Rising Edge Angle
+      P5.091                        360    Degrees            0          360         360 ECam DO.Cam Area1 Falling Edge Angle
+      P5.092                          0             -2147483648   2147483647           0 E-CAM Skipped Master Position Pulses before Re-Engage
+      P5.093                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Macro Command Parameter4
+      P5.094                          0             -2147483648   2147483647           0 Macro Command Parameter3
+      P5.095                          0             -2147483648   2147483647           0 Macro Command Parameter2
+      P5.096                          0             -2147483648   2147483647           0 Macro Command Parameter1
+      P5.097                     0x0000                  0x0000       0xF99F      0x0000 Macro Command Issue / Result
+      P5.098                     0x0000                  0x0000       0xDDDD      0x0000 PR Command Number at Event Rising Edge
+      P5.099                     0x0000                  0x0000       0xDDDD      0x0000 PR Command Number at Event Falling Edge
+      P5.100                          0             -2147483648   2147483647           0 Data Array Read/Write Value3
+      P5.101                          0             -2147483648   2147483647           0 Data Array Read/Write Value4
+      P5.102                          0             -2147483648   2147483647           0 Data Array Read/Write Value5
+      P5.103                          0             -2147483648   2147483647           0 Data Array Read/Write Value6
+      P5.104                          0                  -32768        32767           0 Reserved
+      P5.105                          0                  -32768        32767           0 Reserved
+      P5.106                          0                  -32768        32767           0 Reserved
+      P5.107                         10                       0          799          10 CAPTURE Start Address (DI10)
+      P5.108                          0             -2147483648   2147483647           0 CAPTURE Axis Position (DI10)
+      P5.109                          1                       0          800           1 CAPTURE Remained Count (DI10)
+      P5.110                 0x3C002010              0x00000000   0x6F00F13F  0x3C002010 CAPTURE Control (DI10)
+      P5.111                          0             -1073741824   1073741823           0 First Capture Reset Position (DI10)
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P6.000                 0x00000000              0x00000000   0xFFFFFF6F  0x00000000 Homing Setting
+      P6.001                          0             -2147483648   2147483647           0 Home Position
+      P6.002      PDEF1      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 1  Setting
+      P6.003      PDAT1               0             -2147483648   2147483647           0 PR Commad 1  Data
+      P6.004      PDEF2      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 2  Setting
+      P6.005      PDAT2               0             -2147483648   2147483647           0 PR Commad 2  Data
+      P6.006      PDEF3      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 3  Setting
+      P6.007      PDAT3               0             -2147483648   2147483647           0 PR Commad 3  Data
+      P6.008      PDEF4      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 4  Setting
+      P6.009      PDAT4               0             -2147483648   2147483647           0 PR Commad 4  Data
+      P6.010      PDEF5      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 5  Setting
+      P6.011      PDAT5               0             -2147483648   2147483647           0 PR Commad 5  Data
+      P6.012      PDEF6      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 6  Setting
+      P6.013      PDAT6               0             -2147483648   2147483647           0 PR Commad 6  Data
+      P6.014      PDEF7      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 7  Setting
+      P6.015      PDAT7               0             -2147483648   2147483647           0 PR Commad 7  Data
+      P6.016      PDEF8      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 8  Setting
+      P6.017      PDAT8               0             -2147483648   2147483647           0 PR Commad 8  Data
+      P6.018      PDEF9      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 9  Setting
+      P6.019      PDAT9               0             -2147483648   2147483647           0 PR Commad 9  Data
+      P6.020     PDEF10      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 10  Setting
+      P6.021     PDAT10               0             -2147483648   2147483647           0 PR Commad 10  Data
+      P6.022     PDEF11      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 11  Setting
+      P6.023     PDAT11               0             -2147483648   2147483647           0 PR Commad 11  Data
+      P6.024     PDEF12      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 12  Setting
+      P6.025     PDAT12               0             -2147483648   2147483647           0 PR Commad 12  Data
+      P6.026     PDEF13      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 13  Setting
+      P6.027     PDAT13               0             -2147483648   2147483647           0 PR Commad 13  Data
+      P6.028     PDEF14      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 14  Setting
+      P6.029     PDAT14               0             -2147483648   2147483647           0 PR Commad 14  Data
+      P6.030     PDEF15      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 15  Setting
+      P6.031     PDAT15               0             -2147483648   2147483647           0 PR Commad 15  Data
+      P6.032     PDEF16      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 16  Setting
+      P6.033     PDAT16               0             -2147483648   2147483647           0 PR Commad 16  Data
+      P6.034     PDEF17      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 17  Setting
+      P6.035     PDAT17               0             -2147483648   2147483647           0 PR Commad 17  Data
+      P6.036     PDEF18      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 18  Setting
+      P6.037     PDAT18               0             -2147483648   2147483647           0 PR Commad 18  Data
+      P6.038     PDEF19      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 19  Setting
+      P6.039     PDAT19               0             -2147483648   2147483647           0 PR Commad 19  Data
+      P6.040     PDEF20      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 20  Setting
+      P6.041     PDAT20               0             -2147483648   2147483647           0 PR Commad 20  Data
+      P6.042     PDEF21      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 21  Setting
+      P6.043     PDAT21               0             -2147483648   2147483647           0 PR Commad 21  Data
+      P6.044     PDEF22      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 22  Setting
+      P6.045     PDAT22               0             -2147483648   2147483647           0 PR Commad 22  Data
+      P6.046     PDEF23      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 23  Setting
+      P6.047     PDAT23               0             -2147483648   2147483647           0 PR Commad 23  Data
+      P6.048     PDEF24      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 24  Setting
+      P6.049     PDAT24               0             -2147483648   2147483647           0 PR Commad 24  Data
+      P6.050     PDEF25      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 25  Setting
+      P6.051     PDAT25               0             -2147483648   2147483647           0 PR Commad 25  Data
+      P6.052     PDEF26      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 26  Setting
+      P6.053     PDAT26               0             -2147483648   2147483647           0 PR Commad 26  Data
+      P6.054     PDEF27      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 27  Setting
+      P6.055     PDAT27               0             -2147483648   2147483647           0 PR Commad 27  Data
+      P6.056     PDEF28      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 28  Setting
+      P6.057     PDAT28               0             -2147483648   2147483647           0 PR Commad 28  Data
+      P6.058     PDEF29      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 29  Setting
+      P6.059     PDAT29               0             -2147483648   2147483647           0 PR Commad 29  Data
+      P6.060     PDEF30      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 30  Setting
+      P6.061     PDAT30               0             -2147483648   2147483647           0 PR Commad 30  Data
+      P6.062     PDEF31      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 31  Setting
+      P6.063     PDAT31               0             -2147483648   2147483647           0 PR Commad 31  Data
+      P6.064     PDEF32      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 32  Setting
+      P6.065     PDAT32               0             -2147483648   2147483647           0 PR Commad 32  Data
+      P6.066     PDEF33      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 33  Setting
+      P6.067     PDAT33               0             -2147483648   2147483647           0 PR Commad 33  Data
+      P6.068     PDEF34      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 34  Setting
+      P6.069     PDAT34               0             -2147483648   2147483647           0 PR Commad 34  Data
+      P6.070     PDEF35      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 35  Setting
+      P6.071     PDAT35               0             -2147483648   2147483647           0 PR Commad 35  Data
+      P6.072     PDEF36      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 36  Setting
+      P6.073     PDAT36               0             -2147483648   2147483647           0 PR Commad 36  Data
+      P6.074     PDEF37      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 37  Setting
+      P6.075     PDAT37               0             -2147483648   2147483647           0 PR Commad 37  Data
+      P6.076     PDEF38      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 38  Setting
+      P6.077     PDAT38               0             -2147483648   2147483647           0 PR Commad 38  Data
+      P6.078     PDEF39      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 39  Setting
+      P6.079     PDAT39               0             -2147483648   2147483647           0 PR Commad 39  Data
+      P6.080     PDEF40      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 40  Setting
+      P6.081     PDAT40               0             -2147483648   2147483647           0 PR Commad 40  Data
+      P6.082     PDEF41      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 41  Setting
+      P6.083     PDAT41               0             -2147483648   2147483647           0 PR Commad 41  Data
+      P6.084     PDEF42      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 42  Setting
+      P6.085     PDAT42               0             -2147483648   2147483647           0 PR Commad 42  Data
+      P6.086     PDEF43      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 43  Setting
+      P6.087     PDAT43               0             -2147483648   2147483647           0 PR Commad 43  Data
+      P6.088     PDEF44      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 44  Setting
+      P6.089     PDAT44               0             -2147483648   2147483647           0 PR Commad 44  Data
+      P6.090     PDEF45      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 45  Setting
+      P6.091     PDAT45               0             -2147483648   2147483647           0 PR Commad 45  Data
+      P6.092     PDEF46      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 46  Setting
+      P6.093     PDAT46               0             -2147483648   2147483647           0 PR Commad 46  Data
+      P6.094     PDEF47      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 47  Setting
+      P6.095     PDAT47               0             -2147483648   2147483647           0 PR Commad 47  Data
+      P6.096     PDEF48      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 48  Setting
+      P6.097     PDAT48               0             -2147483648   2147483647           0 PR Commad 48  Data
+      P6.098     PDEF49      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 49  Setting
+      P6.099     PDAT49               0             -2147483648   2147483647           0 PR Commad 49  Data
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      P7.000     PDEF50      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 50  Setting
+      P7.001     PDAT50               0             -2147483648   2147483647           0 PR Commad 50  Data
+      P7.002     PDEF51      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 51  Setting
+      P7.003     PDAT51               0             -2147483648   2147483647           0 PR Commad 51  Data
+      P7.004     PDEF52      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 52  Setting
+      P7.005     PDAT52               0             -2147483648   2147483647           0 PR Commad 52  Data
+      P7.006     PDEF53      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 53  Setting
+      P7.007     PDAT53               0             -2147483648   2147483647           0 PR Commad 53  Data
+      P7.008     PDEF54      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 54  Setting
+      P7.009     PDAT54               0             -2147483648   2147483647           0 PR Commad 54  Data
+      P7.010     PDEF55      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 55  Setting
+      P7.011     PDAT55               0             -2147483648   2147483647           0 PR Commad 55  Data
+      P7.012     PDEF56      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 56  Setting
+      P7.013     PDAT56               0             -2147483648   2147483647           0 PR Commad 56  Data
+      P7.014     PDEF57      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 57  Setting
+      P7.015     PDAT57               0             -2147483648   2147483647           0 PR Commad 57  Data
+      P7.016     PDEF58      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 58  Setting
+      P7.017     PDAT58               0             -2147483648   2147483647           0 PR Commad 58  Data
+      P7.018     PDEF59      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 59  Setting
+      P7.019     PDAT59               0             -2147483648   2147483647           0 PR Commad 59  Data
+      P7.020     PDEF60      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 60  Setting
+      P7.021     PDAT60               0             -2147483648   2147483647           0 PR Commad 60  Data
+      P7.022     PDEF61      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 61  Setting
+      P7.023     PDAT61               0             -2147483648   2147483647           0 PR Commad 61  Data
+      P7.024     PDEF62      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 62  Setting
+      P7.025     PDAT62               0             -2147483648   2147483647           0 PR Commad 62  Data
+      P7.026     PDEF63      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 63  Setting
+      P7.027     PDAT63               0             -2147483648   2147483647           0 PR Commad 63  Data
+      P7.028     PDEF64      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 64  Setting
+      P7.029     PDAT64               0             -2147483648   2147483647           0 PR Commad 64  Data
+      P7.030     PDEF65      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 65  Setting
+      P7.031     PDAT65               0             -2147483648   2147483647           0 PR Commad 65  Data
+      P7.032     PDEF66      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 66  Setting
+      P7.033     PDAT66               0             -2147483648   2147483647           0 PR Commad 66  Data
+      P7.034     PDEF67      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 67  Setting
+      P7.035     PDAT67               0             -2147483648   2147483647           0 PR Commad 67  Data
+      P7.036     PDEF68      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 68  Setting
+      P7.037     PDAT68               0             -2147483648   2147483647           0 PR Commad 68  Data
+      P7.038     PDEF69      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 69  Setting
+      P7.039     PDAT69               0             -2147483648   2147483647           0 PR Commad 69  Data
+      P7.040     PDEF70      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 70  Setting
+      P7.041     PDAT70               0             -2147483648   2147483647           0 PR Commad 70  Data
+      P7.042     PDEF71      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 71  Setting
+      P7.043     PDAT71               0             -2147483648   2147483647           0 PR Commad 71  Data
+      P7.044     PDEF72      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 72  Setting
+      P7.045     PDAT72               0             -2147483648   2147483647           0 PR Commad 72  Data
+      P7.046     PDEF73      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 73  Setting
+      P7.047     PDAT73               0             -2147483648   2147483647           0 PR Commad 73  Data
+      P7.048     PDEF74      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 74  Setting
+      P7.049     PDAT74               0             -2147483648   2147483647           0 PR Commad 74  Data
+      P7.050     PDEF75      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 75  Setting
+      P7.051     PDAT75               0             -2147483648   2147483647           0 PR Commad 75  Data
+      P7.052     PDEF76      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 76  Setting
+      P7.053     PDAT76               0             -2147483648   2147483647           0 PR Commad 76  Data
+      P7.054     PDEF77      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 77  Setting
+      P7.055     PDAT77               0             -2147483648   2147483647           0 PR Commad 77  Data
+      P7.056     PDEF78      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 78  Setting
+      P7.057     PDAT78               0             -2147483648   2147483647           0 PR Commad 78  Data
+      P7.058     PDEF79      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 79  Setting
+      P7.059     PDAT79               0             -2147483648   2147483647           0 PR Commad 79  Data
+      P7.060     PDEF80      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 80  Setting
+      P7.061     PDAT80               0             -2147483648   2147483647           0 PR Commad 80  Data
+      P7.062     PDEF81      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 81  Setting
+      P7.063     PDAT81               0             -2147483648   2147483647           0 PR Commad 81  Data
+      P7.064     PDEF82      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 82  Setting
+      P7.065     PDAT82               0             -2147483648   2147483647           0 PR Commad 82  Data
+      P7.066     PDEF83      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 83  Setting
+      P7.067     PDAT83               0             -2147483648   2147483647           0 PR Commad 83  Data
+      P7.068     PDEF84      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 84  Setting
+      P7.069     PDAT84               0             -2147483648   2147483647           0 PR Commad 84  Data
+      P7.070     PDEF85      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 85  Setting
+      P7.071     PDAT85               0             -2147483648   2147483647           0 PR Commad 85  Data
+      P7.072     PDEF86      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 86  Setting
+      P7.073     PDAT86               0             -2147483648   2147483647           0 PR Commad 86  Data
+      P7.074     PDEF87      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 87  Setting
+      P7.075     PDAT87               0             -2147483648   2147483647           0 PR Commad 87  Data
+      P7.076     PDEF88      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 88  Setting
+      P7.077     PDAT88               0             -2147483648   2147483647           0 PR Commad 88  Data
+      P7.078     PDEF89      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 89  Setting
+      P7.079     PDAT89               0             -2147483648   2147483647           0 PR Commad 89  Data
+      P7.080     PDEF90      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 90  Setting
+      P7.081     PDAT90               0             -2147483648   2147483647           0 PR Commad 90  Data
+      P7.082     PDEF91      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 91  Setting
+      P7.083     PDAT91               0             -2147483648   2147483647           0 PR Commad 91  Data
+      P7.084     PDEF92      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 92  Setting
+      P7.085     PDAT92               0             -2147483648   2147483647           0 PR Commad 92  Data
+      P7.086     PDEF93      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 93  Setting
+      P7.087     PDAT93               0             -2147483648   2147483647           0 PR Commad 93  Data
+      P7.088     PDEF94      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 94  Setting
+      P7.089     PDAT94               0             -2147483648   2147483647           0 PR Commad 94  Data
+      P7.090     PDEF95      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 95  Setting
+      P7.091     PDAT95               0             -2147483648   2147483647           0 PR Commad 95  Data
+      P7.092     PDEF96      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 96  Setting
+      P7.093     PDAT96               0             -2147483648   2147483647           0 PR Commad 96  Data
+      P7.094     PDEF97      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 97  Setting
+      P7.095     PDAT97               0             -2147483648   2147483647           0 PR Commad 97  Data
+      P7.096     PDEF98      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 98  Setting
+      P7.097     PDAT98               0             -2147483648   2147483647           0 PR Commad 98  Data
+      P7.098     PDEF99      0x00000000              0x00000000   0xFFFFFFFF  0x00000000 PR Commad 99  Setting
+      P7.099     PDAT99               0             -2147483648   2147483647           0 PR Commad 99  Data
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      PM.000                          0                       0            3           0 Motor Type
+      PM.001                          0                       0            8           0 Motor Automatic Identification
+      PM.002                          1                       0            1           0 Motor Parameter Confirmation
+      PM.003                     0x0000                  0x0000       0x0010      0x0010 Encoder Type
+      PM.004                    2097152 Counts/Rev          128    268435456    16777216 Encoder Resolution
+      PM.005                          0                  -32768        32767           0 Reserved
+      PM.006                     0x0000                  0x0000       0x0111      0x0000 Phase Sequence
+      PM.007                      326.2    Degrees          0.0        360.0         0.0 Commutation Offset
+      PM.008                        0.0    Degrees          0.0        360.0         0.0 Hall Hysteresis Width
+      PM.009                     0x0000                  0x0000       0x0010      0x0010 Electrical Angle Correction
+      PM.010                          0                  -32768        32767           0 Reserved
+      PM.011                        100                       0          250         100 Reserved
+      PM.012                     0x0044                  0x0011       0x00FF      0x0044 Reserved
+      PM.013                          0                       0            1           0 Reserved
+      PM.014                          0                  -32768        32767           0 Reserved
+      PM.015                     45.203                   0.000     1023.000       0.000 Current Loop Proportional Gain
+      PM.016                        150                       0        32767           0 Current Loop Integral Gain
+      PM.017                          0                  -32768        32767           0 Reserved
+      PM.018                          0                  -32768        32767           0 Reserved
+      PM.019                        100          %            0          600         100 Overload Rising Gain
+      PM.020                        100          %           15          600         100 Overload Falling Gain
+      PM.021                          0                  -32768        32767           0 Reserved
+      PM.022                          0                       0            3           0 Motor Temperature Sensor Type
+      PM.023                          0                  -32768        32767           0 Reserved
+      PM.024                      50000       Ohms            0        50000       50000 Motor Temperature Sensor Resistance
+      PM.025                          0                  -32768        32767           0 Reserved
+      PM.026                          0                  -32768        32767           0 Reserved
+      PM.027                          0                  -32768        32767           0 Reserved
+      PM.028                          8       pole            0          500          10 Number of poles in the motor
+      PM.029                       6.36 Amps (RMS)         0.00       655.35        0.00 Motor Rated Continuous Current
+      PM.030                      20.86 Amps (RMS)         0.00       655.35        0.00 Motor Rated Peak Current
+      PM.031                       5000        RPM            0        28500        8000 Motor Rated Speed at Rated Frequency
+      PM.032                       5000        RPM            0        28500        8000 Maximum allowed motor speed
+      PM.033                      0.561 N-m/Amps (RMS)        0.000       65.535       0.000 Permanent Magnet Motor Torque Constant
+      PM.034                      0.759 10^-4kg-m^2        0.000  2147483.647       0.000 Rotary Motor Inertia
+      PM.035                      0.899       Ohms        0.000       65.535       0.000 Permanent Magnet Motor Resistance
+      PM.036                    0.00599          H      0.00000      0.65535     0.00000 Permanent Magnet Motor Inductance
+      PM.037                          0                  -32768        32767           0 Reserved
+      PM.038                       19.6 Volts (RMS)/KRPM          0.0       2287.6         0.0 Permenent Magnet Motor Bemf Voltage Constant
+      PM.039                          0                  -32768        32767           0 Reserved
+      PM.040                          0                  -32768        32767           0 Reserved
+      PM.041                          0                  -32768        32767           0 Reserved
+      PM.042                          0                  -32768        32767           0 Reserved
+      PM.043                          0                  -32768        32767           0 Reserved
+      PM.044                          0                  -32768        32767           0 Reserved
+      PM.045                     30.000         mm        1.000      500.000      30.000 Linear Motor Pole Pitch
+      PM.046                          0                  -32768        32767           0 Reserved
+      PM.047                          0       mm/s            0        15999        4000 Linear Motor Rated Velocity
+      PM.048                          0       mm/s            0        15999        4000 Linear Motor Max Velocity
+      PM.049                       0.00 N/Amps (RMS)         0.00      1773.62        0.00 Permanent Magnet Motor Force Constant
+      PM.050                          0                  -32768        32767           0 Linear Motor Mass
+      PM.051                          0                  -32768        32767           0 Reserved
+      PM.052                          0                  -32768        32767           0 Reserved
+      PM.053                        0.0 Vrms/(m/s)          0.0        591.2         0.0 Linear Motor Voltage Constant
+      PM.054                          0                  -32768        32767           0 Reserved
+      PM.055                          0                  -32768        32767           0 Reserved
+      PM.056                          0                  -32768        32767           0 Reserved
+      PM.057                          0                  -32768        32767           0 Reserved
+      PM.058                          0                  -32768        32767           0 Reserved
+      PM.059                          0                  -32768        32767           0 Reserved
+      PM.060                          0                  -32768        32767           0 Reserved
+      PM.061                          0                  -32768        32767           0 Reserved
+      PM.062                          0                  -32768        32767           0 Reserved
+      PM.063                          0                  -32768        32767           0 Reserved
+      PM.064                          0                  -32768        32767           0 Reserved
+      PM.065                        230 Volts (RMS)            0        65535         220 Motor Rated Base Voltage
+      PM.066                       50.0         Hz          0.0       1000.0        50.0 Induction Motor Rated Frequency
+      PM.067                       1.30         kW         0.00      6553.50        0.40 Motor Rated Output Power at Rated Frequency
+      PM.068                          0                  -32768        32767           0 Reserved
+      PM.069                          0                  -32768        32767           0 Reserved
+      PM.070                          0                  -32768        32767           0 Reserved
+      PM.071                          0                  -32768        32767           0 Reserved
+      PM.072                          0                  -32768        32767           0 Reserved
+      PM.073                          0                  -32768        32767           0 Reserved
+      PM.074                      0.000       Ohms        0.000       15.999       0.000 Induction Motor Stator Resistance
+      PM.075                      0.000       Ohms        0.000       15.999       0.000 Induction Motor Rotor Resistance
+      PM.076                    0.00010          H      0.00000      0.24999     0.00010 Induction Motor Leakage Inductance
+      PM.077                    0.00010          H      0.00000      1.99900     0.00010 Induction Motor Mutual Inductance
+      PM.078                       0.10 Amps (RMS)         0.00       327.67        0.10 Induction Motor Flux Current
+      PM.079                          0                       0        32767           0 Induction Motor Flux Proportional Gain
+      PM.080                        0.0                     0.0        511.9         0.0 Induction Motor Flux Integral Gain
+      PM.081                          0                  -32768        32767           0 Reserved
+      PM.082                          0                  -32768        32767           0 Reserved
+      PM.083                          0                  -32768        32767           0 Reserved
+      PM.084                          0                  -32768        32767           0 Reserved
+      PM.085                          0                  -32768        32767           0 Reserved
+      PM.086                          0                  -32768        32767           0 Reserved
+      PM.087                          0                  -32768        32767           0 Reserved
+      PM.088                          0                  -32768        32767           0 Reserved
+      PM.089                          0                  -32768        32767           0 Reserved
+      PM.090                          0          %       -32768        32767           0 Overcurrent Diagnostic Level 1
+      PM.091                          0          s       -32768        32767           0 Overcurrent Diagnostic Time 1
+      PM.092                          0          %       -32768        32767           0 Overcurrent Diagnostic Level 2
+      PM.093                          0          s       -32768        32767           0 Overcurrent Diagnostic Time 2
+      PM.094                          0                  -32768        32767           0 Reserved
+      PM.095                          0                  -32768        32767           0 Reserved
+      PM.096                          0                  -32768        32767           0 Reserved
+      PM.097                          0                  -32768        32767           0 Reserved
+
+  [Paramter]  [   Code]      [Value][X]       [Unit]        [Min]        [Max]   [Default] [Description]
+      PN.000                     0x0000                  0x0000       0x0002      0x0000 Motor Data Source
+      PN.001                        100 % Motor Rated            0          200         100 Motor Overload Limit
+      PN.002                      0.000         Kg        0.000      500.000       0.000 Linear Motor Mass
+      PN.003                       1000 Lines/Meter           18     62500000        1000 Encoder Lines / Meter
+      PN.004                          1                       0            1           0 Motor Thermostat
+      PN.005                     32.770    °C/Watt        0.000       65.535       0.000 Motor Winding To Encoder Resistance
+      PN.006                          1       J/°C            0        65535           0 Motor Winding To Encoder Capacitance
+      PN.007                      0.880    °C/Watt        0.000       65.535       0.000 Motor Winding To Ambient Resistance
+      PN.008                       1227       J/°C            0        65535           0 Motor Winding To Ambient Capacitance
+      PN.009                          0                       0            2           0 Commutation Alignment (Startup)
+      PN.010                 0x4D504C2D              0x00000000   0xFFFFFFFF  0x00000000 Motor Catalog Number [0]-[3]
+      PN.011                 0x41333230              0x00000000   0xFFFFFFFF  0x00000000 Motor Catalog Number [4]-[7]
+      PN.012                 0x50202020              0x00000000   0xFFFFFFFF  0x00000000 Motor Catalog Number [8]-[11]
+      PN.013                 0x20202020              0x00000000   0xFFFFFFFF  0x00000000 Motor Catalog Number [12]-[15]
+      PN.014                      89.02          %         0.01       100.00      100.00 Flux Saturation 1/8 Peak Current
+      PN.015                      78.82          %         0.01       100.00      100.00 Flux Saturation 1/4 Peak Current
+      PN.016                      65.88          %         0.01       100.00      100.00 Flux Saturation 3/8 Peak Current
+      PN.017                      52.94          %         0.01       100.00      100.00 Flux Saturation 1/2 Peak Current
+      PN.018                      43.13          %         0.01       100.00      100.00 Flux Saturation 5/8 Peak Current
+      PN.019                      36.86          %         0.01       100.00      100.00 Flux Saturation 3/4 Peak Current
+      PN.020                      32.15          %         0.01       100.00      100.00 Flux Saturation 7/8 Peak Current
+      PN.021                      25.88          %         0.01       100.00      100.00 Flux Saturation Peak Current
+      PN.022                 0x050C07EA              0x00000000   0xFFFFFFFF  0x00000000 Motor Date Code
+      PN.023                       3.05        N-m         0.00       655.35        0.00 Permanent Magnet Motor Rated Torque
+      PN.024                       0.00          N         0.00     65535.00        0.00 Permanent Magnet Motor Rated Force
+      PN.025                       0.00          %         0.00       100.00        0.00 Maximum Continuous Torque Limit
+      PN.026                     0x0007                  0x0000       0xC107      0x0007 Enable Communication Ports
+      PN.027                     0x0001                  0x0000       0xFFFF      0x0000 Hardware Revision
+      PN.028                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [0]-[3]
+      PN.029                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [4]-[7]
+      PN.030                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [8]-[11]
+      PN.031                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [12]-[15]
+      PN.032                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [16]-[19]
+      PN.033                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [20]-[23]
+      PN.034                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [24]-[27]
+      PN.035                 0x00000000              0x00000000   0xFFFFFFFF  0x00000000 Drive Name [28]-[31]
+      PN.036                 0x601C9188              0x00000000   0xFFFFFFFF  0x00000000 Drive Serial Number
+      PN.037                 0x00000000 Amps (RMS)   0x00000000   0xFFFFFFFF  0x00000000 Output Current for Webpage Display
+      PN.038                          0          %            0         1000         100 Motor Capacity
+      PN.039                 0x00000019         °C   0x00000000   0xFFFFFFFF  0x00000000 Inverter Temperature
+      PN.040                 0x33333531              0x00000000   0x7FFFFFFF  0x00000000 Motor Serial Number from nameplate[0]-[3]
+      PN.041                 0x38333531              0x00000000   0x7FFFFFFF  0x00000000 Motor Serial Number from nameplate[4]-[7]
+      PN.042                     0x3020                  0x0000       0x7FFF      0x0000 Motor Serial Number from nameplate[8]-[9]
+      PN.043                 0x00000019         °C   0x00000000   0xFFFFFFFF  0x00000000 Encoder Temperature
+      PN.044                      0.759 10^-4 kg-m^2        0.000  2147483.647       0.000 Total Inertia
+      PN.045                          0                       0            1           0 Use Load Ratio
+      PN.046                     0x2209                  0x0000       0xFFFF      0x0000 Encoder Communication Protocol
+      PN.047                          4                       1        65535           1 Product Code
+      PN.048                       4001                       0        32767           0 Firmware Revision
+      PN.049                  331010003                       0   2147483647           0 Firmware Subminor Revision
+      PN.050                 0x43313034              0x00000000   0xFFFFFFFF  0x00000000 Encoder Serial Number[0]-[3]
+      PN.051                 0x31363636              0x00000000   0xFFFFFFFF  0x00000000 Encoder Serial Number[4]-[7]
+      PN.052                 0x00000042              0x00000000   0xFFFFFFFF  0x00000000 Encoder Serial Number[8]
+      PN.053                         20         Hz            0         4096          20 Motor Overload derate Hz
+      PN.054                     0x0446                  0x0000       0x7FFF      0x0000 Motor ID
+      PN.055                          0                  -32768        32767           0 Reserved
+      PN.056                          0                  -32768        32767           0 Reserved
+      PN.057                          0                  -32768        32767           0 Reserved
+      PN.058                          0                  -32768        32767           0 Reserved
+
+
+
+     [ Header Information]-Header Information
+     =====================================================================================
+     This is the Header Information of this file, Don't change this area!   
+     
+     -------------------------------------------------------------------------------------
+       26432,         4100,            0,       196620,            0, 
+
+
+
+
+
+
+
+           0,          192,        10302,        10302,            1, 
+
+
+
+
+
+
+
+           8,            2,           77,          112,          124, 
+          43,           37,          112,          100, 
+         100,           86,          104,           98, 
+          59, 
+     Version :V4.0.0.1
+     311.0902.01
+     =====================================================================================
+
+[Code]
+0g         Version :V4.0.0.1                                                                                                 €              €                                         π             π"             Pθ             θ                               >(  >(     z#  z#                                                                                                       `                            M  p  |  +  %  p  d  d ÿÿV ώÿh ύÿb όÿ;                   !                >(                                                          	 ÿÿÿÿ  
+ ÿÿÿÿ   ÿÿÿÿ   ÿÿÿÿ   ÿÿÿÿ                                                                                                                                        !       "       #      $      %      &      '      (       )       *       +       ,       - =ÿÿÿ  .      /       0       1       2       3       4       5       6       7       8       9       :       ;       <       =       >       ?       @       A       B       C       D       E       F       G       H       I       J       K       L        B                     d     d                      	 θ   
+ Π    Έ    d     d     d                                -                                θ          θ                @               !      " Θ    # Θ    $      % <    & d    ' Έ   ( @   ) d    *      +      ,     -  †  . Δ	   / 
+    0      1      2      3      4     5 (    6 \  7    8 x    9      :     ;      <      =      >      ?     @      A     B      C      D     E      F      G      H    I 0u   J      K d    L @   M      N      O      P      Q @   R      S      T      U      V      W     X Π   Y      Z      [      \      ]      ^      _      `      a      b      c      d      e      f      g      h      i      j      k      l      m      n      o        $     d     2               d                $    	     
+                                                                  θ                           
+                          !      " @   #     $     %     &     '     (     )     *      + θ   ,      - θ   .      /     0 d    1     2      3      4    @ 5      6      7      8      9      :      ;      <     =     >     ?      @      A     B !    C     D      E      F      G      H      I      J      K      L      M      N    O h   P      Q      R      S      T      U      V    W '   X      Y      Z      [      \      ]     ^     _     `     a     b θ   c      d     e θ   f      g     h     i     j Π   k      l      m      n      o      p     q      r      s      t      u      v      w      x      y      z      {                                                         	      
+                                                                                                                                           !      "      #      $      %      &      ' ¨ΐ (  ÿÿÿ ) ώ¨ΐ *        "     "                                          	      
+       ρ?     @    ο?     @    ώ?     @     @     @                                 –                                   d     X          !      " –    # 
+    $        ίΎ              ÿξοξ        θ    Θ           ÿÿÿ 	    € 
+                                    ÿÿÿÿ              @B   Θ     ,    τ    X         „    θ    °    ά    Π    Δ	    Έ        ! @   " 2    #     $      %      &     '   2 (      ) d    * Θ    +    , τ   -     . θ   / ά   0 Π   1 Δ	   2 Έ   3 ¬   4     5 ”   6    7 |   8 2    9      :     ;  d  < Θ    = τ   > θ   ? Π   @ Έ   A    B p   C @   D '   E Θ2   F :   G PF   H  N   I ΨY   J ¨a   K 0u   L      M      N      O      P      Q d    R     S     T    U      V      W      X     Y      Z    [ h   \      ]      ^      _      `      a      b      c      d      e      f      g      h      i      j      k 
+    l      m     n   < o                                                             	      
+                                                                                                                                           !      "      #      $      %      &      '      (      )      *      +      ,      -      .      /      0      1      2      3      4      5      6      7      8      9      :      ;      <      =      >      ?      @      A      B      C      D      E      F      G      H      I      J      K      L      M      N      O      P      Q      R      S      T      U      V      W      X      Y      Z      [      \      ]      ^      _      `      a      b      c                                                             	      
+                                                                                                                                           !      "      #      $      %      &      '      (      )      *      +      ,      -      .      /      0      1      2      3      4      5      6      7      8      9      :      ;      <      =      >      ?      @      A      B      C      D      E      F      G      H      I      J      K      L      M      N      O      P      Q      R      S      T      U      V      W      X      Y      Z      [      \      ]      ^      _      `      a      b      c     ÿÿ     ÿÿ    ÿÿ    ÿÿ    ÿÿ     ÿÿ     ÿÿ     ÿÿ     ÿÿ     ÿÿ	     ÿÿ
+     ÿÿ     ÿÿ     ÿÿ     ÿÿ     ÿÿ U  ÿÿ    ÿÿ ’U  ÿÿ    ÿÿ     ÿÿ <  ÿÿ    ÿÿ    ÿÿ 	V  ÿÿ  @  ÿÿ     ÿÿ    ÿÿ    ÿÿ    ÿÿ    ÿÿ ό?  ÿÿ  @  ÿÿ  ?  ÿÿ! Ϊ  ÿÿ"     ÿÿ#     ÿÿ$ ό  ÿÿ% 4  ÿÿ&    ÿÿ'    ÿÿ( d   ÿÿ) 
+   ÿÿ*     ÿÿ+ u  ÿÿ, c   ÿÿ-     ÿÿ.     ÿÿ/     ÿÿ0     ÿÿ1     ÿÿ2     ÿÿ3     ÿÿ4     ÿÿ5     ÿÿ6     ÿÿ7     ÿÿ8     ÿÿ9     ÿÿ:     ÿÿ; b  ÿÿ<    ÿÿ=    ÿÿ> 7  ÿÿ?    ÿÿ@     ÿÿA     ÿÿB ”  ÿÿC Ψ  ÿÿD   ÿÿE °  ÿÿF Π  ÿÿG 8  ÿÿH '  ÿÿI   ÿÿJ '  ÿÿK @  ÿÿL '  ÿÿM   ÿÿN )  ÿÿO   ÿÿP   ÿÿQ y  ÿÿR ‡3  ÿÿS  @  ÿÿT †3  ÿÿU @  ώÿ    ώÿ   ώÿ     ώÿ M   ώÿ    ώÿ    ώÿ    ώÿ    ώÿ    ώÿ	    ώÿ
+ C   ώÿ     ώÿ    ώÿ -   ώÿ    ώÿ     ώÿ $  ώÿ     ώÿ    ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ     ώÿ 2   ώÿ     ώÿ    ώÿ  @  ώÿ!  @  ώÿ" d   ώÿ#     ώÿ$     ώÿ%     ώÿ&    ώÿ'    ώÿ(    ώÿ)     ώÿ*    ώÿ+     ώÿ,   ώÿ-     ώÿ.    ώÿ/     ώÿ0     ώÿ1     ώÿ2     ώÿ3     ώÿ4     ώÿ5     ώÿ6     ώÿ7     ώÿ8     ώÿ9     ώÿ:     ώÿ;     ώÿ<     ώÿ=     ώÿ>     ώÿ?     ώÿ@     ώÿA     ώÿB     ώÿC     ώÿD     ώÿE     ώÿF     ώÿG <   ώÿH     ώÿI     ώÿJ     ώÿK     ώÿL    ώÿM     ώÿN     ώÿO  ψ  ώÿP     ώÿQ     ώÿR B†
+ ώÿS     ώÿT WζΗDώÿU     ώÿV     ώÿW     ώÿX     ώÿY     ώÿZ     ώÿ[     ώÿ\     ώÿ]     ώÿ^     ώÿ_ 
+   ώÿ` θ  ώÿa θ  ώÿb    ώÿc     ώÿd wd}Έώÿe   ώÿf     ώÿg     ύÿ      ύÿ     ύÿ    ύÿ     ύÿ     ύÿ     ύÿ     ύÿ Ύ  ύÿ     ύÿ	     ύÿ
+     ύÿ d   ύÿ D   ύÿ     ύÿ     ύÿ “°  ύÿ –   ύÿ     ύÿ     ύÿ d   ύÿ d   ύÿ     ύÿ     ύÿ     ύÿ PΓ  ύÿ     ύÿ     ύÿ     ύÿ    ύÿ |  ύÿ &  ύÿ   ύÿ    ύÿ! 1  ύÿ" χ  ύÿ# ƒ  ύÿ$ W  ύÿ%     ύÿ& Δ   ύÿ'     ύÿ(     ύÿ)     ύÿ*     ύÿ+     ύÿ,     ύÿ- 0u  ύÿ.     ύÿ/     ύÿ0     ύÿ1     ύÿ2     ύÿ3     ύÿ4     ύÿ5     ύÿ6     ύÿ7     ύÿ8     ύÿ9     ύÿ:     ύÿ;     ύÿ<     ύÿ=     ύÿ>     ύÿ?     ύÿ@     ύÿA ζ   ύÿB τ  ύÿC ‚   ύÿD     ύÿE     ύÿF     ύÿG     ύÿH     ύÿI     ύÿJ     ύÿK     ύÿL 
+   ύÿM 
+   ύÿN 
+   ύÿO     ύÿP     ύÿQ     ύÿR     ύÿS     ύÿT     ύÿU     ύÿV     ύÿW     ύÿX     ύÿY     ύÿZ     ύÿ[     ύÿ\     ύÿ]     ύÿ^     ύÿ_     ύÿ`     ύÿa     όÿ      όÿ d   όÿ     όÿ θ  όÿ    όÿ €  όÿ    όÿ p  όÿ Λ  όÿ	     όÿ
+ -LPMόÿ 023Aόÿ    Pόÿ     όÿ Ζ"  όÿ Κ  όÿ Ό  όÿ ®  όÿ Ω  όÿ f  όÿ   όÿ 
+  όÿ κόÿ 1  όÿ     όÿ     όÿ    όÿ    όÿ     όÿ     όÿ     όÿ     όÿ      όÿ!     όÿ"     όÿ#     όÿ$ ‘`όÿ%     όÿ&     όÿ'    όÿ( 1533όÿ) 1538όÿ*  0  όÿ+    όÿ, χ  όÿ-     όÿ. 	"  όÿ/    όÿ0 ΅  όÿ1 ΣΟΊόÿ2 401Cόÿ3 6661όÿ4 B   όÿ5    όÿ6 F  όÿ7     όÿ8     όÿ9     όÿ:                      `Ε                  ÿÿÿ €    5                                   ÿÿ        0@                                    ÿÿΤώ                                                 @                                 ÿ0ÿÿ         h                                 ÿ0ÿÿ         h                                 ÿ0ÿÿ         h                                 ÿ0ÿÿ         h                                 ÿÿÿÿ        t                                	 ÿÿÿ €      0$                                
+ ÿÿÿ €      0$                                 ÿÿÿ €      0$                                 ÿÿÿ €      0$                                 ÿÿÿ €      0$                                   ÿÿÿ €                                       ÿÿÿ €                                       ÿÿÿ €                                        ÿÿΤώ                                          ÿÿΤώ                                          ÿÿΤώ                                          ÿÿΤώ                                          ÿÿΤώ                                         ÿÿÿ €                                       ÿÿÿ €                                       ÿÿÿ €                                     ÿÿÿÿ        pd                                 ÿÿÿÿ        pd                                 ÿÿÿÿ        pd                                 ÿÿÿÿ        pd                                 ÿÿÿÿ        pd                                   ÿÿÿ €                                       ÿÿÿ €                                        ÿÿÿ €                                    !   ÿÿÿ €                                    "   ÿÿÿ €                                    #   ―      €                                 $   ―      €                                 %   ―      €                                 &   ―      €                                 '   ―      €                                 (   ÿÿÿ €                                    )   ÿÿÿ €                                    *   ÿÿÿ €                                    +   ÿÿÿ €                                    , ÿÿÿ €      0$                                -    ÿÿΤώ                                     .   ÿÿ        0D                                /   ÿÿÿ €                                    0   ÿÿÿ €                                    1            0@                                2            0D                                3   ÿÿÿ €    0$                                4 ÿÿÿ €      0$                                5             @                                6 ÿÿÿ €                                        7 ÿÿÿ €                                        8   ÿÿÿ €                                    9   ÿÿÿ €                                    :   ÿÿÿ €                                    ;   ÿÿÿ €                                    <   ÿÿÿ €                                    =   ÿÿÿ €                                    >   ÿÿÿ €                                    ? ÿÿÿ        4                                @   ÿÿÿ €                                    A ÿ0ÿÿ         h                                B ÿ0ÿÿ         h                                C ÿ0ÿÿ         h                                D ÿ0ÿÿ         h                                E   ÿÿÿ €                                    F   ÿÿÿ €                                    G   ÿÿÿ €                                    H   ÿÿÿ €                                    I   ÿÿÿ €                                    J   ÿÿÿ €                                    K   ÿÿÿ €                                    L   ÿÿÿ €                                       χ      B A                                          B                                            A                                            @                                  d       d                                     d       d                                     θ                                            θ                                            θ                                         	  HYϋÿΈ¦  θ                 θ             
+  HYϋÿΈ¦  Π                 Π               HYϋÿΈ¦  Έ                 Έ                ¤ÿÿ\ώ  d                                     ¤ÿÿ\ώ  d                                     ¤ÿÿ\ώ  d                                     ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                     o     -   `                                υ α                                            ÿÿÿ €                                               @                                 €–gÿ€i                                        ÿÿÿ €                                      θ  
+   θ                                   	                                             θ  
+   θ                                   	                                                                                          τ     @                                    ÿÿÿ €                                       0         A                               !            D                               "   άÿ     Θ €                                #   άÿ     Θ €                                $   άÿ        €                                %   Π      < ‚                                &   Π     d                                 '   ¨a      Έ€                                (   To      To                                )   θÿÿό  d                                 *   θ                                         +   θÿÿό                                     , ÿÿÿ                                       - ÿÿÿ     †                                 .          Δ	 !                               /   ,      
+                                  0             @                               1   ÿÿ        €                                2   ÿÿÿ €                                   3   ÿÿÿ €                                   4   ξ     ξ                                5   :      :                                6         \                                 7   Uo  
+   Uo€                                8   x       x                                  9   ,                                         :   θ                                       ;   (                                         <   ,ÿÿΤώ                                     =   ÿÿÿ €                                   >   d                                          ?   θ                                       @             @                               A   θ                                        B   Π                                        C   ÿÿÿ €                                   D   d                                         E   ÿÿÿ €                                   F   ÿÿÿ €                                   G   ÿÿÿ €                                   H      2                                    I ÿÿÿ     0u                                 J   1ρ         @                               K   θ      d                                  L   To      @                                M   ÿÿÿ €                                   N   ÿÿÿ €                                   O   ÿÿÿ €                                   P   ÿÿÿ €                                   Q   To      To                                R   θ                                         S   ΰ.                                         T             A                               U   ÿ                                         V   ÿÿÿ €                                   W   ,                                       X   Π     Π                                 Y   ÿÿÿ €                                   Z   ÿÿÿ €                                   [   ÿÿÿ €                                   \   ÿÿÿ €                                   ]   ÿÿÿ €                                   ^   ÿÿÿ €                                   _   ÿÿÿ €                                   `   ÿÿÿ €                                   a   q         !                               b                                             c   ÿÿÿ €                                   d   ÿÿÿ €                                   e   'ÿÿπΨ                                   f   'ÿÿπΨ                                   g            `                               h υ α                                         i   ÿÿÿ €                                   j   ÿÿÿ €                                   k   d                                          l   ÿÿÿ €                                   m   ÿÿÿ €                                   n   d                                          o   ÿÿÿ €                                       ÿ      #                                     τ  
+   d                                     d       2                                     d                                           ÿ      τ                                    τ  
+   d                                     ÿ      d                                     d                                             υ                                      	                                            
+   O        €                                  O        €                                  O        €                                  O        €                                  O        €                                  O        €                                  O        €                                  O        €                                  ?        €                                  ?        €                                  ?        €                                  ?        €                                  ?        €                                    2   θ                                    (                                             ι      
+                                    ÿ                                                      @                                  θ      
+                                                                                  ÿÿωÿ                                      2                                                     @                               !   ÿÿÿ €                                   "   To     @€                                #  d                                         $   O        €                               %   O        €                               &   O        €                               '   O        €                               (   O        €                               )   ?        €                               *   ÿÿÿ €                                   +     2   θ                                 ,   (                                          -     2   θ                                 .   (                                          /   ς        @                               0   θ      d                                  1   ι      
+                                 2             @                               3   ÿÿÿ €                                   4  @       @   !                               5   ÿ                                         6   ÿÿÿ €                                   7   ÿÿÿ €                                   8   ÿÿÿ €                                   9   ÿÿÿ €                                   :   ÿÿÿ €                                   ;   ÿÿÿ €                                   < ÿÿÿ                                       = ÿÿÿ                                       > ÿÿÿ                                       ?   ÿÿÿ €                                   @   ÿÿÿ €                                   A   HΏ        @                               B   1       !  @                               C   Π                                       D            @                               E            B                               F             @                               G            H                               H   ÿÿÿ €                                   I ?__o         `                               J   ¨aÿÿX                                    K ; ΚeΔ 6     (                               L   χo         H                               M   ÿÿÿ €                                   N   h                                       O   h      h                                 P             @                               Q   ÿÿ        €                                R   ÿÿÿ €                                   S   ÿÿÿ €                                   T           D                               U             C                               V   X  
+    !                               W   lk  ,  ' !                               X   ?         E                               Y   ÿÿÿ €                                   Z   ÿÿÿ €                                   [   ÿÿÿ €                                   \   ÿÿÿ €                                   ]   "        @                               ^   0         A                               _   
+                                        `   
+                                        a   
+                                        b     2   θ                                 c   (                                          d   
+                                        e     2   θ                                 f   (                                          g   
+                                        h                                           i                                           j         Π                                 k   ÿÿÿ €                                   l   ÿÿÿ €                                   m   ÿÿÿ €                                   n   ÿÿÿ €                                   o   ÿÿÿ €                                   p            A                               q   ÿÿÿ €                                   r   ÿÿÿ €                                   s   ÿÿÿ €                                   t   ÿÿÿ €                                   u   ÿÿÿ €                                   v   ÿÿÿ €                                   w   ÿÿÿ €                                   x   ÿÿÿ €                                   y   ÿÿÿ €                                   z   ÿÿÿ €                                   { ÿÿÿ                                                     ‚                                         @                                           @                                            @                                                                                         @                                  ÿ        H                                  θ                                            υ         H                               	   ÿÿÿ €                                   
+   ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      "          @                                  ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                       ÿÿÿ €                                   !   ÿÿÿ €                                   "   ÿÿÿ €                                   #   ÿÿÿ €                                   $   ÿÿÿ €                                   %   ÿÿÿ €                                   &   ÿÿÿ €                                   ' ÿÿÿÿ    ¨ΐ c                               ( ÿÿÿÿ    ÿÿ ÿ c                               ) ÿÿÿÿ    ¨ΐώ c                               *             c                                 ÿÿÿÿ        0`                                ÿÿÿÿ        0d                                ÿÿÿÿ        0d                                ÿÿÿÿ        0d                                ÿÿÿÿ        0d                                                                           ÿ         H                                  ÿ        0@                                  ÿ         0D                               	   ?         0D                               
+                                              ÿ       @                                  ÿ       @                                  ÿ       @                                  ÿ       @                                  ÿ       @                                  ÿ       @                                  ÿ       @                                  ÿ       @                                                                            ÿÿΰό                                       ÿÿΰό                                      ÿÿxμ                                       ÿÿxμ                                       }  (   }                                    ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      ÿÿÿ €                                      Θ   2   d                                    ά  τ  X                                    ÿÿÿ €                                   ! ÿÿÿ                                         "   θ      –                                  #   Θ       
+                                 $   Θ ÿÿ8ÿ                                      ÿÿÿ €      0$                                  -         H                                           @                                ÿÿÿÿ    οξÿξ `                                  *         @                                   N     θ                 θ                     Θ                  Θ                 ƒN        0                                 ÿÿÿ €  ÿÿÿ                                 	 ÿÿÿ €   €                                   
+   ÿ        °                                  ÿ                                         ÿÿÿ €                                        ÿÿÿ €                                          ÿÿÿ €                                                H                                ÿÿÿ €                                        ÿÿÿ €                                       ÿÿÿ €                                       ψΐ€@a @B                                    άÿ     Θ €                                   άÿ     ,€                                   άÿ     τ€                                   άÿ     X€                                   άÿ      €                                   άÿ     „€                                   άÿ     θ€                                   άÿ     °€                                   άÿ     ά€                                   άÿ     Π€                                   άÿ     Δ	€                                   άÿ     Έ€                                    άÿ     €                                !   άÿ     @€                                "   ά     2 €                                #   °      €                                $                                            % ÿÿÿ €                                       &                                           '  o?ρ     2  h                               (   ÿ        €                                )   ÿ      d €                                *   ÿ      Θ €                                +   ÿ      €                                ,   ÿ      τ€                                -   ÿ       €                                .   ÿ      θ€                                /   ÿ      ά€                                0   ÿ      Π€                                1   ÿ      Δ	€                                2   ÿ      Έ€                                3   ÿ      ¬€                                4   ÿ       €                                5   ÿ      ”€                                6   ÿ      €                                7   ÿ      |€                                8         2                                  9 ÿÿÿ €                                       :                                           ; ÿ?1   d   h                               <  €8      Θ                  Θ              =  €8      τ                 τ             >  €8      θ                 θ             ?  €8      Π                 Π             @  €8      Έ                 Έ             A  €8                                    B  €8      p                 p             C  €8      @                 @             D  €8      '                 '             E  €8      Θ2                 Θ2             F  €8      :                 :             G  €8      PF                 PF             H  €8       N                  N             I  €8      ΨY                 ΨY             J  €8      ¨a                 ¨a             K  €8      0u                 0u             L ÿ?ÿÿ ΐ                                       M   ÿÿÿ €                                   N   ÿÿÿ €                                   O   ÿÿÿ €                                   P   ÿÿÿ €                                   Q         d                                  R   Π                                       S   ÿ                                       T ÿ?ÿÿ  
+                                    U   Ο                                         V ÿÿÿ €                                       W ÿ?ÿÿ ΐ                                       X o Gρ       `                               Y ÿ?ÿÿ ΐ                                       Z   h                                       [   h      h                                 \ ÿÿÿ €                                       ] ÿÿÿÿ         `                               ^ ÿÿÿ €                                       _ ÿÿÿ €                                       ` ÿÿÿ €                                       a   ω        0@                               b   έέ         @                               c   έέ         @                               d ÿÿÿ €                                       e ÿÿÿ €                                       f ÿÿÿ €                                       g ÿÿÿ €                                       h   ÿÿÿ €                                   i   ÿÿÿ €                                   j   ÿÿÿ €                                   k         
+                                  l ÿÿÿ €                                       m                                           n  o?ρ     <  h                               o ÿ?ÿÿ ΐ                                         ÿÿoÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                               	 ÿÿÿ €                                       
+ ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                         ÿÿÿÿ         `                               ! ÿÿÿ €                                       " ÿÿÿÿ         `                               # ÿÿÿ €                                       $ ÿÿÿÿ         `                               % ÿÿÿ €                                       & ÿÿÿÿ         `                               ' ÿÿÿ €                                       ( ÿÿÿÿ         `                               ) ÿÿÿ €                                       * ÿÿÿÿ         `                               + ÿÿÿ €                                       , ÿÿÿÿ         `                               - ÿÿÿ €                                       . ÿÿÿÿ         `                               / ÿÿÿ €                                       0 ÿÿÿÿ         `                               1 ÿÿÿ €                                       2 ÿÿÿÿ         `                               3 ÿÿÿ €                                       4 ÿÿÿÿ         `                               5 ÿÿÿ €                                       6 ÿÿÿÿ         `                               7 ÿÿÿ €                                       8 ÿÿÿÿ         `                               9 ÿÿÿ €                                       : ÿÿÿÿ         `                               ; ÿÿÿ €                                       < ÿÿÿÿ         `                               = ÿÿÿ €                                       > ÿÿÿÿ         `                               ? ÿÿÿ €                                       @ ÿÿÿÿ         `                               A ÿÿÿ €                                       B ÿÿÿÿ         `                               C ÿÿÿ €                                       D ÿÿÿÿ         `                               E ÿÿÿ €                                       F ÿÿÿÿ         `                               G ÿÿÿ €                                       H ÿÿÿÿ         `                               I ÿÿÿ €                                       J ÿÿÿÿ         `                               K ÿÿÿ €                                       L ÿÿÿÿ         `                               M ÿÿÿ €                                       N ÿÿÿÿ         `                               O ÿÿÿ €                                       P ÿÿÿÿ         `                               Q ÿÿÿ €                                       R ÿÿÿÿ         `                               S ÿÿÿ €                                       T ÿÿÿÿ         `                               U ÿÿÿ €                                       V ÿÿÿÿ         `                               W ÿÿÿ €                                       X ÿÿÿÿ         `                               Y ÿÿÿ €                                       Z ÿÿÿÿ         `                               [ ÿÿÿ €                                       \ ÿÿÿÿ         `                               ] ÿÿÿ €                                       ^ ÿÿÿÿ         `                               _ ÿÿÿ €                                       ` ÿÿÿÿ         `                               a ÿÿÿ €                                       b ÿÿÿÿ         `                               c ÿÿÿ €                                         ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                               	 ÿÿÿ €                                       
+ ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                        ÿÿÿÿ         `                                ÿÿÿ €                                         ÿÿÿÿ         `                               ! ÿÿÿ €                                       " ÿÿÿÿ         `                               # ÿÿÿ €                                       $ ÿÿÿÿ         `                               % ÿÿÿ €                                       & ÿÿÿÿ         `                               ' ÿÿÿ €                                       ( ÿÿÿÿ         `                               ) ÿÿÿ €                                       * ÿÿÿÿ         `                               + ÿÿÿ €                                       , ÿÿÿÿ         `                               - ÿÿÿ €                                       . ÿÿÿÿ         `                               / ÿÿÿ €                                       0 ÿÿÿÿ         `                               1 ÿÿÿ €                                       2 ÿÿÿÿ         `                               3 ÿÿÿ €                                       4 ÿÿÿÿ         `                               5 ÿÿÿ €                                       6 ÿÿÿÿ         `                               7 ÿÿÿ €                                       8 ÿÿÿÿ         `                               9 ÿÿÿ €                                       : ÿÿÿÿ         `                               ; ÿÿÿ €                                       < ÿÿÿÿ         `                               = ÿÿÿ €                                       > ÿÿÿÿ         `                               ? ÿÿÿ €                                       @ ÿÿÿÿ         `                               A ÿÿÿ €                                       B ÿÿÿÿ         `                               C ÿÿÿ €                                       D ÿÿÿÿ         `                               E ÿÿÿ €                                       F ÿÿÿÿ         `                               G ÿÿÿ €                                       H ÿÿÿÿ         `                               I ÿÿÿ €                                       J ÿÿÿÿ         `                               K ÿÿÿ €                                       L ÿÿÿÿ         `                               M ÿÿÿ €                                       N ÿÿÿÿ         `                               O ÿÿÿ €                                       P ÿÿÿÿ         `                               Q ÿÿÿ €                                       R ÿÿÿÿ         `                               S ÿÿÿ €                                       T ÿÿÿÿ         `                               U ÿÿÿ €                                       V ÿÿÿÿ         `                               W ÿÿÿ €                                       X ÿÿÿÿ         `                               Y ÿÿÿ €                                       Z ÿÿÿÿ         `                               [ ÿÿÿ €                                       \ ÿÿÿÿ         `                               ] ÿÿÿ €                                       ^ ÿÿÿÿ         `                               _ ÿÿÿ €                                       ` ÿÿÿÿ         `                               a ÿÿÿ €                                       b ÿÿÿÿ         `                               c ÿÿÿ €                                      ÿÿ           @                              ÿÿ          @                              ÿÿ           B                              ÿÿ   ÿ                                     ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ	   ÿÿÿ €                                  ÿÿ
+   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   Έ       "                              ÿÿ   ÿ                                     ÿÿ   Έ       "                              ÿÿ   ÿ                                     ÿÿ   ÿÿÿ €                                  ÿÿ   x                                     ÿÿ   ÿ                                     ÿÿ   ά                                    ÿÿ   ÿ     ΈV                               ÿÿ   ÿ      @                               ÿÿ   ÿÿÿ €                                  ÿÿ   ÿ                                      ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ÿÿÿ €                                  ÿÿ   ΜL  33   @                              ÿÿ   ΜL  33   @                              ÿÿ    ΜL  33   @                              ÿÿ!   \Dÿÿÿÿÿÿÿÿ                              ÿÿ"   ÿÿÿ €                                  ÿÿ#   ÿÿÿ €                                  ÿÿ$   Δ	      ό                               ÿÿ%   @  4  4                               ÿÿ&                                         ÿÿ'                                         ÿÿ(         d                               ÿÿ)   (       
+                               ÿÿ*   Θ         0                               ÿÿ+   ―ª    u A                              ÿÿ,   ÿ      c  A                              ÿÿ-                                           ÿÿ. ÿÿÿ €       !                              ÿÿ/   ÿÿÿ €                                  ÿÿ0   ÿÿÿ €                                  ÿÿ1   ÿÿÿ €                                  ÿÿ2   ÿÿÿ €                                  ÿÿ3   ÿÿÿ €                                  ÿÿ4   ÿÿÿ €                                  ÿÿ5   ÿÿÿ €                                  ÿÿ6            €                              ÿÿ7   ÿÿÿ €                                  ÿÿ8   ÿÿÿ €                                  ÿÿ9   ÿÿÿ €                                  ÿÿ:   ÿÿÿ €                                  ÿÿ;   ÿÿÿ €  h                              ÿÿ<   θ  τ                                  ÿÿ=   θ  τ                                  ÿÿ>     –   7                               ÿÿ?      '    #                              ÿÿ@   ÿÿÿ €                                  ÿÿA   ÿÿÿ €                                  ÿÿB   '      ”                              ÿÿC   '      Ψ                              ÿÿD   '                                    ÿÿE   '      °                              ÿÿF   '      Π                              ÿÿG   '      8                              ÿÿH    N      '                              ÿÿI   '                                    ÿÿJ   '      '                              ÿÿK    N      @                              ÿÿL   '      '                              ÿÿM   '                                    ÿÿN   )  ‰  )                              ÿÿO   '                                    ÿÿP   '                                    ÿÿQ   ÿÿ        3D                              ÿÿR   ΜL  φ(  33                              ÿÿS   ΜL  33   @                              ÿÿT   ΜL  φ(  33                              ÿÿU   ΜL  33   @                              ώÿ    ÿÿ        D                              ώÿ   ÿÿ        D                              ώÿ    ÿÿόÿ                                   ώÿ   ÿ                                    ώÿ   ÿ                                     ώÿ   ÿ                                     ώÿ   ÿ                                    ώÿ   ÿ                                     ώÿ   ÿ                                     ώÿ	   ÿ                                     ώÿ
+   ÿÿÿ €                                  ώÿ   ÿÿÿ €                                  ώÿ   ÿÿÿ €                                  ώÿ   ÿÿÿ €                                  ώÿ                                           ώÿ   ÿ                                       ώÿ   ÿÿ        3D                              ώÿ   ÿ         0@                              ώÿ   ÿÿ        0€                              ώÿ   ÿÿ        0€                              ώÿ   ÿ        0€                              ώÿ   ÿÿÿ €    0                              ώÿ   ÿÿ        0„                              ώÿ   ÿÿ        0„                              ώÿ   ÿÿÿ €                                  ώÿ   ÿÿÿ €                                  ώÿ             0d                              ώÿ             0$                              ώÿ                                          ώÿ   Θ      2                               ώÿ                                          ώÿ                                        ώÿ    '     @                              ώÿ!      €    @(                              ώÿ"   ,      d                               ώÿ#   ÿ         @                              ώÿ$   ÿÿÿ €                                  ώÿ%   ÿÿÿ €                                  ώÿ&   ÿ                                     ώÿ'   ÿ                                     ώÿ(   ÿ                                     ώÿ)   ÿ                                      ώÿ*   ÿÿÿ €                                 ώÿ+   ÿÿÿ €                                  ώÿ,   ÿÿÿ €                                ώÿ-                                          ώÿ.   p        0                              ώÿ/   ÿÿÿ €                                  ώÿ0   ÿÿÿ €                                  ώÿ1   ÿÿÿ €                                  ώÿ2   ÿÿÿ €                                  ώÿ3   ÿÿÿ €                                  ώÿ4   ÿÿÿ €                                  ώÿ5   ÿÿÿ €                                  ώÿ6   ÿÿÿ €                                  ώÿ7   ÿÿÿ €                                  ώÿ8   ÿÿÿ €                                  ώÿ9   ÿÿÿ €                                  ώÿ:   ÿÿÿ €                                  ώÿ;   ÿÿÿ €                                  ώÿ<   ÿÿÿ €                                  ώÿ=   ÿÿÿ €                                  ώÿ>   ÿÿÿ €                                  ώÿ?   ÿÿÿ €                                  ώÿ@   ÿÿÿ €                                  ώÿA   ÿÿÿ €                                  ώÿB   ÿÿ        0„                              ώÿC   ÿÿ        0„                              ώÿD   ÿÿ        0„                              ώÿE   ÿÿ        0„                              ώÿF   ÿÿ        0„                              ώÿG   Θ       <                                ώÿH                                          ώÿI   ÿ                                       ώÿJ   ÿ                                       ώÿK   ÿÿÿ €                                  ώÿL                                        ώÿM ÿÿÿ €                                     ώÿN   ÿ                                       ώÿO   ÿÿ        0@                              ώÿP             @                              ώÿQ   ΐ         @                              ώÿR ÿÿÿ €      $                              ώÿS ÿÿÿ €      $                              ώÿT ÿÿÿÿ    "eiίd                              ώÿU ÿÿÿ €      $                              ώÿV ÿÿÿ €      $                              ώÿW                                          ώÿX   ÿÿÿ €                                  ώÿY ÿÿÿÿ        d                              ώÿZ ÿÿÿÿ        d                              ώÿ[   ÿ        D                              ώÿ\   ÿÿÿ €                                  ώÿ]   ÿÿÿ €                                  ώÿ^   ÿÿÿ €                                  ώÿ_   Θ   
+   
+                                ώÿ`   Π  d   θ                               ώÿa   Π  d   θ                               ώÿb   Θ   
+                                   ώÿc   ÿÿÿ €                                  ώÿd ÿÿÿÿ        0d                              ώÿe   ÿ                                      ώÿf ÿÿÿ €                                      ώÿg   ÿ        D                              ύÿ                                            ύÿ             	                              ύÿ                                           ύÿ            C                              ύÿ      €     #                              ύÿ   ÿÿÿ €                                  ύÿ            C                              ύÿ                                         ύÿ                                         ύÿ	            A                              ύÿ
+   ÿÿÿ €                                  ύÿ   ϊ       d                                ύÿ   ÿ      D  A                              ύÿ                                           ύÿ   ÿÿÿ €                                  ύÿ                                         ύÿ   ÿ                                        ύÿ   ÿÿÿ €                                  ύÿ   ÿÿÿ €                                  ύÿ   X      d                                ύÿ   X     d                                ύÿ   ÿÿÿ €                                  ύÿ                                          ύÿ   ÿÿÿ €                                  ύÿ   PΓ      PΓ%                              ύÿ   ÿÿÿ €                                  ύÿ   ÿÿÿ €                                  ύÿ   ÿÿÿ €                                  ύÿ   τ      
+                                ύÿ   ÿÿ        ƒ                              ύÿ   ÿÿ        ƒ                              ύÿ   To      @                               ύÿ    To      @                               ύÿ!   ÿÿ        !                              ύÿ" ÿÿÿ        !                              ύÿ#   ÿÿ        !                              ύÿ$   ÿÿ        !                              ύÿ%   ÿÿÿ €                                  ύÿ&   \Y                                      ύÿ'   ÿÿÿ €                                  ύÿ(   ÿÿÿ €                                  ύÿ)   ÿÿÿ €                                  ύÿ*   ÿÿÿ €                                  ύÿ+   ÿÿÿ €                                  ύÿ,   ÿÿÿ €                                  ύÿ-   ΅  θ  0u#                              ύÿ.   ÿÿÿ €                                  ύÿ/   >                                      ύÿ0   >                                      ύÿ1  Ò΄        !                              ύÿ2   ÿÿÿ €                                  ύÿ3   ÿÿÿ €                                  ύÿ4   ÿÿÿ €                                  ύÿ5                                         ύÿ6   ÿÿÿ €                                  ύÿ7   ÿÿÿ €                                  ύÿ8   ÿÿÿ €                                  ύÿ9   ÿÿÿ €                                  ύÿ:   ÿÿÿ €                                  ύÿ;   ÿÿÿ €                                  ύÿ<   ÿÿÿ €                                  ύÿ=   ÿÿÿ €                                  ύÿ>   ÿÿÿ €                                  ύÿ?   ÿÿÿ €                                  ύÿ@   ÿÿÿ €                                  ύÿA   ÿÿ      ά €                              ύÿB   '      τ                              ύÿC 	 φÿ      ( ƒ                               ύÿD   ÿÿÿ €                                  ύÿE   ÿÿÿ €                                  ύÿF   ÿÿÿ €                                  ύÿG   ÿÿÿ €                                  ύÿH   ÿÿÿ €                                  ύÿI   ÿÿÿ €                                  ύÿJ   >                                      ύÿK   >                                      ύÿL   §a      
+                               ύÿM  ά      
+ !                              ύÿN   ÿ      
+                               ύÿO   ÿ                                        ύÿP   ÿ                                       ύÿQ   ÿÿÿ €                                  ύÿR   ÿÿÿ €                                  ύÿS   ÿÿÿ €                                  ύÿT   ÿÿÿ €                                  ύÿU   ÿÿÿ €                                  ύÿV   ÿÿÿ €                                  ύÿW   ÿÿÿ €                                  ύÿX   ÿÿÿ €                                  ύÿY   ÿÿÿ €                                  ύÿZ   ÿÿÿ €                                  ύÿ[   ÿÿÿ €                                  ύÿ\   ÿÿÿ €                                  ύÿ]   ÿÿÿ €                                  ύÿ^   ÿÿÿ €                                  ύÿ_   ÿÿÿ €                                  ύÿ`   ÿÿÿ €                                  ύÿa   ÿÿÿ €                                  όÿ              C                              όÿ   Θ       d                                όÿ   ΅        !                              όÿ Ή ¬     θ #                              όÿ                                           όÿ   ÿÿ        „!                              όÿ   ÿÿ        €!                              όÿ   ÿÿ        „!                              όÿ   ÿÿ        €!                              όÿ	                                           όÿ
+ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ   '     '                              όÿ ÿÿÿÿ         d                              όÿ   ÿÿ        ƒ                              όÿ c ÿ        ƒ!                              όÿ   '        #                              όÿ   Α                                      όÿ   ÿÿ        0D                              όÿ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ ÿÿÿÿ         a                              όÿ  ÿÿÿÿ         a                              όÿ! ÿÿÿÿ         a                              όÿ" ÿÿÿÿ         a                              όÿ# ÿÿÿÿ         a                              όÿ$ ÿÿÿÿ        0d                              όÿ% ÿÿÿÿ        0d                              όÿ&   θ      d 0                              όÿ' ÿÿÿÿ        0d                              όÿ( ÿÿÿ         d                              όÿ) ÿÿÿ         d                              όÿ*   ÿ         D                              όÿ+ ÿÿÿÿ        0d                              όÿ, ÿÿÿ                                       όÿ-                                            όÿ.   ÿÿ         A                              όÿ/   ÿÿ      °                              όÿ0   ÿ        °                              όÿ1 ÿÿÿ        0$                              όÿ2 ÿÿÿÿ        0d                              όÿ3 ÿÿÿÿ        0d                              όÿ4 ÿÿÿÿ        0d                              όÿ5                                          όÿ6   ÿ         A                              όÿ7   ÿÿÿ €                                  όÿ8   ÿÿÿ €                                  όÿ9   ÿÿÿ €                                  όÿ:   ÿÿÿ €                                                   @                                                              `8            d                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       	                                                                                                                                               
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          !                                                                                                                                               "                                                                                                                                               #                                                                                                                                               $                                                                                                                                               %                                                                                                                                               &                                                                                                                                               '                                                                                                                                               (                                                                                                                                               )                                                                                                                                               *                                                                                                                                               +                                                                                                                                               ,                                                                                                                                               -                                                                                                                                               .                                                                                                                                               /                                                                                                                                               0                                                                                                                                               1                                                                                                                                               2                                                                                                                                               3                                                                                                                                               4                                                                                                                                               5                                                                                                                                               6                                                                                                                                               7                                                                                                                                               8                                                                                                                                               9                                                                                                                                               :                                                                                                                                               ;                                                                                                                                               <                                                                                                                                               =                                                                                                                                               >                                                                                                                                               ?                                                                                                                                               @                                                                                                                                               A                                                                                                                                               B                                                                                                                                               C                                                                                                                                               D                                                                                                                                               E                                                                                                                                               F                                                                                                                                               G                                                                                                                                               H                                                                                                                                               I                                                                                                                                               J                                                                                                                                               K                                                                                                                                               L                                                                                                                                               M                                                                                                                                               N                                                                                                                                               O                                                                                                                                               P                                                                                                                                               Q                                                                                                                                               R                                                                                                                                               S                                                                                                                                               T                                                                                                                                               U                                                                                                                                               V                                                                                                                                               W                                                                                                                                               X                                                                                                                                               Y                                                                                                                                               Z                                                                                                                                               [                                                                                                                                               \                                                                                                                                               ]                                                                                                                                               ^                                                                                                                                               _                                                                                                                                               `                                                                                                                                               a                                                                                                                                               b                                                                                                                                               c                                                                                                                                                                λ  €  @                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               	                                                                                                                                               
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          !                                                                                                                                               "                                                                                                                                               #                                                                                                                                               $                                                                                                                                               %                                                                                                                                               &                                                                                                                                               '                                                                                                                                               (                                                                                                                                               )                                                                                                                                               *                                                                                                                                               +                                                                                                                                               ,                                                                                                                                               -                                                                                                                                               .                                                                                                                                               /                                                                                                                                               0                                                                                                                                               1                                                                                                                                               2                                                                                                                                               3                                                                                                                                               4                                                                                                                                               5                                                                                                                                               6                                                                                                                                               7                                                                                                                                               8                                                                                                                                               9                                                                                                                                               :                                                                                                                                               ;                                                                                                                                               <                                                                                                                                               =                                                                                                                                               >                                                                                                                                               ?                                                                                                                                               @Code:   55292

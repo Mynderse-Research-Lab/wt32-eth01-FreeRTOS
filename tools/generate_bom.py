@@ -211,7 +211,7 @@ BOM_ROWS: list[tuple] = [
         1, "Control", 1, "EA", "Phoenix Contact", "2900299",
         "PLC interface relay, 24 VDC, 1 CO",
         "CR1", "Panel", "Panel design", "Phoenix Contact",
-        "Gripper valve coil driver; MCP cannot sink coil current.",
+        "Gripper valve coil driver; GPIO4 cannot sink coil current — use CR1.",
     ),
     (
         1, "Logic power", 1, "EA", "Phoenix Contact", "STEP3-PS/1AC/5DC/3/PT (1170954)",
@@ -223,7 +223,7 @@ BOM_ROWS: list[tuple] = [
         1, "Logic power", 1, "EA", "(no Phoenix SKU)", "5 VDC -> 3.3 VDC POL",
         "5 V to 3.3 V regulator — see note",
         "PS3", "Controller box", "Excluded", "Design note",
-        "Phoenix Contact has NO 5->3.3 V DIN converter (DC/DC line input >=12 V). Recommended: power WT32-ETH01 from 5 V rail and use its on-board 3.3 V LDO for the MCP23S17; no separate panel 3.3 V supply. If a dedicated 3.3 V rail is required, use a board-mount POL (e.g., Traco TSR-1 / Recom), not Phoenix.",
+        "Recommended: power WT32-ETH01 from 5 V rail and use its on-board 3.3 V LDO; no separate panel 3.3 V supply. If a dedicated 3.3 V rail is required, use a board-mount POL (e.g., Traco TSR-1 / Recom), not Phoenix.",
     ),
     # --- 7.0 Terminal blocks (1492-J) ---
     (0, "7.0 Terminal blocks", "", "", "", "", "Section — Allen-Bradley 1492-J distribution (1492-TD015)", "", "", "", "", ""),
@@ -422,60 +422,36 @@ BOM_ROWS: list[tuple] = [
         "Preferred high-speed path: <=50 mm air path, replaces TB-A2/PF3.",
     ),
     # --- 9.0 Controller (machine interface) ---
-    (0, "9.0 Controller interface", "", "", "", "", "Section — WT32 motion controller (not in drive cabinet)", "", "", "", "", ""),
+    (0, "9.0 Controller interface", "", "", "", "", "Section — WT32 motion controller (EIP; not in drive cabinet)", "", "", "", "", ""),
     (
         1, "Controller", 1, "EA", "LilyGO / Espressif", "WT32-ETH01",
         "ESP32 Ethernet controller module",
         "PLC1", "Controller box", "Field install", "Project hardware",
-        "Gantry firmware; MQTT pick scheduling.",
+        "Gantry firmware; MQTT pick scheduling over LAN8720.",
     ),
     (
-        1, "Controller", 1, "EA", "Microchip", "MCP23S17",
-        "16-bit SPI GPIO expander",
-        "U1", "Controller box", "Field install", "Project hardware",
-        "DIR, ENABLE, ALM, limits, gripper command.",
+        1, "Controller", 1, "EA", "WIZnet", "WIZ850io (W5500)",
+        "SPI Ethernet module for EtherNet/IP daisy-chain",
+        "ETH1", "Controller box", "Field install", "Project hardware",
+        "EIP originator; SPI pins MOSI12/MISO35/SCLK5/CS15/RST14. See docs/HV_LV_SCHEMATICS.md sheet 06.",
     ),
-    # --- 9.1 Motion I/O interface (prototype, hand-wired) ---
+    # --- 9.1 Field I/O (EIP era — no PTI/opto board) ---
     (
-        0, "9.1 Motion I/O interface", "", "", "", "",
-        "Section — opto-isolated WT32/MCP → 24 V drives (see docs/MOTION_IO_INTERFACE.md)",
+        0, "9.1 Field I/O (EIP)", "", "", "", "",
+        "Section — drive-side limits + gripper; see docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md",
         "", "", "", "", "",
     ),
     (
-        1, "Interface", 3, "EA", "Broadcom / Avago", "HCPL-2530",
-        "Dual high-speed optocoupler, transistor output",
-        "U-IF1..3", "Controller box", "Panel design", "Digi-Key / Mouser",
-        "One per axis: pulse + direction to K5100 PTI or HCS01 X31.",
+        1, "Network", 2, "EA", "Generic", "Cat5e patch cable",
+        "EtherNet/IP daisy-chain jumpers",
+        "W-EIP", "Panel / Machine", "Field install", "—",
+        "W5500 -> X PORT1; X PORT2 -> Z PORT1; Z PORT2 -> PC uplink (exclusive).",
     ),
     (
-        1, "Interface", 5, "EA", "Vishay / Siliconix", "VO14642AT",
-        "Phototransistor optocoupler, single channel",
-        "U-IF4..8", "Controller box", "Panel design", "—",
-        "X SON+ARST, Z SON+ARST, Theta enable. No dual-channel SKU.",
-    ),
-    (
-        1, "Interface", 2, "EA", "Broadcom / Avago", "HCPL-3700",
-        "Line-voltage threshold detector opto",
-        "U-IF9..10", "Controller box", "Panel design", "—",
-        "K5100 ALM → MCP for X and Z.",
-    ),
-    (
-        1, "Interface", 2, "EA", "TI", "SN74AHCT244",
-        "Octal buffer, 5 V, drives opto LEDs from 3.3 V logic",
-        "U-IF11..12", "Controller box", "Panel design", "TI",
-        "11 gates used; 3.3 V tolerant inputs.",
-    ),
-    (
-        1, "Interface", 1, "EA", "—", "5 VDC regulator module",
-        "LM2596 or 7805 class, 24 V in / 5 V out, ~300 mA",
-        "PS-IF1", "Controller box", "Panel design", "—",
-        "Powers 74AHCT244 and opto LED side. LOGIC_GND.",
-    ),
-    (
-        1, "Interface", 1, "EA", "Wago / Phoenix", "Terminal block set",
-        "Logic-side + field-side harness landing",
-        "TB-IF", "Controller box", "Panel design", "—",
-        "Star FIELD_0V here; shields at drive end only.",
+        1, "Signal cable", 50, "FT", "Belden", "8723",
+        "2-pair 22 AWG individually shielded, 300V",
+        "W-LIM", "Machine", "Field install", "Belden 8723",
+        "NC limit switches to TBIO INPUT1-4 / HCS01 X31.5-6 (not ESP32).",
     ),
     # --- 10.0 Field wiring (reference lines) ---
     (0, "10.0 Field wiring", "", "", "", "", "Section — cables & harnesses (not panel-mounted)", "", "", "", "", ""),
@@ -483,37 +459,37 @@ BOM_ROWS: list[tuple] = [
         1, "Field cable", 1, "EA", "Allen-Bradley", "2090-CPWM7DF-16AF03",
         "Motor power cable, 16 AWG, 3 m, continuous-flex",
         "W1", "Machine", "On order", "McMc P0078269 L6",
-        "DRV1 ↔ MPL-A320P.",
+        "DRV1 <-> MPL-A320P.",
     ),
     (
         1, "Field cable", 1, "EA", "Allen-Bradley", "2090-CFBM7DF-CEAF03",
         "Motor feedback cable, 3 m",
         "W2", "Machine", "On order", "McMc P0078269 L7",
-        "DRV1 ↔ MPL encoder.",
+        "DRV1 <-> MPL encoder.",
     ),
     (
         1, "Field cable", 1, "EA", "Allen-Bradley", "2090-CPWM7DF-16AF03",
         "Motor power cable, 16 AWG, 3 m, continuous-flex",
         "W3", "Machine", "On order", "McMc P0078269 L14",
-        "DRV2 ↔ MPL-A310F.",
+        "DRV2 <-> MPL-A310F.",
     ),
     (
         1, "Field cable", 1, "EA", "Allen-Bradley", "2090-CFBM7DF-CEAF03",
         "Motor feedback cable, 3 m",
         "W4", "Machine", "On order", "McMc P0078269 L15",
-        "DRV2 ↔ MPL encoder.",
+        "DRV2 <-> MPL encoder.",
     ),
     (
         1, "Field cable", 1, "EA", "SCHUNK", "KA GLT1706-LK-00500-1",
         "ERD motor power cable, 5 m",
         "W5", "Machine", "On order", "Youngblood 349-104",
-        "DRV3 ↔ ERD — factory cable.",
+        "DRV3 <-> ERD — factory cable.",
     ),
     (
         1, "Field cable", 1, "EA", "SCHUNK", "KA WWN1208-GK-00500-K02",
         "ERD HIPERFACE encoder cable, 5 m",
         "W6", "Machine", "On order", "Youngblood 349-544",
-        "DRV3 ↔ ERD feedback.",
+        "DRV3 <-> ERD feedback.",
     ),
     (
         1, "Panel wire", 60, "FT", "Lapp / LappUSA", "OLFLEX WIRE MS 2.1, 10 mm2 (UL MTW/1015 600V)",
@@ -532,12 +508,6 @@ BOM_ROWS: list[tuple] = [
         "18 AWG MTW single conductor (RD +24V, BU 0V, YE e-stop, WT)",
         "W-DC18", "Panel", "On hand", "Lapp 4160-series",
         "24 VDC bus, E-stop chain, gripper valve coil. 80%: 18 AWG 7 A OCPD -> 5.6 A cont >= ~3 A.",
-    ),
-    (
-        1, "Signal cable", 100, "FT", "Belden", "8723",
-        "2-pair 22 AWG individually shielded, 300V",
-        "W-SIG", "Controller box", "Field install", "Belden 8723",
-        "PTI/DIR/EN/ALM/limits/SPI: WT32/MCP -> TB1/TB2/HCS01. See WIRE_SIZE_SELECTION.xlsx.",
     ),
 ]
 
@@ -933,7 +903,7 @@ def build_branch_schedule(ws) -> None:
 
 def build_wiring_reference(ws) -> None:
     ws.title = "Wiring reference"
-    ws["A1"] = "Control signal reference (WT32-ETH01 / MCP23S17)"
+    ws["A1"] = "Control signal reference (WT32-ETH01 / W5500 EIP)"
     ws["A1"].font = TITLE_FONT
     ws.merge_cells("A1:F1")
     headers = [
@@ -945,14 +915,13 @@ def build_wiring_reference(ws) -> None:
         ("Notes", 40),
     ]
     rows = [
-        ("PTI X", "WT32 GPIO14", "TB1 (DRV1)", "22 AWG STP", "PIN_X_PULSE", "LEDC pulse train"),
-        ("PTI Z", "WT32 GPIO2", "TB2 (DRV2)", "22 AWG STP", "PIN_Z_PULSE", "Boot strap — LOW at reset"),
-        ("PTI Theta", "WT32 GPIO0", "DRV3", "22 AWG STP", "PIN_THETA_PULSE", "Boot strap — HIGH at reset"),
-        ("DIR / EN / ALM", "MCP23S17", "TB1 / TB2 / DRV3", "22 AWG STP", "PIN_*", "Digital I/O"),
-        ("Limits", "Beta actuators", "MCP23S17", "22 AWG STP", "PIN_*_LIMIT_*", "Homing / abort"),
-        ("Gripper", "MCP A.7", "CR1 coil", "18 AWG", "PIN_GRIPPER", "activeHigh = close"),
-        ("MCP SPI", "WT32", "MCP23S17", "2-pair 22 AWG", "CS/MOSI/MISO/SCLK", "<0.5 m"),
-        ("Ethernet", "WT32", "Plant network", "Cat5e/6", "—", "MQTT"),
+        ("EIP O→T / T→O", "W5500", "Kinetix X/Z", "Cat5e+", "104 / 154", "Class 1 RPI 5 ms"),
+        ("EIP daisy continue", "X PORT2", "Z PORT1", "Cat5e+", "—", "Then Z PORT2 → PC"),
+        ("W5500 SPI", "WT32", "WIZ850io", "short harness", "12/35/5/15/14", "MOSI/MISO/SCLK/CS/RST"),
+        ("Limits X", "Beta 100-ZRS", "TBIO INPUT1/2", "22 AWG STP", "pins 9/10", "NC sinking"),
+        ("Limits Z", "Beta 80-SRS", "TBIO INPUT3/4", "22 AWG STP", "pins 34/8", "NC sinking"),
+        ("Gripper", "GPIO4", "CR1 coil → SV1", "18 AWG", "PIN_GRIPPER", "activeHigh = close"),
+        ("MQTT Ethernet", "WT32 LAN8720", "Plant network", "Cat5e/6", "—", "Separate from EIP"),
     ]
     start = 3
     for col, (title, width) in enumerate(headers, start=1):

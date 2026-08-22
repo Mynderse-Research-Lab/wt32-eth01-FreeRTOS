@@ -1,0 +1,38 @@
+{
+  "dataset_name": "WIZnet WIZ850io Datasheet \u2014 RAG Corpus",
+  "publication": "WIZ850io Datasheet, WIZnet",
+  "source_pdf": "wiz850io.pdf",
+  "num_pages": 10,
+  "num_chapters": 1,
+  "num_chunks": 15,
+  "chunk_target_tokens": 650,
+  "chunk_overlap_tokens": 80,
+  "chars_per_token_estimate": 4,
+  "created_utc": "2026-07-07T10:39:36.394464+00:00",
+  "schema": {
+    "chunk_id": "16-char md5, primary key",
+    "section_type": "front_matter | chapter | appendix",
+    "chapter": "int chapter number",
+    "chapter_title": "chapter title",
+    "section": "detected `##` heading (best-effort)",
+    "page_start": "int page in original PDF",
+    "page_end": "int page in original PDF",
+    "is_table": "table-only chunk flag",
+    "n_chars": "chunk length in chars",
+    "approx_tokens": "chunk length in tokens (chars/4)",
+    "text": "markdown chunk text",
+    "source_pdf": "original filename",
+    "markdown_file": "per-chapter markdown file"
+  },
+  "chapters": [
+    {
+      "chapter": 1,
+      "section_type": "chapter",
+      "title": "WIZ850io Datasheet",
+      "source_pdf": "wiz850io.pdf",
+      "markdown_file": "chapter_01_wiz850io_datasheet.md",
+      "num_pages": 10,
+      "num_chunks": 15
+    }
+  ]
+}

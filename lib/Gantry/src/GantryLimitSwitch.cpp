@@ -1,73 +1,63 @@
 #include "GantryLimitSwitch.h"
+#include "GantryLimitSwitchPolicy.h"
 
-#include "gpio_expander.h"
 #include "driver/gpio.h"
+#include "gpio_expander.h"
 
 namespace Gantry {
 namespace {
-bool isEncodedDirectPin(int pin) {
-    return (pin & GPIO_EXPANDER_DIRECT_FLAG) != 0;
-}
-
-bool isMcpLogicalPin(int pin) {
-    return pin >= 0 && pin < GPIO_DIRECT_PIN_BASE && !isEncodedDirectPin(pin);
-}
-
-int resolveDirectGpioPin(int pin) {
-    if (pin < 0) {
-        return -1;
-    }
-    if (isEncodedDirectPin(pin)) {
-        return pin & GPIO_EXPANDER_DIRECT_MASK;
-    }
-    if (pin >= GPIO_DIRECT_PIN_BASE) {
-        return pin;
-    }
-    return -1;
-}
 
 uint8_t readPinLevel(int pin) {
-    if (isMcpLogicalPin(pin)) {
+    if (LimitPolicy::isMcpLogicalPin(pin)) {
         return gpio_expander_read(pin);
     }
-    int gpioPin = resolveDirectGpioPin(pin);
+    int gpioPin = LimitPolicy::resolveDirectGpioPin(pin);
     if (gpioPin < 0) {
         return 0;
     }
     return (uint8_t)gpio_get_level((gpio_num_t)gpioPin);
 }
-} // namespace
+
+}  // namespace
 
 GantryLimitSwitch::GantryLimitSwitch()
-    : pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(6),
-      sampleState_(false), stableState_(false), stableCount_(0), initialized_(false) {}
+    : source_(Source::kGpio),
+      pin_(-1), activeLow_(true), enablePullup_(true), debounceCycles_(6),
+      sampleState_(false), stableState_(false), stableCount_(0), initialized_(false),
+      externalActive_(false) {}
 
 void GantryLimitSwitch::configure(int pin, bool activeLow, bool enablePullup,
                                   uint8_t debounceCycles) {
+    source_ = Source::kGpio;
     pin_ = pin;
     activeLow_ = activeLow;
     enablePullup_ = enablePullup;
-    debounceCycles_ = (debounceCycles == 0) ? 1 : debounceCycles;
+    debounceCycles_ = LimitPolicy::coerceDebounceCycles(debounceCycles);
     sampleState_ = false;
     stableState_ = false;
     stableCount_ = 0;
     initialized_ = false;
+    externalActive_ = false;
 }
 
 bool GantryLimitSwitch::begin() {
+    if (source_ == Source::kDriveManaged) {
+        initialized_ = true;
+        return true;
+    }
     if (pin_ < 0) {
         return false;
     }
 
     // Input pin for switch signal (LOW/HIGH interpretation handled by activeLow_).
-    if (isMcpLogicalPin(pin_)) {
+    if (LimitPolicy::isMcpLogicalPin(pin_)) {
         gpio_expander_set_direction(pin_, false);
         if (enablePullup_) {
             // Most limit wiring in this project uses active-low switches with pullups.
             gpio_expander_set_pullup(pin_, true);
         }
     } else {
-        const int gpioPin = resolveDirectGpioPin(pin_);
+        const int gpioPin = LimitPolicy::resolveDirectGpioPin(pin_);
         if (gpioPin < 0) {
             return false;
         }
@@ -88,41 +78,43 @@ bool GantryLimitSwitch::begin() {
 }
 
 void GantryLimitSwitch::update(bool force) {
+    // Drive-managed switches are updated via setExternalActive(), not GPIO polling.
+    if (source_ == Source::kDriveManaged) {
+        return;
+    }
     if (pin_ < 0) {
         return;
     }
 
-    // Convert electrical level to logical "active" state.
-    bool rawActive = activeLow_ ? (readPinLevel(pin_) == 0)
-                                : (readPinLevel(pin_) != 0);
+    bool rawActive = LimitPolicy::rawLevelIsActive(readPinLevel(pin_), activeLow_);
 
     if (force) {
-        sampleState_ = rawActive;
-        stableState_ = rawActive;
-        stableCount_ = debounceCycles_;
+        LimitPolicy::Debounce d{sampleState_, stableState_, stableCount_};
+        LimitPolicy::forceSample(d, rawActive, debounceCycles_);
+        sampleState_ = d.sample_state;
+        stableState_ = d.stable_state;
+        stableCount_ = d.stable_count;
         return;
     }
 
-    // Debounce policy: accept a state change only after N consecutive samples.
-    if (rawActive == sampleState_) {
-        if (stableCount_ < debounceCycles_) {
-            stableCount_++;
-        }
-    } else {
-        sampleState_ = rawActive;
-        stableCount_ = 1;
-    }
-
-    if (stableCount_ >= debounceCycles_) {
-        stableState_ = sampleState_;
-    }
+    LimitPolicy::Debounce d{sampleState_, stableState_, stableCount_};
+    LimitPolicy::debounceSample(d, rawActive, debounceCycles_);
+    sampleState_ = d.sample_state;
+    stableState_ = d.stable_state;
+    stableCount_ = d.stable_count;
 }
 
 bool GantryLimitSwitch::isConfigured() const {
+    if (source_ == Source::kDriveManaged) {
+        return initialized_;
+    }
     return pin_ >= 0;
 }
 
 bool GantryLimitSwitch::isActive() const {
+    if (source_ == Source::kDriveManaged) {
+        return externalActive_;
+    }
     return stableState_;
 }
 

@@ -9,6 +9,9 @@ set(APP_SRCS
     "${APP_ROOT}/src/main.cpp"
     "${APP_ROOT}/src/pick_scheduler.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
+    "${APP_ROOT}/src/gantry_net_console.cpp"
+    "${APP_ROOT}/src/gantry_ota.cpp"
+    "${APP_ROOT}/src/gpio_expander.c"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -26,14 +29,21 @@ idf_component_register(
         "${APP_ROOT}/src"
     REQUIRES
         Gantry
-        MqttBridge
-        PulseMotor
+        CellNetL2
+        EthernetLink
+        EtherNetIP
         MCP23S17
-        gpio_expander
+        Spi3Bus
+        SpiDisplay
+        esp_driver_spi
         esp_driver_gpio
         esp_timer
         log
         freertos
+        lwip
+        esp_netif
+        app_update
+        esp_partition
 )
 
 # ESP-IDF v6 treats #warning as -Werror=cpp. When enabled via menuconfig (or

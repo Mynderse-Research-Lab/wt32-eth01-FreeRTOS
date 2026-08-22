@@ -1,51 +1,49 @@
-# Project documentation index
+# Project Documentation Index
 
-Standalone index for everything under `docs/`. This file is independent of [`driver_datasheets_and_calculations/INDEX.md`](../driver_datasheets_and_calculations/INDEX.md) (vendor PDF catalog).
-
----
-
-## Hardware / integration
+Canonical product-design and software architecture set (EIP production architecture):
 
 | Document | Summary | Audience |
 |----------|---------|----------|
-| [MOTION_IO_INTERFACE.md](MOTION_IO_INTERFACE.md) | WT32 → opto-isolated → K5100 (X/Z) + HCS01 (theta) wiring, parts list, commissioning | Panel wiring, bench bring-up |
+| [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
+| [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
+| [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |
+| [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware review, data integrity fixes, memory optimizations, and 8-stage holistic test cycle | Firmware developers / QA |
+| [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol specification, data integrity model, and multi-platform deployment manual (ESP32 / Linux) | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
+| [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate conventions (+Y downstream, +Z down) and feasibility/timing algorithms ($\tau = D / v_{belt}$) for the Pick Scheduler. | Firmware / Subsystem developers |
+| [DEV_TRACKER.md](DEV_TRACKER.md) | Active hardware bring-up and firmware milestone tracker | Firmware / commissioning |
+| [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | Phase 5 & Phase 6 architecture roadmap (Network extraction, Zenoh-DDS migration) | System architects / developers |
+
+Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).
 
 ---
 
-## Firmware / software
+## Tooling & Guidelines
 
-| Document | Summary | Audience |
-|----------|---------|----------|
-| [../PROGRAMMING_REFERENCE.md](../PROGRAMMING_REFERENCE.md) | Pin map, Gantry API, console, bring-up | Firmware developers |
-| [../lib/Gantry/docs/ARCHITECTURE_FLOW.md](../lib/Gantry/docs/ARCHITECTURE_FLOW.md) | Control/feedback signal routing | Architecture review |
-| [../MQTT_comms_subsys.md](../MQTT_comms_subsys.md) | MQTT bridge design | Networking / scheduler |
-| [../Pickup_algo_and_MQTTBridge_SRS.md](../Pickup_algo_and_MQTTBridge_SRS.md) | Pick scheduler requirements | Integration |
-
----
-
-## SRS build artifacts
-
-| Path | Summary |
-|------|---------|
-| [srs/](srs/) | SRS source and build tooling (see `tools/srs_build/`) |
+| Document | Summary |
+|----------|---------|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
+| [../AGENTS.md](../AGENTS.md) | AI agent entry point and hard rules |
+| [MCP_SETUP.md](MCP_SETUP.md) | Cursor / Antigravity MCP server setup |
+| [../test/README](../test/README) | Host unit tests & on-target test documentation |
+| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
 
 ---
 
-## Related vendor PDFs
+## Vendor references (commonly cited)
 
-Filenames live under `../driver_datasheets_and_calculations/`. Commonly used for motion I/O:
-
-| File | Topic |
-|------|-------|
-| `AB_Kinetix5100_user_manual.pdf` | K5100 PTI, digital I/O, commissioning |
-| `R911325518_07_EN_IndraDrive Drive Controllers Power Sections HCS01_Commissioning Manual.pdf` | HCS01 X13, X31, X47 |
-| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code, control voltage sizing |
+| File under `driver_datasheets_and_calculations/` | Topic |
+|--------------------------------------------------|-------|
+| `AB_Kinetix5100_user_manual.pdf` | K5100 commissioning / I/O |
+| `2198-in003_-en-p.pdf` | Kinetix installation |
+| `R911325518_07_EN_...HCS01_Commissioning Manual.pdf` | HCS01 connectors |
+| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code / control voltage |
+| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
+| `BOM.xlsx` / `WIRE_SIZE_SELECTION.xlsx` | Generated panel BOM / wire schedule |
 
 ---
 
-## Missing documents (motion I/O)
+## Explicitly rejected (do not restore as production docs)
 
-| Document | Blocks |
-|----------|--------|
-| **2198-IN020** (K5100 TBIO installation) | Formal TBIO pin drawing (informal pin list is in MOTION_IO_INTERFACE.md) |
-| **MPB-xxVRS Functional Description** (Rexroth) | Exact HCS01 X31 Step/Dir/Enable pin numbers |
+- Pulse-Train / MCP23S17 / opto PTI interface as production motion path
+- Speed+TM10 host StopMotion for PTP accuracy
+- Duplicate generated markdown copies of vendor PDFs as authoritative sources

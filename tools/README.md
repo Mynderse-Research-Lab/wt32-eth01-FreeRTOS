@@ -1,28 +1,31 @@
 # wt32-eth01-base tools
 
-This repo is **firmware and hardware documentation** (C++ / ESP-IDF). Host-side lab scripts moved to **[ADSB-PI-base](https://github.com/)** (sibling: `Projects/ADSB-PI-base`).
+Firmware / documentation helpers for this repo. Host MQTT/serial lab scripts live
+in the sibling **ADSB-PI-base** project.
 
-## Moved to ADSB-PI-base (`tools/`)
-
-- MQTT: `send_frame.py`, `host_mqtt_broker.py`, `lab_net.py`
-- USB serial bring-up: `listen_serial.py`, `capture_boot.py`, `probe_console.py`, `poll_max_limit.py`, `reset_and_listen.py`, `run_home_probe.py`, `run_calibrate_probe.py`
-
-Install: `pip install -r requirements.txt` in **ADSB-PI-base**.
-
-## Remaining here (repo build / BOM)
+## Scripts kept here
 
 | Script | Purpose |
 |--------|---------|
 | `generate_bom.py` | Generate `driver_datasheets_and_calculations/BOM.xlsx` |
-| `generate_wire_size_selection.py` | Generate wire-size spreadsheet (includes Motion I/O IF hop) |
-| `convert_pdfs_to_markdown.py` | Convert PDFs under `driver_datasheets_and_calculations/` to `pdf_markdown/` |
-| `srs_build/` | SRS Markdown → DOCX export |
+| `generate_wire_size_selection.py` | Generate `WIRE_SIZE_SELECTION.xlsx` |
+| `eip_position_abs.py` / `eip_test.py` | PC-side EIP prove tools |
+| `hcs01_eng.py` | HCS01 engineering HTTP (status / C0500 / PM / OM / C0300 / travel / save / verify-origin / C6400); never writes CIP IP |
+| `hcs01_comws.py` | Shared Service Tool COMWS client used by `hcs01_eng.py` and `hcs01_set_eip_io_map.py` |
+| `hcs01_set_eip_io_map.py` | Load live 18/14 EtherNet/IP cyclic map (no CIP IP write) |
 
-Motion I/O interface design: [`docs/MOTION_IO_INTERFACE.md`](../docs/MOTION_IO_INTERFACE.md).
+Canonical design docs: [`docs/INDEX.md`](../docs/INDEX.md).
 
-```bash
-pip install openpyxl pymupdf4llm   # BOM generators + PDF conversion
-py tools/generate_bom.py
-py tools/generate_wire_size_selection.py
-py tools/convert_pdfs_to_markdown.py
+```powershell
+pip install openpyxl
+py -3 tools/generate_bom.py
+py -3 tools/generate_wire_size_selection.py
+
+# HCS01 eng HTTP (.22) — PC must be on the EIP daisy chain
+py -3 tools/hcs01_eng.py status
+py -3 tools/hcs01_eng.py travel --yes
+py -3 tools/hcs01_eng.py c0300 --yes
+py -3 tools/hcs01_eng.py save --yes
+py -3 tools/hcs01_eng.py verify-origin
+py -3 tools/hcs01_eng.py c0500
 ```

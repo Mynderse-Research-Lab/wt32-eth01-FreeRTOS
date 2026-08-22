@@ -44,11 +44,13 @@ typedef struct mcp23s17_handle* mcp23s17_handle_t;
 typedef struct mcp23s17_config_t {
     spi_host_device_t spi_host;      // SPI host (SPI2_HOST or SPI3_HOST)
     gpio_num_t cs_pin;               // Chip select pin
-    gpio_num_t miso_pin;             // MISO pin
-    gpio_num_t mosi_pin;             // MOSI pin
-    gpio_num_t sclk_pin;             // SCLK pin
-    uint8_t device_address;          // Device address (0x20-0x27, default 0x20)
+    gpio_num_t miso_pin;             // MISO pin (ignored if skip_bus_init)
+    gpio_num_t mosi_pin;             // MOSI pin (ignored if skip_bus_init)
+    gpio_num_t sclk_pin;             // SCLK pin (ignored if skip_bus_init)
+    uint8_t device_address;          // Lower 3 bits (A0-A2); default 0
     uint32_t clock_speed_hz;         // SPI clock speed (default 10MHz)
+    /// If true, SPI bus is already initialized (shared SPI3); only add device.
+    bool skip_bus_init;
 } mcp23s17_config_t;
 
 /**

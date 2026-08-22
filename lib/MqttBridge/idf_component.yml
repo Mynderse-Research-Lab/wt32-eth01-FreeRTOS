@@ -1,8 +1,0 @@
-# ESP-IDF v6.0 moved ESP-MQTT and cJSON out of the core tree. Declare them here
-# so the Component Manager fetches the managed components at configure time.
-# See: https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/migration-guides/release-6.x/6.0/protocols.html
-dependencies:
-  espressif/mqtt: "^1.0.0"
-  espressif/cjson: "^1.7.19"
-  # LAN8720 PHY driver moved out of core IDF in v6.0 (WT32-ETH01).
-  espressif/lan87xx: "^1.0.0"

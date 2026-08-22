@@ -6,6 +6,7 @@
 #ifndef GANTRY_ROTARY_AXIS_H
 #define GANTRY_ROTARY_AXIS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace Gantry {
@@ -33,8 +34,40 @@ public:
 
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// EIP: fill buf with HCS01 diag summary. Default false / empty.
+    virtual bool getDriveAlarmSummary(char* buf, size_t n) const {
+        if (buf != nullptr && n > 0) {
+            buf[0] = '\0';
+        }
+        return false;
+    }
+    /// One-line CIP/T→O / ready / c1err / diag. Default empty.
+    virtual bool formatCipStatus(char* buf, size_t n) const {
+        if (buf != nullptr && n > 0) {
+            buf[0] = '\0';
+        }
+        return false;
+    }
 
     virtual double pulsesPerDeg() const = 0;
+
+    /// Runtime PUU/deg (console `puu t`). Re-home after changing scale.
+    virtual bool setPuuPerDeg(double puu_per_deg) {
+        (void)puu_per_deg;
+        return false;
+    }
+
+    /// Capture current encoder as joint 0 (HIPERFACE absolute; no X31 seek).
+    /// On the EIP rotary this aligns joint to drive abs when |S-0-0051| is
+    /// small (C0300 done); otherwise it offsets and shrinks thetalim.
+    virtual bool captureSoftHome() = 0;
+    /// True when a Class 1 actual assembly has been received.
+    virtual bool hasLiveFeedback() const = 0;
+    /// Drive S-0-0051 in degrees (no firmware origin offset).
+    virtual float getDriveAbsDeg() const { return getCurrentDeg(); }
+    virtual bool isDriveOriginAligned() const { return true; }
+    virtual float getMinDeg() const { return -180.0f; }
+    virtual float getMaxDeg() const { return 180.0f; }
 
     virtual void update() = 0;
 
