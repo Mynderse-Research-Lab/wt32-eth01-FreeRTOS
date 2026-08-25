@@ -35,18 +35,24 @@ These conventions are mirrored in include/conveyor_intercept_params.h.
 | y_pick_mm | **+1016**   | Along-belt position of the **gantry pickup plane**. |
 
 Fixed span from camera to pickup:
-$$ L_{\mathrm{cam}\rightarrow\mathrm{pick}} = y_{\mathrm{pick}} - y_{\mathrm{cam}} \approx 679.45\ \mathrm{mm} $$
+
+$$
+L_{\mathrm{cam}\rightarrow\mathrm{pick}} = y_{\mathrm{pick}} - y_{\mathrm{cam}} \approx 679.45\ \mathrm{mm}
+$$
 
 ---
 
 ## 3. Feasibility and Intercept Math (planPick)
 
-The identification system publishes **y_bat_mm** (along-belt coordinate) and **x_across_mm** (across-belt coordinate) at timestamp $t_{\text{epoch_us}}$.
+The identification system publishes **y_bat_mm** (along-belt coordinate) and **x_across_mm** (across-belt coordinate) at timestamp $t_{\text{epoch\_us}}$.
 
 ### Intercept Distance
 
 The distance the battery must travel to reach the pickup plane is:
-$$ D_{\mathrm{mm}} = y_{\mathrm{pick,mm}} - y_{\mathrm{bat,mm}} $$
+
+$$
+D_{\mathrm{mm}} = y_{\mathrm{pick,mm}} - y_{\mathrm{bat,mm}}
+$$
 
 - **Feasible:** D_mm > 0 (battery is upstream of pick line).
 - **Infeasible (SKIP):** D_mm <= 0 (past pickup plane).
@@ -54,13 +60,19 @@ $$ D_{\mathrm{mm}} = y_{\mathrm{pick,mm}} - y_{\mathrm{bat,mm}} $$
 ### Time to Intercept ($\tau$)
 
 The time until the battery reaches the pickup plane is computed using the absolute belt speed ($v_{\text{belt}}$):
-$$ \tau \approx \frac{D_{\mathrm{mm}}}{v_{\mathrm{belt}}} $$
 
-*(e.g., at $v \approx 1500 \text{ mm/s}$ with $D = 679.45 \text{ mm}$, $\tau \approx 0.45 \text{ s}$)*
+$$
+\tau \approx \frac{D_{\mathrm{mm}}}{v_{\mathrm{belt}}}
+$$
+
+(e.g., at $v \approx 1500 \text{ mm/s}$ with $D = 679.45 \text{ mm}$, $\tau \approx 0.45 \text{ s}$)
 
 ### Across-Belt Mapping (X)
 The gantry **X-joint target** is derived through a single calibration offset:
-$$ X_{\mathrm{target}} = \text{CONVEYOR\_X\_ACROSS\_TO\_GANTRY\_X\_OFFSET\_MM} \pm x_{\mathrm{across,mm}} $$
+
+$$
+X_{\mathrm{target}} = \text{CONVEYOR\_X\_ACROSS\_TO\_GANTRY\_X\_OFFSET\_MM} \pm x_{\mathrm{across,mm}}
+$$
 
 ---
 
