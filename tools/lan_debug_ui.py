@@ -56,10 +56,14 @@ MAX_LOG_LINES = 6000
 COMMANDS: list[tuple[str, str, str]] = [
     ("help", "help | ?", "show firmware help"),
     ("status", "status", "print gantry status"),
-    ("faults", "faults | alarms", "decode X/Z Kinetix FaultCode/WarningCode (e.g. A603)"),
-    ("puuinfo", "puuinfo", "print X/Z PUU/mm scale and positions"),
+    ("faults", "faults | alarms", "decode X/Z Kinetix and theta HCS01 diag"),
+    ("puuinfo", "puuinfo", "print X/Z PUU/mm and theta PUU/deg"),
     ("eiptiming", "eiptiming", "dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)"),
-    ("puucal", "puucal <x|z> <commanded_mm> <measured_mm>", "suggest new PUU/mm"),
+    ("puu", "puu t <scale>", "set live theta PUU/deg (re-run home t)"),
+    ("puucal", "puucal <x|z|t> c m", "suggest (x/z) or apply (t) PUU scale from commanded vs measured"),
+    ("thetalim", "thetalim <min> <max>", "set theta software joint limits (deg); clamped to captured envelope after home t"),
+    ("autotune", "autotune [theta|t]", "run or guide driver-level inertia auto-tuning (ERD-04/HCS01 C1800)"),
+    ("ota", "ota", "print Dual-OTA partition status, image state, and version"),
     ("limits", "limits", "read limit switches"),
     ("pins", "pins", "print active pin configuration"),
     ("mcp_pin_mode", "mcp_pin_mode <pin> <inpu|in|out0|out1>", "force MCP pin mode (optional build)"),
@@ -70,22 +74,24 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("gpio_drive", "gpio_drive <gpio> <0|1>", "drive a direct ESP32 GPIO"),
     ("enable", "enable", "enable motors"),
     ("disable", "disable", "disable motors"),
-    ("home", "home [x|z|t|all]", "home (EIP: seek A014/PL; all=Z then X; X needs SAFE_Z band)"),
-    ("calibrate", "calibrate [x|z|t|all]", "calibrate; 'all' = EIP bring-up (Z- → X home/cal → Z+ → SAFE_Z)"),
+    ("home", "home [x|z|t|all]", "home (EIP X/Z: seek A014/PL; t=HIPERFACE soft-home; all=Z then X then t; X needs SAFE_Z band)"),
+    ("calibrate", "calibrate [x|z|t|all]", "calibrate; 'all' = EIP bring-up (Z-/A015 switch-clear = 0 -> X home/cal -> X=park -> Z+/A014 -> SAFE_Z -> theta soft-home)"),
     ("units", "units <mm|in>", "set linear input/output units"),
-    ("speed", "speed <v> [deg_per_s]", "set 2-D path speed (resultant; v in selected linear units/s)"),
-    ("accel", "accel <a> [decel]", "set 2-D path accel/decel (resultant; >0, selected linear units/s2)"),
+    ("speed", "speed <v> [deg_per_s]", "set 2-D path speed (resultant) and optional theta deg/s"),
+    ("accel", "accel <a> [d] [ta] [td]", "path accel/decel; optional theta accel/decel (deg/s2)"),
     ("rangelimit", "rangelimit <0|1>", "enable/disable path speed+accel/decel range clamps"),
     ("livepos", "livepos <hz>", "LIVE POS periodic rate (0=off); hz is required"),
-    ("axislog", "axislog <hz>", "per-axis MOVE periodic rate (0=off); hz is required"),
+    ("axislog", "axislog <hz>", "per-axis MOVE periodic rate (0=off; START/END always on)"),
     ("move", "move <x> <z> <theta>", "move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract"),
     ("grip", "grip <0|1>", "gripper (0=open, 1=close)"),
-    ("test_cycle", "test_cycle", "enable + EIP bring-up, then path legs A-F at live speed/accel"),
-    ("stop", "stop", "stop all motion and disable"),
-    ("alarmreset", "alarmreset | arst", "pulse alarm reset (EIP FaultReset bit)"),
+    ("test_cycle", "test_cycle", "8-stage holistic test: arm, bring-up, bounds check, legs A-F, pick+place grip, dynamics, theta G-I, telemetry"),
+    ("test_theta_path", "test_theta_path", "combined in-band X+Z+theta (25-75 window) using live thetalim-safe dtheta; enable+bring-up first"),
+    ("stop", "stop", "stop all motion"),
+    ("alarmreset", "alarmreset | arst", "pulse EIP FaultReset / HCS01 C0500 bit5"),
     ("selftest", "selftest", "run basic math/config tests (optional build)"),
     ("logout", "logout | exit | quit", "close the TCP session"),
 ]
+
 
 
 class ConsoleClient:
@@ -328,13 +334,19 @@ class LanDebugApp:
         ttk.Button(seq, text="Test cycle", command=self.cmd_test_cycle, width=12).grid(
             row=2, column=1, pady=2
         )
+        ttk.Button(seq, text="Autotune t", command=lambda: self.send("autotune t"), width=12).grid(
+            row=3, column=0, pady=2
+        )
+        ttk.Button(seq, text="Test theta path", command=self.cmd_test_theta_path, width=12).grid(
+            row=3, column=1, pady=2
+        )
         ttk.Label(
             seq,
             text="Bring-up = calibrate all.\n"
                  "Seek 100 mm/s, 2000 mm/s².\n"
                  "Path / test_cycle use Profile.",
             foreground="#555", font=("Segoe UI", 8),
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         mv = ttk.LabelFrame(tab, text="Move (absolute)", padding=6)
         mv.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
@@ -423,6 +435,16 @@ class LanDebugApp:
         ttk.Button(rl, text="Disable (0)", width=12,
                    command=lambda: self.send("rangelimit 0")).pack(pady=2)
 
+        tlim = ttk.LabelFrame(tab, text="Theta software limits (deg)", padding=6)
+        tlim.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
+        self.tlim_min = tk.StringVar(value="-180")
+        self.tlim_max = tk.StringVar(value="180")
+        ttk.Label(tlim, text="Min").grid(row=0, column=0, sticky="e")
+        ttk.Entry(tlim, textvariable=self.tlim_min, width=8).grid(row=0, column=1, padx=3)
+        ttk.Label(tlim, text="Max").grid(row=0, column=2, sticky="e")
+        ttk.Entry(tlim, textvariable=self.tlim_max, width=8).grid(row=0, column=3, padx=3)
+        ttk.Button(tlim, text="Set Limits", width=12, command=self.cmd_thetalim).grid(row=0, column=4, padx=8)
+
         rates = ttk.LabelFrame(tab, text="Periodic logging", padding=6)
         rates.grid(row=0, column=3, sticky="nsew", padx=4, pady=4)
         self.livepos_hz = tk.StringVar(value="0")
@@ -447,10 +469,10 @@ class LanDebugApp:
         rd = ttk.LabelFrame(tab, text="Read-only queries", padding=6)
         rd.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
         for col, cmd in enumerate(
-            ["status", "faults", "puuinfo", "eiptiming", "limits", "pins", "selftest", "help"]
+            ["status", "faults", "puuinfo", "eiptiming", "limits", "pins", "selftest", "help", "ota"]
         ):
             ttk.Button(rd, text=cmd, width=11, command=lambda c=cmd: self.send(c)).grid(
-                row=col // 4, column=col % 4, padx=3, pady=3
+                row=col // 5, column=col % 5, padx=3, pady=3
             )
 
         cal = ttk.LabelFrame(tab, text="PUU calibration suggestion", padding=6)
@@ -459,19 +481,23 @@ class LanDebugApp:
         self.puucal_cmd = tk.StringVar(value="")
         self.puucal_meas = tk.StringVar(value="")
         ttk.Label(cal, text="axis").grid(row=0, column=0, sticky="e")
-        ttk.Combobox(cal, textvariable=self.puucal_axis, values=["x", "z"], width=4,
+        ttk.Combobox(cal, textvariable=self.puucal_axis, values=["x", "z", "t"], width=4,
                      state="readonly").grid(row=0, column=1, padx=3)
         ttk.Label(cal, text="commanded mm").grid(row=0, column=2, sticky="e")
         ttk.Entry(cal, textvariable=self.puucal_cmd, width=9).grid(row=0, column=3, padx=3)
         ttk.Label(cal, text="measured mm").grid(row=0, column=4, sticky="e")
         ttk.Entry(cal, textvariable=self.puucal_meas, width=9).grid(row=0, column=5, padx=3)
-        ttk.Button(cal, text="Suggest", command=self.cmd_puucal, width=10).grid(
+        ttk.Button(cal, text="Suggest/Apply", command=self.cmd_puucal, width=12).grid(
             row=0, column=6, padx=4
         )
+        ttk.Label(cal, text="set puu t").grid(row=1, column=2, sticky="e")
+        self.puu_t_scale = tk.StringVar(value="")
+        ttk.Entry(cal, textvariable=self.puu_t_scale, width=9).grid(row=1, column=3, padx=3)
+        ttk.Button(cal, text="Set Scale", command=lambda: self.send(f"puu t {self.puu_t_scale.get()}"), width=10).grid(row=1, column=4, padx=4)
         ttk.Label(
-            cal, text="Read-only: prints new = current * (commanded / measured).",
+            cal, text="X/Z suggest only. T applies instantly (must re-home).",
             foreground="#555", font=("Segoe UI", 8),
-        ).grid(row=1, column=0, columnspan=7, sticky="w", pady=(4, 0))
+        ).grid(row=2, column=0, columnspan=7, sticky="w", pady=(4, 0))
 
         tab.columnconfigure(0, weight=1)
         tab.columnconfigure(1, weight=1)
@@ -1080,6 +1106,15 @@ class LanDebugApp:
         ):
             self.send("test_cycle")
 
+    def cmd_test_theta_path(self) -> None:
+        if self._confirm(
+            "Test theta path",
+            "Run test_theta_path?\n\n"
+            "Combined in-band X+Z+theta (25-75 window) using live thetalim-safe dtheta. "
+            "Enable + bring-up first. STOP aborts.",
+        ):
+            self.send("test_theta_path")
+
     def cmd_move(self) -> None:
         try:
             x = float(self.move_x.get())
@@ -1128,6 +1163,15 @@ class LanDebugApp:
             self.send(f"accel {accel} {decel}")
         else:
             self.send(f"accel {accel}")
+
+    def cmd_thetalim(self) -> None:
+        try:
+            tmin = float(self.tlim_min.get())
+            tmax = float(self.tlim_max.get())
+        except ValueError:
+            messagebox.showerror("thetalim", "Min and Max must be numbers.")
+            return
+        self.send(f"thetalim {tmin:g} {tmax:g}")
 
     def cmd_puucal(self) -> None:
         try:
