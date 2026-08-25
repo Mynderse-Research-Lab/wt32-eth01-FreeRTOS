@@ -44,7 +44,7 @@ $$
 
 ## 3. Feasibility and Intercept Math (planPick)
 
-The identification system publishes **y_bat_mm** (along-belt coordinate) and **x_across_mm** (across-belt coordinate) at timestamp $t_{\text{epoch\_us}}$.
+The identification system publishes **y_bat_mm** (along-belt coordinate) and **x_across_mm** (across-belt coordinate) at timestamp $t_{\text{epoch\\_us}}$.
 
 ### Intercept Distance
 
@@ -71,7 +71,7 @@ $$
 The gantry **X-joint target** is derived through a single calibration offset:
 
 $$
-X_{\mathrm{target}} = \text{CONVEYOR\_X\_ACROSS\_TO\_GANTRY\_X\_OFFSET\_MM} \pm x_{\mathrm{across,mm}}
+X_{\mathrm{target}} = \text{CONVEYOR\\_X\\_ACROSS\\_TO\\_GANTRY\\_X\\_OFFSET\\_MM} \pm x_{\mathrm{across,mm}}
 $$
 
 ---
