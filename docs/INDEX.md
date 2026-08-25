@@ -4,10 +4,9 @@ Canonical product-design and software architecture set (EIP production architect
 
 | Document | Summary | Audience |
 |----------|---------|----------|
-| [Expected electro-mechanical assembly](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics / drives / networks | Mechanical / panel / commissioning |
-| [HV/LV schematics](HV_LV_SCHEMATICS.md) | Electrical design basis (preliminary) | Electrical review |
-| [Nomenclature CAD Mapping](NOMENCLATURE_CAD_MAPPING.md) | Universal descriptors linking MECH/ELEC/CODE subsystems | All |
-| [Low-level gantry control](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware / EIP / console | Firmware developers |
+| [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
+| [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
+| [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |
 | [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware review, data integrity fixes, memory optimizations, and 8-stage holistic test cycle | Firmware developers / QA |
 | [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol specification, data integrity model, and multi-platform deployment manual (ESP32 / Linux) | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
 | [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate conventions (+Y downstream, +Z down) and feasibility/timing algorithms ($\tau = D / v_{belt}$) for the Pick Scheduler. | Firmware / Subsystem developers |
