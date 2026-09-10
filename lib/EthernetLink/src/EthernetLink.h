@@ -26,6 +26,7 @@ public:
     bool waitForUp(uint32_t timeout_ms);
     bool isUp() const;
     esp_eth_handle_t getEthHandle() const { return eth_handle_; }
+    esp_netif_t* getNetif() const { return netif_; }
 
 private:
     static void handleEthEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);

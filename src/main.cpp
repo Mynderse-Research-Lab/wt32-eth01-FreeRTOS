@@ -39,7 +39,11 @@
 #include "pick_scheduler.h"
 #include "Spi3Bus.h"
 #include "SpiDisplay.h"
+#include "UiManager.h"
+#include "AppConfig.h"
+#include "nvs_flash.h"
 #include "MCP23S17.h"
+#include "esp_timer.h"
 #include "gpio_expander.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -87,6 +91,54 @@ void gantryUpdateTask(void* param) {
 }
 
 // ---------------------------------------------------------------------------
+// TFT UI display and input task (50 Hz on Core 0)
+// ---------------------------------------------------------------------------
+struct UiTaskConfig {
+    Gantry::Gantry* gantry;
+    Network::EthernetLink* eth;
+};
+
+void tftUiTask(void* param) {
+    auto* cfg = static_cast<UiTaskConfig*>(param);
+    display::DashboardTelemetry telem = {};
+    const TickType_t updateInterval = pdMS_TO_TICKS(20);
+    TickType_t lastWakeTime = xTaskGetTickCount();
+
+    ESP_LOGI(TAG, "TFT UI task started (50 Hz)");
+
+    while (1) {
+        uint8_t port_b = gpio_expander_read_port_b();
+
+        if (cfg && cfg->gantry) {
+            auto joints = cfg->gantry->getCurrentJointConfig();
+            telem.x_mm = joints.x;
+            telem.z_mm = joints.z;
+            telem.theta_deg = joints.theta;
+            telem.x_homed = !cfg->gantry->isBusy();
+            telem.z_homed = !cfg->gantry->isBusy();
+            telem.theta_homed = cfg->gantry->isThetaDriveOriginAligned();
+            telem.gripper_open = !cfg->gantry->isGripperActive();
+            telem.uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+            telem.dev_unlocked = Config::AppConfig::instance().isDeveloperModeUnlocked();
+            telem.motion_state = cfg->gantry->isBusy() ? "BUSY" : "IDLE";
+        }
+
+        if (cfg && cfg->eth) {
+            telem.lan_link = cfg->eth->isUp();
+            esp_netif_ip_info_t ip_info;
+            if (cfg->eth->getNetif() && esp_netif_get_ip_info(cfg->eth->getNetif(), &ip_info) == ESP_OK) {
+                esp_ip4addr_ntoa(&ip_info.ip, telem.lan_ip, sizeof(telem.lan_ip));
+            } else {
+                std::strncpy(telem.lan_ip, Config::AppConfig::instance().data().eth_static_ip, sizeof(telem.lan_ip));
+            }
+        }
+
+        display::UiManager::instance().update(port_b, telem);
+        vTaskDelayUntil(&lastWakeTime, updateInterval);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // app_main
 // ---------------------------------------------------------------------------
 extern "C" void app_main(void) {
@@ -100,14 +152,47 @@ extern "C" void app_main(void) {
 #endif
     ESP_LOGI(TAG, "========================================\n");
 
+    // Initialize NVS storage for runtime application parameters
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_err);
+    Config::AppConfig::instance().init();
+
     // Enable WT32 LAN8720 crystal (GPIO16) before other bring-up so REFCLK and
     // RJ45 LEDs can come up; EthernetLink::start() will re-assert if needed.
     if (!Network::EthernetLink::enablePhyOscillator()) {
         ESP_LOGW(TAG, "LAN8720 crystal enable failed — plant ETH / TCP :2323 may be unavailable");
     }
 
-    // SPI3 shared bus (MCP default client) + MCP23S17 Field/UI + TFT stub
-    static display::SpiDisplay spiDisplay;
+    // Diagnostic electrical line probe for SPI3 lines (CS=GPIO2, MISO=GPIO36)
+    {
+        gpio_config_t t_cs = {};
+        t_cs.pin_bit_mask = (1ULL << SPI3_CS_MCP_GPIO);
+        t_cs.mode = GPIO_MODE_INPUT_OUTPUT;
+        t_cs.pull_up_en = GPIO_PULLUP_ENABLE;
+        gpio_config(&t_cs);
+        gpio_set_level(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO), 1);
+        int cs_mcp_hi = gpio_get_level(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO));
+        gpio_set_level(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO), 0);
+        int cs_mcp_lo = gpio_get_level(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO));
+        gpio_set_level(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO), 1);
+        gpio_reset_pin(static_cast<gpio_num_t>(SPI3_CS_MCP_GPIO));
+
+        gpio_config_t t_miso = {};
+        t_miso.pin_bit_mask = (1ULL << SPI3_MISO_GPIO);
+        t_miso.mode = GPIO_MODE_INPUT;
+        gpio_config(&t_miso);
+        int miso36_lvl = gpio_get_level(static_cast<gpio_num_t>(SPI3_MISO_GPIO));
+        gpio_reset_pin(static_cast<gpio_num_t>(SPI3_MISO_GPIO));
+
+        ESP_LOGI(TAG, "SPI3 line probe: CS_MCP(GPIO%d) 1->%d 0->%d | MISO(GPIO%d) level=%d",
+                 SPI3_CS_MCP_GPIO, cs_mcp_hi, cs_mcp_lo, SPI3_MISO_GPIO, miso36_lvl);
+    }
+
+    // SPI3 shared bus (MCP default client) + MCP23S17 Field/UI + ST7789 TFT
     if (!spi3::init()) {
         ESP_LOGW(TAG, "SPI3 bus init failed — continuing without MCP/TFT");
     } else {
@@ -127,15 +212,15 @@ extern "C" void app_main(void) {
         } else {
             display::SpiDisplayConfig dispCfg = {};
             dispCfg.mcp = gpio_expander_get_mcp_handle();
-            dispCfg.mcp_cs_pin = MCP_TFT_CS;
+            dispCfg.mcp_cs_pin = -1; // Shared hardware CS via ESP32 GPIO2
+            dispCfg.esp_cs_pin = SPI3_CS_TFT_GPIO;
             dispCfg.mcp_dc_pin = MCP_TFT_DC;
             dispCfg.mcp_res_pin = MCP_TFT_RES;
-            dispCfg.mcp_blk_pin = MCP_TFT_BLK;
+            dispCfg.mcp_blk_pin = -1; // Moved to ESP32 for native PWM
+            dispCfg.esp_blk_pin = TFT_BLK_GPIO;
             dispCfg.clock_hz = SPI3_TFT_CLOCK_HZ;
-            if (!spiDisplay.begin(dispCfg)) {
-                ESP_LOGW(TAG, "SpiDisplay stub begin failed — MCP Field I/O still live");
-            } else {
-                (void)spiDisplay.refreshStub();
+            if (!display::UiManager::instance().init(dispCfg)) {
+                ESP_LOGW(TAG, "UiManager ST7789 display begin failed");
             }
         }
     }
@@ -154,14 +239,19 @@ extern "C" void app_main(void) {
     w5500Cfg.miso_gpio = W5500_MISO_GPIO;
     w5500Cfg.sclk_gpio = W5500_SCLK_GPIO;
     w5500Cfg.sclk_hz   = W5500_SCLK_HZ;
+
     ESP_LOGI(TAG, "W5500 pins: MOSI=%d MISO=%d SCLK=%d CS=%d RST=MCP_PB7 @ %d Hz",
              w5500Cfg.mosi_gpio, w5500Cfg.miso_gpio, w5500Cfg.sclk_gpio,
              w5500Cfg.cs_gpio, w5500Cfg.sclk_hz);
-    if (!w5500.init(w5500Cfg)) {
-        ESP_LOGE(TAG, "FATAL: W5500 init failed (check MOSI17/SCLK5/CS15/MISO35 + RST MCP PB7)");
-        return;
+
+    bool w5500_ok = w5500.init(w5500Cfg);
+    uint8_t post_rst_level = gpio_expander_read(MCP_W5500_RST);
+    if (!w5500_ok) {
+        ESP_LOGE(TAG, "W5500 init failed (post-init RST level=%d). Continuing boot: UI and console remain active.",
+                 post_rst_level);
+    } else {
+        ESP_LOGI(TAG, "W5500 initialized (version 0x%02X)", w5500.getVersion());
     }
-    ESP_LOGI(TAG, "W5500 initialized (version 0x%02X)", w5500.getVersion());
 
     // --- EIP process images (one per drive) ---
     static eip::EipProcessImage eipImageX;
@@ -269,23 +359,27 @@ extern "C" void app_main(void) {
     static W5500LinkStatusAdapter w5500LinkStatus(w5500);
     static W5500SpiHal w5500Hal(w5500);
 
-    eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus,
+    if (w5500_ok) {
+        eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus,
 #if defined(CONFIG_EIP_AXIS_X)
-                          &eipImageX,
+                              &eipImageX,
 #else
-                          nullptr,
+                              nullptr,
 #endif
 #if defined(CONFIG_EIP_AXIS_Z)
-                          &eipImageZ,
+                              &eipImageZ,
 #else
-                          nullptr,
+                              nullptr,
 #endif
 #if defined(CONFIG_EIP_AXIS_THETA)
-                          &eipImageTheta
+                              &eipImageTheta
 #else
-                          nullptr
+                              nullptr
 #endif
-    );
+        );
+    } else {
+        ESP_LOGW(TAG, "W5500 is offline: skipping EIP scanner task start");
+    }
 #endif
 
     // ------------------------------------------------------------------
@@ -315,13 +409,25 @@ extern "C" void app_main(void) {
         ESP_LOGE(TAG, "Failed to create Gantry Update task!");
     }
 
+    static UiTaskConfig uiCfg = { &gantry, &ethernetLink };
+    result = xTaskCreatePinnedToCore(
+        tftUiTask, "TftUiTask",
+        4096, &uiCfg,
+        2, nullptr, 0);
+    if (result != pdPASS) {
+        ESP_LOGW(TAG, "Failed to create TftUiTask");
+    }
+
     static GantryTestConsoleConfig consoleCfg = {};
     consoleCfg.gantry                 = &gantry;
     consoleCfg.limit_min_pin          = -1;   // Endstops drive-managed (EIP)
     consoleCfg.limit_max_pin          = -1;
     consoleCfg.use_mcp23s17           = (gpio_expander_get_mcp_handle() != nullptr);
-    consoleCfg.limit_switches_active  = false;
-    consoleCfg.w5500_hal              = &w5500Hal;
+#if CONFIG_EIP_SCANNER_ENABLED
+    consoleCfg.w5500_hal              = w5500_ok ? &w5500Hal : nullptr;
+#else
+    consoleCfg.w5500_hal              = nullptr;
+#endif
 
 #if CONSOLE_UART_ENABLE
     result = xTaskCreatePinnedToCore(
@@ -349,7 +455,7 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "OTA server listening on TCP 8032 (plant / LAN8720)");
 
         // Initialize High-Speed OSI Layer-2 Cell Network transceiver
-        if (l2Transport.attachEthHandle(ethernetLink.getEthHandle()) == ESP_OK &&
+        if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNetif()) == ESP_OK &&
             l2Node.begin()) {
             ESP_LOGI(TAG, "CellNet OSI Layer-2 bus ACTIVE (EtherType 0x%04X, Node 0x%02X)",
                      CELL_NET_L2_ETHERTYPE, static_cast<uint8_t>(CellNodeId::GANTRY));

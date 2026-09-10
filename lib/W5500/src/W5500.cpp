@@ -48,9 +48,9 @@ W5500::~W5500() {
 void W5500::hardReset() {
     if (cfg_.rst_set_level != nullptr) {
         cfg_.rst_set_level(cfg_.rst_ctx, 0);
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(pdMS_TO_TICKS(50));
         cfg_.rst_set_level(cfg_.rst_ctx, 1);
-        vTaskDelay(pdMS_TO_TICKS(55));
+        vTaskDelay(pdMS_TO_TICKS(150));
         ESP_LOGI(TAG, "Hardware reset complete (external RST callback)");
         return;
     }
@@ -58,7 +58,7 @@ void W5500::hardReset() {
     if (cfg_.rst_gpio < 0) {
         // Use software reset
         writeReg(kBlockCommon(), REG_MR, MR_RST);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(20));
         return;
     }
 
@@ -70,13 +70,13 @@ void W5500::hardReset() {
     io.intr_type    = GPIO_INTR_DISABLE;
     gpio_config(&io);
 
-    // Hold RSTn low >= 500 us
+    // Hold RSTn low >= 500 us (use 10 ms)
     gpio_set_level(static_cast<gpio_num_t>(cfg_.rst_gpio), 0);
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(static_cast<gpio_num_t>(cfg_.rst_gpio), 1);
 
-    // Wait >= 50 ms before SPI communication
-    vTaskDelay(pdMS_TO_TICKS(55));
+    // Wait >= 50 ms before SPI communication (use 100 ms)
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP_LOGI(TAG, "Hardware reset complete (GPIO%d)", cfg_.rst_gpio);
 }
 
@@ -125,6 +125,8 @@ bool W5500::init(const W5500Config& cfg) {
     devCfg.spics_io_num   = (cfg_.cs_gpio >= 0) ? cfg_.cs_gpio : -1;
     devCfg.queue_size     = 1;
     devCfg.flags          = 0;
+    devCfg.cs_ena_pretrans = 1;
+    devCfg.cs_ena_posttrans = 1;
 
     err = spi_bus_add_device(static_cast<spi_host_device_t>(cfg_.spi_host),
                              &devCfg, reinterpret_cast<spi_device_handle_t*>(&spiHandle_));
@@ -155,7 +157,67 @@ bool W5500::init(const W5500Config& cfg) {
 }
 
 bool W5500::configureAfterReset() {
-    uint8_t ver = readReg(kBlockCommon(), REG_VERSIONR);
+    uint8_t ver = 0;
+    for (int retry = 0; retry < 10; ++retry) {
+        ver = readReg(kBlockCommon(), REG_VERSIONR);
+        if (ver == 0x04) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    // Fallback: try software reset if external reset line didn't bring chip up
+    if (ver != 0x04) {
+        ESP_LOGW(TAG, "W5500 version read 0x%02X; attempting software reset fallback...", ver);
+        writeReg(kBlockCommon(), REG_MR, MR_RST);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        for (int retry = 0; retry < 5; ++retry) {
+            ver = readReg(kBlockCommon(), REG_VERSIONR);
+            if (ver == 0x04) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
+    // Multirate fallback: if current clock failed, try stepped-down clock rates (5 MHz, 2 MHz, 1 MHz)
+    if (ver != 0x04) {
+        const int fallback_rates[] = {5000000, 2000000, 1000000};
+        for (int fb_hz : fallback_rates) {
+            if (fb_hz >= cfg_.sclk_hz) {
+                continue;
+            }
+            ESP_LOGW(TAG, "W5500 version 0x%02X at %d Hz; retrying at fallback %d Hz...",
+                     ver, cfg_.sclk_hz, fb_hz);
+            spi_bus_remove_device(static_cast<spi_device_handle_t>(spiHandle_));
+            spiHandle_ = nullptr;
+
+            spi_device_interface_config_t devCfg = {};
+            devCfg.mode           = 0;
+            devCfg.clock_speed_hz = fb_hz;
+            devCfg.spics_io_num   = (cfg_.cs_gpio >= 0) ? cfg_.cs_gpio : -1;
+            devCfg.queue_size     = 1;
+            devCfg.flags          = 0;
+            devCfg.cs_ena_pretrans = 1;
+            devCfg.cs_ena_posttrans = 1;
+
+            esp_err_t add_err = spi_bus_add_device(static_cast<spi_host_device_t>(cfg_.spi_host),
+                                                   &devCfg, reinterpret_cast<spi_device_handle_t*>(&spiHandle_));
+            if (add_err != ESP_OK) {
+                ESP_LOGE(TAG, "SPI device re-add failed at %d Hz: %s", fb_hz, esp_err_to_name(add_err));
+                break;
+            }
+            cfg_.sclk_hz = fb_hz;
+            writeReg(kBlockCommon(), REG_MR, MR_RST);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            ver = readReg(kBlockCommon(), REG_VERSIONR);
+            if (ver == 0x04) {
+                ESP_LOGI(TAG, "W5500 communication established at %d Hz!", fb_hz);
+                break;
+            }
+        }
+    }
+
     if (ver != 0x04) {
         ESP_LOGE(TAG, "Unexpected W5500 version: 0x%02X (expected 0x04)", ver);
         return false;

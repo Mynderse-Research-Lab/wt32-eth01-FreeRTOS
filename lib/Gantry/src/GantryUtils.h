@@ -26,7 +26,7 @@ namespace Constants {
     constexpr uint32_t DEFAULT_HOMING_SPEED_PPS = 3000;
     constexpr uint32_t DEFAULT_SPEED_MM_PER_S = GANTRY_DEFAULT_SPEED_MM_PER_S;
     constexpr uint32_t DEFAULT_SPEED_DEG_PER_S = GANTRY_DEFAULT_SPEED_DEG_PER_S;
-    constexpr uint32_t GRIPPER_ACTUATE_TIME_MS = 100;
+    constexpr uint32_t GRIPPER_ACTUATE_TIME_MS = GANTRY_GRIPPER_OPEN_TIME_MS;
     constexpr uint32_t CALIBRATION_TIMEOUT_MS = 30000;
     constexpr uint32_t TRAVEL_MEASUREMENT_TIMEOUT_MS = 90000;
     // Home / calibrate / bring-up seek, park, and SAFE_Z return. Independent

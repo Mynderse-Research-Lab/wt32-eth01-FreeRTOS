@@ -81,6 +81,16 @@ target_include_directories(ethernet_ip PUBLIC
 )
 # Reliability + timing helpers are header/cpp already in ethernet_ip SRCS via EipReliabilityStats
 
+# --- AppConfig layer under test ------------------------------------------------
+add_library(app_config STATIC
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfig.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/ConfigSchema.cpp"
+)
+target_include_directories(app_config PUBLIC
+    "${REPO_ROOT}/lib/AppConfig/src"
+    "${REPO_ROOT}/include"
+)
+
 # --- Test executables ---------------------------------------------------------
 # Each test file is its own Unity runner registered with CTest.
 function(add_host_test name)
@@ -112,6 +122,10 @@ add_test(NAME test_hcs01_comws_client COMMAND test_hcs01_comws_client)
 add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
+
+add_executable(test_app_config "test_app_config.cpp")
+target_link_libraries(test_app_config PRIVATE app_config unity)
+add_test(NAME test_app_config COMMAND test_app_config)
 
 add_executable(test_eip_axis "test_eip_axis.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"

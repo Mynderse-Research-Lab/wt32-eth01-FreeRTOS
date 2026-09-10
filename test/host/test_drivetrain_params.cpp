@@ -63,6 +63,11 @@ static void test_default_hard_joint_limits(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 180.0f, AXIS_THETA_DRIVE_ABS_MAX_DEG);
 }
 
+static void test_conveyor_collision_limits(void) {
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 95.0f, GANTRY_CONVEYOR_COLLISION_X_MIN_MM);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 115.0f, GANTRY_CONVEYOR_COLLISION_Z_MIN_MM);
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_x_pulses_per_mm);
@@ -70,5 +75,6 @@ int main(void) {
   RUN_TEST(test_theta_pulses_per_deg);
   RUN_TEST(test_z_critical_rpm_speed_cap_is_1000);
   RUN_TEST(test_default_hard_joint_limits);
+  RUN_TEST(test_conveyor_collision_limits);
   return UNITY_END();
 }

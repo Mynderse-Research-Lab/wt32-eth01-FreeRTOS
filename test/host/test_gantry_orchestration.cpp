@@ -365,6 +365,69 @@ static void test_bringup_phase_order_to_x_home(void) {
     TEST_ASSERT_TRUE(h.x->busy);
 }
 
+static void test_bringup_full_sequence_with_theta_90_orient(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_TRUE(h.g->startEipBringUp());
+    // 1. Z- seek & creep
+    tick(*h.g);
+    h.z->a015 = true;
+    tick(*h.g);
+    h.z->a015 = false;
+    h.z->completeMove();
+    tick(*h.g);  // creep cleared -> settle
+    tick(*h.g);  // settle -> X home seek
+    tick(*h.g);  // X home seek starts
+
+    // 2. X home seek & creep
+    TEST_ASSERT_TRUE(h.x->busy);
+    h.x->a014 = true;
+    tick(*h.g);
+    h.x->a014 = false;
+    h.x->completeMove();
+    tick(*h.g);  // creep cleared -> settle
+    tick(*h.g);  // settle -> X cal seek
+    tick(*h.g);  // X cal seek starts
+
+    // 3. X cal seek & creep
+    TEST_ASSERT_TRUE(h.x->busy);
+    h.x->a015 = true;
+    tick(*h.g);
+    h.x->a015 = false;
+    h.x->completeMove();
+    tick(*h.g);  // creep cleared -> settle
+    tick(*h.g);  // settle -> parks X at 35mm
+
+    // 4. X park move
+    TEST_ASSERT_TRUE(h.x->busy);
+    TEST_ASSERT_FLOAT_WITHIN(1e-2f, 35.0f, h.x->target_mm);
+    h.x->completeMove();
+    tick(*h.g);  // X park completes -> Theta orient starts
+
+    // 5. Theta orient to 90 degrees before Z+ seek
+    TEST_ASSERT_TRUE(h.t->busy);
+    TEST_ASSERT_FLOAT_WITHIN(1e-2f, 90.0f, h.t->target_deg);
+    h.t->completeMove();
+    tick(*h.g);  // Theta orient completes -> Z+ seek phase
+    tick(*h.g);  // Z+ seek starts
+
+    // 6. Z+ seek starts
+    TEST_ASSERT_TRUE(h.z->busy);
+    h.z->a014 = true;
+    tick(*h.g);
+    h.z->a014 = false;
+    h.z->completeMove();
+    tick(*h.g);  // creep cleared -> settle
+    tick(*h.g);  // settle -> Z return to band ceiling
+
+    // 7. Z return to SAFE_Z ceiling
+    TEST_ASSERT_TRUE(h.z->busy);
+    h.z->completeMove();
+    tick(*h.g);  // return completes
+
+    // Bring-up successfully completed
+    TEST_ASSERT_FALSE(h.g->eipBringUpInProgress());
+}
+
 #if CONFIG_GANTRY_THETA_SEQUENTIAL
 
 static void test_sequential_theta_after_in_band_path(void) {
@@ -431,6 +494,7 @@ int main(void) {
     RUN_TEST(test_bringup_requires_drive_managed);
     RUN_TEST(test_bringup_z_minus_then_timeout);
     RUN_TEST(test_bringup_phase_order_to_x_home);
+    RUN_TEST(test_bringup_full_sequence_with_theta_90_orient);
 #if CONFIG_GANTRY_THETA_SEQUENTIAL
     RUN_TEST(test_sequential_theta_after_in_band_path);
     RUN_TEST(test_sequential_theta_gated_when_path_ends_deep);

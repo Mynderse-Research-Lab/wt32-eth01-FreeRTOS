@@ -217,6 +217,7 @@ public:
 
     // ---------- Gripper ----------
     void grip(bool active);
+    bool isGripperActive() const { return gripperActive_; }
 
     // ---------- Position accessors ----------
     int     getXEncoder() const;
@@ -378,6 +379,7 @@ private:
         kXCalCreep,
         kXCalSettle,
         kXPark,
+        kThetaOrient,
         kZPlusSeek,
         kZPlusCreep,
         kZPlusSettle,

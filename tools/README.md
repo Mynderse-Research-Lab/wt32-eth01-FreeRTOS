@@ -9,7 +9,9 @@ in the sibling **ADSB-PI-base** project.
 |--------|---------|
 | `generate_bom.py` | Generate `driver_datasheets_and_calculations/BOM.xlsx` |
 | `generate_wire_size_selection.py` | Generate `WIRE_SIZE_SELECTION.xlsx` |
-| `eip_position_abs.py` / `eip_test.py` | PC-side EIP prove tools |
+| `direct_eip_driver_ui.py` | Direct PC-to-Drive EtherNet/IP & HTTP Suite GUI (unplug from WT32 and plug directly into drive chain) |
+| `driver_config_ui.py` | EtherNet/IP Driver Configuration & Tuning GUI over WT32 bridge |
+| `lan_debug_ui.py` | Full plant Ethernet TCP console GUI & telemetry monitor |
 | `hcs01_eng.py` | HCS01 engineering HTTP (status / C0500 / PM / OM / C0300 / travel / save / verify-origin / C6400); never writes CIP IP |
 | `hcs01_comws.py` | Shared Service Tool COMWS client used by `hcs01_eng.py` and `hcs01_set_eip_io_map.py` |
 | `hcs01_set_eip_io_map.py` | Load live 18/14 EtherNet/IP cyclic map (no CIP IP write) |

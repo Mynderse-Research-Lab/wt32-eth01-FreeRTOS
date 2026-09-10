@@ -39,7 +39,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
-DEFAULT_HOST = "192.168.1.100"
+DEFAULT_HOST = "10.42.0.100"
 DEFAULT_PORT = 2323
 DEFAULT_PASSWORD = os.environ.get("GANTRY_TCP_PASSWORD", "LTU_1932")
 

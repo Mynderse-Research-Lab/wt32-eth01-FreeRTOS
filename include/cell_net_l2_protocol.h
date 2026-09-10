@@ -104,7 +104,7 @@ struct L2GantryStatusPayload {
  * @brief Payload for Message Type 0x04: Cell Supervisor Command.
  */
 struct L2CellCommandPayload {
-  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK
+  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK, 6=SET_GRIPPER (param_u8=0|1)
   uint8_t param_u8;
   uint16_t param_u16;
   float param_float;

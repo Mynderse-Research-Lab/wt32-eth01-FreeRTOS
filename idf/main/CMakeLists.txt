@@ -35,6 +35,8 @@ idf_component_register(
         MCP23S17
         Spi3Bus
         SpiDisplay
+        AppConfig
+        nvs_flash
         esp_driver_spi
         esp_driver_gpio
         esp_timer

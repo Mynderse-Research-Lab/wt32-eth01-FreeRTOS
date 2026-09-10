@@ -18,9 +18,11 @@ namespace display {
 struct SpiDisplayConfig {
     mcp23s17_handle_t mcp = nullptr;
     int mcp_cs_pin = -1;
+    int esp_cs_pin = -1;  // Direct ESP GPIO CS (e.g. GPIO2 shared with MCP or unique GPIO)
     int mcp_dc_pin = -1;
     int mcp_res_pin = -1;
-    int mcp_blk_pin = -1;
+    int mcp_blk_pin = -1; // Unused if esp_blk_pin is set
+    int esp_blk_pin = -1; // Native ESP GPIO for backlight PWM
     uint32_t clock_hz = 20000000;
 };
 

@@ -4,6 +4,7 @@
 #include "gantry_app_constants.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 
 namespace spi3 {
 namespace {
@@ -20,7 +21,8 @@ esp_err_t waitClass1Clear(TickType_t timeout_ticks) {
             ESP_LOGW(TAG, "SPI3 deferred: Class 1 critical timeout");
             return ESP_ERR_TIMEOUT;
         }
-        vTaskDelay(1);
+        esp_rom_delay_us(20);
+        taskYIELD();
     }
     return ESP_OK;
 }
@@ -95,9 +97,9 @@ bool init() {
 
     g_ready = true;
     ESP_LOGI(TAG,
-             "SPI3 ready (SCLK=%d MOSI=%d MISO=%d CS_MCP=%d); TFT CS on MCP; "
+             "SPI3 ready (SCLK=%d MOSI=%d MISO=%d CS_MCP=%d); TFT CS=%d; "
              "Class1 deferral enabled",
-             SPI3_SCLK_GPIO, SPI3_MOSI_GPIO, SPI3_MISO_GPIO, SPI3_CS_MCP_GPIO);
+             SPI3_SCLK_GPIO, SPI3_MOSI_GPIO, SPI3_MISO_GPIO, SPI3_CS_MCP_GPIO, SPI3_CS_TFT_GPIO);
     return true;
 }
 

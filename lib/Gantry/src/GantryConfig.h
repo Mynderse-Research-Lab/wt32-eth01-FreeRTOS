@@ -86,7 +86,7 @@ struct JointLimits {
     JointLimits()
         : x_min(0.0f), x_max(0.0f),
           z_min(0.0f), z_max(0.0f),
-          theta_min(-90.0f), theta_max(90.0f) {}
+          theta_min(-180.0f), theta_max(180.0f) {}
 
     /**
      * @brief Check if joint configuration is within limits.
