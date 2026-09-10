@@ -12,21 +12,26 @@
 
 // ============================================================================
 // W5500 SPI Ethernet (WIZ850io) — EtherNet/IP daisy-chain (SPI2 / HSPI)
-// ESP32 enum: SPI1=0 (flash), SPI2_HOST=1, SPI3_HOST=2 — do not use literal "2" for SPI2.
+// Pinout per WT32-ETH01-IM-REV02-PCB schematic:
+//   SCLK: GPIO12
+//   MISO: GPIO5
+//   MOSI: GPIO15
+//   CS:   GPIO33
+//   RST:  MCP PB7
 // ============================================================================
 #define W5500_SPI_HOST     1        // SPI2_HOST
-#define W5500_CS_GPIO     15        // Required for VDM frame edges (not hardwireable)
+#define W5500_CS_GPIO     33        // WT32-ETH01-IM-REV02-PCB schematic
 #define W5500_INT_GPIO    (-1)      // Unused (Class 1 polled)
 #define W5500_RST_GPIO    (-1)      // Hardware RST via MCP PB7 (not ESP GPIO)
-#define W5500_MOSI_GPIO   17        // Non-ADC; frees GPIO12 for ADC
-#define W5500_MISO_GPIO   35
-#define W5500_SCLK_GPIO    5        // Non-ADC
+#define W5500_MOSI_GPIO   15        // WT32-ETH01-IM-REV02-PCB schematic
+#define W5500_MISO_GPIO    5        // WT32-ETH01-IM-REV02-PCB schematic
+#define W5500_SCLK_GPIO   12        // WT32-ETH01-IM-REV02-PCB schematic
 // ESP-IDF v6 full-duplex on GPIO-matrix pins max ~26.67 MHz (80/3).
-// Use 20 MHz (80/4) — reliable; chip datasheet allows up to 80 MHz on short traces.
+// Use 10 MHz — reliable over GPIO matrix and board traces; 20 MHz can be set via Kconfig if verified.
 #if defined(CONFIG_EIP_W5500_SPI_HZ)
 #define W5500_SCLK_HZ     CONFIG_EIP_W5500_SPI_HZ
 #else
-#define W5500_SCLK_HZ     20000000
+#define W5500_SCLK_HZ     10000000
 #endif
 
 // ============================================================================
@@ -37,9 +42,13 @@
 #define SPI3_MOSI_GPIO         4
 #define SPI3_MISO_GPIO        36
 #define SPI3_CS_MCP_GPIO       2    // Idle HIGH; boot strap safe; only ESP CS on SPI3
-#define SPI3_MCP_CLOCK_HZ  10000000
+#define SPI3_MCP_CLOCK_HZ   1000000
 #define SPI3_TFT_CLOCK_HZ  20000000
 #define MCP23S17_HW_ADDR    0x00    // A0=A1=A2=GND → opcode addr 0
+
+// SPI3 CS pins: MCP23S17 uses GPIO2.
+#define SPI3_CS_TFT_GPIO      32    // Unique ESP32 GPIO for TFT CS
+#define TFT_BLK_GPIO          17    // Unique ESP32 GPIO for TFT Backlight PWM
 
 // MCP23S17 logical pins 0..15 (Port A 0..7, Port B 8..15)
 #define MCP_FIELD_DOUT0        0    // PA0 — gripper (Field 24 V OUT0)
@@ -50,23 +59,24 @@
 #define MCP_FIELD_DIN1         5
 #define MCP_FIELD_DIN2         6
 #define MCP_FIELD_DIN3         7
-#define MCP_TFT_DC             8    // PB0
-#define MCP_TFT_RES            9    // PB1
-#define MCP_TFT_CS            10    // PB2 — TFT chip select (idle HIGH)
-#define MCP_TFT_BLK           (-1)  // Hardwired ON (+5V); not MCP-driven
-#define MCP_UI_ENC_A          11    // PB3
-#define MCP_UI_ENC_B          12    // PB4
-#define MCP_UI_ENC_PUSH       13    // PB5
-#define MCP_UI_ENC_KO         14    // PB6 — module KO / key (input)
+
+// Port B: Disp1 / UI / W5500 RST (WT32-ETH01-IM-REV02-PCB schematic)
+#define MCP_UI_ENC_KO          8    // PB0 — module KO / key out (input)
+#define MCP_UI_ENC_PUSH        9    // PB1 — encoder push button (input)
+#define MCP_UI_ENC_B          10    // PB2 — encoder B (input)
+#define MCP_UI_ENC_A          11    // PB3 — encoder A (input)
+#define MCP_TFT_BLK           12    // PB4 — Unused (Moved to ESP32 GPIO17 for PWM)
+#define MCP_TFT_DC            13    // PB5 — TFT data/command (output)
+#define MCP_TFT_RES           14    // PB6 — TFT reset (output)
 #define MCP_W5500_RST         15    // PB7 — WIZ850io RSTn (active low)
 
 #define FIELD_24V_DOUT_COUNT   4
 #define FIELD_24V_DIN_COUNT    4
 
-// Free ESP ADC inputs (isolator → 0..3.3 V): GPIO12, 32, 33, 39
-#define ADC_FREE_GPIO_0       12
+// Free ESP ADC inputs (isolator → 0..3.3 V): GPIO17, 32, 35, 39
+#define ADC_FREE_GPIO_0       17
 #define ADC_FREE_GPIO_1       32
-#define ADC_FREE_GPIO_2       33
+#define ADC_FREE_GPIO_2       35
 #define ADC_FREE_GPIO_3       39
 
 // ============================================================================

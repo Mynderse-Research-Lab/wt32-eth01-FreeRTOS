@@ -1194,10 +1194,11 @@ void runFieldDinCommand(const char *cmd) {
     ESP_LOGI(TAG, "FIELD_DIN%d = %d (MCP PA%d)", i, field_din_get(i) ? 1 : 0,
              MCP_FIELD_DIN0 + static_cast<int>(i));
   }
-  ESP_LOGI(TAG, "ENC A/B/PUSH/KO = %d %d %d %d  TFT_CS(PB2)=%d  W5500_RST(PB7)=%d",
-           gpio_expander_read(MCP_UI_ENC_A), gpio_expander_read(MCP_UI_ENC_B),
-           gpio_expander_read(MCP_UI_ENC_PUSH), gpio_expander_read(MCP_UI_ENC_KO),
-           gpio_expander_read(MCP_TFT_CS), gpio_expander_read(MCP_W5500_RST));
+  ESP_LOGI(TAG, "ENC KO/PUSH/B/A = %d %d %d %d  BLK=%d DC=%d RES=%d  W5500_RST(PB7)=%d",
+           gpio_expander_read(MCP_UI_ENC_KO), gpio_expander_read(MCP_UI_ENC_PUSH),
+           gpio_expander_read(MCP_UI_ENC_B), gpio_expander_read(MCP_UI_ENC_A),
+           gpio_expander_read(MCP_TFT_BLK), gpio_expander_read(MCP_TFT_DC),
+           gpio_expander_read(MCP_TFT_RES), gpio_expander_read(MCP_W5500_RST));
 }
 #endif  // MCP_DEBUG_CMDS
 

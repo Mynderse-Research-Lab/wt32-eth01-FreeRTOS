@@ -7,6 +7,8 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "esp_rom_sys.h"
 
 // MCP23S17 Register addresses
 #define MCP23S17_IODIRA   0x00  // I/O Direction Port A
@@ -66,7 +68,8 @@ static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (!handle->owns_bus) {
         while (spi3_class1_critical_active()) {
             xSemaphoreGive(handle->spi_mutex);
-            vTaskDelay(pdMS_TO_TICKS(1));
+            esp_rom_delay_us(20);
+            taskYIELD();
             if (xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) != pdTRUE) {
                 return false;
             }
@@ -83,17 +86,14 @@ static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
 }
 
 static esp_err_t mcp23s17_write_register_unlocked(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
-    uint8_t tx_data[3];
-    tx_data[0] = MCP23S17_WRITE_OPCODE | (handle->device_address << 1);
-    tx_data[1] = reg;
-    tx_data[2] = value;
-
     spi_transaction_t trans = {};
+    trans.flags = SPI_TRANS_USE_TXDATA;
     trans.length = 24;  // 3 bytes * 8 bits
-    trans.tx_buffer = tx_data;
-    trans.rx_buffer = NULL;
+    trans.tx_data[0] = MCP23S17_WRITE_OPCODE | (handle->device_address << 1);
+    trans.tx_data[1] = reg;
+    trans.tx_data[2] = value;
 
-    esp_err_t ret = spi_device_transmit(handle->spi_device, &trans);
+    esp_err_t ret = spi_device_polling_transmit(handle->spi_device, &trans);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Write register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
@@ -101,21 +101,16 @@ static esp_err_t mcp23s17_write_register_unlocked(mcp23s17_handle_t handle, uint
 }
 
 static esp_err_t mcp23s17_read_register_unlocked(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
-    uint8_t tx_data[3];
-    uint8_t rx_data[3];
-    
-    tx_data[0] = MCP23S17_READ_OPCODE | (handle->device_address << 1);
-    tx_data[1] = reg;
-    tx_data[2] = 0;  // Dummy byte
-
     spi_transaction_t trans = {};
-    trans.length = 24;
-    trans.tx_buffer = tx_data;
-    trans.rx_buffer = rx_data;
+    trans.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
+    trans.length = 24;  // 3 bytes * 8 bits
+    trans.tx_data[0] = MCP23S17_READ_OPCODE | (handle->device_address << 1);
+    trans.tx_data[1] = reg;
+    trans.tx_data[2] = 0;  // Dummy byte
 
-    esp_err_t ret = spi_device_transmit(handle->spi_device, &trans);
+    esp_err_t ret = spi_device_polling_transmit(handle->spi_device, &trans);
     if (ret == ESP_OK) {
-        *value = rx_data[2];
+        *value = trans.rx_data[2];
     } else {
         ESP_LOGE(TAG, "Read register 0x%02X failed: %s", reg, esp_err_to_name(ret));
     }
@@ -184,11 +179,13 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     }
 
     spi_device_interface_config_t dev_cfg = {};
-    dev_cfg.clock_speed_hz = config->clock_speed_hz > 0 ? config->clock_speed_hz : 10000000;
+    dev_cfg.clock_speed_hz = config->clock_speed_hz > 0 ? config->clock_speed_hz : 1000000;
     dev_cfg.mode = 0;
     dev_cfg.spics_io_num = config->cs_pin;
     dev_cfg.queue_size = 1;
     dev_cfg.flags = 0;
+    dev_cfg.cs_ena_pretrans = 2;
+    dev_cfg.cs_ena_posttrans = 2;
     dev_cfg.pre_cb = NULL;
 
     esp_err_t ret = spi_bus_add_device(config->spi_host, &dev_cfg, &handle->spi_device);
@@ -202,7 +199,35 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x00);
+    // Auto-detect hardware address (A0..A2: 0x00..0x07)
+    // On power-up, IODIRA register (0x00) defaults to 0xFF.
+    int found_addr = -1;
+    uint8_t scan_vals[8] = {0};
+    for (uint8_t a = 0; a < 8; ++a) {
+        handle->device_address = a;
+        uint8_t val = 0;
+        esp_err_t pr = mcp23s17_read_register_unlocked(handle, MCP23S17_IODIRA, &val);
+        if (pr == ESP_OK) {
+            scan_vals[a] = val;
+            if (val == 0xFF && found_addr < 0) {
+                found_addr = a;
+            }
+        }
+    }
+
+    if (found_addr >= 0) {
+        handle->device_address = static_cast<uint8_t>(found_addr);
+        ESP_LOGI(TAG, "MCP23S17 detected at address 0x%02X (A2..A0 = %d)",
+                 0x20 | found_addr, found_addr);
+    } else {
+        ESP_LOGW(TAG, "MCP23S17 address scan [0..7]: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
+                 scan_vals[0], scan_vals[1], scan_vals[2], scan_vals[3],
+                 scan_vals[4], scan_vals[5], scan_vals[6], scan_vals[7]);
+        handle->device_address = config->device_address & 0x07;
+    }
+
+    // Configure IOCON: enable HAEN (bit 3 = 0x08) so hardware address pins are active
+    ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x08);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "IOCON init failed");
         mcp23s17_deinit(handle);
@@ -220,6 +245,15 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
     handle->port_b_output = 0x00;
     handle->port_a_pullup = 0x00;
     handle->port_b_pullup = 0x00;
+
+    // Verify SPI communication with MCP23S17 by reading back IODIRA
+    uint8_t check_dir = 0;
+    ret = mcp23s17_read_register(handle, MCP23S17_IODIRA, &check_dir);
+    if (ret != ESP_OK || check_dir != 0xFF) {
+        ESP_LOGE(TAG, "MCP23S17 communication check failed (IODIRA read 0x%02X, expected 0xFF)", check_dir);
+    } else {
+        ESP_LOGI(TAG, "MCP23S17 communication verified (IODIRA=0x%02X)", check_dir);
+    }
 
     ESP_LOGI(TAG, "MCP23S17 initialized (address: 0x%02X, shared_bus=%d)",
              0x20 | handle->device_address, config->skip_bus_init ? 1 : 0);

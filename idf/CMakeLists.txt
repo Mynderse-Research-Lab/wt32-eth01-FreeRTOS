@@ -17,6 +17,7 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Spi3Bus"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/SpiDisplay"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/AppConfig"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

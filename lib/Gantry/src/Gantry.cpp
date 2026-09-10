@@ -84,7 +84,7 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     deceleration_deg_per_s2_(0),
     gripperTargetState_(false),
     gripperActuateStart_ms_(0),
-    gripperActuateDurationMs_(GRIPPER_ACTUATE_TIME_MS),
+    gripperActuateDurationMs_(GANTRY_GRIPPER_OPEN_TIME_MS),
     lastXPositionCounts_(0),
     xPulsesPerMmOverride_(0.0f),
     jointDirectMove_(false),
@@ -2025,8 +2025,35 @@ void Gantry::advanceEipBringUp() {
             if (!x) { failEipBringUp("no X"); return; }
             if (!x->isBusy()) {
                 currentX_mm_ = x->getCurrentMm();
-                ESP_LOGI(TAG, "[BRINGUP] at X=%.3f; seek +Z A014 for stroke",
-                         currentX_mm_);
+                ESP_LOGI(TAG, "[BRINGUP] at X=%.3f (parked)", currentX_mm_);
+                if (axisTheta_ && axisTheta_->hasLiveFeedback()) {
+                    ESP_LOGI(TAG, "[BRINGUP] Orienting Theta to 90.0 deg before Z+ calibration...");
+                    axisTheta_->captureSoftHome();
+                    axisTheta_->moveToDeg(90.0f, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+                    bringUpPhase_ = BringUpPhase::kThetaOrient;
+                    eipLimitSawBusy_ = true;
+                    eipLimitPhaseStartMs_ = gantry_millis();
+                } else {
+                    ESP_LOGI(TAG, "[BRINGUP] Seek +Z A014 for stroke (no Theta axis)");
+                    eipLimitAxis_ = EipLimitAxisRole::kZ;
+                    eipLimitSawBusy_ = false;
+                    eipLimitPhaseStartMs_ = gantry_millis();
+                    if (eipMaxWarningActive()) {
+                        bringUpPhase_ = BringUpPhase::kZPlusCreep;
+                    } else {
+                        bringUpPhase_ = BringUpPhase::kZPlusSeek;
+                    }
+                }
+            }
+            break;
+        }
+
+        case BringUpPhase::kThetaOrient: {
+            if (!axisTheta_) { failEipBringUp("no Theta"); return; }
+            if (!axisTheta_->isBusy()) {
+                currentTheta_ = static_cast<int32_t>(axisTheta_->getCurrentDeg());
+                ESP_LOGI(TAG, "[BRINGUP] Theta oriented at %.1f deg; seek +Z A014 for stroke",
+                         (double)axisTheta_->getCurrentDeg());
                 eipLimitAxis_ = EipLimitAxisRole::kZ;
                 eipLimitSawBusy_ = false;
                 eipLimitPhaseStartMs_ = gantry_millis();
@@ -2534,8 +2561,8 @@ void Gantry::startSequentialMotion() {
     // Retracting (toward A015) = placing (grip open).
     gripperTargetState_ = (targetZ_mm_ > currentZ);
     gripperActuateDurationMs_ = gripperTargetState_
-        ? GRIPPER_ACTUATE_TIME_MS
-        : GRIPPER_ACTUATE_TIME_MS;
+        ? GANTRY_GRIPPER_CLOSE_TIME_MS
+        : GANTRY_GRIPPER_OPEN_TIME_MS;
 
     pathDoGripperAfter_ = false;
 

@@ -30,6 +30,7 @@ esp_err_t gpio_expander_set_pullup(int pin, bool enable);
 esp_err_t gpio_expander_write(int pin, uint8_t level);
 uint8_t gpio_expander_read(int pin);
 mcp23s17_handle_t gpio_expander_get_mcp_handle(void);
+uint8_t gpio_expander_read_port_b(void);
 
 esp_err_t gpio_expander_configure_field_and_ui(void);
 esp_err_t field_dout_set(unsigned channel, bool level);

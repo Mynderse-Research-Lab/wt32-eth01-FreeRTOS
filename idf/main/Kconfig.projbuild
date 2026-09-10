@@ -223,6 +223,16 @@ menu "Gantry kinematics"
         config AXIS_THETA_HARD_LIMIT_MAX_DEG
             float "Hard limit max (deg)"
             default 180.0
+        config AXIS_THETA_DRIVE_ABS_MIN_DEG
+            float "Drive-absolute window lower limit (deg)"
+            default -180.0
+            help
+                Drive-absolute window lower limit enforced by F2057 (S-0-0051).
+        config AXIS_THETA_DRIVE_ABS_MAX_DEG
+            float "Drive-absolute window upper limit (deg)"
+            default 180.0
+            help
+                Drive-absolute window upper limit enforced by F2057 (S-0-0051).
         config AXIS_THETA_MAX_SPEED_DEG_PER_S
             float "Max speed (deg/s)"
             default 3600.0
@@ -273,12 +283,73 @@ menu "Gantry kinematics"
             help
                 During EIP bring-up calibrate-all: after X stroke is measured,
                 move to this X before seeking Z+ (stroke).
+
+        config GANTRY_CONVEYOR_COLLISION_X_MIN_MM
+            float "Conveyor collision envelope X threshold (mm)"
+            default 95.0
+            help
+                With current gripper jaws: when X >= this threshold, the gripper
+                extends over the conveyor belt region.
+
+        config GANTRY_CONVEYOR_COLLISION_Z_MIN_MM
+            float "Conveyor collision envelope Z lower limit (mm)"
+            default 115.0
+            help
+                With current gripper jaws: when X >= X_MIN_MM over the conveyor,
+                lowering Z to or beyond this limit causes physical collision
+                with the conveyor belt/frame.
+
         config GANTRY_GRIPPER_OPEN_TIME_MS
             int "Gripper open time (ms)"
             default 190
         config GANTRY_GRIPPER_CLOSE_TIME_MS
             int "Gripper close time (ms)"
             default 150
+    endmenu
+
+    menu "Conveyor intercept (pick scheduler)"
+        config CONVEYOR_Y_CAM_MM
+            float "Camera Y position along belt (mm)"
+            default 336.55
+        config CONVEYOR_Y_PICK_MM
+            float "Pick Y position along belt (mm)"
+            default 1016.0
+        config CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM
+            float "Across-belt X to gantry X offset (mm)"
+            default 0.0
+        config CONVEYOR_Z_PICK_JOINT_MM
+            float "Joint Z pick height (mm)"
+            default 140.0
+        config PICK_DEFAULT_BELT_SPEED_MM_S
+            float "Default belt speed (mm/s)"
+            default 1524.0
+        config TAU_MIN_US
+            int "Minimum time-to-pick tau (us)"
+            default 100000
+        config TAU_MAX_US
+            int "Maximum time-to-pick tau (us)"
+            default 5000000
+    endmenu
+
+    menu "Homing and calibration"
+        config EIP_HOME_CAL_SPEED_MM_S
+            float "Home / cal search speed (mm/s)"
+            default 50.0
+        config EIP_HOME_THETA_SPEED_DEG_S
+            float "Home / cal theta speed (deg/s)"
+            default 15.0
+        config EIP_HOME_CAL_ACCEL_MM_S2
+            float "Home / cal accel (mm/s^2)"
+            default 2000.0
+        config EIP_CREEP_SPEED_MM_S
+            float "Creep speed toward switch-clear (mm/s)"
+            default 1.0
+        config GANTRY_CALIBRATION_TIMEOUT_MS
+            int "Calibration timeout (ms)"
+            default 30000
+        config GANTRY_TRAVEL_MEASUREMENT_TIMEOUT_MS
+            int "Travel measurement timeout (ms)"
+            default 90000
     endmenu
 
 endmenu
@@ -404,3 +475,22 @@ menu "TCP gantry console (LAN8720)"
     endchoice
 
 endmenu
+
+menu "OTA and Developer mode security"
+
+    config OTA_SERVER_PORT
+        int "TCP OTA firmware streaming port"
+        default 8032
+        range 1 65535
+        help
+            Port for the background TCP OTA server task on LAN8720.
+
+    config DEV_MODE_PASSWORD
+        string "Default Developer Mode password"
+        default "DEV_2026"
+        help
+            Initial password required to unlock Developer Mode in the TFT settings menu.
+            Can be changed at runtime via the UI if the previous password is known.
+
+endmenu
+

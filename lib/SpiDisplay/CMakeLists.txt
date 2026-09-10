@@ -1,14 +1,24 @@
 idf_component_register(
     SRCS
         "src/SpiDisplay.cpp"
+        "src/St7789Driver.cpp"
+        "src/TftFont.cpp"
+        "src/UiInput.cpp"
+        "src/UiDashboard.cpp"
+        "src/UiMenu.cpp"
+        "src/UiEditor.cpp"
+        "src/UiRebootPrompt.cpp"
+        "src/UiManager.cpp"
     INCLUDE_DIRS
         "src"
         "${CMAKE_CURRENT_LIST_DIR}/../../include"
     REQUIRES
+        AppConfig
         Spi3Bus
         MCP23S17
         esp_driver_spi
         esp_driver_gpio
+        esp_driver_ledc
         log
         freertos
 )

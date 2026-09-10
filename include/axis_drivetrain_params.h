@@ -329,6 +329,25 @@
 #define GANTRY_CAL_X_PARK_MM               35.0f
 #endif
 
+/* Conveyor collision avoidance limits for current gripper jaws.
+ * With the current gripper jaws attached:
+ * When X >= GANTRY_CONVEYOR_COLLISION_X_MIN_MM (95.0 mm), the gripper extends
+ * over the conveyor belt / frame.
+ * When Z >= GANTRY_CONVEYOR_COLLISION_Z_MIN_MM (115.0 mm) while in this X zone,
+ * the gripper jaws will collide with the conveyor belt/frame.
+ * Simultaneous X >= 95.0mm and Z >= 115.0mm is prohibited. */
+#if defined(CONFIG_GANTRY_CONVEYOR_COLLISION_X_MIN_MM)
+#define GANTRY_CONVEYOR_COLLISION_X_MIN_MM ((float)CONFIG_GANTRY_CONVEYOR_COLLISION_X_MIN_MM)
+#else
+#define GANTRY_CONVEYOR_COLLISION_X_MIN_MM 95.0f
+#endif
+
+#if defined(CONFIG_GANTRY_CONVEYOR_COLLISION_Z_MIN_MM)
+#define GANTRY_CONVEYOR_COLLISION_Z_MIN_MM ((float)CONFIG_GANTRY_CONVEYOR_COLLISION_Z_MIN_MM)
+#else
+#define GANTRY_CONVEYOR_COLLISION_Z_MIN_MM 115.0f
+#endif
+
 /* Pneumatic gripper (SCHUNK KGG 100-80). Open/close times from datasheet. */
 #if defined(CONFIG_GANTRY_GRIPPER_OPEN_TIME_MS)
 #define GANTRY_GRIPPER_OPEN_TIME_MS        ((uint32_t)CONFIG_GANTRY_GRIPPER_OPEN_TIME_MS)
