@@ -347,6 +347,19 @@ static void test_three_segment_outbound(void) {
     TEST_ASSERT_FALSE(h.g->isBusy());
 }
 
+static void test_above_to_above_arms_x_at_band_entry(void) {
+    Harness h = makeHarness(10.0f, 100.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 200.0f, 120.0f, 0.0f));
+    TEST_ASSERT_TRUE(h.z->busy);
+    TEST_ASSERT_FALSE(h.x->busy);
+
+    // Crossing into SAFE_Z should arm X immediately; no extra dwell segment.
+    h.z->setMm(30.0f);
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.z->busy);
+    TEST_ASSERT_TRUE(h.x->busy);
+}
+
 static void test_pnp_gripper_then_retract(void) {
     Harness h = makeHarness();
     EndEffectorPose pose;
@@ -529,6 +542,7 @@ int main(void) {
     RUN_TEST(test_deferred_x_arms_once_in_band);
     RUN_TEST(test_in_band_xz_together);
     RUN_TEST(test_three_segment_outbound);
+    RUN_TEST(test_above_to_above_arms_x_at_band_entry);
     RUN_TEST(test_pnp_gripper_then_retract);
     RUN_TEST(test_bringup_requires_drive_managed);
     RUN_TEST(test_bringup_z_minus_then_timeout);

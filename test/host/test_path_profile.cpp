@@ -167,17 +167,14 @@ static void test_plan_outbound_from_origin(void) {
 static void test_plan_both_above_band(void) {
   PathSegment out[3];
   const size_t n = planSegments(10.0f, 100.0f, 200.0f, 120.0f, 30.0f, out);
-  TEST_ASSERT_EQUAL_UINT(3u, n);
-  TEST_ASSERT_FALSE(out[0].move_x);
+  TEST_ASSERT_EQUAL_UINT(2u, n);
+  TEST_ASSERT_TRUE(out[0].move_x);
   TEST_ASSERT_TRUE(out[0].move_z);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, out[0].x_mm);
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.0f, out[0].z_mm);
-  TEST_ASSERT_TRUE(out[1].move_x);
-  TEST_ASSERT_FALSE(out[1].move_z);
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, out[1].x_mm);
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.0f, out[1].z_mm);
-  TEST_ASSERT_FALSE(out[2].move_x);
-  TEST_ASSERT_TRUE(out[2].move_z);
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 120.0f, out[2].z_mm);
+  TEST_ASSERT_FALSE(out[1].move_x);
+  TEST_ASSERT_TRUE(out[1].move_z);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 120.0f, out[1].z_mm);
   assert_x_endpoints_in_band(out, n, 30.0f);
 }
 
@@ -223,7 +220,7 @@ static void test_plan_test_cycle_legs(void) {
   n = planSegments(0.0f, 0.0f, 350.0f, 130.0f, ceiling, out);
   TEST_ASSERT_EQUAL_UINT(2u, n);
   n = planSegments(350.0f, 130.0f, 80.0f, 110.0f, ceiling, out);
-  TEST_ASSERT_EQUAL_UINT(3u, n);
+  TEST_ASSERT_EQUAL_UINT(2u, n);
   n = planSegments(80.0f, 110.0f, 0.0f, 0.0f, ceiling, out);
   TEST_ASSERT_EQUAL_UINT(1u, n);
   TEST_ASSERT_TRUE(out[0].move_x);
