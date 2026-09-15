@@ -91,8 +91,9 @@ inline AxisComponents decompose(float dx, float dz, const PathProfile& p) {
  *    (x1, z1). Runtime defers X until Z is in-band; Z does not stop at ceiling.
  *  - In-band: one X+Z (or X-only / Z-only) segment to (x1, min(z1, ceiling)).
  *  - End above the band: Z-alone after X is at x1.
- *  - Start and end both above, need X: Z-alone into the band, X at ceiling,
- *    Z-alone to z1 (X cannot run until Z is in-band).
+ *  - Start and end both above, need X: first segment targets (x1, ceiling)
+ *    with X deferred until Z enters the band (so there is no hard dwell at
+ *    SAFE_Z), then Z-alone to z1.
  *
  * band_ceiling_z_mm is typically z_min + GANTRY_SAFE_Z_HEIGHT_MM (e.g. 30
  * when z_min=0 and margin=30).
@@ -136,7 +137,10 @@ inline size_t planSegments(float x0, float z0, float x1, float z1,
     float cur_z = z0;
 
     if (start_above) {
-        push(cur_x, band_ceiling_z_mm, false, true);
+        // Keep one retract segment and defer X until runtime sees in-band.
+        // This avoids a hard stop at SAFE_Z before starting X.
+        push(x1, band_ceiling_z_mm, true, true);
+        cur_x = x1;
         cur_z = band_ceiling_z_mm;
     }
 
