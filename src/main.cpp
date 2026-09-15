@@ -91,7 +91,7 @@ void gantryUpdateTask(void* param) {
 }
 
 // ---------------------------------------------------------------------------
-// TFT UI display and input task (50 Hz on Core 0)
+// TFT UI: encoder polled ~100 Hz; display redraw 15 Hz (Core 0)
 // ---------------------------------------------------------------------------
 struct UiTaskConfig {
     Gantry::Gantry* gantry;
@@ -101,40 +101,62 @@ struct UiTaskConfig {
 void tftUiTask(void* param) {
     auto* cfg = static_cast<UiTaskConfig*>(param);
     display::DashboardTelemetry telem = {};
-    const TickType_t updateInterval = pdMS_TO_TICKS(20);
+    // Quadrature needs >> detent rate: 15 Hz display undersamples the knob.
+    const TickType_t inputInterval = pdMS_TO_TICKS(10);       // 100 Hz
+    const TickType_t drawInterval = pdMS_TO_TICKS(1000 / 15);  // 15 Hz
     TickType_t lastWakeTime = xTaskGetTickCount();
+    TickType_t lastDrawTime = lastWakeTime - drawInterval;  // draw on first pass
 
-    ESP_LOGI(TAG, "TFT UI task started (50 Hz)");
+    ESP_LOGI(TAG, "TFT UI task started (input 100 Hz, draw 15 Hz)");
 
     while (1) {
-        uint8_t port_b = gpio_expander_read_port_b();
+        // Skip SPI3 while Class 1 critical — brief miss OK at 100 Hz input rate.
+        if (!spi3_class1_critical_active()) {
+            uint8_t port_b = gpio_expander_read_port_b();
+            const TickType_t now = xTaskGetTickCount();
+            const bool draw_due = (now - lastDrawTime) >= drawInterval;
 
-        if (cfg && cfg->gantry) {
-            auto joints = cfg->gantry->getCurrentJointConfig();
-            telem.x_mm = joints.x;
-            telem.z_mm = joints.z;
-            telem.theta_deg = joints.theta;
-            telem.x_homed = !cfg->gantry->isBusy();
-            telem.z_homed = !cfg->gantry->isBusy();
-            telem.theta_homed = cfg->gantry->isThetaDriveOriginAligned();
-            telem.gripper_open = !cfg->gantry->isGripperActive();
-            telem.uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
-            telem.dev_unlocked = Config::AppConfig::instance().isDeveloperModeUnlocked();
-            telem.motion_state = cfg->gantry->isBusy() ? "BUSY" : "IDLE";
-        }
+            if (draw_due) {
+                if (cfg && cfg->gantry) {
+                    auto joints = cfg->gantry->getCurrentJointConfig();
+                    telem.x_mm = joints.x;
+                    telem.z_mm = joints.z;
+                    telem.theta_deg = joints.theta;
+                    telem.x_homed = !cfg->gantry->isBusy();
+                    telem.z_homed = !cfg->gantry->isBusy();
+                    telem.theta_homed = cfg->gantry->isThetaDriveOriginAligned();
+                    telem.gripper_open = !cfg->gantry->isGripperActive();
+                    telem.uptime_s =
+                        static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+                    telem.dev_unlocked =
+                        Config::AppConfig::instance().isDeveloperModeUnlocked();
+                    telem.motion_state = cfg->gantry->isBusy() ? "BUSY" : "IDLE";
+                }
 
-        if (cfg && cfg->eth) {
-            telem.lan_link = cfg->eth->isUp();
-            esp_netif_ip_info_t ip_info;
-            if (cfg->eth->getNetif() && esp_netif_get_ip_info(cfg->eth->getNetif(), &ip_info) == ESP_OK) {
-                esp_ip4addr_ntoa(&ip_info.ip, telem.lan_ip, sizeof(telem.lan_ip));
+                if (cfg && cfg->eth) {
+                    telem.lan_link = cfg->eth->isUp();
+                    esp_netif_ip_info_t ip_info;
+                    if (cfg->eth->getNetif() &&
+                        esp_netif_get_ip_info(cfg->eth->getNetif(), &ip_info) ==
+                            ESP_OK) {
+                        esp_ip4addr_ntoa(&ip_info.ip, telem.lan_ip,
+                                         sizeof(telem.lan_ip));
+                    } else {
+                        std::strncpy(
+                            telem.lan_ip,
+                            Config::AppConfig::instance().data().eth_static_ip,
+                            sizeof(telem.lan_ip));
+                    }
+                }
+
+                display::UiManager::instance().update(port_b, telem);
+                lastDrawTime = now;
             } else {
-                std::strncpy(telem.lan_ip, Config::AppConfig::instance().data().eth_static_ip, sizeof(telem.lan_ip));
+                display::UiManager::instance().pollInput(port_b);
             }
         }
 
-        display::UiManager::instance().update(port_b, telem);
-        vTaskDelayUntil(&lastWakeTime, updateInterval);
+        vTaskDelayUntil(&lastWakeTime, inputInterval);
     }
 }
 
@@ -412,8 +434,8 @@ extern "C" void app_main(void) {
     static UiTaskConfig uiCfg = { &gantry, &ethernetLink };
     result = xTaskCreatePinnedToCore(
         tftUiTask, "TftUiTask",
-        4096, &uiCfg,
-        2, nullptr, 0);
+        TFT_UI_TASK_STACK, &uiCfg,
+        TFT_UI_TASK_PRIORITY, nullptr, TFT_UI_TASK_CORE);
     if (result != pdPASS) {
         ESP_LOGW(TAG, "Failed to create TftUiTask");
     }

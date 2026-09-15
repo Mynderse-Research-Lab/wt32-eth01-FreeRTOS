@@ -841,4 +841,15 @@ void GantryEipLinearAxis::setLogRateHz(uint32_t hz) {
   last_axislog_us_ = 0;
 }
 
+DrivePositionRef GantryEipLinearAxis::getDrivePositionRef() const {
+  if (!image_.isOnline()) {
+    return DrivePositionRef::kUnknown;
+  }
+  eip::k5100::InputAssembly154 fb{};
+  if (!readFeedback(fb)) {
+    return DrivePositionRef::kUnknown;
+  }
+  return fb.homed_status ? DrivePositionRef::kHomed : DrivePositionRef::kLost;
+}
+
 }  // namespace Gantry

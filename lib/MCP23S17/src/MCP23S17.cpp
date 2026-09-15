@@ -8,7 +8,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "esp_rom_sys.h"
 
 // MCP23S17 Register addresses
 #define MCP23S17_IODIRA   0x00  // I/O Direction Port A
@@ -55,27 +54,33 @@ static const char *TAG = "MCP23S17";
 
 #include "Spi3Bus.h"
 
+static constexpr TickType_t kMcpSpiLockTimeoutTicks = pdMS_TO_TICKS(20);
+
 static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (handle == NULL || handle->spi_mutex == NULL) {
         return false;
     }
-    
-    if (xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) != pdTRUE) {
+
+    if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) != pdTRUE) {
         return false;
     }
 
-    // Defer when on shared SPI3 bus and Class 1 scanner critical section is active
+    // Defer when on shared SPI3 bus and Class 1 scanner critical section is active.
+    // vTaskDelay (not busy-spin): same-core SerialCmd must run while we wait.
     if (!handle->owns_bus) {
+        const TickType_t start = xTaskGetTickCount();
         while (spi3_class1_critical_active()) {
             xSemaphoreGive(handle->spi_mutex);
-            esp_rom_delay_us(20);
-            taskYIELD();
-            if (xSemaphoreTake(handle->spi_mutex, portMAX_DELAY) != pdTRUE) {
+            if ((xTaskGetTickCount() - start) >= kMcpSpiLockTimeoutTicks) {
+                return false;
+            }
+            vTaskDelay(1);
+            if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) != pdTRUE) {
                 return false;
             }
         }
     }
-    
+
     return true;
 }
 

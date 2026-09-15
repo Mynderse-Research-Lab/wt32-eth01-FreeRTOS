@@ -62,6 +62,7 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
 
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
+  DrivePositionRef getDrivePositionRef() const override;
 
  private:
   enum class MovePhase : uint8_t {

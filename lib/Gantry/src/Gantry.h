@@ -60,6 +60,7 @@ enum class GantryError {
     OK,
     NOT_INITIALIZED,
     MOTOR_NOT_ENABLED,
+    NOT_CALIBRATED,
     ALREADY_MOVING,
     INVALID_POSITION,
     INVALID_PARAMETER,
@@ -156,6 +157,12 @@ public:
     /// True when current joint Z is in the SAFE_Z retract/traverse band
     /// (X Absolute and theta allowed).
     bool zInTraverseBand() const;
+
+    /// Workspace envelope is valid. Latched true after X+Z stroke (bring-up
+    /// or both axis cals). Cleared only when a live drive reports lost
+    /// position-ref (24 V / encoder), not on disable/stop/Class 1 gaps.
+    bool isWorkspaceCalibrated() const;
+    void setWorkspaceCalibrated(bool on);
 
     // ---------- Motion ----------
     /// @brief Home X (Z/Theta: call homeZ / homeTheta separately; console `all` sequences).
@@ -286,6 +293,7 @@ private:
     bool abortRequested_;
     bool homingInProgress_;
     bool calibrationInProgress_;
+    bool workspaceCalibrated_;
     bool gripperActive_;
 
     // Position tracking (mirrored from axis wrappers for cheap access)
@@ -421,6 +429,10 @@ private:
     bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
     void     updateAxisPositions();
     void     stopAllMotion();
+    /// Pause Lost polling during home/cal/bring-up (Home34 flicker).
+    bool     driveRefPollPaused() const;
+    void     pollDrivePositionLoss();
+    void     tryLatchWorkspaceFromStrokes();
 
     GantryLinearAxis* eipLimitActiveAxis();
     const GantryLinearAxis* eipLimitActiveAxis() const;

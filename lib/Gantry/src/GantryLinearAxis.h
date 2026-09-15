@@ -11,6 +11,8 @@
 #ifndef GANTRY_LINEAR_AXIS_H
 #define GANTRY_LINEAR_AXIS_H
 
+#include "GantryDriveRef.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -84,6 +86,11 @@ public:
 
     // ---------- Periodic ----------
     virtual void update() = 0;
+
+    /// Live drive homed/in-reference. Default unknown (host fakes override).
+    virtual DrivePositionRef getDrivePositionRef() const {
+        return DrivePositionRef::kUnknown;
+    }
 
     // ---------- Homing speed (used by Gantry::home / calibrate) ----------
     virtual uint32_t homingSpeedPps() const = 0;

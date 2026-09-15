@@ -60,6 +60,7 @@ Gantry::Gantry(std::unique_ptr<GantryLinearAxis> xAxis,
     abortRequested_(false),
     homingInProgress_(false),
     calibrationInProgress_(false),
+    workspaceCalibrated_(false),
     gripperActive_(false),
     currentX_mm_(0.0f),
     currentZ_(0),
@@ -353,7 +354,7 @@ bool Gantry::requireThetaTraverseInterlock(const char* what) {
 
 void Gantry::moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (!initialized_ || !enabled_) {
+    if (!initialized_ || !enabled_ || !workspaceCalibrated_) {
         return;
     }
     if (speed == 0) {
@@ -388,6 +389,9 @@ GantryError Gantry::moveTo(const JointConfig& joint,
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
+    if (!workspaceCalibrated_) {
+        return GantryError::NOT_CALIBRATED;
+    }
     GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
 
     if (axisX_ && axisX_->isAlarmActive()) {
@@ -423,6 +427,9 @@ GantryError Gantry::moveTo(const EndEffectorPose& pose,
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
+    if (!workspaceCalibrated_) {
+        return GantryError::NOT_CALIBRATED;
+    }
     GANTRY_CHECK_BUSY_RET(GantryError::ALREADY_MOVING);
 
     JointConfig joint = inverseKinematics(pose);
@@ -482,6 +489,7 @@ void Gantry::update() {
     // Advance EIP axis state machines first so isBusy() reflects the latest
     // StartMotion preload/pulse phase before sequential sequencing decides.
     updateAxisPositions();
+    pollDrivePositionLoss();
 
     if (motionState_ != MotionState::IDLE) {
         processSequentialMotion();
@@ -1286,6 +1294,54 @@ void Gantry::updateAxisPositions() {
     }
 }
 
+bool Gantry::isWorkspaceCalibrated() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return workspaceCalibrated_;
+}
+
+void Gantry::setWorkspaceCalibrated(bool on) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (workspaceCalibrated_ == on) {
+        return;
+    }
+    workspaceCalibrated_ = on;
+    ESP_LOGI(TAG, "Workspace calibrated: %s", on ? "Yes" : "No");
+}
+
+bool Gantry::driveRefPollPaused() const {
+    return homingInProgress_ || calibrationInProgress_ ||
+           eipLimitPhase_ != EipLimitPhase::kIdle ||
+           bringUpPhase_ != BringUpPhase::kIdle;
+}
+
+void Gantry::tryLatchWorkspaceFromStrokes() {
+    if (axisLength_ > 0 && zAxisLength_ > 0) {
+        setWorkspaceCalibrated(true);
+    }
+}
+
+void Gantry::pollDrivePositionLoss() {
+    if (!workspaceCalibrated_ || driveRefPollPaused()) {
+        return;
+    }
+    auto linearLost = [](GantryLinearAxis* axis, const char* name) {
+        if (axis && axis->getDrivePositionRef() == DrivePositionRef::kLost) {
+            ESP_LOGW(TAG, "%s drive position ref lost (24 V / unhomed)", name);
+            return true;
+        }
+        return false;
+    };
+    if (linearLost(axisX_.get(), "X") || linearLost(axisZ_.get(), "Z")) {
+        setWorkspaceCalibrated(false);
+        return;
+    }
+    if (axisTheta_ &&
+        axisTheta_->getDrivePositionRef() == DrivePositionRef::kLost) {
+        ESP_LOGW(TAG, "Theta drive position ref lost (24 V / not in-reference)");
+        setWorkspaceCalibrated(false);
+    }
+}
+
 void Gantry::stopAllMotion() {
     if (axisX_)     axisX_->stopMotion();
     if (axisZ_)     axisZ_->stopMotion();
@@ -1668,6 +1724,7 @@ void Gantry::advanceEipLimitSequence() {
                         eipLimitPhase_ = EipLimitPhase::kIdle;
                         eipLimitAxis_ = EipLimitAxisRole::kNone;
                         calibrationInProgress_ = false;
+                        tryLatchWorkspaceFromStrokes();
                     }
                 } else {
                     eipLimitSawBusy_ = false;
@@ -1685,6 +1742,7 @@ void Gantry::advanceEipLimitSequence() {
                     eipLimitPhase_ = EipLimitPhase::kIdle;
                     eipLimitAxis_ = EipLimitAxisRole::kNone;
                     calibrationInProgress_ = false;
+                    tryLatchWorkspaceFromStrokes();
                 }
             }
             break;
@@ -1780,6 +1838,7 @@ void Gantry::finishEipBringUpOk() {
     eipLimitSawBusy_ = false;
     homingInProgress_ = false;
     calibrationInProgress_ = false;
+    tryLatchWorkspaceFromStrokes();
 }
 
 void Gantry::advanceEipBringUp() {

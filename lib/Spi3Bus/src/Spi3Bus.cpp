@@ -4,7 +4,8 @@
 #include "gantry_app_constants.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace spi3 {
 namespace {
@@ -21,8 +22,9 @@ esp_err_t waitClass1Clear(TickType_t timeout_ticks) {
             ESP_LOGW(TAG, "SPI3 deferred: Class 1 critical timeout");
             return ESP_ERR_TIMEOUT;
         }
-        esp_rom_delay_us(20);
-        taskYIELD();
+        // Block (not busy-spin + yield): Class 1 holds SPI for ~1–2 ms per
+        // exchange; spinning here starves priority-1 SerialCmd on the same core.
+        vTaskDelay(1);
     }
     return ESP_OK;
 }

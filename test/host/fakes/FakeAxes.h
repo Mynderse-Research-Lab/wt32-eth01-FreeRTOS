@@ -124,6 +124,8 @@ public:
 
     double pulsesPerMm() const override { return ppm; }
     bool isEncoderFeedbackEnabled() const override { return encoder_feedback; }
+    DrivePositionRef drive_ref = DrivePositionRef::kHomed;
+    DrivePositionRef getDrivePositionRef() const override { return drive_ref; }
     void update() override {}
     uint32_t homingSpeedPps() const override { return homing_pps; }
     void setLogTag(const char* tag) override { log_tag = tag; }
@@ -208,6 +210,8 @@ public:
         return capture_ok;
     }
     bool hasLiveFeedback() const override { return live_fb; }
+    DrivePositionRef drive_ref = DrivePositionRef::kHomed;
+    DrivePositionRef getDrivePositionRef() const override { return drive_ref; }
     void update() override {}
     void setAngleRange(float min_d, float max_d) override {
         min_deg = min_d;

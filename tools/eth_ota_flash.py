@@ -20,11 +20,15 @@ import os
 import socket
 import sys
 import time
+from collections.abc import Callable
 
 DEFAULT_HOST = "192.168.1.100"
 DEFAULT_PORT = 8032
 DEFAULT_PASSWORD = os.environ.get("GANTRY_TCP_PASSWORD", "LTU_1932")
 CHUNK_SIZE = 4096
+
+LogFn = Callable[[str], None]
+ProgressFn = Callable[[int, int, float], None]  # sent_bytes, total_bytes, KiB/s
 
 
 def read_line(sock: socket.socket, timeout: float = 5.0) -> str:
@@ -44,46 +48,66 @@ def read_line(sock: socket.socket, timeout: float = 5.0) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def flash_ota(host: str, port: int, password: str, bin_path: str) -> bool:
+def flash_ota(
+    host: str,
+    port: int,
+    password: str,
+    bin_path: str,
+    *,
+    log: LogFn | None = None,
+    progress: ProgressFn | None = None,
+) -> bool:
+    """Stream a .bin to the Dual-OTA TCP server (LAN8720, default :8032).
+
+    `log` / `progress` let a GUI consume the same protocol as the CLI. When
+    omitted, this prints to stdout/stderr as before.
+    """
+    to_stdout = log is None
+
+    def emit(msg: str, *, error: bool = False) -> None:
+        if log is not None:
+            log(msg)
+        elif error:
+            print(msg, file=sys.stderr)
+        else:
+            print(msg)
+
     if not os.path.isfile(bin_path):
-        print(f"[ERROR] Firmware file not found: {bin_path}", file=sys.stderr)
+        emit(f"[ERROR] Firmware file not found: {bin_path}", error=True)
         return False
 
     file_size = os.path.getsize(bin_path)
-    print(f"============================================================")
-    print(f"=== WT32-ETH01 LAN8720 ETHERNET OTA FLASHER               ===")
-    print(f"============================================================")
-    print(f"Target Host      : {host}:{port}")
-    print(f"Firmware File    : {bin_path}")
-    print(f"Binary Size      : {file_size:,} bytes ({file_size / 1024:.1f} KB)")
-    print(f"============================================================")
+    emit("============================================================")
+    emit("=== WT32-ETH01 LAN8720 ETHERNET OTA FLASHER               ===")
+    emit("============================================================")
+    emit(f"Target Host      : {host}:{port}")
+    emit(f"Firmware File    : {bin_path}")
+    emit(f"Binary Size      : {file_size:,} bytes ({file_size / 1024:.1f} KB)")
+    emit("============================================================")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(5.0)
 
     try:
-        print(f"Connecting to {host}:{port}...")
+        emit(f"Connecting to {host}:{port}...")
         sock.connect((host, port))
-        print("Connected.")
+        emit("Connected.")
 
-        # 1. Authentication
         sock.sendall(f"AUTH {password}\n".encode("utf-8"))
         resp = read_line(sock, 5.0)
         if not resp.startswith("OK AUTH"):
-            print(f"[ERROR] Authentication failed: {resp}", file=sys.stderr)
+            emit(f"[ERROR] Authentication failed: {resp}", error=True)
             return False
-        print("Authentication verified (OK).")
+        emit("Authentication verified (OK).")
 
-        # 2. Pre-flight check & stream start
         sock.sendall(f"START {file_size}\n".encode("utf-8"))
         resp = read_line(sock, 8.0)
         if not resp.startswith("OK READY"):
-            print(f"[ERROR] OTA initiation rejected by target: {resp}", file=sys.stderr)
+            emit(f"[ERROR] OTA initiation rejected by target: {resp}", error=True)
             return False
-        print("Target ready for binary stream.")
+        emit("Target ready for binary stream.")
 
-        # 3. Stream binary chunks
-        print("\nStreaming firmware binary...")
+        emit("Streaming firmware binary...")
         start_time = time.time()
         sent_bytes = 0
 
@@ -94,39 +118,44 @@ def flash_ota(host: str, port: int, password: str, bin_path: str) -> bool:
                     break
                 sock.sendall(chunk)
                 sent_bytes += len(chunk)
-
-                # Progress bar
-                pct = (sent_bytes / file_size) * 100.0
                 elapsed = time.time() - start_time
                 speed_kb = (sent_bytes / 1024.0) / (elapsed if elapsed > 0 else 0.001)
-                bar_len = 30
-                filled = int(bar_len * (sent_bytes / file_size))
-                bar = "=" * filled + "-" * (bar_len - filled)
-                print(
-                    f"\r[{bar}] {pct:5.1f}% ({sent_bytes / 1024:.1f} / {file_size / 1024:.1f} KB) @ {speed_kb:5.1f} KB/s",
-                    end="",
-                    flush=True,
-                )
+                if progress is not None:
+                    progress(sent_bytes, file_size, speed_kb)
+                elif to_stdout:
+                    pct = (sent_bytes / file_size) * 100.0
+                    bar_len = 30
+                    filled = int(bar_len * (sent_bytes / file_size))
+                    bar = "=" * filled + "-" * (bar_len - filled)
+                    print(
+                        f"\r[{bar}] {pct:5.1f}% ({sent_bytes / 1024:.1f} / "
+                        f"{file_size / 1024:.1f} KB) @ {speed_kb:5.1f} KB/s",
+                        end="",
+                        flush=True,
+                    )
 
-        print("\nAll bytes transmitted. Finalizing flash and verifying image...")
+        if to_stdout:
+            print()
+        emit("All bytes transmitted. Finalizing flash and verifying image...")
 
-        # 4. Await verification and reboot confirmation
         resp = read_line(sock, 15.0)
         if not resp.startswith("OK COMPLETE"):
-            print(f"[ERROR] OTA validation failed on target: {resp}", file=sys.stderr)
+            emit(f"[ERROR] OTA validation failed on target: {resp}", error=True)
             return False
 
         elapsed = time.time() - start_time
         avg_speed = (file_size / 1024.0) / (elapsed if elapsed > 0 else 0.001)
-        print(f"============================================================")
-        print(f"[SUCCESS] OTA Flash Completed in {elapsed:.2f} s ({avg_speed:.1f} KB/s)")
-        print(f"Target Response  : {resp}")
-        print(f"Target WT32 is now rebooting into the new firmware slot!")
-        print(f"============================================================")
+        if progress is not None:
+            progress(file_size, file_size, avg_speed)
+        emit("============================================================")
+        emit(f"[SUCCESS] OTA Flash Completed in {elapsed:.2f} s ({avg_speed:.1f} KB/s)")
+        emit(f"Target Response  : {resp}")
+        emit("Target WT32 is now rebooting into the new firmware slot!")
+        emit("============================================================")
         return True
 
     except Exception as e:
-        print(f"\n[ERROR] Connection error during OTA flash: {e}", file=sys.stderr)
+        emit(f"[ERROR] Connection error during OTA flash: {e}", error=True)
         return False
     finally:
         try:
