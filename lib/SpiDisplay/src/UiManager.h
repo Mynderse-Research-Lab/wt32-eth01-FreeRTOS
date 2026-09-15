@@ -23,13 +23,25 @@ public:
     static UiManager& instance();
 
     bool init(const SpiDisplayConfig& cfg);
+
+    /** Full refresh: input + telemetry draw (call at display rate, e.g. 15 Hz). */
     void update(uint8_t port_b_val, const DashboardTelemetry& telem);
+
+    /**
+     * Encoder/button sample only (call at ~100 Hz). Dispatches UI events and
+     * redraws menus/editors on interaction; skips dashboard telemetry SPI.
+     */
+    void pollInput(uint8_t port_b_val);
 
     St7789Driver& getDriver() { return driver_; }
 
 private:
     UiManager();
     ~UiManager() = default;
+
+    void applyBacklight(uint32_t uptime_s);
+    void dispatchEvent(UiEvent evt, const DashboardTelemetry& telem,
+                       bool refresh_dashboard_telem);
 
     St7789Driver driver_;
     UiInput input_;
@@ -40,6 +52,7 @@ private:
 
     UiScreenState state_{UiScreenState::DASHBOARD};
     bool initialized_{false};
+    DashboardTelemetry last_telem_{};
 
     mcp23s17_handle_t mcp_{nullptr};
     int mcp_blk_pin_{-1};

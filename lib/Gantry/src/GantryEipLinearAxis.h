@@ -70,6 +70,7 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
+  DrivePositionRef getDrivePositionRef() const override;
 
   /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
   void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw) override;

@@ -92,8 +92,12 @@
 #define GANTRY_UPDATE_TASK_PRIORITY    5
 #define GANTRY_UPDATE_TASK_CORE        1
 #define CONSOLE_TASK_STACK          4096
-#define CONSOLE_TASK_PRIORITY          1
+// Above TftUiTask (2): UART/TCP must preempt SPI3 UI redraws under Class 1 load.
+#define CONSOLE_TASK_PRIORITY          3
 #define CONSOLE_TASK_CORE              0
+#define TFT_UI_TASK_STACK           4096
+#define TFT_UI_TASK_PRIORITY           2
+#define TFT_UI_TASK_CORE               0
 
 #define PICK_SCHEDULER_TASK_STACK   4096
 #define PICK_SCHEDULER_TASK_PRIORITY   4

@@ -8,9 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Workspace calibrated latch (`Gantry::isWorkspaceCalibrated`): true after X+Z
+  stroke (bring-up / both axis cals). Clears only on live drive position-ref
+  loss (Kinetix `homed_status` / HCS01 `in_reference`), not disable/stop/Class 1
+  gaps. Console `calibrated` + `status` line; NVS restore across ESP reboot.
+  `moveTo` returns `NOT_CALIBRATED` until latched.
 - Safe Z clearance margin: locked to **35.7 mm** (`CONFIG_GANTRY_SAFE_Z_HEIGHT_MM`, 4.5" clearance from lowest drop limit) across kinematics, Kconfig, and bring-up sequences.
 - Theta 100 PUU/deg absolute scaling: configured $0.01^\circ$ resolution with full $\pm 36000.0^\circ$ continuous multi-turn window (`S-0-0278`/`S-0-0049`/`S-0-0050`), zero software offsets, and auto-aligned drive origin.
-- Unified firmware autotuning (`autotune x|z|theta [args]`): embedded CIP Class 0x0F parameter access for Kinetix 5100 (Mode 1) and embedded HTTP/COMWS client for Rexroth HCS01 (C1800/C2200 procedure commands).
+- Unified firmware autotuning (`autotune x|z|theta [args]`): embedded CIP Class 0x0F parameter access for Kinetix 5100 (Mode 1) and embedded HTTP/COMWS client for Rexroth HCS01 (C1800/C2200 procedure commands). **Disabled this version** (`GANTRY_CONSOLE_AUTOTUNE=0`); re-enable with `-DGANTRY_CONSOLE_AUTOTUNE=1`.
 - Console `test_theta_path`: combined in-band X+Z+theta using a live
   `thetalim`-safe dθ (25–75% window). Requires enable + bring-up first.
 - HCS01 eng CLI: `travel --yes`, `save --yes` (C2200), `verify-origin`.

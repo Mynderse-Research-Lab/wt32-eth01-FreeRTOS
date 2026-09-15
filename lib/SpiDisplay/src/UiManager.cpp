@@ -64,64 +64,36 @@ bool UiManager::init(const SpiDisplayConfig& cfg) {
     return true;
 }
 
-void UiManager::update(uint8_t port_b_val, const DashboardTelemetry& telem) {
-    if (!initialized_) return;
-
-    // Check dynamic orientation changes
+void UiManager::applyBacklight(uint32_t uptime_s) {
     const auto& app_cfg = Config::AppConfig::instance().data();
-    if (prev_orient_ != app_cfg.display_orientation) {
-        prev_orient_ = app_cfg.display_orientation;
-        if (app_cfg.display_orientation == 1) {
-            driver_.setOrientation(Orientation::PORTRAIT);
-        } else {
-            driver_.setOrientation(Orientation::LANDSCAPE);
-        }
-        if (state_ == UiScreenState::DASHBOARD) {
-            dashboard_.renderFull(telem);
-        } else if (state_ == UiScreenState::MENU) {
-            menu_.invalidate();
-            menu_.render();
-        } else if (state_ == UiScreenState::EDITOR) {
-            editor_.forceFullRender();
-            editor_.render();
-        }
-    }
-
-    UiEvent evt = input_.update(port_b_val);
-
-    // Track user activity for backlight timeout
-    if (evt != UiEvent::NONE) {
-        last_activity_s_ = telem.uptime_s;
-    }
-
-    // Backlight PWM brightness control
     int32_t target_brightness = app_cfg.display_brightness; // 0..100 %
     if (app_cfg.display_backlight_timeout_s > 0 &&
-        (telem.uptime_s - last_activity_s_) > static_cast<uint32_t>(app_cfg.display_backlight_timeout_s)) {
-        // Dimmed during idle
+        (uptime_s - last_activity_s_) > static_cast<uint32_t>(app_cfg.display_backlight_timeout_s)) {
         target_brightness = 10;
     }
 
     if (esp_blk_pin_ >= 0) {
-        // Hardware PWM (5 kHz)
         uint32_t duty = (target_brightness * 255) / 100;
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     } else if (mcp_ && mcp_blk_pin_ >= 0) {
-        // 10-step software PWM cycle (50 Hz loop -> 5 Hz PWM carrier)
+        // 10-step software PWM (carrier tracks input poll rate when used)
         pwm_cycle_ = (pwm_cycle_ + 1) % 10;
         int active_threshold = (target_brightness + 5) / 10; // 0..10
         uint8_t blk_val = (pwm_cycle_ < active_threshold) ? 1 : 0;
         mcp23s17_write_pin(mcp_, static_cast<mcp23s17_pin_t>(mcp_blk_pin_), blk_val);
     }
+}
 
+void UiManager::dispatchEvent(UiEvent evt, const DashboardTelemetry& telem,
+                              bool refresh_dashboard_telem) {
     switch (state_) {
         case UiScreenState::DASHBOARD: {
             if (evt == UiEvent::PUSH_CLICK) {
                 state_ = UiScreenState::MENU;
                 menu_.reset();
                 menu_.render();
-            } else {
+            } else if (refresh_dashboard_telem) {
                 dashboard_.updateTelemetry(telem);
             }
             break;
@@ -129,8 +101,6 @@ void UiManager::update(uint8_t port_b_val, const DashboardTelemetry& telem) {
 
         case UiScreenState::MENU: {
             if (evt == UiEvent::BACK_CLICK) {
-                // If at root menu and BACK clicked, return to dashboard
-                // UiMenu::popMenu handles submenus, but if already at root:
                 state_ = UiScreenState::DASHBOARD;
                 dashboard_.renderFull(telem);
                 break;
@@ -216,6 +186,50 @@ void UiManager::update(uint8_t port_b_val, const DashboardTelemetry& telem) {
             break;
         }
     }
+}
+
+void UiManager::pollInput(uint8_t port_b_val) {
+    if (!initialized_) return;
+
+    UiEvent evt = input_.update(port_b_val);
+    if (evt != UiEvent::NONE) {
+        last_activity_s_ = last_telem_.uptime_s;
+    }
+    // No dashboard telemetry SPI on the fast path.
+    dispatchEvent(evt, last_telem_, /*refresh_dashboard_telem=*/false);
+}
+
+void UiManager::update(uint8_t port_b_val, const DashboardTelemetry& telem) {
+    if (!initialized_) return;
+
+    last_telem_ = telem;
+
+    const auto& app_cfg = Config::AppConfig::instance().data();
+    if (prev_orient_ != app_cfg.display_orientation) {
+        prev_orient_ = app_cfg.display_orientation;
+        if (app_cfg.display_orientation == 1) {
+            driver_.setOrientation(Orientation::PORTRAIT);
+        } else {
+            driver_.setOrientation(Orientation::LANDSCAPE);
+        }
+        if (state_ == UiScreenState::DASHBOARD) {
+            dashboard_.renderFull(telem);
+        } else if (state_ == UiScreenState::MENU) {
+            menu_.invalidate();
+            menu_.render();
+        } else if (state_ == UiScreenState::EDITOR) {
+            editor_.forceFullRender();
+            editor_.render();
+        }
+    }
+
+    UiEvent evt = input_.update(port_b_val);
+    if (evt != UiEvent::NONE) {
+        last_activity_s_ = telem.uptime_s;
+    }
+
+    applyBacklight(telem.uptime_s);
+    dispatchEvent(evt, telem, /*refresh_dashboard_telem=*/true);
 }
 
 } // namespace display

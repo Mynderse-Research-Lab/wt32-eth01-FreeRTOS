@@ -641,4 +641,16 @@ void GantryEipRotaryAxis::setLogRateHz(uint32_t hz) {
   last_axislog_us_ = 0;
 }
 
+DrivePositionRef GantryEipRotaryAxis::getDrivePositionRef() const {
+  if (!image_.isOnline()) {
+    return DrivePositionRef::kUnknown;
+  }
+  eip::hcs01::Hcs01PositioningActual fb;
+  if (!readFeedback(fb)) {
+    return DrivePositionRef::kUnknown;
+  }
+  return fb.status.in_reference ? DrivePositionRef::kHomed
+                                : DrivePositionRef::kLost;
+}
+
 }  // namespace Gantry

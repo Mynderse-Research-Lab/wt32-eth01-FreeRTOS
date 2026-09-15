@@ -16,6 +16,7 @@
 
 #include <memory>
 
+using Gantry::DrivePositionRef;
 using Gantry::EndEffectorPose;
 using Gantry::GantryError;
 using Gantry::JointConfig;
@@ -50,6 +51,7 @@ Harness makeHarness(float x_mm = 0.0f, float z_mm = 0.0f, float th_deg = 0.0f) {
     TEST_ASSERT_TRUE(h.g->isEnabled());
     h.g->setJointLimits(0.0f, 550.0f, 0.0f, 150.0f, -180.0f, 180.0f);
     h.g->setSafeZHeight(30.0f);
+    h.g->setWorkspaceCalibrated(true);
     return h;
 }
 
@@ -96,6 +98,40 @@ static void test_move_not_enabled(void) {
     TEST_ASSERT_TRUE(g.begin());
     TEST_ASSERT_EQUAL(GantryError::MOTOR_NOT_ENABLED,
                       g.moveTo(JointConfig(1, 0, 0)));
+}
+
+static void test_move_not_calibrated(void) {
+    Harness h = makeHarness();
+    h.g->setWorkspaceCalibrated(false);
+    TEST_ASSERT_EQUAL(GantryError::NOT_CALIBRATED, go(h, 10.0f, 0.0f, 0.0f));
+}
+
+static void test_workspace_cal_clears_on_drive_lost(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_TRUE(h.g->isWorkspaceCalibrated());
+
+    h.x->drive_ref = DrivePositionRef::kUnknown;
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.g->isWorkspaceCalibrated());
+
+    h.x->drive_ref = DrivePositionRef::kLost;
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isWorkspaceCalibrated());
+    TEST_ASSERT_EQUAL(GantryError::NOT_CALIBRATED, go(h, 10.0f, 0.0f, 0.0f));
+
+    h.x->drive_ref = DrivePositionRef::kHomed;
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isWorkspaceCalibrated());
+
+    h.g->setWorkspaceCalibrated(true);
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 10.0f, 0.0f, 0.0f));
+}
+
+static void test_workspace_cal_clears_on_theta_lost(void) {
+    Harness h = makeHarness();
+    h.t->drive_ref = DrivePositionRef::kLost;
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isWorkspaceCalibrated());
 }
 
 static void test_move_invalid_position(void) {
@@ -472,6 +508,9 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_move_not_initialized);
     RUN_TEST(test_move_not_enabled);
+    RUN_TEST(test_move_not_calibrated);
+    RUN_TEST(test_workspace_cal_clears_on_drive_lost);
+    RUN_TEST(test_workspace_cal_clears_on_theta_lost);
     RUN_TEST(test_move_invalid_position);
     RUN_TEST(test_orchestrator_bubbles_up_axis_rejection);
     RUN_TEST(test_move_already_moving);

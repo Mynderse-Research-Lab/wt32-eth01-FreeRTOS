@@ -6,6 +6,8 @@
 #ifndef GANTRY_ROTARY_AXIS_H
 #define GANTRY_ROTARY_AXIS_H
 
+#include "GantryDriveRef.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -63,6 +65,10 @@ public:
     virtual bool captureSoftHome() = 0;
     /// True when a Class 1 actual assembly has been received.
     virtual bool hasLiveFeedback() const = 0;
+    /// Live HCS01 in-reference. Default unknown (host fakes override).
+    virtual DrivePositionRef getDrivePositionRef() const {
+        return DrivePositionRef::kUnknown;
+    }
     /// Drive S-0-0051 in degrees (no firmware origin offset).
     virtual float getDriveAbsDeg() const { return getCurrentDeg(); }
     virtual bool isDriveOriginAligned() const { return true; }

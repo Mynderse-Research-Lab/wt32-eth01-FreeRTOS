@@ -185,8 +185,9 @@ From [`src/main.cpp`](../src/main.cpp):
 | `EipHoldKA` | **7** | **1** | 4096 | ~5 ms O→T keepalive during 2nd FO only |
 | `GantryUpdate` | 5 | 1 | 4096 | **100 Hz** (10 ms) — axis SMs + orchestration |
 | `PickScheduler` | 4 | 1 | 4096 | MQTT pick queue (motion not wired) |
-| `SerialCmd` | 1 | 0 | 4096 | UART console poll |
-| `NetConsole` | 1 | 0 | 4096 | TCP line console on LAN8720 `:2323` |
+| `SerialCmd` | **3** | 0 | 4096 | UART console poll (above TFT so Class 1 UI redraws do not starve RX) |
+| `TftUiTask` | 2 | 0 | 4096 | Encoder poll **100 Hz**, ST7789 draw **15 Hz** (SPI3; skips sample while Class 1 critical) |
+| `NetConsole` | **3** | 0 | 4096 | TCP line console on LAN8720 `:2323` |
 
 App constants: [`gantry_app_constants.h`](../include/gantry_app_constants.h).  
 Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
@@ -677,7 +678,7 @@ UART remains for bring-up before Ethernet is ready (no password).
 
 ### Commands
 
-Primary: `help`, `status`, `faults` / `alarms`, `enable`, `disable`, `home`,
+Primary: `help`, `status`, `calibrated`, `faults` / `alarms`, `enable`, `disable`, `home`,
 `calibrate`, `test_cycle`, `speed`, `accel`, `move`, `grip`, `stop`, `alarmreset`,
 `puuinfo`, `puucal`, `puu t`, `thetalim`, `livepos`, `units`, `selftest`.
 
@@ -689,9 +690,10 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `enable` / `disable` | Arms / ServoOff via Gantry |
 | `home` | Drive-managed: seek joint min per axis (`home x` A014; `home z` A015; `all` = Z then X); else soft-home |
 | `calibrate` | Drive-managed: seek joint max (`calibrate x` A015; `calibrate z` A014); **`calibrate all`** = bring-up Z−→band→X→Z+→band; else SCHUNK hard envelope (X soft-cal) |
+| `calibrated` | Query workspace calibrated latch. **Yes** after X+Z stroke; **No** only when a live drive reports lost position-ref (Kinetix `homed_status` / HCS01 `in_reference`). Survives disable/stop/ESP reboot (NVS). Printed on `status` |
 | `test_cycle` | Enable + bring-up (home/cal) + path legs A–F at live `speed`/`accel`, then theta G–I at `thetalim` min/max using kinematic speed/accel caps; `stop` aborts |
 | `test_theta_path` | Combined in-band X+Z+theta (25–75% window) with live thetalim-safe dθ; enable + bring-up first |
-| `move` | Requires **home + calibrate this session** (X gates) |
+| `move` | Requires **workspace calibrated**. Per-axis session home/cal still apply. Latch does **not** clear on `stop` |
 | `stop` | Abort + disable; does **not** clear session home/cal gates |
 | `alarmreset` / `arst` | EIP **FaultReset** (Kinetix) and HCS01 C0500 **bit5**; if Gantry is disabled, theta stays Drive OFF (no WaitAf / AF). HTTP `hcs01_eng.py c0500` if theta T→O is stale |
 | `faults` / `alarms` | Decode FaultCode/WarningCode (e.g. A603) |
@@ -713,9 +715,11 @@ removed; do not rely on them.
 - **Absolute Encoder Tracking & Zero-Offset Architecture**: `GantryEipRotaryAxis` operates in pure absolute frame without software offsets (`zero_puu_` eliminated). `getCurrentDeg()` directly reflects the HIPERFACE absolute encoder position (`S-0-0051`). Because end-effector cabling and pneumatics are routed over pass-through slip-rings, continuous multi-turn rotation is supported for any number of revolutions.
 - **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`). Command velocity is clamped to $360^\circ/\text{s}$ ($60\text{ RPM}$ = $360,000,000\text{ PUU}$) and acceleration/deceleration to $1800^\circ/\text{s}^2$ ($31.416\text{ rad}/\text{s}^2 = 31416\text{ units}$) to eliminate signed 32-bit integer overflow risks.
 - **Home & Bring-up**: `home t` captures the absolute encoder datum and commands Theta to return directly to physical zero ($0.000^\circ$). Bring-up synchronizes until Theta reaches $\le 0.01^\circ$ error before opening subsequent path stages.
-- **Embedded Autotuning (Zero External Scripting)**: Autotuning runs 100% autonomously on the WT32 microcontroller without requiring host scripts:
-  - **HCS01 Theta (`autotune theta [inertia|tune|zero]`)**: Executed via embedded `Hcs01ComwsClient` over HTTP port 80 to trigger C1800 load inertia identification and C2200 non-volatile parameter backup.
-  - **Kinetix 5100 X/Z (`autotune <x|z> [mode1|lock|read|gain]`)**: Executed via embedded `Kinetix5100ParamAccess` over CIP Explicit Messaging (Class 0x0F Parameter Object) to configure real-time adaptive tuning (Mode 1 / Mode 0).
+- **Embedded Autotuning**: Console `autotune` is **disabled for this version**
+  (`GANTRY_CONSOLE_AUTOTUNE=0`). Use IndraWorks / KNX5100C / `tools/hcs01_eng.py`
+  for drive tuning. Re-enable with `-DGANTRY_CONSOLE_AUTOTUNE=1` to restore:
+  - **HCS01 Theta (`autotune theta [inertia|tune|zero]`)**: Embedded `Hcs01ComwsClient` HTTP :80 → C1800 / C2200.
+  - **Kinetix 5100 X/Z (`autotune <x|z> [mode1|lock|read|gain]`)**: CIP Class 0x0F Parameter Object Mode 1 / Mode 0.
 - `CONFIG_GANTRY_THETA_SEQUENTIAL` default **n**: theta is scheduled on the
   in-band X+Z segment (start 25%, finish 75%) unless sequential choreography
   is enabled (theta after the linear path, still SAFE_Z-gated).
@@ -821,10 +825,9 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
    ```powershell
    idf.py -C idf build
    ```
-2. **Execute OTA update:**
-   ```powershell
-   py tools/eth_ota_flash.py --host 192.168.1.100 idf/build/wt32_eth01_gantry.bin
-   ```
+2. **Execute OTA update** (motors disabled; firmware rejects START if ENABLED or BUSY):
+   - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
+   - CLI: `py tools/eth_ota_flash.py --host 192.168.1.100 idf/build/wt32_eth01_gantry.bin`
 3. **Console commands:**
    - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, and rollback status.
 

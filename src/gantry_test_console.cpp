@@ -3,13 +3,22 @@
 #if CONFIG_GANTRY_SELFTEST
 #include "basic_tests.h"
 #endif
+
+// Console driver auto-tune (Kinetix Mode 1 / HCS01 C1800). Off for this version —
+// re-enable with -DGANTRY_CONSOLE_AUTOTUNE=1 when bring-up needs embedded tuning.
+#ifndef GANTRY_CONSOLE_AUTOTUNE
+#define GANTRY_CONSOLE_AUTOTUNE 0
+#endif
+
 #include "EipScannerTask.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#if GANTRY_CONSOLE_AUTOTUNE
 #include "EipSocketW5500.h"
 #include "EipSession.h"
 #include "Kinetix5100TuningClient.h"
 #include "Hcs01ComwsClient.h"
+#endif
 #include "freertos/task.h"
 #include "ethernet_app_config.h"
 #include "gantry_app_constants.h"
@@ -21,6 +30,7 @@
 #include "MCP23S17.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "driver/gpio.h"
 
 #ifndef MCP_DEBUG_CMDS
@@ -189,6 +199,10 @@ static std::atomic<bool> g_homeThetaThisSession{false};
 static std::atomic<bool> g_calibratedThetaThisSession{false};
 static std::atomic<bool> g_calibrationInProgress{false};
 static std::atomic<bool> g_testCycleInProgress{false};
+static bool g_wsCalPersistInited = false;
+static bool g_wsCalPersistLast = false;
+static constexpr char kWsCalNvsNs[] = "gantry_cfg";
+static constexpr char kWsCalNvsKey[] = "ws_cal";
 static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
 static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
 static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
@@ -302,6 +316,96 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
   g_liveMotionWasBusy = busy;
 }
 
+void persistWorkspaceCalNvs(bool on) {
+  nvs_handle_t handle = 0;
+  if (nvs_open(kWsCalNvsNs, NVS_READWRITE, &handle) != ESP_OK) {
+    return;
+  }
+  (void)nvs_set_u8(handle, kWsCalNvsKey, on ? 1 : 0);
+  (void)nvs_commit(handle);
+  nvs_close(handle);
+}
+
+void clearSessionHomeCalFlags() {
+  g_homeCompletedThisSession = false;
+  g_calibratedThisSession = false;
+  g_homeZCompletedThisSession = false;
+  g_calibratedZThisSession = false;
+  g_homeThetaThisSession = false;
+  g_calibratedThetaThisSession = false;
+}
+
+void markSessionHomeCalFlags() {
+  g_homeCompletedThisSession = true;
+  g_calibratedThisSession = true;
+  g_homeZCompletedThisSession = true;
+  g_calibratedZThisSession = true;
+  g_homeThetaThisSession = true;
+  g_calibratedThetaThisSession = true;
+}
+
+void maybeLatchWorkspaceCalibrated(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    return;
+  }
+  if ((gantry->xAxisLengthMm() > 0 && gantry->zAxisLengthMm() > 0) ||
+      (g_calibratedThisSession && g_calibratedZThisSession)) {
+    gantry->setWorkspaceCalibrated(true);
+    persistWorkspaceCalEdge(gantry);
+  }
+}
+
+void persistWorkspaceCalEdge(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    return;
+  }
+  const bool now = gantry->isWorkspaceCalibrated();
+  if (!g_wsCalPersistInited) {
+    g_wsCalPersistInited = true;
+    g_wsCalPersistLast = now;
+    return;
+  }
+  if (now == g_wsCalPersistLast) {
+    return;
+  }
+  g_wsCalPersistLast = now;
+  persistWorkspaceCalNvs(now);
+  if (!now) {
+    clearSessionHomeCalFlags();
+  }
+}
+
+void restorePersistedWorkspaceCalibrated(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    return;
+  }
+  nvs_handle_t handle = 0;
+  uint8_t value = 0;
+  const bool have = (nvs_open(kWsCalNvsNs, NVS_READONLY, &handle) == ESP_OK);
+  if (have) {
+    const esp_err_t err = nvs_get_u8(handle, kWsCalNvsKey, &value);
+    nvs_close(handle);
+    if (err == ESP_OK && value != 0) {
+      gantry->setWorkspaceCalibrated(true);
+      markSessionHomeCalFlags();
+      ESP_LOGI(TAG,
+               "Restored workspace calibrated from NVS "
+               "(clears if a drive loses position)");
+    }
+  }
+  g_wsCalPersistInited = true;
+  g_wsCalPersistLast = gantry->isWorkspaceCalibrated();
+}
+
+void printWorkspaceCalibrated(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+  ESP_LOGI(TAG, "Workspace calibrated: %s",
+           gantry->isWorkspaceCalibrated() ? "Yes" : "No");
+}
+
 void calibrationTask(void *param) {
   auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
   if (cfg == nullptr || cfg->gantry == nullptr) {
@@ -324,6 +428,7 @@ void calibrationTask(void *param) {
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK X joint max updated from calibration: %.1f mm", (float)len);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
   } else if (cfg->gantry->isAbortRequested()) {
     g_calibratedThisSession = hadCalibration;
     ESP_LOGI(TAG, "Calibration aborted by stop request");
@@ -354,6 +459,7 @@ void zCalibrationTask(void *param) {
     g_calibratedZThisSession = true;
     ESP_LOGI(TAG, "OK Z Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK Z joint max updated from calibration: %.1f mm", (float)len);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
   } else if (cfg->gantry->isAbortRequested()) {
     g_calibratedZThisSession = hadCalibration;
     ESP_LOGI(TAG, "Z calibration aborted by stop request");
@@ -396,6 +502,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
              (int)cur.enabled, (int)cur.busy, (int)cur.alarm,
              (int)cur.min_limit_active, (int)cur.max_limit_active,
              cur.raw_alarm_level);
+    persistWorkspaceCalEdge(cfg->gantry);
     return;
   }
 
@@ -464,6 +571,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
               g_controlDebounce.pending.raw_alarm_level,
               g_controlDebounce.raw_alarm_cnt, kRawAlarmDebounceSamples,
               "raw_alarm_pin_level");
+  persistWorkspaceCalEdge(cfg->gantry);
 }
 
 void printStatus(Gantry::Gantry *gantry) {
@@ -484,6 +592,8 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
+  ESP_LOGI(TAG, "Workspace calibrated: %s",
+           gantry->isWorkspaceCalibrated() ? "Yes" : "No");
   {
     char xSum[192] = {};
     char zSum[192] = {};
@@ -645,6 +755,12 @@ void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
 }
 
 void runAutotuneCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
+#if !GANTRY_CONSOLE_AUTOTUNE
+  (void)cfg;
+  (void)cmd;
+  ESP_LOGW(TAG, "autotune disabled for this version "
+                "(use IndraWorks / KNX5100C / tools/hcs01_eng.py for drive tuning)");
+#else
   if (cfg == nullptr || cfg->gantry == nullptr) {
     ESP_LOGE(TAG, "Gantry not initialized");
     return;
@@ -813,6 +929,7 @@ void runAutotuneCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 
   session.unregisterSession();
   tcp.close();
+#endif  // GANTRY_CONSOLE_AUTOTUNE
 }
 
 void runPuuSetCommand(Gantry::Gantry *gantry, const char *cmd) {
@@ -1256,6 +1373,7 @@ void runSoftCalibrateX(const GantryTestConsoleConfig *cfg) {
            "OK X soft-calibrate (no limit switches). Joint envelope X=%.1f..%.1f mm "
            "from SCHUNK datasheet. Run puucal after measured moves.",
            AXIS_X_HARD_LIMIT_MIN_MM, xMax);
+  maybeLatchWorkspaceCalibrated(cfg->gantry);
 }
 
 void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
@@ -1476,6 +1594,7 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
              "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
              xLen, zLen, (double)cfg->gantry->traverseClearanceZMm(),
              (double)GANTRY_SAFE_Z_HEIGHT_MM);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
     return true;
   }
   ESP_LOGE(TAG, "ERROR: Bring-up finished without valid X/Z stroke");
@@ -1490,6 +1609,8 @@ const char *gantryErrorName(Gantry::GantryError err) {
       return "NOT_INITIALIZED";
     case Gantry::GantryError::MOTOR_NOT_ENABLED:
       return "MOTOR_NOT_ENABLED";
+    case Gantry::GantryError::NOT_CALIBRATED:
+      return "NOT_CALIBRATED";
     case Gantry::GantryError::ALREADY_MOVING:
       return "ALREADY_MOVING";
     case Gantry::GantryError::INVALID_POSITION:
@@ -2252,6 +2373,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   } else if (g_testCycleInProgress &&
              strcmp(cmdLower, "stop") != 0 &&
              strcmp(cmdLower, "status") != 0 &&
+             strcmp(cmdLower, "calibrated") != 0 &&
              strcmp(cmdLower, "faults") != 0 &&
              strcmp(cmdLower, "alarms") != 0 &&
              strcmp(cmdLower, "eiptiming") != 0 &&
@@ -2286,6 +2408,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     gantryOtaPrintStatus();
   } else if (strcmp(cmdLower, "status") == 0) {
     printStatus(cfg->gantry);
+  } else if (strcmp(cmdLower, "calibrated") == 0) {
+    printWorkspaceCalibrated(cfg->gantry);
   } else if (strcmp(cmdLower, "faults") == 0 || strcmp(cmdLower, "alarms") == 0) {
     char xSum[192] = {};
     char zSum[192] = {};
@@ -2586,6 +2710,13 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     const bool moveZ = fabsf(target.z - cur.z) > kHoldEpsMm;
     constexpr float kHoldEpsDeg = 0.1f;
     const bool moveT = fabsf(target.theta - cur.theta) > kHoldEpsDeg;
+    if (!cfg->gantry->isWorkspaceCalibrated()) {
+      ESP_LOGE(TAG,
+               "ERROR: Move blocked — workspace not calibrated. Run "
+               "'calibrate all' (query with 'calibrated'). Flag clears only "
+               "when a drive loses position (motor 24 V / encoder ref).");
+      return;
+    }
     if (moveX && (!g_homeCompletedThisSession || !g_calibratedThisSession)) {
       ESP_LOGE(TAG,
                "ERROR: X move blocked. Run 'home x' then 'calibrate x' "
@@ -2762,6 +2893,8 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
+  ESP_LOGI(TAG, "  calibrated           - query workspace calibrated latch "
+                "(Yes until a drive loses position)");
   ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix and theta HCS01 diag");
   ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm and theta PUU/deg");
   ESP_LOGI(TAG, "  eiptiming            - dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)");
@@ -2769,7 +2902,11 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  puucal <x|z|t> c m   - suggest (x/z) or apply (t) PUU scale from commanded vs measured");
   ESP_LOGI(TAG, "  thetalim <min> <max> - set theta software joint limits (deg); "
                 "clamped to captured envelope after home t");
+#if GANTRY_CONSOLE_AUTOTUNE
   ESP_LOGI(TAG, "  autotune [theta|t]   - run or guide driver-level inertia auto-tuning (ERD-04/HCS01 C1800)");
+#else
+  ESP_LOGI(TAG, "  autotune             - DISABLED this version (IndraWorks / KNX5100C / hcs01_eng.py)");
+#endif
   ESP_LOGI(TAG, "  ota                  - print Dual-OTA partition status, image state, and version");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
@@ -2816,13 +2953,18 @@ void gantryTestConsoleTask(void *param) {
 
   ESP_LOGI(TAG, "Serial task started");
   ESP_LOGI(TAG, "Type 'help' for commands");
+  restorePersistedWorkspaceCalibrated(cfg->gantry);
 
   while (1) {
-    monitorControlVariableFlips(cfg);
-    logLiveMotionState(cfg);
-
-    int c = getchar();
-    if (c >= 0) {
+    // Drain UART before status polling so a typed line is not held behind
+    // Gantry mutex / CTRL FLIP work after Class 1 starts.
+    bool got_char = false;
+    for (;;) {
+      const int c = getchar();
+      if (c < 0) {
+        break;
+      }
+      got_char = true;
       if (c == '\n' || c == '\r' || c == ';') {
         if (inputIndex > 0) {
           inputLine[inputIndex] = '\0';
@@ -2833,6 +2975,11 @@ void gantryTestConsoleTask(void *param) {
       } else if (c >= 32 && c <= 126 && inputIndex < sizeof(inputLine) - 1) {
         inputLine[inputIndex++] = static_cast<char>(c);
       }
+    }
+
+    if (!got_char) {
+      monitorControlVariableFlips(cfg);
+      logLiveMotionState(cfg);
     }
 
     vTaskDelay(pdMS_TO_TICKS(1));
