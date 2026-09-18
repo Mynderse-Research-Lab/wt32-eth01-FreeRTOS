@@ -344,6 +344,8 @@ void markSessionHomeCalFlags() {
   g_calibratedThetaThisSession = true;
 }
 
+void persistWorkspaceCalEdge(Gantry::Gantry *gantry);
+
 void maybeLatchWorkspaceCalibrated(Gantry::Gantry *gantry) {
   if (gantry == nullptr) {
     return;
