@@ -47,8 +47,16 @@ void pickSchedulerTask(void *param) {
         xQueueSend(s_pick_queue, &task, 0);
       }
     });
-    cfg->net_l2->onConveyorSpeed([](const L2ConveyorSpeedPayload &payload, const L2CellHeader &) {
+    cfg->net_l2->onConveyorSpeed([](const L2ConveyorSpeedPayload &payload, const L2CellHeader &hdr) {
       s_live_belt_speed_mm_s = payload.speed_mm_s;
+      ESP_LOGI(TAG,
+               "L2 Conveyor RX: sender=0x%02X seq=%u ts=%lu speed=%.2f mm/s disp=%.4f m enc=%ld",
+               (unsigned)hdr.sender_id,
+               (unsigned)hdr.sequence,
+               (unsigned long)hdr.timestamp_us_low,
+               (double)payload.speed_mm_s,
+               (double)payload.displacement_m,
+               (long)payload.raw_encoder_cnt);
     });
   }
 
