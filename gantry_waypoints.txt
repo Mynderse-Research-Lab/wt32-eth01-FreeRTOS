@@ -1,0 +1,9 @@
+# WT32 gantry waypoints
+# x_mm  z_mm  theta_deg  grip   (+Z down; z=0 is A015 retract)
+# grip = open|close or 0|1
+10.0000  21.2000  0  open
+350.0013  19.7676  0  open
+350.3100  105.4000  -40  close
+10.0000  27.2200  90  close
+10.0000  90.8200  90  open
+20.0000  20.0000  0  open
