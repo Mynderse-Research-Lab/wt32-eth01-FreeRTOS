@@ -308,6 +308,37 @@ static void test_linear_x_belt_move_command(void) {
   TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);  // Run
 }
 
+static void test_linear_held_start_waits_for_release(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMmHeld(12.5f, 50.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.isStartHeld());
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  Bytes fb = makeK5100Input154(0, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  Bytes cmd;
+  for (int i = 0; i < 20; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+    TEST_ASSERT_TRUE(axis.isStartHeld());
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
+  }
+
+  TEST_ASSERT_TRUE(axis.releaseStartMotion());
+  TEST_ASSERT_FALSE(axis.isStartHeld());
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
+}
+
 static void test_linear_offline_aborts_move(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -1441,6 +1472,7 @@ int main(void) {
   RUN_TEST(test_process_image_command_feedback);
   RUN_TEST(test_process_image_online);
   RUN_TEST(test_linear_x_belt_move_command);
+  RUN_TEST(test_linear_held_start_waits_for_release);
   RUN_TEST(test_linear_offline_aborts_move);
   RUN_TEST(test_linear_second_absolute_preloads_before_start_edge);
   RUN_TEST(test_linear_move_stays_busy_until_target);

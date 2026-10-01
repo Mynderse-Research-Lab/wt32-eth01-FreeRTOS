@@ -1,7 +1,10 @@
 #include "AppConfig.h"
 #include "MemoryStorage.h"
 #include "NvsStorage.h"
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <cstdio>
 
 #if defined(ESP_PLATFORM)
 #include "sdkconfig.h"
@@ -59,7 +62,7 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
     data_.gantry_path_max_speed_mm_per_s = CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S;
 #else
-    data_.gantry_path_max_speed_mm_per_s = 500;
+    data_.gantry_path_max_speed_mm_per_s = 2000;
 #endif
 
 #if defined(CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
@@ -318,10 +321,19 @@ void AppConfig::loadDefaults() {
     data_.gantry_safe_z_height_mm = 35.7f;
 #endif
 
-#if defined(CONFIG_GANTRY_CAL_X_PARK_MM)
-    data_.gantry_cal_x_park_mm = (float)CONFIG_GANTRY_CAL_X_PARK_MM;
+    // Bin-column X. Independent of the bring-up park (GANTRY_CAL_X_PARK_MM).
+    data_.gantry_cal_x_park_mm = 10.0f;
+
+#if defined(CONFIG_GANTRY_CAL_Z_PARK_MM)
+    data_.gantry_cal_z_park_mm = (float)CONFIG_GANTRY_CAL_Z_PARK_MM;
 #else
-    data_.gantry_cal_x_park_mm = 35.0f;
+    data_.gantry_cal_z_park_mm = 90.8f;
+#endif
+
+#if defined(CONFIG_GANTRY_CAL_THETA_PARK_DEG)
+    data_.gantry_cal_theta_park_deg = (float)CONFIG_GANTRY_CAL_THETA_PARK_DEG;
+#else
+    data_.gantry_cal_theta_park_deg = 90.0f;
 #endif
 
 #if defined(CONFIG_GANTRY_CONVEYOR_COLLISION_X_MIN_MM)
@@ -345,20 +357,20 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_GANTRY_GRIPPER_CLOSE_TIME_MS)
     data_.gantry_gripper_close_time_ms = CONFIG_GANTRY_GRIPPER_CLOSE_TIME_MS;
 #else
-    data_.gantry_gripper_close_time_ms = 150;
+    data_.gantry_gripper_close_time_ms = 190;
 #endif
 
     // 6. Conveyor Intercept
 #if defined(CONFIG_CONVEYOR_Y_CAM_MM)
     data_.conveyor_y_cam_mm = (float)CONFIG_CONVEYOR_Y_CAM_MM;
 #else
-    data_.conveyor_y_cam_mm = 336.55f;
+    data_.conveyor_y_cam_mm = -711.0f;
 #endif
 
 #if defined(CONFIG_CONVEYOR_Y_PICK_MM)
     data_.conveyor_y_pick_mm = (float)CONFIG_CONVEYOR_Y_PICK_MM;
 #else
-    data_.conveyor_y_pick_mm = 1016.0f;
+    data_.conveyor_y_pick_mm = 0.0f;
 #endif
 
 #if defined(CONFIG_CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM)
@@ -370,7 +382,7 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_CONVEYOR_Z_PICK_JOINT_MM)
     data_.conveyor_z_pick_joint_mm = (float)CONFIG_CONVEYOR_Z_PICK_JOINT_MM;
 #else
-    data_.conveyor_z_pick_joint_mm = 140.0f;
+    data_.conveyor_z_pick_joint_mm = 105.4f;
 #endif
 
 #if defined(CONFIG_PICK_DEFAULT_BELT_SPEED_MM_S)
@@ -390,6 +402,35 @@ void AppConfig::loadDefaults() {
 #else
     data_.tau_max_us = 5000000;
 #endif
+
+    data_.pick_vision_latency_ms = 40;
+    data_.pick_valve_ms = 30;
+    data_.pick_jaw_ms[0] = 0;
+    data_.pick_jaw_ms[1] = 0;
+    data_.pick_jaw_ms[2] = 0;
+    data_.pick_jaw_ms[3] = 0;
+    data_.pick_jaw_offset_deg = 0.0f;
+    data_.pick_dedupe_mm = 40.0f;
+    data_.pick_cell_len_mm[0] = 65.0f;
+    data_.pick_cell_len_mm[1] = 70.0f;
+    data_.pick_cell_len_mm[2] = 50.0f;
+    data_.pick_cell_len_mm[3] = 60.0f;
+    data_.pick_cell_h_mm[0] = 18.3f;
+    data_.pick_cell_h_mm[1] = 21.2f;
+    data_.pick_cell_h_mm[2] = 34.0f;
+    data_.pick_cell_h_mm[3] = 45.0f;
+    data_.pick_finger_open_mm = 80.0f;
+    data_.pick_finger_thick_mm = 8.0f;
+    data_.pick_finger_width_mm = 30.0f;
+    data_.pick_jaw_speed_mm_s = 210.0f;
+    data_.pick_guard_ms = 15;
+    data_.pick_dropin_enable = false;
+    data_.pick_drop_any_theta = false;
+    data_.pick_stage_x_mm = 320.0f;
+    data_.pick_speed_mm_s = 2000;
+    data_.pick_accel_mm_s2 = 3000;
+    data_.pick_theta_speed_deg_s = 360.0f;
+    data_.pick_theta_accel_deg_s2 = 1800.0f;
 
     // 7. Homing & Calibration
 #if defined(CONFIG_EIP_HOME_CAL_SPEED_MM_S)
@@ -739,6 +780,8 @@ bool AppConfig::load() {
     storage_->getFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
     storage_->getFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
     storage_->getFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
+    storage_->getFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
+    storage_->getFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
     storage_->getFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
     storage_->getFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
     storage_->getInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
@@ -751,6 +794,34 @@ bool AppConfig::load() {
     storage_->getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->getInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->getInt32("cv_tau_max_us", data_.tau_max_us);
+    storage_->getInt32("cv_vis_ms", data_.pick_vision_latency_ms);
+    storage_->getInt32("cv_valve_ms", data_.pick_valve_ms);
+    storage_->getInt32("cv_jaw1_ms", data_.pick_jaw_ms[0]);
+    storage_->getInt32("cv_jaw2_ms", data_.pick_jaw_ms[1]);
+    storage_->getInt32("cv_jaw3_ms", data_.pick_jaw_ms[2]);
+    storage_->getInt32("cv_jaw4_ms", data_.pick_jaw_ms[3]);
+    storage_->getFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
+    storage_->getFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    storage_->getFloat("cell1_len_mm", data_.pick_cell_len_mm[0]);
+    storage_->getFloat("cell2_len_mm", data_.pick_cell_len_mm[1]);
+    storage_->getFloat("cell3_len_mm", data_.pick_cell_len_mm[2]);
+    storage_->getFloat("cell4_len_mm", data_.pick_cell_len_mm[3]);
+    storage_->getFloat("cell1_h_mm", data_.pick_cell_h_mm[0]);
+    storage_->getFloat("cell2_h_mm", data_.pick_cell_h_mm[1]);
+    storage_->getFloat("cell3_h_mm", data_.pick_cell_h_mm[2]);
+    storage_->getFloat("cell4_h_mm", data_.pick_cell_h_mm[3]);
+    storage_->getFloat("fin_open_mm", data_.pick_finger_open_mm);
+    storage_->getFloat("fin_thk_mm", data_.pick_finger_thick_mm);
+    storage_->getFloat("fin_w_mm", data_.pick_finger_width_mm);
+    storage_->getFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
+    storage_->getInt32("pk_guard_ms", data_.pick_guard_ms);
+    storage_->getBool("pk_dropin", data_.pick_dropin_enable);
+    storage_->getBool("pk_drop_any_th", data_.pick_drop_any_theta);
+    storage_->getFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
+    storage_->getInt32("pk_spd_mm_s", data_.pick_speed_mm_s);
+    storage_->getInt32("pk_acc_mm_s2", data_.pick_accel_mm_s2);
+    storage_->getFloat("pk_th_spd", data_.pick_theta_speed_deg_s);
+    storage_->getFloat("pk_th_acc", data_.pick_theta_accel_deg_s2);
 
     storage_->getFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
     storage_->getFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
@@ -865,6 +936,8 @@ bool AppConfig::save() {
     storage_->setFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
     storage_->setFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
     storage_->setFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
+    storage_->setFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
+    storage_->setFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
     storage_->setFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
     storage_->setFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
     storage_->setInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
@@ -877,6 +950,34 @@ bool AppConfig::save() {
     storage_->setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->setInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->setInt32("cv_tau_max_us", data_.tau_max_us);
+    storage_->setInt32("cv_vis_ms", data_.pick_vision_latency_ms);
+    storage_->setInt32("cv_valve_ms", data_.pick_valve_ms);
+    storage_->setInt32("cv_jaw1_ms", data_.pick_jaw_ms[0]);
+    storage_->setInt32("cv_jaw2_ms", data_.pick_jaw_ms[1]);
+    storage_->setInt32("cv_jaw3_ms", data_.pick_jaw_ms[2]);
+    storage_->setInt32("cv_jaw4_ms", data_.pick_jaw_ms[3]);
+    storage_->setFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
+    storage_->setFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    storage_->setFloat("cell1_len_mm", data_.pick_cell_len_mm[0]);
+    storage_->setFloat("cell2_len_mm", data_.pick_cell_len_mm[1]);
+    storage_->setFloat("cell3_len_mm", data_.pick_cell_len_mm[2]);
+    storage_->setFloat("cell4_len_mm", data_.pick_cell_len_mm[3]);
+    storage_->setFloat("cell1_h_mm", data_.pick_cell_h_mm[0]);
+    storage_->setFloat("cell2_h_mm", data_.pick_cell_h_mm[1]);
+    storage_->setFloat("cell3_h_mm", data_.pick_cell_h_mm[2]);
+    storage_->setFloat("cell4_h_mm", data_.pick_cell_h_mm[3]);
+    storage_->setFloat("fin_open_mm", data_.pick_finger_open_mm);
+    storage_->setFloat("fin_thk_mm", data_.pick_finger_thick_mm);
+    storage_->setFloat("fin_w_mm", data_.pick_finger_width_mm);
+    storage_->setFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
+    storage_->setInt32("pk_guard_ms", data_.pick_guard_ms);
+    storage_->setBool("pk_dropin", data_.pick_dropin_enable);
+    storage_->setBool("pk_drop_any_th", data_.pick_drop_any_theta);
+    storage_->setFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
+    storage_->setInt32("pk_spd_mm_s", data_.pick_speed_mm_s);
+    storage_->setInt32("pk_acc_mm_s2", data_.pick_accel_mm_s2);
+    storage_->setFloat("pk_th_spd", data_.pick_theta_speed_deg_s);
+    storage_->setFloat("pk_th_acc", data_.pick_theta_accel_deg_s2);
 
     storage_->setFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
     storage_->setFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
@@ -988,6 +1089,15 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "grp_close_ms") == 0) out_val = data_.gantry_gripper_close_time_ms;
     else if (std::strcmp(key, "cv_tau_min_us") == 0) out_val = data_.tau_min_us;
     else if (std::strcmp(key, "cv_tau_max_us") == 0) out_val = data_.tau_max_us;
+    else if (std::strcmp(key, "cv_vis_ms") == 0) out_val = data_.pick_vision_latency_ms;
+    else if (std::strcmp(key, "cv_valve_ms") == 0) out_val = data_.pick_valve_ms;
+    else if (std::strcmp(key, "cv_jaw1_ms") == 0) out_val = data_.pick_jaw_ms[0];
+    else if (std::strcmp(key, "cv_jaw2_ms") == 0) out_val = data_.pick_jaw_ms[1];
+    else if (std::strcmp(key, "cv_jaw3_ms") == 0) out_val = data_.pick_jaw_ms[2];
+    else if (std::strcmp(key, "cv_jaw4_ms") == 0) out_val = data_.pick_jaw_ms[3];
+    else if (std::strcmp(key, "pk_guard_ms") == 0) out_val = data_.pick_guard_ms;
+    else if (std::strcmp(key, "pk_spd_mm_s") == 0) out_val = data_.pick_speed_mm_s;
+    else if (std::strcmp(key, "pk_acc_mm_s2") == 0) out_val = data_.pick_accel_mm_s2;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) out_val = data_.gantry_calibration_timeout_ms;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) out_val = data_.gantry_travel_measurement_timeout_ms;
     else if (std::strcmp(key, "eth_timeout_ms") == 0) out_val = data_.eth_ip_wait_timeout_ms;
@@ -1038,6 +1148,15 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "grp_close_ms") == 0) data_.gantry_gripper_close_time_ms = val;
     else if (std::strcmp(key, "cv_tau_min_us") == 0) data_.tau_min_us = val;
     else if (std::strcmp(key, "cv_tau_max_us") == 0) data_.tau_max_us = val;
+    else if (std::strcmp(key, "cv_vis_ms") == 0) data_.pick_vision_latency_ms = val;
+    else if (std::strcmp(key, "cv_valve_ms") == 0) data_.pick_valve_ms = val;
+    else if (std::strcmp(key, "cv_jaw1_ms") == 0) data_.pick_jaw_ms[0] = val;
+    else if (std::strcmp(key, "cv_jaw2_ms") == 0) data_.pick_jaw_ms[1] = val;
+    else if (std::strcmp(key, "cv_jaw3_ms") == 0) data_.pick_jaw_ms[2] = val;
+    else if (std::strcmp(key, "cv_jaw4_ms") == 0) data_.pick_jaw_ms[3] = val;
+    else if (std::strcmp(key, "pk_guard_ms") == 0) data_.pick_guard_ms = val;
+    else if (std::strcmp(key, "pk_spd_mm_s") == 0) data_.pick_speed_mm_s = val;
+    else if (std::strcmp(key, "pk_acc_mm_s2") == 0) data_.pick_accel_mm_s2 = val;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) data_.gantry_calibration_timeout_ms = val;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) data_.gantry_travel_measurement_timeout_ms = val;
     else if (std::strcmp(key, "eth_timeout_ms") == 0) data_.eth_ip_wait_timeout_ms = val;
@@ -1098,6 +1217,8 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "geom_grp_z_mm") == 0) out_val = data_.gantry_gripper_z_offset_mm;
     else if (std::strcmp(key, "geom_safe_z_mm") == 0) out_val = data_.gantry_safe_z_height_mm;
     else if (std::strcmp(key, "geom_cal_x_mm") == 0) out_val = data_.gantry_cal_x_park_mm;
+    else if (std::strcmp(key, "geom_cal_z_mm") == 0) out_val = data_.gantry_cal_z_park_mm;
+    else if (std::strcmp(key, "geom_cal_th_deg") == 0) out_val = data_.gantry_cal_theta_park_deg;
     else if (std::strcmp(key, "col_x_min_mm") == 0) out_val = data_.gantry_conveyor_collision_x_min_mm;
     else if (std::strcmp(key, "col_z_min_mm") == 0) out_val = data_.gantry_conveyor_collision_z_min_mm;
     else if (std::strcmp(key, "cv_cam_y_mm") == 0) out_val = data_.conveyor_y_cam_mm;
@@ -1105,6 +1226,23 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "cv_x_off_mm") == 0) out_val = data_.conveyor_x_across_to_gantry_x_offset_mm;
     else if (std::strcmp(key, "cv_z_pick_mm") == 0) out_val = data_.conveyor_z_pick_joint_mm;
     else if (std::strcmp(key, "cv_belt_spd") == 0) out_val = data_.pick_default_belt_speed_mm_s;
+    else if (std::strcmp(key, "cv_jaw_deg") == 0) out_val = data_.pick_jaw_offset_deg;
+    else if (std::strcmp(key, "cv_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
+    else if (std::strcmp(key, "cell1_len_mm") == 0) out_val = data_.pick_cell_len_mm[0];
+    else if (std::strcmp(key, "cell2_len_mm") == 0) out_val = data_.pick_cell_len_mm[1];
+    else if (std::strcmp(key, "cell3_len_mm") == 0) out_val = data_.pick_cell_len_mm[2];
+    else if (std::strcmp(key, "cell4_len_mm") == 0) out_val = data_.pick_cell_len_mm[3];
+    else if (std::strcmp(key, "cell1_h_mm") == 0) out_val = data_.pick_cell_h_mm[0];
+    else if (std::strcmp(key, "cell2_h_mm") == 0) out_val = data_.pick_cell_h_mm[1];
+    else if (std::strcmp(key, "cell3_h_mm") == 0) out_val = data_.pick_cell_h_mm[2];
+    else if (std::strcmp(key, "cell4_h_mm") == 0) out_val = data_.pick_cell_h_mm[3];
+    else if (std::strcmp(key, "fin_open_mm") == 0) out_val = data_.pick_finger_open_mm;
+    else if (std::strcmp(key, "fin_thk_mm") == 0) out_val = data_.pick_finger_thick_mm;
+    else if (std::strcmp(key, "fin_w_mm") == 0) out_val = data_.pick_finger_width_mm;
+    else if (std::strcmp(key, "fin_spd_mm_s") == 0) out_val = data_.pick_jaw_speed_mm_s;
+    else if (std::strcmp(key, "pk_stage_x_mm") == 0) out_val = data_.pick_stage_x_mm;
+    else if (std::strcmp(key, "pk_th_spd") == 0) out_val = data_.pick_theta_speed_deg_s;
+    else if (std::strcmp(key, "pk_th_acc") == 0) out_val = data_.pick_theta_accel_deg_s2;
     else if (std::strcmp(key, "cal_spd_mm_s") == 0) out_val = data_.eip_home_cal_speed_mm_s;
     else if (std::strcmp(key, "cal_th_spd_deg") == 0) out_val = data_.eip_home_theta_speed_deg_s;
     else if (std::strcmp(key, "cal_acc_mm_s2") == 0) out_val = data_.eip_home_cal_accel_mm_s2;
@@ -1158,6 +1296,8 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "geom_grp_z_mm") == 0) data_.gantry_gripper_z_offset_mm = val;
     else if (std::strcmp(key, "geom_safe_z_mm") == 0) data_.gantry_safe_z_height_mm = val;
     else if (std::strcmp(key, "geom_cal_x_mm") == 0) data_.gantry_cal_x_park_mm = val;
+    else if (std::strcmp(key, "geom_cal_z_mm") == 0) data_.gantry_cal_z_park_mm = val;
+    else if (std::strcmp(key, "geom_cal_th_deg") == 0) data_.gantry_cal_theta_park_deg = val;
     else if (std::strcmp(key, "col_x_min_mm") == 0) data_.gantry_conveyor_collision_x_min_mm = val;
     else if (std::strcmp(key, "col_z_min_mm") == 0) data_.gantry_conveyor_collision_z_min_mm = val;
     else if (std::strcmp(key, "cv_cam_y_mm") == 0) data_.conveyor_y_cam_mm = val;
@@ -1165,6 +1305,23 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_x_off_mm") == 0) data_.conveyor_x_across_to_gantry_x_offset_mm = val;
     else if (std::strcmp(key, "cv_z_pick_mm") == 0) data_.conveyor_z_pick_joint_mm = val;
     else if (std::strcmp(key, "cv_belt_spd") == 0) data_.pick_default_belt_speed_mm_s = val;
+    else if (std::strcmp(key, "cv_jaw_deg") == 0) data_.pick_jaw_offset_deg = val;
+    else if (std::strcmp(key, "cv_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
+    else if (std::strcmp(key, "cell1_len_mm") == 0) data_.pick_cell_len_mm[0] = val;
+    else if (std::strcmp(key, "cell2_len_mm") == 0) data_.pick_cell_len_mm[1] = val;
+    else if (std::strcmp(key, "cell3_len_mm") == 0) data_.pick_cell_len_mm[2] = val;
+    else if (std::strcmp(key, "cell4_len_mm") == 0) data_.pick_cell_len_mm[3] = val;
+    else if (std::strcmp(key, "cell1_h_mm") == 0) data_.pick_cell_h_mm[0] = val;
+    else if (std::strcmp(key, "cell2_h_mm") == 0) data_.pick_cell_h_mm[1] = val;
+    else if (std::strcmp(key, "cell3_h_mm") == 0) data_.pick_cell_h_mm[2] = val;
+    else if (std::strcmp(key, "cell4_h_mm") == 0) data_.pick_cell_h_mm[3] = val;
+    else if (std::strcmp(key, "fin_open_mm") == 0) data_.pick_finger_open_mm = val;
+    else if (std::strcmp(key, "fin_thk_mm") == 0) data_.pick_finger_thick_mm = val;
+    else if (std::strcmp(key, "fin_w_mm") == 0) data_.pick_finger_width_mm = val;
+    else if (std::strcmp(key, "fin_spd_mm_s") == 0) data_.pick_jaw_speed_mm_s = val;
+    else if (std::strcmp(key, "pk_stage_x_mm") == 0) data_.pick_stage_x_mm = val;
+    else if (std::strcmp(key, "pk_th_spd") == 0) data_.pick_theta_speed_deg_s = val;
+    else if (std::strcmp(key, "pk_th_acc") == 0) data_.pick_theta_accel_deg_s2 = val;
     else if (std::strcmp(key, "cal_spd_mm_s") == 0) data_.eip_home_cal_speed_mm_s = val;
     else if (std::strcmp(key, "cal_th_spd_deg") == 0) data_.eip_home_theta_speed_deg_s = val;
     else if (std::strcmp(key, "cal_acc_mm_s2") == 0) data_.eip_home_cal_accel_mm_s2 = val;
@@ -1198,6 +1355,8 @@ bool AppConfig::getParamBool(const char* key, bool& out_val) const {
     else if (std::strcmp(key, "eip_x_en") == 0) out_val = data_.eip_axis_x;
     else if (std::strcmp(key, "eip_z_en") == 0) out_val = data_.eip_axis_z;
     else if (std::strcmp(key, "eip_th_en") == 0) out_val = data_.eip_axis_theta;
+    else if (std::strcmp(key, "pk_dropin") == 0) out_val = data_.pick_dropin_enable;
+    else if (std::strcmp(key, "pk_drop_any_th") == 0) out_val = data_.pick_drop_any_theta;
     else return false;
 
     return true;
@@ -1220,6 +1379,8 @@ bool AppConfig::setParamBool(const char* key, bool val, bool& out_reboot_require
     else if (std::strcmp(key, "eip_x_en") == 0) data_.eip_axis_x = val;
     else if (std::strcmp(key, "eip_z_en") == 0) data_.eip_axis_z = val;
     else if (std::strcmp(key, "eip_th_en") == 0) data_.eip_axis_theta = val;
+    else if (std::strcmp(key, "pk_dropin") == 0) data_.pick_dropin_enable = val;
+    else if (std::strcmp(key, "pk_drop_any_th") == 0) data_.pick_drop_any_theta = val;
     else return false;
 
     if (storage_) {
@@ -1281,6 +1442,169 @@ bool AppConfig::setParamString(const char* key, const char* val, bool& out_reboo
         storage_->commit();
     }
     return true;
+}
+
+namespace {
+
+bool equalsIgnoreCase(const char* a, const char* b) {
+    if (a == nullptr || b == nullptr) {
+        return false;
+    }
+    while (*a != '\0' && *b != '\0') {
+        if (std::tolower(static_cast<unsigned char>(*a)) !=
+            std::tolower(static_cast<unsigned char>(*b))) {
+            return false;
+        }
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+const char* skipSpace(const char* s) {
+    while (s != nullptr && *s != '\0' &&
+           std::isspace(static_cast<unsigned char>(*s))) {
+        ++s;
+    }
+    return s;
+}
+
+bool parseBoolText(const char* text, bool& out) {
+    if (equalsIgnoreCase(text, "1") || equalsIgnoreCase(text, "on") ||
+        equalsIgnoreCase(text, "true") || equalsIgnoreCase(text, "yes")) {
+        out = true;
+        return true;
+    }
+    if (equalsIgnoreCase(text, "0") || equalsIgnoreCase(text, "off") ||
+        equalsIgnoreCase(text, "false") || equalsIgnoreCase(text, "no")) {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
+bool consumedNumber(const char* end) {
+    end = skipSpace(end);
+    return end != nullptr && *end == '\0';
+}
+
+} // namespace
+
+bool AppConfig::isParamVisible(const char* key) const {
+    const ParamSchema* schema = findParamSchema(key);
+    if (schema == nullptr) {
+        return false;
+    }
+    if (schema->access == AccessLevel::DEVELOPER && !dev_unlocked_) {
+        return false;
+    }
+    return true;
+}
+
+bool AppConfig::formatParamValue(const char* key, char* out_buf, size_t max_len) const {
+    if (out_buf == nullptr || max_len == 0 || !isParamVisible(key)) {
+        return false;
+    }
+    const ParamSchema* schema = findParamSchema(key);
+    if (schema == nullptr) {
+        return false;
+    }
+
+    if (schema->type == ParamType::INT) {
+        int32_t value = 0;
+        if (!getParamInt(key, value)) {
+            return false;
+        }
+        std::snprintf(out_buf, max_len, "%ld", static_cast<long>(value));
+        return true;
+    }
+    if (schema->type == ParamType::FLOAT) {
+        float value = 0.0f;
+        if (!getParamFloat(key, value)) {
+            return false;
+        }
+        std::snprintf(out_buf, max_len, "%.2f", static_cast<double>(value));
+        return true;
+    }
+    if (schema->type == ParamType::BOOL) {
+        bool value = false;
+        if (!getParamBool(key, value)) {
+            return false;
+        }
+        std::snprintf(out_buf, max_len, "%s", value ? "ON" : "OFF");
+        return true;
+    }
+    if (schema->type == ParamType::STRING) {
+        return getParamString(key, out_buf, max_len);
+    }
+    if (schema->type == ParamType::CHOICE) {
+        int32_t value = 0;
+        if (!getParamInt(key, value)) {
+            return false;
+        }
+        if (value >= 0 && value < static_cast<int32_t>(schema->choices.size())) {
+            std::snprintf(out_buf, max_len, "%s", schema->choices[static_cast<size_t>(value)]);
+        } else {
+            std::snprintf(out_buf, max_len, "%ld", static_cast<long>(value));
+        }
+        return true;
+    }
+    return false;
+}
+
+bool AppConfig::applyParamText(const char* key, const char* text, bool& out_reboot_required) {
+    if (!isParamVisible(key) || text == nullptr) {
+        return false;
+    }
+    const ParamSchema* schema = findParamSchema(key);
+    if (schema == nullptr) {
+        return false;
+    }
+    const char* body = skipSpace(text);
+    if (body == nullptr || *body == '\0') {
+        return false;
+    }
+
+    if (schema->type == ParamType::BOOL) {
+        bool value = false;
+        if (!parseBoolText(body, value)) {
+            return false;
+        }
+        return setParamBool(key, value, out_reboot_required);
+    }
+    if (schema->type == ParamType::INT) {
+        char* end = nullptr;
+        long parsed = std::strtol(body, &end, 10);
+        if (!consumedNumber(end)) {
+            return false;
+        }
+        return setParamInt(key, static_cast<int32_t>(parsed), out_reboot_required);
+    }
+    if (schema->type == ParamType::CHOICE) {
+        char* end = nullptr;
+        long parsed = std::strtol(body, &end, 10);
+        if (consumedNumber(end) && end != body) {
+            return setParamInt(key, static_cast<int32_t>(parsed), out_reboot_required);
+        }
+        for (size_t i = 0; i < schema->choices.size(); ++i) {
+            if (equalsIgnoreCase(body, schema->choices[i])) {
+                return setParamInt(key, static_cast<int32_t>(i), out_reboot_required);
+            }
+        }
+        return false;
+    }
+    if (schema->type == ParamType::FLOAT) {
+        char* end = nullptr;
+        float parsed = std::strtof(body, &end);
+        if (!consumedNumber(end)) {
+            return false;
+        }
+        return setParamFloat(key, parsed, out_reboot_required);
+    }
+    if (schema->type == ParamType::STRING) {
+        return setParamString(key, body, out_reboot_required);
+    }
+    return false;
 }
 
 } // namespace Config

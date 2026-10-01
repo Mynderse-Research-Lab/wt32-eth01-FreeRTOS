@@ -23,6 +23,9 @@ static void test_default_values(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 180.0f, d.axis_theta_hard_limit_max_deg);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 95.0f, d.gantry_conveyor_collision_x_min_mm);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 115.0f, d.gantry_conveyor_collision_z_min_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, d.gantry_cal_x_park_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.8f, d.gantry_cal_z_park_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, d.gantry_cal_theta_park_deg);
     TEST_ASSERT_EQUAL_STRING("192.168.1.100", d.eth_static_ip);
     TEST_ASSERT_EQUAL_STRING("DEV_2026", d.dev_mode_password);
 }
@@ -108,9 +111,51 @@ static void test_factory_reset(void) {
     TEST_ASSERT_EQUAL_STRING("192.168.1.100", AppConfig::instance().data().eth_static_ip);
 }
 
+static void test_drop_pose_and_text_apply(void) {
+    bool reboot = false;
+    bool ok = AppConfig::instance().applyParamText("geom_cal_z_mm", "91.5", reboot);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_FALSE(reboot);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 91.5f, AppConfig::instance().data().gantry_cal_z_park_mm);
+
+    ok = AppConfig::instance().applyParamText("geom_cal_z_mm", "200", reboot);
+    TEST_ASSERT_FALSE(ok);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 91.5f, AppConfig::instance().data().gantry_cal_z_park_mm);
+
+    ok = AppConfig::instance().applyParamText("geom_cal_th_deg", "90", reboot);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, AppConfig::instance().data().gantry_cal_theta_park_deg);
+
+    ok = AppConfig::instance().applyParamText("disp_orient", "portrait", reboot);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL_INT(1, AppConfig::instance().data().display_orientation);
+
+    char shown[32];
+    TEST_ASSERT_TRUE(AppConfig::instance().formatParamValue("geom_cal_z_mm", shown, sizeof(shown)));
+    TEST_ASSERT_EQUAL_STRING("91.50", shown);
+
+    TEST_ASSERT_FALSE(AppConfig::instance().isParamVisible("eip_ip_x"));
+    TEST_ASSERT_FALSE(AppConfig::instance().applyParamText("eip_ip_x", "192.168.1.20", reboot));
+    TEST_ASSERT_TRUE(AppConfig::instance().unlockDeveloperMode(
+        AppConfig::instance().data().dev_mode_password));
+    TEST_ASSERT_TRUE(AppConfig::instance().isParamVisible("eip_ip_x"));
+    TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("z_has_brake", "on", reboot));
+    TEST_ASSERT_TRUE(AppConfig::instance().data().axis_z_has_motor_brake);
+}
+
 static void test_schema_lookup(void) {
     const auto& schemas = getParamSchemas();
     TEST_ASSERT_TRUE(schemas.size() > 50);
+
+    const ParamSchema* drop_z = findParamSchema("geom_cal_z_mm");
+    TEST_ASSERT_NOT_NULL(drop_z);
+    TEST_ASSERT_EQUAL_STRING("Bin Drop Z", drop_z->label);
+    TEST_ASSERT_EQUAL(AccessLevel::END_USER, drop_z->access);
+    TEST_ASSERT_FALSE(drop_z->reboot_required);
+
+    const ParamSchema* drop_th = findParamSchema("geom_cal_th_deg");
+    TEST_ASSERT_NOT_NULL(drop_th);
+    TEST_ASSERT_EQUAL_STRING("Bin Drop Theta", drop_th->label);
 
     const ParamSchema* s = findParamSchema("col_x_min_mm");
     TEST_ASSERT_NOT_NULL(s);
@@ -131,6 +176,7 @@ int main(void) {
     RUN_TEST(test_set_get_bool_and_string);
     RUN_TEST(test_developer_mode_password_lifecycle);
     RUN_TEST(test_factory_reset);
+    RUN_TEST(test_drop_pose_and_text_apply);
     RUN_TEST(test_schema_lookup);
     return UNITY_END();
 }

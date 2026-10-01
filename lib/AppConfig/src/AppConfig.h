@@ -72,6 +72,22 @@ public:
     bool getParamString(const char* key, char* out_buf, size_t max_len) const;
     bool setParamString(const char* key, const char* val, bool& out_reboot_required);
 
+    /**
+     * @brief True when the key exists and the current developer lock allows it.
+     */
+    bool isParamVisible(const char* key) const;
+
+    /**
+     * @brief Write the current value into out_buf (no units). Hidden keys fail.
+     */
+    bool formatParamValue(const char* key, char* out_buf, size_t max_len) const;
+
+    /**
+     * @brief Parse a console/UI text value, apply bounds, and persist.
+     * Developer keys fail while developer mode is locked.
+     */
+    bool applyParamText(const char* key, const char* text, bool& out_reboot_required);
+
 private:
     AppConfig();
     ~AppConfig() = default;

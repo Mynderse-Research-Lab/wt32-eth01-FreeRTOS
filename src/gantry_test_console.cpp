@@ -27,7 +27,11 @@
 #include "GantryPathProfile.h"
 #include "gpio_expander.h"
 #include "gantry_ota.h"
+#include "pick_scheduler.h"
+#include "AppConfig.h"
+#include "ConfigSchema.h"
 #include "MCP23S17.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs.h"
@@ -235,12 +239,10 @@ bool physicalLimitsAvailable(const GantryTestConsoleConfig *cfg) {
 // Shared 2-D path envelope: console speed/accel/decel are the RESULTANT along
 // the X-Z path. Protective clamp: never exceed Z ballscrew critical-RPM speed.
 uint32_t maxLinearSpeedMmPerS() {
-  uint32_t pathCap = GANTRY_PATH_MAX_SPEED_MM_PER_S;
-  const double crit = AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S;
-  if (crit > 0.0 && crit < static_cast<double>(pathCap)) {
-    pathCap = static_cast<uint32_t>(crit);
-  }
-  return pathCap;
+  // Effective path speed is operator-set and may exceed 1 m/s. The Z
+  // ballscrew critical-RPM figure stays in the drivetrain header for
+  // commissioning; it is not a hard ceiling on this setting.
+  return GANTRY_PATH_MAX_SPEED_MM_PER_S;
 }
 
 uint32_t maxLinearAccelMmPerS2() {
@@ -2353,6 +2355,162 @@ void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
   }
 }
 
+static bool cmdTokenIs(const char *cmd, const char *word) {
+  size_t i = 0;
+  for (; word[i] != '\0'; ++i) {
+    if (tolower(static_cast<unsigned char>(cmd[i])) !=
+        tolower(static_cast<unsigned char>(word[i]))) {
+      return false;
+    }
+  }
+  return cmd[i] == '\0' || isspace(static_cast<unsigned char>(cmd[i]));
+}
+
+static const char *skipCmdSpace(const char *s) {
+  while (s != nullptr && *s != '\0' && isspace(static_cast<unsigned char>(*s))) {
+    ++s;
+  }
+  return s;
+}
+
+static void runCfgCommand(const char *cmd) {
+  const char *args = skipCmdSpace(cmd + 3);
+  auto &config = Config::AppConfig::instance();
+
+  if (args == nullptr || *args == '\0') {
+    const char *section = "";
+    for (const auto &schema : Config::getParamSchemas()) {
+      if (!config.isParamVisible(schema.key)) {
+        continue;
+      }
+      if (strcmp(section, schema.section) != 0) {
+        section = schema.section;
+        ESP_LOGI(TAG, "--- %s ---", section);
+      }
+      char value[40];
+      if (!config.formatParamValue(schema.key, value, sizeof(value))) {
+        snprintf(value, sizeof(value), "?");
+      }
+      ESP_LOGI(TAG, "  %-16s %-16s = %s %s%s", schema.key, schema.label, value,
+               schema.units, schema.reboot_required ? "  (reboot)" : "");
+    }
+    ESP_LOGI(TAG, "cfg <key> [value] | cfg unlock <pw> | cfg lock | "
+                  "cfg passwd <old> <new> | cfg factory | cfg reboot");
+    return;
+  }
+
+  char buf[160];
+  strncpy(buf, args, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char *token = buf;
+  char *rest = buf;
+  while (*rest != '\0' && !isspace(static_cast<unsigned char>(*rest))) {
+    ++rest;
+  }
+  if (*rest != '\0') {
+    *rest = '\0';
+    rest = const_cast<char *>(skipCmdSpace(rest + 1));
+  } else {
+    rest = const_cast<char *>(rest);
+  }
+  for (char *p = token; *p != '\0'; ++p) {
+    *p = static_cast<char>(tolower(static_cast<unsigned char>(*p)));
+  }
+
+  if (cmdTokenIs(token, "reboot") && *rest == '\0') {
+    ESP_LOGI(TAG, "Rebooting");
+    esp_restart();
+    return;
+  }
+  if (cmdTokenIs(token, "lock") && *rest == '\0') {
+    config.lockDeveloperMode();
+    ESP_LOGI(TAG, "OK developer mode locked");
+    return;
+  }
+  if (cmdTokenIs(token, "factory") && *rest == '\0') {
+    if (!config.factoryReset()) {
+      ESP_LOGE(TAG, "ERROR: factory reset failed");
+      return;
+    }
+    ESP_LOGI(TAG, "OK factory reset. Settings that need a restart take effect after 'cfg reboot'");
+    return;
+  }
+  if (cmdTokenIs(token, "unlock")) {
+    if (*rest == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg unlock <password>");
+      return;
+    }
+    if (!config.unlockDeveloperMode(rest)) {
+      ESP_LOGE(TAG, "ERROR: developer unlock failed");
+      return;
+    }
+    ESP_LOGI(TAG, "OK developer mode unlocked");
+    return;
+  }
+  if (cmdTokenIs(token, "passwd")) {
+    if (!config.isDeveloperModeUnlocked()) {
+      ESP_LOGE(TAG, "ERROR: developer mode is locked");
+      return;
+    }
+    char *old_pw = rest;
+    char *new_pw = rest;
+    while (*new_pw != '\0' && !isspace(static_cast<unsigned char>(*new_pw))) {
+      ++new_pw;
+    }
+    if (*new_pw == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg passwd <old> <new>");
+      return;
+    }
+    *new_pw = '\0';
+    new_pw = const_cast<char *>(skipCmdSpace(new_pw + 1));
+    if (*new_pw == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg passwd <old> <new>");
+      return;
+    }
+    if (!config.changeDeveloperPassword(old_pw, new_pw)) {
+      ESP_LOGE(TAG, "ERROR: developer password change failed");
+      return;
+    }
+    ESP_LOGI(TAG, "OK developer password changed");
+    return;
+  }
+
+  const Config::ParamSchema *schema = Config::findParamSchema(token);
+  if (schema == nullptr) {
+    ESP_LOGE(TAG, "ERROR: unknown config key '%s'", token);
+    return;
+  }
+  if (!config.isParamVisible(token)) {
+    ESP_LOGE(TAG, "ERROR: '%s' requires developer mode ('cfg unlock <password>')", token);
+    return;
+  }
+
+  if (*rest == '\0') {
+    char value[40];
+    if (!config.formatParamValue(token, value, sizeof(value))) {
+      ESP_LOGE(TAG, "ERROR: cannot read '%s'", token);
+      return;
+    }
+    ESP_LOGI(TAG, "%s (%s) = %s %s%s", token, schema->label, value, schema->units,
+             schema->reboot_required ? "  (reboot)" : "");
+    return;
+  }
+
+  bool reboot = false;
+  if (!config.applyParamText(token, rest, reboot)) {
+    ESP_LOGE(TAG, "ERROR: rejected %s = %s", token, rest);
+    return;
+  }
+  char value[40];
+  const char *shown = value;
+  if (!config.formatParamValue(token, value, sizeof(value))) {
+    shown = rest;
+  }
+  ESP_LOGI(TAG, "OK %s = %s %s%s", token, shown, schema->units,
+           reboot ? "  (reboot required; 'cfg reboot')" : "");
+}
+
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (cfg == nullptr || cmd == nullptr || strlen(cmd) == 0) {
     return;
@@ -2365,13 +2523,17 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     cmdLower[i] = static_cast<char>(tolower(cmdLower[i]));
   }
 
-  if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0) {
+  const bool cfg_cmd = cmdTokenIs(cmd, "cfg");
+  if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0 &&
+      strcmp(cmdLower, "?") != 0 && !cfg_cmd) {
     ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
   if (strcmp(cmdLower, "help") == 0 || strcmp(cmdLower, "?") == 0) {
     gantryTestPrintHelp();
+  } else if (cfg_cmd) {
+    runCfgCommand(cmd);
   } else if (g_testCycleInProgress &&
              strcmp(cmdLower, "stop") != 0 &&
              strcmp(cmdLower, "status") != 0 &&
@@ -2792,6 +2954,66 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     cfg->gantry->grip(value != 0);
     ESP_LOGI(TAG, "OK Gripper %s", value ? "closed" : "opened");
+  } else if (strncmp(cmdLower, "picksim", 7) == 0) {
+    float x_mm = 0.0f;
+    float y_mm = 0.0f;
+    float theta_deg = 0.0f;
+    float width_mm = 0.0f;
+    float length_mm = 0.0f;
+    float height_from_belt_mm = 0.0f;
+    const int n = sscanf(cmdLower, "picksim %f %f %f %f %f %f", &x_mm, &y_mm, &theta_deg,
+                         &width_mm, &length_mm, &height_from_belt_mm);
+    if (n != 3 && n != 6) {
+      ESP_LOGE(TAG,
+               "Usage: picksim <x_across_mm> <y_bat_mm> <theta_deg> [width_mm length_mm height_from_belt_mm]");
+      return;
+    }
+    if (!pickSchedulerInject(x_mm, y_mm, theta_deg, width_mm, length_mm, height_from_belt_mm)) {
+      ESP_LOGE(TAG, "ERROR: picksim not queued");
+    }
+  } else if (strncmp(cmdLower, "pickplan", 8) == 0) {
+    float x_mm = 0.0f;
+    float y_mm = 0.0f;
+    float theta_deg = 0.0f;
+    float width_mm = 0.0f;
+    float length_mm = 0.0f;
+    float height_from_belt_mm = 0.0f;
+    const int n = sscanf(cmdLower, "pickplan %f %f %f %f %f %f", &x_mm, &y_mm, &theta_deg,
+                         &width_mm, &length_mm, &height_from_belt_mm);
+    if (n != 3 && n != 6) {
+      ESP_LOGE(TAG,
+               "Usage: pickplan <x> <y> <theta> [width_mm length_mm height_from_belt_mm]");
+      return;
+    }
+    char plan[384];
+    if (!pickSchedulerPlan(x_mm, y_mm, theta_deg, plan, sizeof(plan), width_mm, length_mm,
+                           height_from_belt_mm)) {
+      ESP_LOGE(TAG, "ERROR: %s", plan);
+      return;
+    }
+    ESP_LOGI(TAG, "pickplan %s", plan);
+  } else if (strncmp(cmdLower, "pickcover", 9) == 0) {
+    int cls = 1;
+    if (sscanf(cmdLower, "pickcover %d", &cls) != 1) {
+      cls = 1;
+    }
+    char line[384];
+    if (!pickSchedulerCover(static_cast<uint8_t>(cls), line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "pickcover %s", line);
+  } else if (strncmp(cmdLower, "pickcal", 7) == 0) {
+    const char* args = cmdLower + 7;
+    while (*args == ' ') {
+      ++args;
+    }
+    char line[384];
+    if (!pickSchedulerCalibrate(args, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strcmp(cmdLower, "eiptiming") == 0) {
     eip::dumpClass1TimingStats();
   } else if (strcmp(cmdLower, "stop") == 0) {
@@ -2936,6 +3158,18 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
   ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
+  ESP_LOGI(TAG, "  picksim <x> <y> <t> [w len h] - synthetic pick; 0 deg along +Y");
+  ESP_LOGI(TAG, "  omitted w/len/h = class-1: 65 mm long, 18.3 mm across and above the belt");
+  ESP_LOGI(TAG, "  pickplan <x> <y> <t> [w len h] - dry-run; grasp Z = belt - height_from_belt/2");
+  ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 deg along +Y)");
+  ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");
+  ESP_LOGI(TAG, "  cfg                  - list settings (same keys as the panel menu)");
+  ESP_LOGI(TAG, "  cfg <key> [value]    - read or set a setting; developer keys need unlock");
+  ESP_LOGI(TAG, "  cfg unlock <pw>      - unlock developer settings");
+  ESP_LOGI(TAG, "  cfg lock             - lock developer settings");
+  ESP_LOGI(TAG, "  cfg passwd <old> <new> - change developer password (unlocked)");
+  ESP_LOGI(TAG, "  cfg factory          - factory reset stored settings");
+  ESP_LOGI(TAG, "  cfg reboot           - restart (apply reboot-required settings)");
     ESP_LOGI(TAG, "  test_cycle           - 8-stage holistic test: arm, bring-up, bounds check, legs A-F, pick+place grip, dynamics, theta G-I, telemetry");
   ESP_LOGI(TAG, "  test_theta_path      - combined in-band X+Z+theta (25-75 "
                 "window) using live thetalim-safe dtheta; enable+bring-up first");

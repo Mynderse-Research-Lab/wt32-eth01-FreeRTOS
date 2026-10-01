@@ -5,6 +5,7 @@
 #include "GantryEipRotaryAxis.h"
 
 #include "axis_drivetrain_params.h"
+#include "GantryRotaryPhases.h"
 #include "GantryThetaOrigin.h"
 #include "GantryUtils.h"
 #include "Hcs01Assembly.h"
@@ -25,9 +26,9 @@
 namespace Gantry {
 
 namespace {
-constexpr uint8_t kMovePreloadTicks = 4;     // ~40 ms @ 100 Hz — latch S-0-0282 while AH
-constexpr uint8_t kMoveReleaseHaltTicks = 10; // ~100 ms wait for AF
-constexpr uint8_t kMoveStartTicks = 4;        // ~40 ms wait for bit10 command ack
+constexpr uint8_t kMovePreloadTicks = RotaryPhase::kPreloadTicks;
+constexpr uint8_t kMoveReleaseHaltTicks = RotaryPhase::kReleaseHaltTicks;
+constexpr uint8_t kMoveStartTicks = RotaryPhase::kStartAckTicks;
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
 constexpr uint16_t kWaitAfTicks = 100;       // 1 s @ 100 Hz
 constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at target

@@ -8,13 +8,13 @@
 #if defined(CONFIG_CONVEYOR_Y_CAM_MM)
 #define CONVEYOR_Y_CAM_MM                       ((float)CONFIG_CONVEYOR_Y_CAM_MM)
 #else
-#define CONVEYOR_Y_CAM_MM                       (336.55f)
+#define CONVEYOR_Y_CAM_MM                       (-711.0f)
 #endif
 
 #if defined(CONFIG_CONVEYOR_Y_PICK_MM)
 #define CONVEYOR_Y_PICK_MM                      ((float)CONFIG_CONVEYOR_Y_PICK_MM)
 #else
-#define CONVEYOR_Y_PICK_MM                      (1016.0f)
+#define CONVEYOR_Y_PICK_MM                      (0.0f)
 #endif
 
 // Across-belt mapping: gantry joint X = x_across + offset.
@@ -26,11 +26,11 @@
 
 // Joint-space pick heights for Gantry::moveTo(JointConfig).
 // SAFE aliases GANTRY_SAFE_Z_HEIGHT_MM = retract/traverse band from Z−.
-// PICK is toward the belt (+Z down, near A014) — placeholder, re-measure.
+// PICK is the bench grasp (waypoint Z 105.4). Measured stroke is 105.5 mm.
 #if defined(CONFIG_CONVEYOR_Z_PICK_JOINT_MM)
 #define CONVEYOR_Z_PICK_JOINT_MM                ((float)CONFIG_CONVEYOR_Z_PICK_JOINT_MM)
 #else
-#define CONVEYOR_Z_PICK_JOINT_MM                (140.0f)
+#define CONVEYOR_Z_PICK_JOINT_MM                (105.4f)
 #endif
 #define CONVEYOR_Z_SAFE_JOINT_MM                (GANTRY_SAFE_Z_HEIGHT_MM)
 

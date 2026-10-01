@@ -202,13 +202,18 @@ public:
 
     void moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed);
 
+    /// theta_start_frac < 0 keeps the console window (25%, axis-max cap)
+    /// and the 0.5° deadband. >= 0 is a pick: theta starts at that fraction,
+    /// any |dθ| >= 0.1° is commanded and quantized to 0.1°, and a waiting
+    /// gantry still turns. SAFE_Z still blocks theta below the band.
     GantryError moveTo(const JointConfig& joint,
                        uint32_t speed_mm_per_s        = 50,
                        uint32_t speed_deg_per_s       = 30,
                        uint32_t acceleration_mm_per_s2 = 0,
                        uint32_t deceleration_mm_per_s2 = 0,
                        uint32_t acceleration_deg_per_s2 = 0,
-                       uint32_t deceleration_deg_per_s2 = 0);
+                       uint32_t deceleration_deg_per_s2 = 0,
+                       float theta_start_frac = -1.0f);
 
     GantryError moveTo(const EndEffectorPose& pose,
                        uint32_t speed_mm_per_s        = 50,
@@ -218,12 +223,27 @@ public:
                        uint32_t acceleration_deg_per_s2 = 0,
                        uint32_t deceleration_deg_per_s2 = 0);
 
+    /// Z-only Absolute with StartMotion held until releasePreloadedMotion().
+    GantryError preloadJointMove(const JointConfig& joint,
+                                 uint32_t speed_mm_per_s,
+                                 uint32_t acceleration_mm_per_s2,
+                                 uint32_t deceleration_mm_per_s2);
+    bool releasePreloadedMotion();
+    bool isPreloadHeld() const;
+
+    /// Z-only lift to the SAFE_Z band ceiling. Stops any motion first and is
+    /// allowed while X or theta is alarmed; refused only on a Z alarm.
+    GantryError retractToSafeZ(uint32_t speed_mm_per_s,
+                               uint32_t acceleration_mm_per_s2,
+                               uint32_t deceleration_mm_per_s2);
+
     bool isBusy() const;
     bool isEnabled() const;
     void update();
 
     // ---------- Gripper ----------
-    void grip(bool active);
+    /// False when no gripper is configured or the output write failed.
+    bool grip(bool active);
     bool isGripperActive() const { return gripperActive_; }
 
     // ---------- Position accessors ----------
@@ -343,6 +363,8 @@ private:
     float       xPulsesPerMmOverride_;
     // Console/joint moves: path to joint target (no gripper). Pose/pick keeps gripper.
     bool        jointDirectMove_;
+    bool        holdZStart_ = false;
+    bool        zStartHeld_ = false;
 
     // Planned 2-D path Absolute segments (max 3).
     static constexpr size_t kMaxPathSegments = 3;
@@ -353,11 +375,16 @@ private:
     float pathSegStartZ_mm_ = 0.0f;
     bool pathSegXArmed_ = false;
     bool pathSegZArmed_ = false;
-    // Theta: wait for 25% of the in-band X+Z segment, then run at window speed.
+    // Theta: wait for the start fraction of the in-band X+Z segment (25% for
+    // console moves), then run at window speed.
     bool thetaPending_ = false;
     float thetaPendingSpeedDegS_ = 0.0f;
     size_t thetaWindowSegIndex_ = 0;
     bool thetaHoldsDescent_ = false;
+    float thetaStartFrac_ = -1.0f;
+    float thetaWindowStartFrac_ = Path::kThetaStartFrac;
+    // retractToSafeZ in progress: X / theta alarms do not abort it.
+    bool retractOnly_ = false;
     // PnP: after path to pick completes, run gripper then retract to clearance.
     bool pathDoGripperAfter_ = false;
 

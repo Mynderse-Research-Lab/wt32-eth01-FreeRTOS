@@ -48,21 +48,26 @@ bool GantryEndEffector::begin() {
     return true;
 }
 
-void GantryEndEffector::setActive(bool active) {
+bool GantryEndEffector::setActive(bool active) {
     if (!configured_) {
-        return;
+        return false;
     }
     const uint8_t level = EndEffectorPolicy::outputLevel(active, activeHigh_);
     if (EndEffectorPolicy::classifyPin(pin_) == EndEffectorPolicy::PinDomain::kMcp) {
-        gpio_expander_write(pin_, level);
+        if (gpio_expander_write(pin_, level) != ESP_OK) {
+            return false;
+        }
     } else {
         const int gpioPin = LimitPolicy::resolveDirectGpioPin(pin_);
         if (gpioPin < 0) {
-            return;
+            return false;
         }
-        gpio_set_level((gpio_num_t)gpioPin, level);
+        if (gpio_set_level((gpio_num_t)gpioPin, level) != ESP_OK) {
+            return false;
+        }
     }
     active_ = active;
+    return true;
 }
 
 } // namespace Gantry

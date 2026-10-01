@@ -226,6 +226,13 @@ target_include_directories(test_console_parse PRIVATE "${REPO_ROOT}/src")
 target_link_libraries(test_console_parse PRIVATE unity)
 add_test(NAME test_console_parse COMMAND test_console_parse)
 
+add_executable(test_pick_intercept "test_pick_intercept.cpp")
+target_include_directories(test_pick_intercept PRIVATE
+    "${REPO_ROOT}/include"
+    "${REPO_ROOT}/lib/Gantry/src")
+target_link_libraries(test_pick_intercept PRIVATE unity)
+add_test(NAME test_pick_intercept COMMAND test_pick_intercept)
+
 # Limit-switch debounce / pin encoding + end-effector polarity
 add_executable(test_limit_switch_policy "test_limit_switch_policy.cpp")
 target_include_directories(test_limit_switch_policy PRIVATE

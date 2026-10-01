@@ -12,7 +12,10 @@
 #include "FakeAxes.h"
 #include "Gantry.h"
 #include "GantryPathProfile.h"
+#include "axis_drivetrain_params.h"
+#include "gpio_expander.h"
 #include "host_test_clock.h"
+#include "pick_intercept.h"
 
 #include <memory>
 
@@ -294,6 +297,125 @@ static void test_retract_starts_theta_after_band_entry(void) {
     TEST_ASSERT_TRUE(h.t->moves.size() >= 1u);
 }
 
+static void test_theta_start_fraction_zero_starts_with_x(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(100.0f, 0.0f, 90.0f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    TEST_ASSERT_TRUE(h.x->busy);
+    tick(*h.g);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, h.x->mm);
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    // T_seg = 2 s; window 0..75% = 1.5 s; 60 deg/s.
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 60.0f, h.t->moves[0].speed_deg_s);
+}
+
+static void test_theta_start_fraction_caps_at_move_theta_speed(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(1.0f, 0.0f, 180.0f), 50, 100, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    tick(*h.g);
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 100.0f, h.t->moves[0].speed_deg_s);
+}
+
+static void test_pick_theta_commands_a_tenth_while_waiting(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(0.0f, 0.0f, 0.2f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.2f, h.t->moves[0].target_deg);
+    TEST_ASSERT_TRUE(h.g->isBusy());
+}
+
+static void test_pick_theta_truncates_below_a_tenth(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(0.0f, 0.0f, 0.05f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    TEST_ASSERT_EQUAL_UINT(0u, h.t->moves.size());
+    TEST_ASSERT_FALSE(h.g->isBusy());
+}
+
+static void test_pick_theta_quantizes_to_a_tenth(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(0.0f, 0.0f, 10.14f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.1f, h.t->moves[0].target_deg);
+}
+
+static void test_pick_theta_runs_with_x_below_half_degree(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(100.0f, 0.0f, 0.2f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    tick(*h.g);
+    TEST_ASSERT_EQUAL_UINT(1u, h.t->moves.size());
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.2f, h.t->moves[0].target_deg);
+}
+
+static void test_console_still_ignores_a_fifth_of_a_degree(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 0.0f, 0.2f, 50));
+    h.x->completeMove();
+    tick(*h.g);
+    TEST_ASSERT_EQUAL_UINT(0u, h.t->moves.size());
+}
+
+static void test_theta_refused_below_band_during_wait(void) {
+    Harness h = makeHarness(0.0f, 100.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(0.0f, 100.0f, 45.0f), 50, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    tick(*h.g);
+    TEST_ASSERT_EQUAL_UINT(0u, h.t->moves.size());
+    TEST_ASSERT_FALSE(h.g->isBusy());
+}
+
+static void test_budget_matches_timed_fake_pre_position(void) {
+    Harness h = makeHarness(0.0f, 30.0f, 0.0f);
+    h.x->timed.enabled = true;
+    h.z->timed.enabled = true;
+    h.t->timed.enabled = true;
+    PickIntercept::MotionLimits m;
+    m.speed = 2000.0f;
+    m.accel = 3000.0f;
+    m.decel = 3000.0f;
+    m.theta_cap = 360.0f;
+    m.theta_accel = 1800.0f;
+    m.theta_decel = 1800.0f;
+    m.z_cap = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    m.theta_start_frac = 0.0f;
+    const int64_t start = HostTest::nowUs();
+    TEST_ASSERT_EQUAL(GantryError::OK,
+                      h.g->moveTo(JointConfig(200.0f, 30.0f, 90.0f), 2000, 360, 3000, 3000,
+                                  1800, 1800, 0.0f));
+    for (int i = 0; i < 5000 && h.g->isBusy(); ++i) {
+        tick(*h.g, 1);
+    }
+    TEST_ASSERT_FALSE(h.g->isBusy());
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, h.x->mm);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 90.0f, h.t->deg);
+    const float elapsed = static_cast<float>(HostTest::nowUs() - start) * 1.0e-6f;
+    const auto w = Gantry::Path::planThetaWindow(200.0f, m.speed, 90.0f, m.theta_cap, 0.0f);
+    const float t_x = PickIntercept::profileSeconds(200.0f, m.speed, m.accel, m.decel);
+    const float t_th = PickIntercept::profileSeconds(90.0f, w.speed_deg_per_s, m.theta_accel,
+                                                     m.theta_decel);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, t_x > t_th ? t_x : t_th, elapsed);
+
+    // The budget adds what the fakes do not model: preload, settle, rotary start.
+    const auto budget =
+        PickIntercept::budgetPick(0.0f, 30.0f, 0.0f, 200.0f, 30.0f, 30.0f, 100.0f, 90.0f, m);
+    TEST_ASSERT_TRUE(budget.approach_s >= elapsed - 0.005f);
+    TEST_ASSERT_TRUE(budget.approach_s <= elapsed + PickIntercept::kPreloadS +
+                                              PickIntercept::kSettleS + PickIntercept::kTickS +
+                                              PickIntercept::kThetaStartS + 0.005f);
+}
+
 #endif  // !SEQUENTIAL
 
 static void test_fail_path_off_target(void) {
@@ -370,8 +492,8 @@ static void test_pnp_gripper_then_retract(void) {
     TEST_ASSERT_EQUAL(GantryError::OK, h.g->moveTo(pose, 50, 30, 3000, 3000));
     h.z->completeMove();
     tick(*h.g);
-    // Gripper dwell then retract to SAFE_Z ceiling.
-    HostTest::advanceMs(150);
+    // Gripper close is 190 ms, then retract to the SAFE_Z ceiling.
+    HostTest::advanceMs(200);
     tick(*h.g);
     TEST_ASSERT_TRUE(h.z->busy);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 30.0f, h.z->target_mm);
@@ -498,6 +620,75 @@ static void test_sequential_theta_gated_when_path_ends_deep(void) {
 
 #endif
 
+static void test_z_cap_on_z_only_segment(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 0.0f, 100.0f, 0.0f, 2000));
+    TEST_ASSERT_TRUE(h.z->busy);
+    const float cap = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, cap < 2000.0f ? cap : 2000.0f, h.z->moves.back().speed_mm_s);
+}
+
+static void test_z_cap_on_combined_segment_keeps_it_straight(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 30.0f, 0.0f, 5000));
+    TEST_ASSERT_TRUE(h.x->busy);
+    TEST_ASSERT_TRUE(h.z->busy);
+    const float cap = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, cap, h.z->moves.back().speed_mm_s);
+    TEST_ASSERT_FLOAT_WITHIN(1.0f, cap * 100.0f / 30.0f, h.x->moves.back().speed_mm_s);
+}
+
+static void test_retract_to_safe_z_while_theta_alarmed(void) {
+    Harness h = makeHarness(50.0f, 100.0f, 10.0f);
+    h.t->alarm = true;
+    TEST_ASSERT_EQUAL(GantryError::OK, h.g->retractToSafeZ(2000, 3000, 3000));
+    TEST_ASSERT_TRUE(h.z->busy);
+    TEST_ASSERT_FLOAT_WITHIN(0.05f, 30.0f, h.z->target_mm);
+    const float cap = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, cap < 2000.0f ? cap : 2000.0f, h.z->moves.back().speed_mm_s);
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.z->busy);
+    h.z->completeMove();
+    tick(*h.g);
+    TEST_ASSERT_FALSE(h.g->isBusy());
+    TEST_ASSERT_EQUAL_UINT(0u, h.x->moves.size());
+    TEST_ASSERT_EQUAL_UINT(0u, h.t->moves.size());
+
+    // Already in the band: nothing to do.
+    TEST_ASSERT_EQUAL(GantryError::OK, h.g->retractToSafeZ(2000, 3000, 3000));
+    TEST_ASSERT_FALSE(h.g->isBusy());
+
+    h.z->mm = h.z->target_mm = 90.0f;
+    h.z->alarm = true;
+    TEST_ASSERT_EQUAL(GantryError::TIMEOUT, h.g->retractToSafeZ(2000, 3000, 3000));
+}
+
+static void test_retract_stops_a_move_in_progress(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(GantryError::OK, go(h, 0.0f, 100.0f, 0.0f, 2000));
+    h.z->setMm(80.0f);
+    h.x->alarm = true;
+    TEST_ASSERT_EQUAL(GantryError::OK, h.g->retractToSafeZ(2000, 3000, 3000));
+    TEST_ASSERT_TRUE(h.z->stop_count > 0);
+    TEST_ASSERT_FLOAT_WITHIN(0.05f, 30.0f, h.z->target_mm);
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.z->busy);
+}
+
+static void test_grip_reports_write_failure(void) {
+    Harness h = makeHarness();
+    TEST_ASSERT_FALSE(h.g->grip(true));
+    h.g->setEndEffectorPin(3, true);
+    TEST_ASSERT_TRUE(h.g->grip(true));
+    TEST_ASSERT_TRUE(h.g->isGripperActive());
+    HostTest::gpio_expander_write_result = ESP_FAIL;
+    TEST_ASSERT_FALSE(h.g->grip(false));
+    TEST_ASSERT_TRUE(h.g->isGripperActive());
+    HostTest::gpio_expander_write_result = ESP_OK;
+    TEST_ASSERT_TRUE(h.g->grip(false));
+    TEST_ASSERT_FALSE(h.g->isGripperActive());
+}
+
 static void test_cross_axis_fault_stops_orchestrator(void) {
     Harness h = makeHarness();
     TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 10.0f, 0.0f));
@@ -537,6 +728,15 @@ int main(void) {
     RUN_TEST(test_descent_held_until_theta_idle);
     RUN_TEST(test_stop_clears_pending_theta);
     RUN_TEST(test_retract_starts_theta_after_band_entry);
+    RUN_TEST(test_theta_start_fraction_zero_starts_with_x);
+    RUN_TEST(test_theta_start_fraction_caps_at_move_theta_speed);
+    RUN_TEST(test_pick_theta_commands_a_tenth_while_waiting);
+    RUN_TEST(test_pick_theta_truncates_below_a_tenth);
+    RUN_TEST(test_pick_theta_quantizes_to_a_tenth);
+    RUN_TEST(test_pick_theta_runs_with_x_below_half_degree);
+    RUN_TEST(test_console_still_ignores_a_fifth_of_a_degree);
+    RUN_TEST(test_theta_refused_below_band_during_wait);
+    RUN_TEST(test_budget_matches_timed_fake_pre_position);
 #endif
     RUN_TEST(test_fail_path_off_target);
     RUN_TEST(test_deferred_x_arms_once_in_band);
@@ -552,6 +752,11 @@ int main(void) {
     RUN_TEST(test_sequential_theta_after_in_band_path);
     RUN_TEST(test_sequential_theta_gated_when_path_ends_deep);
 #endif
+    RUN_TEST(test_z_cap_on_z_only_segment);
+    RUN_TEST(test_z_cap_on_combined_segment_keeps_it_straight);
+    RUN_TEST(test_retract_to_safe_z_while_theta_alarmed);
+    RUN_TEST(test_retract_stops_a_move_in_progress);
+    RUN_TEST(test_grip_reports_write_failure);
     RUN_TEST(test_cross_axis_fault_stops_orchestrator);
     return UNITY_END();
 }

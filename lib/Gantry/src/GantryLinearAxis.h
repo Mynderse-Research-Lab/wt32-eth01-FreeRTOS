@@ -39,6 +39,14 @@ public:
     // ---------- mm-domain motion ----------
     virtual bool  moveToMm(float target_mm, float speed_mm_per_s,
                            float accel_mm_per_s2, float decel_mm_per_s2) = 0;
+    /// Latch Absolute and hold the StartMotion edge until releaseStartMotion().
+    /// Axes that cannot hold fall through to moveToMm().
+    virtual bool moveToMmHeld(float target_mm, float speed_mm_per_s,
+                              float accel_mm_per_s2, float decel_mm_per_s2) {
+        return moveToMm(target_mm, speed_mm_per_s, accel_mm_per_s2, decel_mm_per_s2);
+    }
+    virtual bool releaseStartMotion() { return false; }
+    virtual bool isStartHeld() const { return false; }
     virtual bool  moveRelativeMm(float delta_mm, float speed_mm_per_s,
                                  float accel_mm_per_s2, float decel_mm_per_s2) = 0;
     virtual bool  stopMotion()            = 0;

@@ -460,6 +460,11 @@ void GantryEipLinearAxis::advanceMovePhase(
     return;
   }
 
+  if (move_phase_ == MovePhase::kPreloadHold) {
+    republishMoveCommand(/*start_motion_edge=*/false);
+    return;
+  }
+
   if (move_phase_ticks_ > 0) --move_phase_ticks_;
 
   if (move_phase_ == MovePhase::kPreload) {
@@ -530,6 +535,34 @@ void GantryEipLinearAxis::advanceMovePhase(
 
 bool GantryEipLinearAxis::moveToMm(float target_mm, float speed_mm_per_s,
                                    float accel_mm_per_s2, float decel_mm_per_s2) {
+  return startAbsoluteMm(target_mm, speed_mm_per_s, accel_mm_per_s2, decel_mm_per_s2,
+                         false);
+}
+
+bool GantryEipLinearAxis::moveToMmHeld(float target_mm, float speed_mm_per_s,
+                                      float accel_mm_per_s2, float decel_mm_per_s2) {
+  return startAbsoluteMm(target_mm, speed_mm_per_s, accel_mm_per_s2, decel_mm_per_s2,
+                         true);
+}
+
+bool GantryEipLinearAxis::releaseStartMotion() {
+  if (move_phase_ != MovePhase::kPreloadHold) {
+    return false;
+  }
+  move_phase_ = MovePhase::kStart;
+  move_phase_ticks_ = kMoveStartMotionTicks;
+  eip::class1TimingStats().noteAbsoluteStartMotionPublished(eip::class1NowUs());
+  republishMoveCommand(/*start_motion_edge=*/true);
+  return true;
+}
+
+bool GantryEipLinearAxis::isStartHeld() const {
+  return move_phase_ == MovePhase::kPreloadHold;
+}
+
+bool GantryEipLinearAxis::startAbsoluteMm(float target_mm, float speed_mm_per_s,
+                                          float accel_mm_per_s2, float decel_mm_per_s2,
+                                          bool hold_start) {
   if (!initialized_ || !enabled_ || absPuuPerMm() <= 0.0) return false;
   if (!image_.isOnline()) return false;
   if (arm_phase_ != ArmPhase::kIdle && arm_phase_ != ArmPhase::kHolding) {
@@ -577,8 +610,10 @@ bool GantryEipLinearAxis::moveToMm(float target_mm, float speed_mm_per_s,
 
   motion_commanded_ = true;
   // Preload the new Absolute with StartMotion=0; the rising edge is kStart.
-  move_phase_ = MovePhase::kPreload;
-  move_phase_ticks_ = kMovePreloadTicks;
+  // kPreloadHold waits for releaseStartMotion() so a strike can fire that edge
+  // on a timer instead of after a fixed tick count.
+  move_phase_ = hold_start ? MovePhase::kPreloadHold : MovePhase::kPreload;
+  move_phase_ticks_ = hold_start ? 0 : kMovePreloadTicks;
   run_ticks_ = 0;
   arrival_stable_ticks_ = 0;
   return publishCommand(buildMoveCommand(/*start_motion_edge=*/false));

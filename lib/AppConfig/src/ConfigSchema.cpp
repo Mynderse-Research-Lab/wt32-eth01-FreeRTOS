@@ -72,7 +72,9 @@ static const std::vector<ParamSchema> s_schemas = {
     {"geom_grp_x_mm", "Gripper TCP X",     "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, true,  -1000.0f, 1000.0f, 1.0f, "mm", {}},
     {"geom_grp_z_mm", "Gripper TCP Z",     "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, true,  -1000.0f, 1000.0f, 1.0f, "mm", {}},
     {"geom_safe_z_mm","Safe Z Margin",     "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, true,  1.0f, 150.0f, 1.0f, "mm", {}},
-    {"geom_cal_x_mm", "Cal X Park",        "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 500.0f, 1.0f, "mm", {}},
+    {"geom_cal_x_mm", "Bin Drop X",        "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 500.0f, 1.0f, "mm", {}},
+    {"geom_cal_z_mm", "Bin Drop Z",        "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 150.0f, 0.1f, "mm", {}},
+    {"geom_cal_th_deg","Bin Drop Theta",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, -180.0f, 180.0f, 1.0f, "deg", {}},
     {"col_x_min_mm",  "Collision X Min",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {}},
     {"col_z_min_mm",  "Collision Z Min",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 150.0f, 1.0f, "mm", {}},
     {"grp_open_ms",   "Gripper Open Time", "Geometry",       ParamType::INT,   AccessLevel::END_USER, false, 10.0f, 5000.0f, 10.0f, "ms", {}},
@@ -81,13 +83,45 @@ static const std::vector<ParamSchema> s_schemas = {
     // ========================================================================
     // 6. Conveyor Intercept (End-User)
     // ========================================================================
-    {"cv_cam_y_mm",   "Camera Y Pos",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 1.0f, "mm", {}},
+    {"cv_cam_y_mm",   "Camera Y Pos",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -5000.0f, 5000.0f, 1.0f, "mm", {}},
     {"cv_pick_y_mm",  "Pick Y Pos",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 1.0f, "mm", {}},
     {"cv_x_off_mm",   "X Across Offset",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -500.0f, 500.0f, 0.5f, "mm", {}},
     {"cv_z_pick_mm",  "Z Pick Joint Pos",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 150.0f, 1.0f, "mm", {}},
     {"cv_belt_spd",   "Default Belt Spd",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 10.0f, "mm/s", {}},
     {"cv_tau_min_us", "Tau Min",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 10000000.0f, 10000.0f, "us", {}},
     {"cv_tau_max_us", "Tau Max",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 30000000.0f, 50000.0f, "us", {}},
+    {"cv_vis_ms",     "Vision Latency",    "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_valve_ms",   "Grip Valve Delay",  "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_jaw1_ms",    "Jaw Contact 18650", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_jaw2_ms",    "Jaw Contact 21700", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_jaw3_ms",    "Jaw Contact Prism", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_jaw4_ms",    "Jaw Contact Pouch", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
+    {"cv_jaw_deg",    "Jaw Angle Offset",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -180.0f, 180.0f, 1.0f, "deg", {}},
+    {"cv_dedupe_mm",  "Detect Dedupe",     "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 5.0f, 200.0f, 1.0f, "mm", {}},
+
+    // ========================================================================
+    // 6b. Side-grip pick (End-User)
+    // ========================================================================
+    {"cell1_len_mm",  "18650 Length",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
+    {"cell2_len_mm",  "21700 Length",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
+    {"cell3_len_mm",  "Prism Length",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
+    {"cell4_len_mm",  "Pouch Length",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
+    {"cell1_h_mm",    "18650 Height",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
+    {"cell2_h_mm",    "21700 Height",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
+    {"cell3_h_mm",    "Prism Height",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
+    {"cell4_h_mm",    "Pouch Height",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
+    {"fin_open_mm",   "Finger Opening",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 200.0f, 0.5f, "mm", {}},
+    {"fin_thk_mm",    "Finger Thickness",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 50.0f, 0.5f, "mm", {}},
+    {"fin_w_mm",      "Finger Width",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.5f, "mm", {}},
+    {"fin_spd_mm_s",  "Jaw Speed",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 2000.0f, 5.0f, "mm/s", {}},
+    {"pk_guard_ms",   "Timing Guard",      "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 200.0f, 1.0f, "ms", {}},
+    {"pk_dropin",     "Drop-in Strike",    "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
+    {"pk_drop_any_th","Bin Any Theta",     "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
+    {"pk_stage_x_mm", "Staging X",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {}},
+    {"pk_spd_mm_s",   "Pick Path Speed",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 2000.0f, 10.0f, "mm/s", {}},
+    {"pk_acc_mm_s2",  "Pick Path Accel",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
+    {"pk_th_spd",     "Pick Theta Speed",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 3600.0f, 10.0f, "deg/s", {}},
+    {"pk_th_acc",     "Pick Theta Accel",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 18000.0f, 100.0f, "deg/s2", {}},
 
     // ========================================================================
     // 7. Homing & Calibration (End-User)

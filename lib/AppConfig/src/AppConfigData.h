@@ -13,7 +13,7 @@ struct AppConfigData {
     int32_t gantry_default_speed_deg_per_s = 30;
     int32_t gantry_default_accel_deg_per_s2 = 180;
     int32_t gantry_default_decel_deg_per_s2 = 180;
-    int32_t gantry_path_max_speed_mm_per_s = 500;
+    int32_t gantry_path_max_speed_mm_per_s = 2000;
     int32_t gantry_path_max_accel_mm_per_s2 = 3000;
     int32_t gantry_path_max_decel_mm_per_s2 = 3000;
     int32_t gantry_eip_assumed_stop_decel_mm_s2 = 300;
@@ -64,18 +64,39 @@ struct AppConfigData {
     float gantry_gripper_x_offset_mm = 385.0f;
     float gantry_gripper_z_offset_mm = 80.0f;
     float gantry_safe_z_height_mm = 35.7f;
-    float gantry_cal_x_park_mm = 35.0f;
+    float gantry_cal_x_park_mm = 10.0f;
+    float gantry_cal_z_park_mm = 90.8f;
+    float gantry_cal_theta_park_deg = 90.0f;
     float gantry_conveyor_collision_x_min_mm = 95.0f;
     float gantry_conveyor_collision_z_min_mm = 115.0f;
     int32_t gantry_gripper_open_time_ms = 190;
-    int32_t gantry_gripper_close_time_ms = 150;
+    int32_t gantry_gripper_close_time_ms = 190;
 
     // 6. Conveyor Intercept
-    float conveyor_y_cam_mm = 336.55f;
-    float conveyor_y_pick_mm = 1016.0f;
+    float conveyor_y_cam_mm = -711.0f;
+    float conveyor_y_pick_mm = 0.0f;
     float conveyor_x_across_to_gantry_x_offset_mm = 0.0f;
-    float conveyor_z_pick_joint_mm = 140.0f;
+    float conveyor_z_pick_joint_mm = 105.4f;
+    int32_t pick_vision_latency_ms = 40;
+    int32_t pick_valve_ms = 30;
+    int32_t pick_jaw_ms[4] = {0, 0, 0, 0};  // 0 = derive from jaw travel
+    float pick_jaw_offset_deg = 0.0f;
+    float pick_dedupe_mm = 40.0f;
     float pick_default_belt_speed_mm_s = 1524.0f;
+    float pick_cell_len_mm[4] = {65.0f, 70.0f, 50.0f, 60.0f};
+    float pick_cell_h_mm[4] = {18.3f, 21.2f, 34.0f, 45.0f};
+    float pick_finger_open_mm = 80.0f;
+    float pick_finger_thick_mm = 8.0f;
+    float pick_finger_width_mm = 30.0f;
+    float pick_jaw_speed_mm_s = 210.0f;
+    int32_t pick_guard_ms = 15;
+    bool pick_dropin_enable = false;
+    bool pick_drop_any_theta = false;
+    float pick_stage_x_mm = 320.0f;
+    int32_t pick_speed_mm_s = 2000;
+    int32_t pick_accel_mm_s2 = 3000;
+    float pick_theta_speed_deg_s = 360.0f;
+    float pick_theta_accel_deg_s2 = 1800.0f;
     int32_t tau_min_us = 100000;
     int32_t tau_max_us = 5000000;
 

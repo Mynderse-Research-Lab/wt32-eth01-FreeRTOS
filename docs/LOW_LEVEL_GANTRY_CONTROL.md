@@ -102,9 +102,9 @@ LAN8720 and W5500 do **not** share physical cabling. An outage or packet flood o
   └── WT32 W5500 ──► Kinetix X ──► Kinetix Z ──► Rexroth Theta (HCS01)
 ```
 
-**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the cell unmanaged switch. That merges the domains, causing IP collisions (`.10`), ARP storms, and lost packets.
+**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the cell unmanaged switch. That merges the isolated motion segment onto the cell LAN.
 
-* **Cell Subnet (LAN8720):** `192.168.1.0/24` (WT32 LAN8720 = `.100`, TCP console `:2323`, Zenoh / Raw L2 frames).
+* **Cell Subnet (LAN8720):** `10.42.0.0/24` (WT32 LAN8720 = `10.42.0.100`, gateway `10.42.0.1`, TCP console `:2323`, Raw L2 frames).
 * **Motion Subnet (W5500):** `192.168.1.0/24` isolated segment (W5500 = `.10`, X = `.20`, Z = `.21`, Theta = `.23`).
 
 ### W5500 pins and IPs
@@ -184,7 +184,7 @@ From [`src/main.cpp`](../src/main.cpp):
 | `EipScannerM` / `EipScannerT` | **6** | **1** | 8192 | Class 1 exchange (highest vs SPI3 users) |
 | `EipHoldKA` | **7** | **1** | 4096 | ~5 ms O→T keepalive during 2nd FO only |
 | `GantryUpdate` | 5 | 1 | 4096 | **100 Hz** (10 ms) — axis SMs + orchestration |
-| `PickScheduler` | 4 | 1 | 4096 | MQTT pick queue (motion not wired) |
+| `PickScheduler` | 4 | 1 | 8192 | Side-grip moving pick: vision queue, tracker, pre-position, strike, bin drop |
 | `SerialCmd` | **3** | 0 | 4096 | UART console poll (above TFT so Class 1 UI redraws do not starve RX) |
 | `TftUiTask` | 2 | 0 | 4096 | Encoder poll **100 Hz**, ST7789 draw **15 Hz** (SPI3; skips sample while Class 1 critical) |
 | `NetConsole` | **3** | 0 | 4096 | TCP line console on LAN8720 `:2323` |
@@ -210,7 +210,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Enabled** (`CONFIG_EIP_AXIS_THETA=y`; CIP `192.168.1.23` FKM, eng `.22`; FO config **0** / 101/102, Class 1 **24/16** from 18/14 + seq + Run/Idle; HIPERFACE soft-home) |
 | Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |
-| Pick → `moveTo(EndEffectorPose)` | **Not wired** (`SKIP:pick_motion_not_wired`) |
+| Pick → `moveTo(JointConfig)` + timed strike | **Wired** (side grip; picks run only after CellNet Start) |
 | PulseMotor / MCP motion path | **Removed** (MCP restored only for Field/UI) |
 
 ---
@@ -256,7 +256,10 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 | `begin()` / `enable()` / `disable()` | Lifecycle; enable arms EIP axes (settle → Home34 if needed → hold) |
 | `isBusy()` | True while `motionState_ != IDLE`, any axis busy, or homing/calibration flags |
 | `moveTo(EndEffectorPose)` | PnP path: 2-D path planner + gripper staging; post-grip retract to clearance |
-| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: 2-D path to joint target (no gripper) |
+| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: 2-D path to joint target (no gripper). `moveTo(JointConfig, …, theta_start_frac)` sets where theta starts in the in-band segment (scheduler passes 0; −1 = default 25%) |
+| `preloadJointMove()` / `releasePreloadedMotion()` | Held Z preload for a late Z tail; the pick timer fires the StartMotion edge |
+| `retractToSafeZ(speed, accel, decel)` | Z-only lift to the traverse band at the Z-capped speed; allowed while X or theta is alarmed; refused (`TIMEOUT`) on a Z alarm or lost Z reference |
+| `grip(bool)` | Gripper write; returns false when no pin is configured or the MCP write fails |
 | `softHomeJointDatum()` | Zeros firmware `zero_puu_` on X+Z (not drive Homed) |
 | `requestAbort()` | Abort motion only — does **not** disable servos |
 | Console `stop` | `requestAbort()` + `disable()`; requires home+calibrate again |
@@ -277,8 +280,10 @@ are derived from path direction:
 `v_i = V · |d_i| / L`, `a_i = A · |d_i| / L`, with `L = hypot(dx, dz)`.
 
 Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
-(`decompose`, `planSegments`). Protective clamp: Z ballscrew critical-RPM
-derived speed cap still applies to the path speed ceiling.
+(`decompose`, `planSegments`). Z cap: `armCurrentPathSegment` lowers each
+segment's path speed with `Path::zCappedPathSpeed` so the Z component stays under
+`AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` (ballscrew critical speed) and the
+segment stays straight. The pick budget uses the same helper.
 
 **Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **35.7 mm**): margin
 from Z− / A015 (retracted joint min). This corresponds to **4.5 inches (114.3 mm)** clearance
@@ -296,6 +301,10 @@ that segment, finish by **75%**. Required theta speed is
 `AXIS_THETA_MAX_SPEED_DEG_PER_S` (360 deg/s). If the cap forces finish past 75%, the
 below-band descent segment is **held** until theta is idle. Theta-only
 commands while Z is out of band are refused (linear path still runs).
+With a per-move `theta_start_frac` ≥ 0 (pick scheduler: 0), theta starts at that
+fraction and runs at the move's theta speed, capped at the axis maximum; the
+rotary start phases (preload 4, release-halt ≤ 10, ack ≤ 4 ticks) are shared with
+the budget through `GantryRotaryPhases.h`.
 Limit warning codes: **X** A014/PL = joint min,
 A015/NL = joint max; **Z** A015/NL = joint min (retract), A014/PL = joint max
 (+Z down / toward belt). Z Absolute joint sense is **inverted** so joint −
@@ -341,8 +350,8 @@ same path planner / clearance rule.
 **X-Z path (production):** in-band X+Z together; above SAFE_Z, Z-alone. X
 Absolute and theta are interlocked unless Z is in the retract/traverse band.
 Retract from pick height to an in-band target does not stop at SAFE_Z.
-Theta window: 25–75% of the in-band traverse; descent below the band waits
-for theta idle if the speed cap is hit.
+Theta window: 25–75% of the in-band traverse (or from `theta_start_frac`);
+descent below the band waits for theta idle if the speed cap is hit.
 
 Arm Z first, then X (or defer X until the interlock is true) before publishing
 `motionState_` (A603 / StartMotion race guard).
@@ -471,7 +480,7 @@ Exchange outcomes:
 | Status | Meaning | Action |
 |--------|---------|--------|
 | `kOk` | T→O fresh on Kinetix (HCS01 may be isolated) | Sleep RPI remainder |
-| `kInputMiss` | Kinetix T→O stale | Soft-retry; tear down after **3** consecutive Kinetix misses |
+| `kInputMiss` | Kinetix T→O stale | Soft-retry; tear down after **2** consecutive Kinetix misses |
 | `kOutputSendFailed` | Kinetix O→T / W5500 SENDOK fail | Disconnect → `W5500::recover()` immediately |
 
 ### Recover ladder
@@ -647,24 +656,24 @@ Shared command core: `gantryConsoleProcessLine()` in
 
 Config (idf.py menuconfig): **LAN8720 plant Ethernet** and **TCP gantry console
 (LAN8720)** — bridged by [`ethernet_app_config.h`](../include/ethernet_app_config.h).
-Defaults: gantry IP **`192.168.1.100/24`**, TCP **`:2323`**, password **`LTU_1932`**,
+Defaults: gantry IP **`10.42.0.100/24`** (gateway `10.42.0.1`), TCP **`:2323`**, password **`LTU_1932`**,
 up to **4** remembered IPs for **600 s** (timer resets on reconnect). UART has no
 password. Single TCP client (backlog 1).
 
 ### Connect from a PC (plant / LAN8720 subnet)
 
-Prerequisites: PC on `192.168.1.0/24`, gantry at `192.168.1.100`, link up.
+Prerequisites: PC on `10.42.0.0/24`, gantry at `10.42.0.100`, link up.
 
 ```powershell
 # Windows (ncat from Nmap)
-ncat 192.168.1.100 2323
+ncat 10.42.0.100 2323
 
-# PuTTY: Connection type Raw, Host 192.168.1.100, Port 2323
+# PuTTY: Connection type Raw, Host 10.42.0.100, Port 2323
 ```
 
 ```bash
 # Linux / macOS
-nc 192.168.1.100 2323
+nc 10.42.0.100 2323
 ```
 
 1. At `Password:` prompt, enter the menuconfig password (`CONSOLE_TCP_PASSWORD`,
@@ -700,6 +709,10 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `puuinfo` / `puucal` / `puu t` | Scale / suggest PUU/mm; theta PUU/deg is live-settable |
 | `speed` / `accel` | Path mm/s and mm/s²; optional theta deg/s and deg/s² |
 | `thetalim` | Software theta joint min/max (deg) |
+| `picksim <x> <y> <theta> [w len h]` | Queue a simulated class-1 detection (needs Start). `y` is camera-relative (`picksim 0 0 0` = cell at the camera center). 0° is the long axis along +Y. Omitted width, length, and height-from-belt use the class-1 cell (65 mm long, 18.3 mm across and above the belt) |
+| `pickplan <x> <y> <theta> [w len h]` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and skip reason. Grasp Z is the belt surface minus height-from-belt/2 |
+| `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° along +Y) at the current belt speed: `P` pick, `S` skip |
+| `pickcal valve \| jaw \| jawoff \| cam` | Valve delay, per-class jaw time (`0` = derived from jaw travel), jaw offset, camera mark/apply |
 
 MCP diagnostic commands (`mcp_*`) are **legacy leftovers** — MCP hardware is
 removed; do not rely on them.
@@ -727,9 +740,36 @@ removed; do not rely on them.
 
 ### Network / pick
 
-CellNetL2 (LAN8720) -> queue -> pick_scheduler -> (future)
-Gantry::moveTo(EndEffectorPose). Today pick motion is **not wired**
-(SKIP:pick_motion_not_wired). For real-time protocol specs, see 
+CellNetL2 (LAN8720) → vision queue → `PickScheduler` task → tracker → `Gantry::moveTo(JointConfig)`
+pre-position → timed strike → bin drop. The Ethernet receive callback only queues the
+detection and its receipt time. A separate `PickStrike` task fires the Z release and grip
+from `esp_timer` one-shots, re-timed from the newest belt state on every conveyor frame.
+
+- **Side grip only.** Cell angle 0° is the long axis along +Y; positive rotation about +Z
+  runs from +Y toward −X. Jaw joint = fold(θ) + 90° + `cv_jaw_deg`; of the two equivalent
+  angles the one with less linear theta travel inside `thetalim` is used, else skip
+  `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
+  to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.
+- **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm (about ±29° of
+  along-belt for an 18650): Z goes to the grasp right after the pre-position, and only the
+  grip is timed. Grasp height is \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top. A sent
+  width of 80 mm has zero jaw travel; it is still a pick only when that across-belt strip
+  misses the fingers. Width above 80 mm is skipped.
+- **Late Z** otherwise, if `pk_dropin` is on (default off): hover above the tallest tracked
+  cell, then a Z descent that is at grasp height one guard before contact. With `pk_dropin`
+  off that case is skipped (`late Z off`).
+- **Failures** (belt stop, stale frames, conveyor restart, refined angle out of the frozen
+  jaw's clearance, grip write failure, missed deadline) abort the pick and call
+  `retractToSafeZ()` at the ballscrew cap. A cell-in-jaws flag sends a held cell to the bin
+  before any new pick.
+- After the drop the gantry goes straight from the bin to the next tracked cell, or waits
+  at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0). `pk_drop_any_th` skips the turn
+  to `geom_cal_th_deg` at the bin.
+- Approach, jaws open: 500 mm/s and 60 deg/s, or 2000 mm/s and 180 deg/s when a later
+  tracked part would be missed. Z descend, grip, and retract use the ballscrew cap
+  (1000 mm/s). Accel stays `pk_acc_mm_s2` 3000 and `pk_th_acc` 1800.
+
+For real-time protocol specs, see
 [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
 For kinematics, see [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md).
 
@@ -803,7 +843,7 @@ Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII C
 
 ## 13. Dual-OTA & Ethernet Firmware Flashing
 
-The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`192.168.1.100:8032`).
+The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`10.42.0.100:8032`).
 
 ### 13.1 Partition Map (4 MB Flash)
 
@@ -827,7 +867,8 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
    ```
 2. **Execute OTA update** (motors disabled; firmware rejects START if ENABLED or BUSY):
    - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
-   - CLI: `py tools/eth_ota_flash.py --host 192.168.1.100 idf/build/wt32_eth01_gantry.bin`
+   - CLI, PC on the cell switch: `py tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin`
+   - CLI, no switch cable: `py tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin` (`PI_USER` / `PI_PASS`).
 3. **Console commands:**
    - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, and rollback status.
 

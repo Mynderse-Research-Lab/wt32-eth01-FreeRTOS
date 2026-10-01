@@ -75,11 +75,12 @@ menu "Gantry kinematics"
 
         config GANTRY_PATH_MAX_SPEED_MM_PER_S
             int "2-D path speed ceiling (mm/s)"
-            default 500
-            range 1 2000
+            default 2000
+            range 1 5000
             help
-                Console rangelimit ceiling for path speed. Z ballscrew
-                critical-RPM derived cap is still applied as a protective clamp.
+                Console rangelimit ceiling for path speed. Effective speed
+                may be set above 1 m/s. The Z ballscrew critical-RPM figure
+                is commissioning data, not this ceiling.
 
         config GANTRY_PATH_MAX_ACCEL_MM_PER_S2
             int "2-D path accel ceiling (mm/s^2)"
@@ -283,6 +284,21 @@ menu "Gantry kinematics"
             help
                 During EIP bring-up calibrate-all: after X stroke is measured,
                 move to this X before seeking Z+ (stroke).
+                The tunable bin-drop X (geom_cal_x_mm) is a separate runtime
+                setting and does not move this bring-up park.
+
+        config GANTRY_CAL_Z_PARK_MM
+            float "Bin drop height (mm)"
+            default 90.8
+            help
+                Joint Z (+Z down) where the gripper opens above the drop bins.
+                Tunable at runtime as geom_cal_z_mm.
+
+        config GANTRY_CAL_THETA_PARK_DEG
+            float "Bin drop orientation (deg)"
+            default 90.0
+            help
+                Theta at the drop bins. Tunable at runtime as geom_cal_th_deg.
 
         config GANTRY_CONVEYOR_COLLISION_X_MIN_MM
             float "Conveyor collision envelope X threshold (mm)"
@@ -304,16 +320,16 @@ menu "Gantry kinematics"
             default 190
         config GANTRY_GRIPPER_CLOSE_TIME_MS
             int "Gripper close time (ms)"
-            default 150
+            default 190
     endmenu
 
     menu "Conveyor intercept (pick scheduler)"
         config CONVEYOR_Y_CAM_MM
             float "Camera Y position along belt (mm)"
-            default 336.55
+            default -711.0
         config CONVEYOR_Y_PICK_MM
             float "Pick Y position along belt (mm)"
-            default 1016.0
+            default 0.0
         config CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM
             float "Across-belt X to gantry X offset (mm)"
             default 0.0

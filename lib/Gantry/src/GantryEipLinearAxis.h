@@ -42,6 +42,10 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   bool moveToMm(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
                 float decel_mm_per_s2) override;
+  bool moveToMmHeld(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
+                    float decel_mm_per_s2) override;
+  bool releaseStartMotion() override;
+  bool isStartHeld() const override;
   bool moveRelativeMm(float delta_mm, float speed_mm_per_s, float accel_mm_per_s2,
                       float decel_mm_per_s2) override;
   bool stopMotion() override;
@@ -130,6 +134,7 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   enum class MovePhase : uint8_t {
     kIdle = 0,
     kPreload,
+    kPreloadHold,
     kStart,
     kRun,
     kStopping
@@ -161,6 +166,8 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   eip::k5100::OutputAssembly104 buildMoveCommand(bool start_motion_edge) const;
   eip::k5100::OutputAssembly104 buildHoldCommand() const;
   eip::k5100::OutputAssembly104 buildStopCommand(bool stop_motion) const;
+  bool startAbsoluteMm(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
+                       float decel_mm_per_s2, bool hold_start);
   void republishMoveCommand(bool start_motion_edge);
   void enterAbortStop();
   void finishMoveHold();
