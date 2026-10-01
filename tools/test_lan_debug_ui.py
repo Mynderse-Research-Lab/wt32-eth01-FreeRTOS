@@ -226,6 +226,9 @@ def test_parsing_and_gating() -> None:
     check("COMMANDS includes autotune", "autotune" in names, True)
     check("COMMANDS includes puu", "puu" in names, True)
     check("COMMANDS includes calibrated", "calibrated" in names, True)
+    check("COMMANDS includes cfg", "cfg" in names, True)
+    check("COMMANDS includes cfg_reboot", "cfg_reboot" in names, True)
+    check("COMMANDS includes picksim", "picksim" in names, True)
     check("default host is plant LAN", ui.DEFAULT_HOST, "10.42.0.100")
     move_help = next(desc for name, _usage, desc in ui.COMMANDS if name == "move")
     check("move catalog is +Z=down", "+Z=down" in move_help, True)
@@ -520,7 +523,7 @@ def test_waypoint_file() -> None:
 
 def test_ota_protocol() -> None:
     print("\n== Dual-OTA protocol ==")
-    import eth_ota_flash
+    import ota_flash
 
     payload = os.urandom(5000)
     received = bytearray()
@@ -580,7 +583,7 @@ def test_ota_protocol() -> None:
         handle.write(payload)
         handle.close()
         logs: list[str] = []
-        ok = eth_ota_flash.flash_ota(
+        ok = ota_flash.flash_ota(
             "127.0.0.1", port_box[0], "pw", handle.name, log=logs.append,
         )
         check("flash_ota mock OK COMPLETE", ok, True)
@@ -594,11 +597,23 @@ def test_ota_protocol() -> None:
             pass
         thread.join(timeout=2.0)
 
-    missing = eth_ota_flash.flash_ota(
+    missing = ota_flash.flash_ota(
         "127.0.0.1", 1, "pw", "no-such-ota.bin",
         log=lambda _m: None,
     )
     check("flash_ota missing bin fails", missing, False)
+    relay_logs: list[str] = []
+    relay = ota_flash.flash_via_pi(
+        "10.42.0.100", 8032, "pw", "no-such-ota.bin",
+        pi_password="",
+        log=relay_logs.append,
+    )
+    check("flash_via_pi without PI_PASS fails", relay, False)
+    check(
+        "flash_via_pi reports missing PI_PASS",
+        any("PI_PASS" in line for line in relay_logs),
+        True,
+    )
 
 
 def main() -> int:

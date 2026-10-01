@@ -4,7 +4,7 @@
 Covers every command in the firmware `help` menu (`gantryTestPrintHelp` in
 `src/gantry_test_console.cpp`), grouped into tabs, with an always-visible STOP.
 Diagnostics Dual-OTA streams a `.bin` to the LAN8720 OTA port (`:8032`) using
-`tools/eth_ota_flash.py`.
+`tools/ota_flash.py`.
 
 Defaults match plant bring-up:
   WT32 LAN8720  10.42.0.100:2323  (console) / :8032 (Dual-OTA)
@@ -42,12 +42,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-import eth_ota_flash
+import ota_flash
 
 DEFAULT_HOST = "10.42.0.100"
 DEFAULT_PORT = 2323
 DEFAULT_PASSWORD = os.environ.get("GANTRY_TCP_PASSWORD", "LTU_1932")
-DEFAULT_OTA_PORT = eth_ota_flash.DEFAULT_PORT
+DEFAULT_OTA_PORT = ota_flash.DEFAULT_PORT
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OTA_BIN = REPO_ROOT / "idf" / "build" / "wt32_eth01_gantry.bin"
 
@@ -165,6 +165,8 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("axislog", "axislog <hz>", "per-axis MOVE periodic rate (0=off); hz is required"),
     ("move", "move <x> <z> <theta>", "move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract"),
     ("grip", "grip <0|1>", "gripper (0=open, 1=close)"),
+    ("picksim", "picksim <x> <y> <theta>",
+     "queue a synthetic belt pick (needs START and a conveyor clock)"),
     ("test_cycle", "test_cycle",
      "8-stage holistic: arm, bring-up, bounds, A-F, pick+place, dynamics, theta G-I, telemetry"),
     ("test_theta_path", "test_theta_path",
@@ -172,6 +174,13 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("stop", "stop", "stop all motion (also disables servos)"),
     ("alarmreset", "alarmreset | arst", "pulse EIP FaultReset / HCS01 C0500 bit5"),
     ("selftest", "selftest", "run basic math/config tests (optional build)"),
+    ("cfg", "cfg", "list panel settings (developer keys hidden until unlock)"),
+    ("cfg_key", "cfg <key> [value]", "read or set one setting; same keys as the panel"),
+    ("cfg_unlock", "cfg unlock <password>", "unlock developer settings"),
+    ("cfg_lock", "cfg lock", "lock developer settings"),
+    ("cfg_passwd", "cfg passwd <old> <new>", "change developer password (unlocked)"),
+    ("cfg_factory", "cfg factory", "factory reset stored settings"),
+    ("cfg_reboot", "cfg reboot", "restart to apply reboot-required settings"),
     ("logout", "logout | exit | quit", "close the TCP session"),
 ]
 
@@ -1413,7 +1422,7 @@ class LanDebugApp:
         self.decel_var = tk.StringVar(value="")
         self.accel_theta = tk.StringVar(value="")
         self.decel_theta = tk.StringVar(value="")
-        # Path clamps with rangelimit 1: speed 1–500 mm/s, accel 100–3000 mm/s².
+        # Path clamps with rangelimit 1: speed 1–2000 mm/s, accel 100–3000 mm/s².
         ttk.Label(prof, text="speed").grid(row=0, column=0, sticky="e")
         ttk.Spinbox(prof, textvariable=self.speed_lin, from_=1, to=500, width=8).grid(row=0, column=1)
         ttk.Label(prof, text="deg/s (opt)").grid(row=0, column=2, sticky="e")
@@ -1438,7 +1447,7 @@ class LanDebugApp:
         ttk.Label(
             prof,
             text="Path / test_cycle legs only. Home/cal seek locked at 100 mm/s, 2000 mm/s².\n"
-                 "With rangelimit 1: speed ≤500 mm/s, accel/decel ≤3000 mm/s².\n"
+                 "With rangelimit 1: speed ≤2000 mm/s, accel/decel ≤3000 mm/s².\n"
                  "accel cmd: accel <a> [d] [theta_a] [theta_d]",
             foreground="#555", font=("Segoe UI", 8),
         ).grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
@@ -1540,6 +1549,13 @@ class LanDebugApp:
         )
         self.btn_ota_flash = ttk.Button(ota, text="Flash .bin", width=12, command=self.cmd_ota_flash)
         self.btn_ota_flash.grid(row=1, column=3, sticky="w", padx=3, pady=(6, 0))
+        self.ota_wireless = tk.BooleanVar(value=False)
+        self.chk_ota_wireless = ttk.Checkbutton(
+            ota,
+            text="Wireless (via supervisor)",
+            variable=self.ota_wireless,
+        )
+        self.chk_ota_wireless.grid(row=1, column=4, columnspan=2, sticky="w", padx=3, pady=(6, 0))
         self.ota_progress = ttk.Progressbar(ota, mode="determinate", maximum=100.0)
         self.ota_progress.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(8, 2))
         ttk.Label(ota, textvariable=self.ota_status, foreground="#1565c0",
@@ -1547,12 +1563,14 @@ class LanDebugApp:
         ttk.Label(
             ota,
             text="Uses the connection-bar Host + Password. Firmware rejects START if ENABLED or BUSY. "
-                 "CLI remains: py tools/eth_ota_flash.py <bin>",
+                 "Wireless relays through the supervisor (PI_PASS). CLI: py tools/ota_flash.py --destination <wt32_IP> [--wireless <Pi IP>] <bin>",
             foreground="#555",
             font=("Segoe UI", 8),
         ).grid(row=4, column=0, columnspan=6, sticky="w", pady=(2, 0))
         ota.columnconfigure(1, weight=1)
-        self._ota_always_on = [ota_entry, btn_browse, ota_port_entry, self.btn_ota_flash]
+        self._ota_always_on = [
+            ota_entry, btn_browse, ota_port_entry, self.btn_ota_flash, self.chk_ota_wireless,
+        ]
         self._refresh_ota_bin_info()
 
         tab.columnconfigure(0, weight=1)
@@ -2486,9 +2504,11 @@ class LanDebugApp:
             messagebox.showerror("Dual-OTA", "OTA port must be an integer (default 8032).")
             return
         size = os.path.getsize(path)
+        wireless = bool(self.ota_wireless.get())
+        via = " through the supervisor" if wireless else ""
         if not self._confirm(
             "Dual-OTA flash",
-            f"Stream {os.path.basename(path)} ({size / 1024:.1f} KB) to {host}:{port}?\n\n"
+            f"Stream {os.path.basename(path)} ({size / 1024:.1f} KB) to {host}:{port}{via}?\n\n"
             "Motors must stay disabled. Firmware rejects START if ENABLED or BUSY.\n"
             "The WT32 will reboot into the other OTA slot; this console TCP session will drop.",
         ):
@@ -2497,27 +2517,27 @@ class LanDebugApp:
         self._ota_busy = True
         self._set_ota_widgets_enabled(False)
         self.ota_progress["value"] = 0.0
-        self.ota_status.set(f"Connecting to {host}:{port}…")
-        self._log("sys", f"=== Dual-OTA start {host}:{port} {path} ({size} bytes) ===")
+        self.ota_status.set(f"Connecting to {host}:{port}{via}…")
+        self._log("sys", f"=== Dual-OTA start {host}:{port}{via} {path} ({size} bytes) ===")
         password = self.pw_var.get()
         threading.Thread(
             target=self._ota_worker,
-            args=(host, port, password, path),
+            args=(host, port, password, path, wireless),
             name="eth-ota",
             daemon=True,
         ).start()
 
-    def _ota_worker(self, host: str, port: int, password: str, path: str) -> None:
-        ok = eth_ota_flash.flash_ota(
-            host,
-            port,
-            password,
-            path,
+    def _ota_worker(self, host: str, port: int, password: str, path: str, wireless: bool) -> None:
+        callbacks = dict(
             log=lambda msg: self.events.put(("ota_log", msg)),
             progress=lambda sent, total, kbps: self.events.put(
                 ("ota_progress", (sent, total, kbps))
             ),
         )
+        if wireless:
+            ok = ota_flash.flash_via_pi(host, port, password, path, **callbacks)
+        else:
+            ok = ota_flash.flash_ota(host, port, password, path, **callbacks)
         self.events.put(("ota_done", "ok" if ok else "fail"))
 
     def _on_ota_progress(self, sent: int, total: int, kbps: float) -> None:

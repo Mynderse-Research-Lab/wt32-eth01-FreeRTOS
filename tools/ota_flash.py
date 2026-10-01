@@ -4,9 +4,13 @@
 Streams a compiled firmware binary (.bin) over the plant Ethernet network to the
 WT32 Gantry Controller's Dual-OTA partition manager.
 
+Default path is a direct TCP connection to the gantry, which requires this PC
+on the cell switch (`10.42.0.0/24`). `--wireless <Pi IP>` relays through that
+supervisor (user `$PI_USER`, password `$PI_PASS`) when the cable is not connected.
+
 Usage:
-  python tools/eth_ota_flash.py idf/build/wt32_eth01_gantry.bin
-  python tools/eth_ota_flash.py --host 192.168.1.100 --port 8032 idf/build/wt32_eth01_gantry.bin
+  python tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin
+  python tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin
 
 Safety Interlock:
   The firmware automatically rejects OTA attempts if the gantry is ENABLED or
@@ -17,13 +21,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import socket
+import subprocess
 import sys
+import tempfile
+import threading
 import time
 from collections.abc import Callable
 
-DEFAULT_HOST = "192.168.1.100"
+DEFAULT_HOST = "10.42.0.100"
 DEFAULT_PORT = 8032
+DEFAULT_PI_HOST = "10.168.40.1"
+DEFAULT_PI_USER = os.environ.get("PI_USER", "robotics")
 DEFAULT_PASSWORD = os.environ.get("GANTRY_TCP_PASSWORD", "LTU_1932")
 CHUNK_SIZE = 4096
 
@@ -56,6 +66,7 @@ def flash_ota(
     *,
     log: LogFn | None = None,
     progress: ProgressFn | None = None,
+    connect_timeout: float = 5.0,
 ) -> bool:
     """Stream a .bin to the Dual-OTA TCP server (LAN8720, default :8032).
 
@@ -86,7 +97,7 @@ def flash_ota(
     emit("============================================================")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(5.0)
+    sock.settimeout(connect_timeout)
 
     try:
         emit(f"Connecting to {host}:{port}...")
@@ -164,15 +175,159 @@ def flash_ota(
             pass
 
 
+def _local_port_is_listening(port: int) -> bool:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError:
+        return True
+    else:
+        return False
+    finally:
+        probe.close()
+
+
+def _write_askpass() -> str:
+    """Helper OpenSSH runs to read PI_PASS. The password stays in the environment."""
+    handle = tempfile.NamedTemporaryFile(
+        suffix=".cmd", delete=False, mode="w", encoding="ascii", newline="\r\n"
+    )
+    exe = sys.executable.replace("%", "%%")
+    handle.write("@echo off\n")
+    handle.write(f"\"{exe}\" -c \"import os; print(os.environ['PI_PASS'])\"\n")
+    handle.close()
+    return handle.name
+
+
+def flash_via_pi(
+    host: str,
+    port: int,
+    password: str,
+    bin_path: str,
+    *,
+    pi_host: str = DEFAULT_PI_HOST,
+    pi_user: str | None = None,
+    pi_password: str | None = None,
+    log: LogFn | None = None,
+    progress: ProgressFn | None = None,
+) -> bool:
+    """SSH to the Pi and stream the image to the gantry on the cell LAN.
+
+    `pi_password` defaults to `$PI_PASS`. It is never placed on the ssh command line.
+    """
+
+    def emit(msg: str, *, error: bool = False) -> None:
+        if log is not None:
+            log(msg)
+        elif error:
+            print(msg, file=sys.stderr)
+        else:
+            print(msg)
+
+    user = pi_user or os.environ.get("PI_USER", DEFAULT_PI_USER)
+    secret = pi_password if pi_password is not None else os.environ.get("PI_PASS", "")
+    if not secret:
+        emit("[ERROR] PI_PASS is not set", error=True)
+        return False
+    if shutil.which("ssh") is None:
+        emit("[ERROR] ssh client not found on PATH", error=True)
+        return False
+
+    local_port = 0
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        local_port = int(reserved.getsockname()[1])
+
+    askpass = _write_askpass()
+    env = os.environ.copy()
+    env["PI_PASS"] = secret
+    env["SSH_ASKPASS"] = askpass
+    env["SSH_ASKPASS_REQUIRE"] = "force"
+    env["DISPLAY"] = "localhost:0"
+    stderr_chunks: list[bytes] = []
+
+    emit(f"Opening SSH forward {user}@{pi_host} -> {host}:{port}")
+    proc = subprocess.Popen(
+        [
+            "ssh",
+            "-N",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            # The Pi offers password only after a public-key attempt fails.
+            "-o", "PreferredAuthentications=publickey,password",
+            "-o", "NumberOfPasswordPrompts=1",
+            "-o", "ConnectTimeout=15",
+            "-L", f"127.0.0.1:{local_port}:{host}:{port}",
+            f"{user}@{pi_host}",
+        ],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+    def _drain() -> None:
+        if proc.stderr is None:
+            return
+        stderr_chunks.append(proc.stderr.read())
+
+    drain = threading.Thread(target=_drain, daemon=True)
+    drain.start()
+
+    try:
+        deadline = time.time() + 20.0
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                drain.join(timeout=2.0)
+                detail = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+                if "Permission denied (password)" in detail:
+                    detail += " PI_PASS was sent and the supervisor rejected it for this user."
+                emit(
+                    "[ERROR] SSH forward to the Pi failed"
+                    + (f": {detail}" if detail else ""),
+                    error=True,
+                )
+                return False
+            if _local_port_is_listening(local_port):
+                break
+            time.sleep(0.1)
+        else:
+            emit("[ERROR] SSH forward did not start listening", error=True)
+            return False
+
+        return flash_ota(
+            "127.0.0.1",
+            local_port,
+            password,
+            bin_path,
+            log=log,
+            progress=progress,
+            connect_timeout=20.0,
+        )
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        drain.join(timeout=2.0)
+        try:
+            os.unlink(askpass)
+        except OSError:
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Stream firmware updates to WT32-ETH01 over LAN8720 Ethernet."
     )
     parser.add_argument("bin", help="Path to compiled firmware .bin file")
     parser.add_argument(
-        "--host",
+        "--destination",
+        metavar="WT32_IP",
         default=DEFAULT_HOST,
-        help=f"Target IP address (default: {DEFAULT_HOST})",
+        help=f"Gantry plant IP (default: {DEFAULT_HOST})",
     )
     parser.add_argument(
         "--port",
@@ -183,11 +338,32 @@ def main():
     parser.add_argument(
         "--password",
         default=DEFAULT_PASSWORD,
-        help="Authentication password (default: LTU_1932 or $GANTRY_TCP_PASSWORD)",
+        help="Gantry OTA password (default: LTU_1932 or $GANTRY_TCP_PASSWORD)",
+    )
+    parser.add_argument(
+        "--wireless",
+        metavar="PI_IP",
+        help="Flash through the supervisor at PI_IP when this PC is not on the cell switch "
+        "(SSH user $PI_USER or robotics, password from PI_PASS)",
+    )
+    parser.add_argument(
+        "--pi-user",
+        default=DEFAULT_PI_USER,
+        help="Supervisor SSH user for --wireless (default: $PI_USER or robotics)",
     )
 
     args = parser.parse_args()
-    success = flash_ota(args.host, args.port, args.password, args.bin)
+    if args.wireless:
+        success = flash_via_pi(
+            args.destination,
+            args.port,
+            args.password,
+            args.bin,
+            pi_host=args.wireless,
+            pi_user=args.pi_user,
+        )
+    else:
+        success = flash_ota(args.destination, args.port, args.password, args.bin)
     sys.exit(0 if success else 1)
 
 
