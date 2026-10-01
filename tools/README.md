@@ -36,4 +36,5 @@ py -3 tools/hcs01_eng.py c0500
 py -3 -m pip install scapy
 py -3 tools/switch_traffic_logger.py --list-ifaces
 py -3 tools/switch_traffic_logger.py --iface "<your-nic>" --bpf "ether proto 0x88b5"
+py -3 tools/switch_traffic_logger.py --iface "<your-nic>" --conveyor-only --log logs/conveyor_packets.txt --pcap logs/conveyor_packets.pcap
 ```

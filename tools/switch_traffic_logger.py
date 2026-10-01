@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import struct
 import sys
 from pathlib import Path
 from typing import TextIO
@@ -26,6 +27,8 @@ except Exception as exc:  # pragma: no cover - import guard for missing deps
 
 
 CELLNET_ETHERTYPE = 0x88B5
+CELLNET_MSG_CONVEYOR_SPEED = 0x02
+CELLNET_SENDER_CONVEYOR = 0x02
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +41,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--count", type=int, default=0, help="Stop after N packets (0 = infinite)")
     p.add_argument("--pcap", default="", help="Optional pcap output path")
     p.add_argument("--log", default="", help="Optional text log output path")
+    p.add_argument(
+        "--conveyor-only",
+        action="store_true",
+        help="Only log CellNet conveyor-speed packets (msg=0x02)",
+    )
+    p.add_argument(
+        "--conveyor-sender-id",
+        type=lambda x: int(x, 0),
+        default=CELLNET_SENDER_CONVEYOR,
+        help="Expected sender_id for --conveyor-only (default 0x02)",
+    )
     p.add_argument("--hex", action="store_true", help="Print packet bytes as hex")
     p.add_argument("--hex-bytes", type=int, default=96, help="Max bytes shown when --hex is set")
     p.add_argument(
@@ -57,11 +71,21 @@ def to_hex(data: bytes, width: int = 16) -> str:
 
 
 class TrafficLogger:
-    def __init__(self, text_log: TextIO | None, pcap: PcapWriter | None, dump_hex: bool, hex_bytes: int):
+    def __init__(
+        self,
+        text_log: TextIO | None,
+        pcap: PcapWriter | None,
+        dump_hex: bool,
+        hex_bytes: int,
+        conveyor_only: bool,
+        conveyor_sender_id: int,
+    ):
         self.text_log = text_log
         self.pcap = pcap
         self.dump_hex = dump_hex
         self.hex_bytes = max(1, hex_bytes)
+        self.conveyor_only = conveyor_only
+        self.conveyor_sender_id = conveyor_sender_id & 0xFF
         self.seq = 0
 
     def _write_line(self, line: str) -> None:
@@ -70,28 +94,58 @@ class TrafficLogger:
             self.text_log.write(line + "\n")
             self.text_log.flush()
 
-    def _cellnet_suffix(self, frame: bytes) -> str:
+    def _cellnet_info(self, frame: bytes) -> dict[str, int] | None:
         if len(frame) < 22:
-            return ""
-        version = frame[14]
-        msg_type = frame[15]
-        sender = frame[16]
-        seq = frame[17]
-        ts_low = int.from_bytes(frame[18:22], "little", signed=False)
+            return None
+        return {
+            "version": int(frame[14]),
+            "msg_type": int(frame[15]),
+            "sender": int(frame[16]),
+            "seq": int(frame[17]),
+            "ts_low": int.from_bytes(frame[18:22], "little", signed=False),
+        }
+
+    def _cellnet_suffix(self, info: dict[str, int]) -> str:
         return (
-            f" cellnet[v={version} msg=0x{msg_type:02X} sender=0x{sender:02X} "
-            f"seq={seq} ts={ts_low}]"
+            f" cellnet[v={info['version']} msg=0x{info['msg_type']:02X} "
+            f"sender=0x{info['sender']:02X} seq={info['seq']} ts={info['ts_low']}]"
+        )
+
+    def _conveyor_suffix(self, frame: bytes) -> str:
+        if len(frame) < 34:
+            return " conveyor[short]"
+        speed_mm_s, displacement_m, raw_encoder_cnt = struct.unpack_from("<ffi", frame, 22)
+        return (
+            f" conveyor[speed={speed_mm_s:.2f}mm/s disp={displacement_m:.4f}m "
+            f"enc={raw_encoder_cnt}]"
         )
 
     def on_packet(self, pkt) -> None:  # scapy packet type is dynamic
         if Ether not in pkt:
             return
-        self.seq += 1
         raw_bytes = bytes(pkt)
         eth = pkt[Ether]
         now = dt.datetime.fromtimestamp(float(pkt.time)).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         etype = int(eth.type)
-        suffix = self._cellnet_suffix(raw_bytes) if etype == CELLNET_ETHERTYPE else ""
+
+        cell_info: dict[str, int] | None = None
+        if etype == CELLNET_ETHERTYPE:
+            cell_info = self._cellnet_info(raw_bytes)
+
+        if self.conveyor_only:
+            if cell_info is None:
+                return
+            if cell_info["msg_type"] != CELLNET_MSG_CONVEYOR_SPEED:
+                return
+            if cell_info["sender"] != self.conveyor_sender_id:
+                return
+
+        self.seq += 1
+        suffix = ""
+        if cell_info is not None:
+            suffix = self._cellnet_suffix(cell_info)
+            if cell_info["msg_type"] == CELLNET_MSG_CONVEYOR_SPEED:
+                suffix += self._conveyor_suffix(raw_bytes)
         line = (
             f"{now} #{self.seq:07d} len={len(raw_bytes):4d} "
             f"{eth.src} -> {eth.dst} type=0x{etype:04X}{suffix}"
@@ -132,10 +186,27 @@ def main() -> int:
         pcap_path.parent.mkdir(parents=True, exist_ok=True)
         pcap_writer = PcapWriter(str(pcap_path), append=True, sync=True)
 
-    logger = TrafficLogger(text_log, pcap_writer, args.hex, args.hex_bytes)
+    bpf_filter = args.bpf
+    if args.conveyor_only and not bpf_filter:
+        bpf_filter = "ether proto 0x88b5"
+
+    logger = TrafficLogger(
+        text_log,
+        pcap_writer,
+        args.hex,
+        args.hex_bytes,
+        args.conveyor_only,
+        args.conveyor_sender_id,
+    )
 
     print(f"Capturing on iface: {args.iface}")
-    print(f"BPF filter: {args.bpf or '(none)'}")
+    print(f"BPF filter: {bpf_filter or '(none)'}")
+    if args.conveyor_only:
+        print(
+            "Mode: conveyor-only "
+            f"(CellNet msg=0x{CELLNET_MSG_CONVEYOR_SPEED:02X}, "
+            f"sender=0x{args.conveyor_sender_id & 0xFF:02X})"
+        )
     print("Press Ctrl+C to stop.")
     print(
         "Note: unmanaged switch limits visibility; full port-to-port unicast "
@@ -145,7 +216,7 @@ def main() -> int:
     try:
         sniff(
             iface=args.iface,
-            filter=args.bpf or None,
+            filter=bpf_filter or None,
             prn=logger.on_packet,
             store=False,
             promisc=not args.no_promisc,
