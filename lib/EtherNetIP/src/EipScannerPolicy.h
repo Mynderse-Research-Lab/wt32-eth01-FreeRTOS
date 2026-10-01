@@ -11,7 +11,7 @@ namespace eip {
 
 inline constexpr unsigned kMaxChipRecovers = 3;
 inline constexpr uint32_t kChipRecoverInitialBackoffMs = 1000;
-inline constexpr uint32_t kChipRecoverMaxBackoffMs = 30000;
+inline constexpr uint32_t kChipRecoverMaxBackoffMs = 5000;
 
 enum class ChipRecoverDecision { kAttemptRecover, kRestart };
 
@@ -61,7 +61,7 @@ inline ScannerConfig makeKinetixScannerConfig(const KinetixScannerArgs& a) {
     cfg.to_connection_id = 0x20000000u | static_cast<uint32_t>(a.connection_serial);
     cfg.connection_serial = a.connection_serial;
     cfg.originator_vendor_id = a.originator_vendor_id;
-    cfg.connection_timeout_multiplier = 7;
+    cfg.connection_timeout_multiplier = 0;
     cfg.include_run_idle_header = true;
     cfg.include_run_idle_bit_in_net_params = false;
     cfg.to_connection_type = a.to_point_to_point ? ConnectionType::kPointToPoint
@@ -92,7 +92,7 @@ inline ScannerConfig makeThetaScannerConfig(const ThetaScannerArgs& a = {}) {
     cfg.to_connection_id = 0x20000003;
     cfg.connection_serial = 0x0003;
     cfg.originator_vendor_id = a.originator_vendor_id;
-    cfg.connection_timeout_multiplier = 7;
+    cfg.connection_timeout_multiplier = 0;
     cfg.include_run_idle_header = true;
     cfg.include_run_idle_bit_in_net_params = false;
     cfg.to_connection_type = a.to_point_to_point ? ConnectionType::kPointToPoint

@@ -35,8 +35,8 @@ static const char* TAG = "W5500Sock";
 namespace {
 
 constexpr uint8_t kCommonBlock    = 0x00;
-constexpr uint32_t kDefaultTimeoutMs = 5000;
-constexpr uint32_t kCommandTimeoutMs  = 100;
+constexpr uint32_t kDefaultTimeoutMs = 500;
+constexpr uint32_t kCommandTimeoutMs  = 10;
 constexpr size_t   kUdpHeaderSize     = 8;
 
 static uint16_t g_next_tcp_source_port = 49152;

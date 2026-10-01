@@ -419,13 +419,13 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_GANTRY_CALIBRATION_TIMEOUT_MS)
     data_.gantry_calibration_timeout_ms = CONFIG_GANTRY_CALIBRATION_TIMEOUT_MS;
 #else
-    data_.gantry_calibration_timeout_ms = 30000;
+    data_.gantry_calibration_timeout_ms = 20000;
 #endif
 
 #if defined(CONFIG_GANTRY_TRAVEL_MEASUREMENT_TIMEOUT_MS)
     data_.gantry_travel_measurement_timeout_ms = CONFIG_GANTRY_TRAVEL_MEASUREMENT_TIMEOUT_MS;
 #else
-    data_.gantry_travel_measurement_timeout_ms = 90000;
+    data_.gantry_travel_measurement_timeout_ms = 20000;
 #endif
 
     // 8. Network (LAN8720)
@@ -456,13 +456,13 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_ETH_IP_WAIT_TIMEOUT_MS)
     data_.eth_ip_wait_timeout_ms = CONFIG_ETH_IP_WAIT_TIMEOUT_MS;
 #else
-    data_.eth_ip_wait_timeout_ms = 3000;
+    data_.eth_ip_wait_timeout_ms = 1500;
 #endif
 
     // 9. Display
     data_.display_orientation = 0; // 0 = Landscape (320x240)
     data_.display_brightness = 100; // 100%
-    data_.display_backlight_timeout_s = 30;
+    data_.display_backlight_timeout_s = 10;
 
     // 10. Console Security (Developer)
 #if defined(CONFIG_CONSOLE_TCP_AUTH_ENABLE)
@@ -486,7 +486,7 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_CONSOLE_TCP_AUTH_REMEMBER_S)
     data_.console_tcp_auth_remember_s = CONFIG_CONSOLE_TCP_AUTH_REMEMBER_S;
 #else
-    data_.console_tcp_auth_remember_s = 600;
+    data_.console_tcp_auth_remember_s = 60;
 #endif
 
 #if defined(CONFIG_CONSOLE_TCP_AUTH_REMEMBER_MAX)

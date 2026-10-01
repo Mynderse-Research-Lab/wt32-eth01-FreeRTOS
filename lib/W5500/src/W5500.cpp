@@ -433,7 +433,7 @@ bool W5500::openMacRaw(uint8_t sock) {
     // Issue OPEN command
     writeSocketReg(sock, Sn_CR, Sn_CR_OPEN);
 
-    if (!waitForCommand(sock, 100)) {
+    if (!waitForCommand(sock, 10)) {
         ESP_LOGE(TAG, "MACRAW OPEN command timed out for socket %d", sock);
         return false;
     }
@@ -453,7 +453,7 @@ void W5500::closeSocket(uint8_t sock) {
     if (!initialized_) return;
 
     writeSocketReg(sock, Sn_CR, Sn_CR_CLOSE);
-    waitForCommand(sock, 100);
+    waitForCommand(sock, 10);
 }
 
 // ==========================================================================

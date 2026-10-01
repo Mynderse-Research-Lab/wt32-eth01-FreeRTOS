@@ -39,7 +39,7 @@ struct ScannerConfig {
   uint16_t connection_serial = 0x0001;
   uint16_t originator_vendor_id = 0;
   uint32_t originator_serial = 0xCAFEB00D;
-  uint8_t connection_timeout_multiplier = 4;
+  uint8_t connection_timeout_multiplier = 0;
   bool include_run_idle_header = true;
   /// When true, set bit 8 (Run/Idle header format) in O->T network params.
   /// When false, omit bit 8 even when include_run_idle_header is true

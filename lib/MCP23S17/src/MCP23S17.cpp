@@ -54,7 +54,7 @@ static const char *TAG = "MCP23S17";
 
 #include "Spi3Bus.h"
 
-static constexpr TickType_t kMcpSpiLockTimeoutTicks = pdMS_TO_TICKS(20);
+static constexpr TickType_t kMcpSpiLockTimeoutTicks = pdMS_TO_TICKS(8);
 
 static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (handle == NULL || handle->spi_mutex == NULL) {

@@ -59,7 +59,7 @@ inline Class1OverrunAction class1OverrunAction(uint32_t& streak,
 // Soft-miss policy: allow a few T->O misses while O->T keeps running before
 // tearing down dual Class 1 (avoids cascading E602 on a single dropped UDP).
 inline bool shouldTeardownAfterInputMisses(uint32_t consecutive_misses,
-                                           uint32_t max_misses = 3) {
+                                           uint32_t max_misses = 2) {
   return consecutive_misses >= max_misses;
 }
 

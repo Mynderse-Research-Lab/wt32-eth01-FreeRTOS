@@ -29,9 +29,9 @@ constexpr uint8_t kMovePreloadTicks = 4;     // ~40 ms @ 100 Hz — latch S-0-02
 constexpr uint8_t kMoveReleaseHaltTicks = 10; // ~100 ms wait for AF
 constexpr uint8_t kMoveStartTicks = 4;        // ~40 ms wait for bit10 command ack
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
-constexpr uint16_t kWaitAfTicks = 300;       // 3 s @ 100 Hz
+constexpr uint16_t kWaitAfTicks = 100;       // 1 s @ 100 Hz
 constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at target
-constexpr uint16_t kMoveTimeoutTicks = 6000; // ~60 s @ 100 Hz
+constexpr uint16_t kMoveTimeoutTicks = 1500; // 15 s @ 100 Hz
 // Theta positioning tolerance: 0.01 deg
 constexpr float kArrivalEpsDeg = 0.01f;
 

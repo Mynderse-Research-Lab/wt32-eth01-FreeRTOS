@@ -37,7 +37,7 @@ static constexpr uint32_t kScannerStack = 8192;
 static constexpr uint32_t kKeepaliveStack = 4096;
 static constexpr uint32_t kLinkPollMs = 500;
 static constexpr uint32_t kLinkSettleMs = 300;
-static constexpr uint32_t kReconnectIdleMs = 2500;
+static constexpr uint32_t kReconnectIdleMs = 500;
 static constexpr uint32_t kPostResetSettleMs = 100;
 static constexpr uint32_t kTimingLogEveryN = 200;
 

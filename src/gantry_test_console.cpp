@@ -1542,7 +1542,7 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
       break;
     }
     if ((xTaskGetTickCount() - start) >
-        pdMS_TO_TICKS(Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS * 4)) {
+        pdMS_TO_TICKS(Gantry::Constants::BRINGUP_SEQUENCE_TIMEOUT_MS)) {
       ESP_LOGE(TAG, "ERROR: Bring-up timed out");
       cfg->gantry->requestAbort();
       break;

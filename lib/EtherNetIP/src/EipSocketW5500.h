@@ -29,7 +29,7 @@ private:
     w5500::W5500Hal& hal_;
     int sock_ = -1;       // W5500 socket number (-1 = not open)
     bool connected_ = false;
-    uint32_t defaultTimeoutMs_ = 5000;
+    uint32_t defaultTimeoutMs_ = 500;
 };
 
 class EipSocketW5500Udp : public IUdpEndpoint {

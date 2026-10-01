@@ -177,6 +177,14 @@ Bytes makeHcs01Input102(int32_t position_puu, bool class1_error,
   return frame;
 }
 
+void writeLeI32(Bytes& data, size_t offset, int32_t value) {
+  const uint32_t u = static_cast<uint32_t>(value);
+  data[offset] = static_cast<uint8_t>(u & 0xFF);
+  data[offset + 1] = static_cast<uint8_t>((u >> 8) & 0xFF);
+  data[offset + 2] = static_cast<uint8_t>((u >> 16) & 0xFF);
+  data[offset + 3] = static_cast<uint8_t>((u >> 24) & 0xFF);
+}
+
 int32_t readLeI32(const Bytes& data, size_t offset) {
   return static_cast<int32_t>(
       static_cast<uint32_t>(data[offset]) |
@@ -845,6 +853,133 @@ static void test_stop_motion_stays_busy_while_position_creeps(void) {
 // Bench regression: the drive A603s and ignores the abort if it changes anything
 // beyond the StopMotion bit. The settle image (OM=0 TM=10, zero decel) swapped
 // mode mid-profile and asked for a decel-to-stop with no decel ramp.
+// 1 s stop cap: position still changing and speed still high. Busy must
+// survive the 200 ms stable window and clear on the 100th 100 Hz tick.
+static void test_stop_motion_times_out_while_still_moving(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.moveToMm(400.0f, 80.0f, 2000.0f, 100.0f));
+  pumpAbsoluteToRun(axis, image, 0);
+  TEST_ASSERT_TRUE(axis.stopMotion());
+
+  int32_t puu = 0;
+  for (int i = 0; i < 99; ++i) {
+    Bytes fb = makeK5100Input154(puu, false, false, false);
+    fb[9] |= 0x04 | 0x08 | 0x20;  // active + ready + homed, not stopped
+    writeLeI32(fb, 16, 100);      // 10.0 RPM, above the near-stop gate
+    image.setFeedback(fb);
+    axis.update();
+    TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(),
+                             "StopMotion must stay busy until the 1 s cap");
+    puu += 20;  // 0.02 mm/tick, above the 0.005 mm stable gate
+  }
+  Bytes fb = makeK5100Input154(puu, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  writeLeI32(fb, 16, 100);
+  image.setFeedback(fb);
+  axis.update();
+  TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(),
+                            "100th tick must force hold while still moving");
+}
+
+// Servo-on with Active stuck at 0. The 400 ms settle must expire into hold
+// and must not issue method 34.
+static void test_servo_arm_times_out_when_active_stays_clear(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  Bytes fb = makeK5100Input154(5000, false, false, false);
+  fb[9] |= 0x08;  // ready, Active clear
+  image.setFeedback(fb);
+  TEST_ASSERT_TRUE(axis.enable());
+
+  for (int i = 0; i < 10; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
+  TEST_ASSERT_FALSE_MESSAGE(axis.moveToMm(6.0f, 10.0f, 100.0f, 100.0f),
+                            "move must wait out the servo-arm settle");
+
+  bool saw_home = false;
+  for (int i = 0; i < 50; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+    Bytes cmd;
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    if (cmd[0] == 3) saw_home = true;
+  }
+  TEST_ASSERT_FALSE(saw_home);
+  // Holding copies feedback into the command target. Settle does not.
+  Bytes later = makeK5100Input154(8000, false, false, false);
+  later[9] |= 0x08;
+  image.setFeedback(later);
+  axis.update();
+  TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 8.0f, axis.getTargetMm(),
+                                   "settle cap must leave the axis holding");
+}
+
+// HomedStatus stays 0, so arm issues method 34 and the 0.5 s wait expires
+// without redefining joint zero.
+static void test_home34_times_out_when_homed_stays_clear(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  Bytes fb = makeK5100Input154(5000, false, false, false);
+  fb[9] |= 0x04 | 0x08;  // active + ready, HomedStatus clear
+  image.setFeedback(fb);
+  TEST_ASSERT_TRUE(axis.enable());
+
+  bool saw_method_34 = false;
+  bool left_home = false;
+  for (int i = 0; i < 80; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+    Bytes cmd;
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    if (cmd[0] == 3 && cmd[3] == 34) saw_method_34 = true;
+    if (saw_method_34 && cmd[0] == 0) left_home = true;
+  }
+  TEST_ASSERT_TRUE_MESSAGE(saw_method_34, "unhomed arm must issue method 34");
+  TEST_ASSERT_TRUE_MESSAGE(left_home, "Home34 wait must return to settle");
+  TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 5.0f, axis.getTargetMm(),
+                                   "timeout must not zero the joint");
+}
+
+static void test_move_while_disabled_does_not_arm_motion(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  Bytes fb = makeK5100Input154(0, false, false, false);
+  fb[9] |= 0x04 | 0x08 | 0x20;
+  image.setFeedback(fb);
+  TEST_ASSERT_FALSE(axis.moveToMm(10.0f, 20.0f, 100.0f, 100.0f));
+  TEST_ASSERT_FALSE(axis.isBusy());
+  for (int i = 0; i < 80; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+    Bytes cmd;
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    TEST_ASSERT_NOT_EQUAL(3, cmd[0]);
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+}
+
 static void test_abort_image_differs_from_move_only_by_stop_bit(void) {
   eip::EipProcessImage image;
   image.setOnline(true);
@@ -974,6 +1109,52 @@ static void test_rotary_move_and_feedback(void) {
   }
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, axis.getCurrentDeg());
   TEST_ASSERT_FALSE(axis.isBusy());
+}
+
+// Class 1 stays up, ready never reaches 3. After the 1 s AH cap the hold
+// command stops tracking feedback.
+static void test_theta_ah_times_out_when_ready_stays_below_operation(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 100.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+
+  auto frame = [](int32_t puu) {
+    eip::hcs01::Hcs01StatusWord st;
+    st.ready = eip::hcs01::ReadyForOperation::kReadyAb;
+    st.operating_mode_ack = eip::hcs01::OperatingModeAck::kOperatingMode;
+    eip::hcs01::Hcs01PositioningActual actual;
+    actual.status = st;
+    actual.position_feedback = puu;
+    Bytes out;
+    eip::ByteWriter w(out);
+    w.u16(actual.status.encode());
+    w.i32(actual.position_feedback);
+    w.i32(0);
+    w.u32(0);
+    return out;
+  };
+
+  image.setFeedback(frame(1000));
+  TEST_ASSERT_TRUE(axis.enable());
+  for (int i = 0; i < 160; ++i) {
+    image.setFeedback(frame(1000));
+    axis.update();
+  }
+  Bytes held;
+  TEST_ASSERT_TRUE(image.getCommand(held));
+  TEST_ASSERT_EQUAL_INT32(1000, readLeI32(held, 2));
+
+  for (int i = 0; i < 5; ++i) {
+    image.setFeedback(frame(8000));
+    axis.update();
+  }
+  Bytes after;
+  TEST_ASSERT_TRUE(image.getCommand(after));
+  TEST_ASSERT_EQUAL_INT32_MESSAGE(1000, readLeI32(after, 2),
+                                  "AH cap must stop tracking feedback");
 }
 
 static void test_rotary_offline_aborts_move(void) {
@@ -1278,10 +1459,15 @@ int main(void) {
   RUN_TEST(test_linear_absolute_aborts_busy_on_a015);
   RUN_TEST(test_stop_motion_clears_busy_when_position_stable);
   RUN_TEST(test_stop_motion_stays_busy_while_position_creeps);
+  RUN_TEST(test_stop_motion_times_out_while_still_moving);
+  RUN_TEST(test_servo_arm_times_out_when_active_stays_clear);
+  RUN_TEST(test_home34_times_out_when_homed_stays_clear);
+  RUN_TEST(test_move_while_disabled_does_not_arm_motion);
   RUN_TEST(test_abort_image_differs_from_move_only_by_stop_bit);
   RUN_TEST(test_rotary_enable_holds_feedback_and_keeps_halt);
   RUN_TEST(test_rotary_arst_while_disabled_stays_drive_off);
   RUN_TEST(test_rotary_move_and_feedback);
+  RUN_TEST(test_theta_ah_times_out_when_ready_stays_below_operation);
   RUN_TEST(test_rotary_offline_aborts_move);
   RUN_TEST(test_rotary_consecutive_move_ignores_stale_in_pos);
   RUN_TEST(test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel);

@@ -49,7 +49,7 @@ public:
 
     // Execute a SERCOS procedure command (e.g., P-0-0162 for C1800).
     // Polls .8 status until completion or timeout.
-    bool runCommand(const char* idn, uint32_t timeout_ms = 30000);
+    bool runCommand(const char* idn, uint32_t timeout_ms = 10000);
 
     // Full autotune sequence: configure, C1800, read results, C2200 backup.
     TuningResult runAutotune(float damping = 1.0f, float travel_deg = 45.0f, bool save_nv = true);

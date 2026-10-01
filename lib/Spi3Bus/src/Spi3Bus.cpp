@@ -33,19 +33,19 @@ esp_err_t withLocked(const std::function<esp_err_t()>& fn) {
     if (!g_ready || g_mutex == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (waitClass1Clear(pdMS_TO_TICKS(20)) != ESP_OK) {
+    if (waitClass1Clear(pdMS_TO_TICKS(8)) != ESP_OK) {
         return ESP_ERR_TIMEOUT;
     }
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
         ESP_LOGE(TAG, "SPI3 mutex timeout");
         return ESP_ERR_TIMEOUT;
     }
     if (g_class1.active()) {
         xSemaphoreGive(g_mutex);
-        if (waitClass1Clear(pdMS_TO_TICKS(20)) != ESP_OK) {
+        if (waitClass1Clear(pdMS_TO_TICKS(8)) != ESP_OK) {
             return ESP_ERR_TIMEOUT;
         }
-        if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
             return ESP_ERR_TIMEOUT;
         }
     }

@@ -23,7 +23,7 @@ class EipSession {
 
   bool registerSession();
   bool sendExplicit(const Bytes& cip_request, Bytes& out_cip_response,
-                    uint16_t timeout_ms = 5000);
+                    uint16_t timeout_ms = 500);
   bool unregisterSession();
 
   uint32_t sessionHandle() const { return session_handle_; }

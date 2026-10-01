@@ -277,7 +277,7 @@ static void otaServerTask(void *param) {
              inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
     char line[128] = {};
-    if (!readLine(client_fd, line, sizeof(line), 5000)) {
+    if (!readLine(client_fd, line, sizeof(line), 1000)) {
       sendStr(client_fd, "ERR TIMEOUT\n");
       close(client_fd);
       continue;
@@ -294,7 +294,7 @@ static void otaServerTask(void *param) {
     sendStr(client_fd, "OK AUTH\n");
 
     // Step 2: Receive START command
-    if (!readLine(client_fd, line, sizeof(line), 5000)) {
+    if (!readLine(client_fd, line, sizeof(line), 1000)) {
       sendStr(client_fd, "ERR TIMEOUT\n");
       close(client_fd);
       continue;
@@ -328,9 +328,9 @@ static void otaServerTask(void *param) {
     static uint8_t chunk_buf[4096];
     bool stream_failed = false;
 
-    // Set receive timeout to 10 seconds for chunk transfer
+    // Silence longer than 2 s means the sender stalled.
     struct timeval tv {};
-    tv.tv_sec = 10;
+    tv.tv_sec = 2;
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     while (received_bytes < image_size) {

@@ -27,8 +27,10 @@ namespace Constants {
     constexpr uint32_t DEFAULT_SPEED_MM_PER_S = GANTRY_DEFAULT_SPEED_MM_PER_S;
     constexpr uint32_t DEFAULT_SPEED_DEG_PER_S = GANTRY_DEFAULT_SPEED_DEG_PER_S;
     constexpr uint32_t GRIPPER_ACTUATE_TIME_MS = GANTRY_GRIPPER_OPEN_TIME_MS;
-    constexpr uint32_t CALIBRATION_TIMEOUT_MS = 30000;
-    constexpr uint32_t TRAVEL_MEASUREMENT_TIMEOUT_MS = 90000;
+    constexpr uint32_t CALIBRATION_TIMEOUT_MS = 20000;
+    constexpr uint32_t TRAVEL_MEASUREMENT_TIMEOUT_MS = 20000;
+    // Whole EIP bring-up (several 20 s phases plus theta at 15 deg/s).
+    constexpr uint32_t BRINGUP_SEQUENCE_TIMEOUT_MS = 120000;
     // Home / calibrate / bring-up seek, park, and SAFE_Z return. Independent
     // of console speed/accel. Creep toward switch-clear stays slower.
     constexpr float EIP_HOME_CAL_SPEED_MM_S = 50.0f;

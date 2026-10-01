@@ -189,7 +189,7 @@ private:
     bool configureAfterReset();
 
     // Wait for a socket command to complete (Sn_CR clears to 0).
-    bool waitForCommand(uint8_t sock, uint32_t timeoutMs = 100);
+    bool waitForCommand(uint8_t sock, uint32_t timeoutMs = 10);
 
     // Raw SPI transfer
     void spiTransfer(const uint8_t* txData, uint8_t* rxData, size_t len);

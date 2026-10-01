@@ -346,10 +346,10 @@ menu "Gantry kinematics"
             default 1.0
         config GANTRY_CALIBRATION_TIMEOUT_MS
             int "Calibration timeout (ms)"
-            default 30000
+            default 20000
         config GANTRY_TRAVEL_MEASUREMENT_TIMEOUT_MS
             int "Travel measurement timeout (ms)"
-            default 90000
+            default 20000
     endmenu
 
 endmenu
@@ -380,7 +380,7 @@ menu "LAN8720 plant Ethernet"
 
     config ETH_IP_WAIT_TIMEOUT_MS
         int "Wait for LAN8720 PHY+IP (ms)"
-        default 3000
+        default 1500
         range 100 60000
         help
             How long Bridge / net-console bring-up waits for link+IP.
@@ -434,7 +434,7 @@ menu "TCP gantry console (LAN8720)"
 
     config CONSOLE_TCP_AUTH_REMEMBER_S
         int "Remember authenticated peer IP (seconds)"
-        default 600
+        default 60
         range 0 86400
         depends on CONSOLE_TCP_AUTH_ENABLE
         help

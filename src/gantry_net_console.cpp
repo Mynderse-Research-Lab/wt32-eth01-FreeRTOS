@@ -59,11 +59,28 @@ bool passwordsEqual(const char *attempt, const char *expected) {
   return diff == 0;
 }
 
-/** Read one line (ends on \\n/\\r/;). Returns false on disconnect/error. */
-bool recvLine(int fd, char *out, size_t cap) {
+/** Read one line (ends on \\n/\\r/;). timeout_ms > 0 stops the wait. */
+bool recvLine(int fd, char *out, size_t cap, int timeout_ms = 0) {
   size_t len = 0;
   char chunk[64];
+  const int64_t deadline_us =
+      timeout_ms > 0 ? esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000 : 0;
   while (true) {
+    if (timeout_ms > 0) {
+      const int64_t left_us = deadline_us - esp_timer_get_time();
+      if (left_us <= 0) {
+        return false;
+      }
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      FD_SET(fd, &rfds);
+      timeval tv{};
+      tv.tv_sec = static_cast<long>(left_us / 1000000);
+      tv.tv_usec = static_cast<long>(left_us % 1000000);
+      if (select(fd + 1, &rfds, nullptr, nullptr, &tv) <= 0) {
+        return false;
+      }
+    }
     const int n = recv(fd, chunk, sizeof(chunk), 0);
     if (n <= 0) {
       return false;
@@ -157,8 +174,8 @@ bool authenticateClient(int fd, uint32_t peer_addr_nbo) {
 
   for (int try_i = 1; try_i <= CONSOLE_TCP_AUTH_MAX_TRIES; ++try_i) {
     char attempt[kLineCap];
-    if (!recvLine(fd, attempt, sizeof(attempt))) {
-      ESP_LOGW(TAG, "Auth: client disconnected");
+    if (!recvLine(fd, attempt, sizeof(attempt), 15000)) {
+      ESP_LOGW(TAG, "Auth: no password within 15 s");
       return false;
     }
     if (passwordsEqual(attempt, CONSOLE_TCP_PASSWORD)) {

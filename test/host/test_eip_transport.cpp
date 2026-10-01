@@ -641,9 +641,9 @@ static void test_class1_rpi_remainder_and_miss_policy(void) {
   }
 
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(0));
-  TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(2));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(1));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(2));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(3));
-  TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(4));
 
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(0, 2000));
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(1999, 2000));

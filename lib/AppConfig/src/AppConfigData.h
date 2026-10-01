@@ -84,26 +84,26 @@ struct AppConfigData {
     float eip_home_theta_speed_deg_s = 15.0f;
     float eip_home_cal_accel_mm_s2 = 2000.0f;
     float eip_creep_speed_mm_s = 1.0f;
-    int32_t gantry_calibration_timeout_ms = 30000;
-    int32_t gantry_travel_measurement_timeout_ms = 90000;
+    int32_t gantry_calibration_timeout_ms = 20000;
+    int32_t gantry_travel_measurement_timeout_ms = 20000;
 
     // 8. Network (LAN8720)
     bool eth_use_static_ip = true;
     char eth_static_ip[32] = "192.168.1.100";
     char eth_static_gateway[32] = "192.168.1.5";
     char eth_static_netmask[32] = "255.255.255.0";
-    int32_t eth_ip_wait_timeout_ms = 3000;
+    int32_t eth_ip_wait_timeout_ms = 1500;
 
     // 9. Display
     int32_t display_orientation = 0; // 0 = Landscape, 1 = Portrait
     int32_t display_brightness = 100; // 0..100 % (PWM brightness)
-    int32_t display_backlight_timeout_s = 30;
+    int32_t display_backlight_timeout_s = 10;
 
     // 10. Console Security (Developer)
     bool console_tcp_auth_enable = true;
     char console_tcp_password[32] = "LTU_1932";
     int32_t console_tcp_auth_max_tries = 3;
-    int32_t console_tcp_auth_remember_s = 600;
+    int32_t console_tcp_auth_remember_s = 60;
     int32_t console_tcp_auth_remember_max = 4;
 
     // 11. Console Options (Developer)
