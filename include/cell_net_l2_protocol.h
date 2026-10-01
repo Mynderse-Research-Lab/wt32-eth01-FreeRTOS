@@ -71,12 +71,23 @@ struct L2CellHeader {
  */
 struct L2VisionDetectPayload {
   uint32_t item_id;
-  float x_across_mm;       // Battery centroid across belt (linear X)
-  float y_bat_mm;          // Battery centroid along belt (at capture instant)
-  float theta_deg;         // Battery orientation angle (-180..+180 deg)
-  uint8_t battery_class;   // 1=18650, 2=21700, 3=Prismatic, 4=Pouch
-  uint8_t reserved[3];
+  float x_across_mm;       // Centroid across belt (linear X)
+  float y_bat_mm;          // Along belt at capture, relative to camera center (world Y = cv_cam_y_mm + y_bat_mm)
+  float theta_deg;         // Long axis: 0° along +Y, + about +Z toward −X (-180..+180; folded to ±90)
+  uint8_t battery_class;   // 1=18650, 2=21700, 3=Prismatic, 4=Pouch (label; does not override size)
+  uint8_t reserved[3];     // reserved[0] bit0: capture_displacement_m is valid
+  float capture_displacement_m;  // Conveyor displacement at exposure, metres. 0 if the flag is clear.
+  float width_mm;             // 24 Jaws close across this (perpendicular to the long axis). 0 = not sent.
+  float length_mm;            // 28 In-plane long-axis size. 0 = not sent. Not the vertical size.
+  float height_from_belt_mm;  // 32 Belt surface up to the object top. Grasp at half. 0 = not sent.
 };
+
+// Payload is 36 bytes (offsets 0..35). The frame is 58 bytes, so a 60-byte
+// padded frame still parses (two trailing pad bytes). A zero width, length, or
+// height_from_belt means that field was not sent and the class size is used.
+// Width must be in (0, 80] mm when sent; 80 mm is the open end-effector width.
+constexpr uint8_t kVisionCaptureDispValid = 0x01;
+constexpr float kVisionMaxWidthMm = 80.0f;
 
 /**
  * @brief Payload for Message Type 0x02: Conveyor Telemetry.

@@ -88,16 +88,16 @@ bool CellNetL2Framing::parseFrame(const uint8_t* buffer, size_t length,
     return false;
   }
 
-  // 4. Verify Exact Message Length
+  // 4. Verify Message Length (Ethernet minimum-size padding may follow the payload)
   const auto msg_type = static_cast<CellMsgType>(out.cell.msg_type);
   const size_t expected_len = expectedFrameLength(msg_type);
-  if (expected_len == 0 || length != expected_len) {
+  if (expected_len == 0 || length < expected_len || length > kMaxPaddedRxLen) {
     return false;
   }
 
   // 5. Extract Payload
   const uint8_t* payload_ptr = buffer + kMinHdrLen;
-  const size_t payload_len = length - kMinHdrLen;
+  const size_t payload_len = expected_len - kMinHdrLen;
 
   switch (msg_type) {
     case CellMsgType::HEARTBEAT:

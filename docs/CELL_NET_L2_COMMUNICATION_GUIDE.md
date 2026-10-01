@@ -109,17 +109,34 @@ struct L2HeartbeatPayload {
 };
 ```
 
-#### 2. Vision Detection (`MsgType::VISION_DETECT = 0x01`, Total Size: 38 Bytes)
+#### 2. Vision Detection (`MsgType::VISION_DETECT = 0x01`, frame 58 bytes, payload 36)
 ```cpp
 struct L2VisionDetectPayload {
-  uint32_t item_id;       // Unique tracking identifier
-  float x_across_mm;      // Battery centroid across belt (linear X)
-  float y_bat_mm;         // Battery centroid along belt at capture instant
-  float theta_deg;        // Battery orientation angle (-180..+180 deg)
-  uint8_t battery_class;  // 1=18650, 2=21700, 3=Prismatic, 4=Pouch
-  uint8_t reserved[3];
+  uint32_t item_id;              // 0
+  float x_across_mm;             // 4  centroid across the belt
+  float y_bat_mm;                // 8  camera-relative, +Y downstream
+  float theta_deg;               // 12 long axis: 0° along +Y, + toward −X
+  uint8_t battery_class;         // 16 label only; does not override size
+  uint8_t reserved[3];           // 17 bit0: capture_displacement_m is valid
+  float capture_displacement_m;  // 20 metres; ignored unless the flag is set
+  float width_mm;                // 24 jaws close across this; 0 = not sent
+  float length_mm;               // 28 in-plane long axis; 0 = not sent
+  float height_from_belt_mm;     // 32 belt surface to the top; grasp at half; 0 = not sent
 };
 ```
+
+`y_bat_mm` is measured from the camera center at the capture instant; the gantry adds
+`cv_cam_y_mm` to get world Y (+Y downstream). `theta_deg` is the cell long axis: 0° is
+parallel to +Y and positive rotation about +Z runs from +Y toward −X. The gantry folds it
+to ±90° and grips the width faces (jaw perpendicular to the long axis). `length_mm` is that
+long-axis size in the belt plane. `width_mm` must be in (0, 80] when sent; 80 mm is the
+open end-effector. The grasp joint Z is the belt surface (`col_z_min_mm`, 115) minus
+`height_from_belt_mm / 2`. A zero width, length, or height-from-belt means that field was
+not sent. The frame is 58 bytes, so a 60-byte padded frame still parses and the class size
+fills any field left at zero. The gantry takes
+the receipt time minus `cv_vis_ms` as the capture time, anchored to the belt clock with the
+min-delay `offset_us`. Detections are handed to the pick task through a queue, so the
+Ethernet receive task never runs the planner.
 
 #### 3. Conveyor Telemetry (`MsgType::CONVEYOR_SPEED = 0x02`, Total Size: 34 Bytes)
 ```cpp
@@ -511,7 +528,7 @@ class CellNetL2Node {
 
   // Senders (Returns true on successful MAC/PHY transmission)
   bool sendHeartbeat(uint32_t uptime_ms, uint16_t status_flags = 0, const uint8_t dest_mac[6] = nullptr);
-  bool sendVisionDetect(uint32_t item_id, float x_across_mm, float y_bat_mm, float theta_deg, uint8_t battery_class, const uint8_t dest_mac[6] = nullptr);
+  bool sendVisionDetect(uint32_t item_id, float x_across_mm, float y_bat_mm, float theta_deg, uint8_t battery_class, float capture_displacement_m = 0, bool capture_disp_valid = false, float width_mm = 0, float length_mm = 0, float height_from_belt_mm = 0, const uint8_t dest_mac[6] = nullptr);
   bool sendConveyorSpeed(float speed_mm_s, float displacement_m, int32_t raw_encoder_cnt, const uint8_t dest_mac[6] = nullptr);
   bool sendGantryStatus(uint8_t motion_state, uint8_t active_slot, float x_pos_mm, float z_pos_mm, float theta_deg, float last_cycle_time_ms, uint16_t fault_flags = 0, const uint8_t dest_mac[6] = nullptr);
   bool sendCellCommand(uint8_t command_id, uint8_t param_u8 = 0, uint16_t param_u16 = 0, float param_float = 0.0f, const uint8_t dest_mac[6] = nullptr);

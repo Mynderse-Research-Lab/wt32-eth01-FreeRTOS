@@ -18,6 +18,7 @@
 #include <net/if.h>
 #include <netinet/ether.h>
 #include <netpacket/packet.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -131,8 +132,21 @@ class LinuxRawSocketL2Transport : public IL2Transport {
   void rxWorker() {
     uint8_t buf[2048];
     while (running_) {
+      // AF_PACKET recvfrom is not woken by close() from the other thread.
+      // A short poll lets shutdown observe running_ and join the worker.
+      pollfd pfd{};
+      pfd.fd = sock_fd_;
+      pfd.events = POLLIN;
+      const int ready = poll(&pfd, 1, 200);
+      if (!running_) {
+        break;
+      }
+      if (ready <= 0 || (pfd.revents & POLLIN) == 0) {
+        continue;
+      }
+      // Non-blocking: close() from the destructor must not leave this thread in recvfrom.
       const ssize_t bytes =
-          recvfrom(sock_fd_, buf, sizeof(buf), 0, nullptr, nullptr);
+          recvfrom(sock_fd_, buf, sizeof(buf), MSG_DONTWAIT, nullptr, nullptr);
       if (bytes > 0 && rx_callback_) {
         rx_callback_(buf, static_cast<size_t>(bytes));
       }

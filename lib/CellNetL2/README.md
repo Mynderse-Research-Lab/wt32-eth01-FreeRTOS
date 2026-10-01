@@ -63,7 +63,7 @@ All frames use the standard 14-byte IEEE 802.3 header, followed by the 8-byte Ce
 | Msg Type | ID | Direction | Frame Size | Primary Payload Fields |
 | :--- | :--- | :--- | :--- | :--- |
 | **`HEARTBEAT`** | `0x00` | Any $\rightarrow$ Broadcast | 30 Bytes | `uptime_ms`, `status_flags` |
-| **`VISION_DETECT`** | `0x01` | Vision $\rightarrow$ Gantry / Supervisor | 38 Bytes | `item_id`, `x_across_mm`, `y_bat_mm`, `theta_deg`, `battery_class` |
+| **`VISION_DETECT`** | `0x01` | Vision $\rightarrow$ Gantry / Supervisor | 58 Bytes | `item_id`, `x_across_mm`, `y_bat_mm`, `theta_deg`, `battery_class`, `width_mm`, `length_mm`, `height_from_belt_mm` |
 | **`CONVEYOR_SPEED`** | `0x02` | Conveyor $\rightarrow$ Gantry / Supervisor | 34 Bytes | `speed_mm_s`, `displacement_m`, `raw_encoder_cnt` |
 | **`GANTRY_STATUS`** | `0x03` | Gantry $\rightarrow$ Supervisor | 40 Bytes | `motion_state`, `active_slot`, `x_pos_mm`, `z_pos_mm`, `theta_deg`, `cycle_ms`, `fault_flags` |
 | **`CELL_COMMAND`** | `0x04` | Supervisor $\rightarrow$ Gantry / Conveyor | 30 Bytes | `command_id` (Start/Stop/Park), `param_u8`, `param_u16`, `param_float` |

@@ -107,6 +107,9 @@ static void test_framing_vision_detect_roundtrip(void) {
   payload.y_bat_mm = 12.25f;
   payload.theta_deg = -45.0f;
   payload.battery_class = 2;
+  payload.width_mm = 18.3f;
+  payload.length_mm = 65.0f;
+  payload.height_from_belt_mm = 40.0f;
 
   const auto bytes = CellNet::CellNetL2Framing::buildVisionDetectFrame(
       src_mac, CellNodeId::VISION, 101, 555123, payload);
@@ -130,6 +133,37 @@ static void test_framing_vision_detect_roundtrip(void) {
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, -45.0f,
                            parsed.payload.vision_detect.theta_deg);
   TEST_ASSERT_EQUAL_UINT8(2, parsed.payload.vision_detect.battery_class);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 18.3f, parsed.payload.vision_detect.width_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 65.0f, parsed.payload.vision_detect.length_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 40.0f, parsed.payload.vision_detect.height_from_belt_mm);
+  TEST_ASSERT_EQUAL_UINT8(0, parsed.payload.vision_detect.reserved[0]);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f,
+                           parsed.payload.vision_detect.capture_displacement_m);
+}
+
+static void test_framing_old_padded_vision_frame_ignores_capture(void) {
+  // Pre-extension payload is 20 bytes. A 60-byte padded frame still parses;
+  // reserved[0] is clear, so the trailing float is not a capture displacement.
+  std::vector<uint8_t> frame(60, 0);
+  frame[12] = 0x88;
+  frame[13] = 0xB5;
+  frame[14] = CELL_NET_L2_VERSION;
+  frame[15] = static_cast<uint8_t>(CellMsgType::VISION_DETECT);
+  frame[16] = static_cast<uint8_t>(CellNodeId::VISION);
+  const uint32_t item = 42;
+  std::memcpy(frame.data() + 22, &item, sizeof(item));
+
+  CellNet::ParsedFrame parsed{};
+  TEST_ASSERT_TRUE(CellNet::CellNetL2Framing::parseFrame(frame.data(), frame.size(), parsed));
+  TEST_ASSERT_EQUAL_UINT32(42, parsed.payload.vision_detect.item_id);
+  TEST_ASSERT_EQUAL_UINT8(0, parsed.payload.vision_detect.reserved[0] & kVisionCaptureDispValid);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, parsed.payload.vision_detect.capture_displacement_m);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, parsed.payload.vision_detect.width_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, parsed.payload.vision_detect.length_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, parsed.payload.vision_detect.height_from_belt_mm);
+  TEST_ASSERT_TRUE(sizeof(L2VisionDetectFrame) <= 60);
+
+  TEST_ASSERT_FALSE(CellNet::CellNetL2Framing::parseFrame(frame.data(), 42, parsed));
 }
 
 static void test_framing_conveyor_speed_roundtrip(void) {
@@ -262,6 +296,28 @@ static void test_framing_reject_truncated_frames(void) {
   TEST_ASSERT_FALSE(ok);
 }
 
+static void test_framing_cell_command_accepts_ethernet_padding(void) {
+  const uint8_t src_mac[6] = {0x04, 0x00, 0x00, 0x00, 0x00, 0x04};
+  L2CellCommandPayload payload{};
+  payload.command_id = 3;
+  auto bytes = CellNet::CellNetL2Framing::buildCellCommandFrame(
+      src_mac, CellNodeId::SUPERVISOR, 7, 1000, payload);
+
+  CellNet::ParsedFrame exact{};
+  TEST_ASSERT_TRUE(CellNet::CellNetL2Framing::parseFrame(bytes.data(), bytes.size(), exact));
+  TEST_ASSERT_EQUAL_UINT8(3, exact.payload.cell_command.command_id);
+
+  bytes.resize(CellNet::CellNetL2Framing::kMinEthFrameLen, 0);
+  CellNet::ParsedFrame padded{};
+  TEST_ASSERT_TRUE(CellNet::CellNetL2Framing::parseFrame(bytes.data(), bytes.size(), padded));
+  TEST_ASSERT_EQUAL_UINT8(exact.payload.cell_command.command_id,
+                          padded.payload.cell_command.command_id);
+
+  bytes.resize(CellNet::CellNetL2Framing::kMaxPaddedRxLen + 1, 0);
+  CellNet::ParsedFrame oversized{};
+  TEST_ASSERT_FALSE(CellNet::CellNetL2Framing::parseFrame(bytes.data(), bytes.size(), oversized));
+}
+
 static void test_node_rx_dispatch_callbacks(void) {
   FakeL2Transport transport;
   CellNet::CellNetL2Node node(transport, CellNodeId::GANTRY);
@@ -367,6 +423,9 @@ static void test_node_tx_methods(void) {
   const auto stats = node.getStats();
   TEST_ASSERT_EQUAL_UINT32(5, stats.tx_frames);
   TEST_ASSERT_EQUAL_UINT32(5, transport.sent_frames.size());
+  for (const auto& frame : transport.sent_frames) {
+    TEST_ASSERT_EQUAL_UINT32(CellNet::CellNetL2Framing::kMinEthFrameLen, frame.size());
+  }
 }
 
 int main(void) {
@@ -374,12 +433,14 @@ int main(void) {
   RUN_TEST(test_framing_expected_lengths);
   RUN_TEST(test_framing_heartbeat_roundtrip);
   RUN_TEST(test_framing_vision_detect_roundtrip);
+  RUN_TEST(test_framing_old_padded_vision_frame_ignores_capture);
   RUN_TEST(test_framing_conveyor_speed_roundtrip);
   RUN_TEST(test_framing_gantry_status_roundtrip);
   RUN_TEST(test_framing_cell_command_roundtrip);
   RUN_TEST(test_framing_reject_invalid_ethertype);
   RUN_TEST(test_framing_reject_invalid_version);
   RUN_TEST(test_framing_reject_truncated_frames);
+  RUN_TEST(test_framing_cell_command_accepts_ethernet_padding);
   RUN_TEST(test_node_rx_dispatch_callbacks);
   RUN_TEST(test_node_sequence_loss_detection);
   RUN_TEST(test_node_tx_methods);

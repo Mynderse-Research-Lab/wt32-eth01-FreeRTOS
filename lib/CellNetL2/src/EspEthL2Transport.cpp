@@ -10,6 +10,7 @@
 
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "hal/emac_ll.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -67,7 +68,10 @@ esp_err_t EspEthL2Transport::attachEthHandle(esp_eth_handle_t eth_handle, esp_ne
       return err;
     }
     hooked_ = true;
-    ESP_LOGI(TAG, "Attached Layer-2 RX filter hook (EtherType 0x%04X)",
+    // CellNet peers may send frames under the 64-byte Ethernet minimum; the stock
+    // driver configures the EMAC DMA to drop them before the RX hook sees them.
+    emac_ll_forward_undersized_good_frame_enable(&EMAC_DMA, true);
+    ESP_LOGI(TAG, "Attached Layer-2 RX filter hook (EtherType 0x%04X), undersized RX forward on",
              CELL_NET_L2_ETHERTYPE);
   }
 

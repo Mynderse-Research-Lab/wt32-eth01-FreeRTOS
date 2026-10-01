@@ -35,6 +35,11 @@ struct ParsedFrame {
 
 class CellNetL2Framing {
  public:
+  /// Minimum Ethernet frame length on the wire, excluding the 4-byte FCS.
+  static constexpr size_t kMinEthFrameLen = 60;
+  /// Largest accepted receive length: a minimum frame with the FCS still attached.
+  static constexpr size_t kMaxPaddedRxLen = 64;
+
   /**
    * @brief Retrieve expected total frame length (Ethernet + Cell + Payload) for a message type.
    * @param type Message type enum.
@@ -47,7 +52,8 @@ class CellNetL2Framing {
    * @param buffer Raw frame bytes.
    * @param length Total frame length in bytes.
    * @param out Reference to ParsedFrame structure to fill.
-   * @return true if frame is valid EtherType 0x88B5, matching version and exact length.
+   * @return true if frame is valid EtherType 0x88B5, matching version, and its length is
+   *         between the message size and kMaxPaddedRxLen (trailing padding is ignored).
    */
   static bool parseFrame(const uint8_t* buffer, size_t length, ParsedFrame& out);
 
