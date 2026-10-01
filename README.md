@@ -22,17 +22,17 @@ Part of the distributed battery sorting cell:
 
 - **UART0** — flash and pre-link logs (USB–TTL).
 - **TCP** on LAN8720 — after plant link is up, gantry listens at
-  **`192.168.1.100:2323`**. Password / remember TTL editable under menuconfig
+  **`10.42.0.100:2323`**. Password / remember TTL editable under menuconfig
   **TCP gantry console (LAN8720)** (default password `LTU_1932`, 600 s / 4 IPs).
 
 ```powershell
-ncat 192.168.1.100 2323
+ncat 10.42.0.100 2323
 # enter password if prompted
-# PuTTY: Raw → 192.168.1.100 port 2323
+# PuTTY: Raw → 10.42.0.100 port 2323
 ```
 
 ```bash
-nc 192.168.1.100 2323
+nc 10.42.0.100 2323
 ```
 
 Details: [LOW_LEVEL §9](docs/LOW_LEVEL_GANTRY_CONTROL.md).
