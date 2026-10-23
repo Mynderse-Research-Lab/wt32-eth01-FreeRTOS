@@ -35,7 +35,6 @@ by a primary source are marked **Assumption**.
 | 13 | Diagnostics perturbing the system (observer effect) | Logging in RT loop; FreeRTOS run-time stats + per-cycle snapshots | Probes removed / redesigned | Fixed (lesson) |
 | 14 | Saleae / Logic 2 problems | Floating ground leads, CS probe unplugged, USB ReadTimeout, Logic 2 crash | Per-channel grounds, reconnect, relaunch | Tooling |
 | 15 | Dev-page console stuck "busy" after `cfg reboot` | Supervisor waits for a reply that never comes | Send `stop`, then retry | Tooling |
-| 16 | Motion speed / accel changes requested | — | 1.5x X/θ speeds, Z ceiling 950 mm/s, path accel/decel ceilings 6000 | Done |
 
 ---
 
@@ -235,22 +234,6 @@ timing only.
 
 After `cfg reboot` the supervisor console stays "busy" waiting for a reply.
 Send `stop`, then retry (note: `stop` also disables the motors).
-
-## 16. Motion changes made at the user's request
-
-| Parameter | Before | After | Where |
-|-----------|--------|-------|-------|
-| X approach slow | 500 mm/s | 750 mm/s | `kApproachSlowMmS` (`include/pick_intercept.h`) |
-| X approach fast | 2000 mm/s | 2000 mm/s (X clamp) | `kApproachFastMmS` |
-| θ approach slow / fast | 60 / 180 deg/s | 90 / 270 deg/s | `kApproachSlowDegS` / `kApproachFastDegS` |
-| θ pick speed | 180 deg/s | 270 deg/s | `cfg pk_th_spd` |
-| Z pick ceiling | 800 (doc) / 1000 effective | 950 mm/s | `kZCriticalMmS`; scheduler now uses min(950, whip cap) |
-| Path accel/decel ceiling | 3000 mm/s² | 6000 mm/s² | `CONFIG_GANTRY_PATH_MAX_ACCEL/DECEL_MM_PER_S2` |
-
-Z is not raised to/above 1000 mm/s: `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S`
-is the ball-screw whip ceiling ("Never command a linear speed above this",
-`include/axis_drivetrain_params.h`). The 6000 ceiling only raises the console
-range limit; the path profile (3000) and `pk_acc_mm_s2` (1500) were not changed.
 
 ---
 
