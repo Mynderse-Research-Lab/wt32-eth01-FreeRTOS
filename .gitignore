@@ -48,3 +48,25 @@ docs/schematics/**/#auto_saved_files#
 docs/schematics/exports/_*.pdf
 docs/schematics/exports/_*.kicad_sch
 docs/schematics/exports/*.erc.rpt
+
+# Local simulation, scratch and analysis output (kept on disk, not tracked)
+scratch/
+logs/
+tools/sim/
+/fix_*.py
+/run_*.py
+/refactor_*.py
+/update_*.py
+/scratch_*.py
+/test_flex*.xml
+/MUJOCO_LOG.TXT
+/debug_output.txt
+/err.txt
+/schema.txt
+/sim_output.txt
+
+# Office lock files, generated document exports, purchasing BOM workbooks
+~$*
+docs/*.docx
+docs/Grasp_Timing_*.html
+driver_datasheets_and_calculations/GANTRY_EXACT_COPY_PURCHASING_BOM*.xlsx
