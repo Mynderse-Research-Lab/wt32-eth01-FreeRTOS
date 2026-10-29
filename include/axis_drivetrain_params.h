@@ -319,7 +319,7 @@
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #define GANTRY_SAFE_Z_HEIGHT_MM            ((float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #else
-#define GANTRY_SAFE_Z_HEIGHT_MM            35.7f  /* 4.5 inches (114.3 mm) above 150.0 mm Z lowest drop limit */
+#define GANTRY_SAFE_Z_HEIGHT_MM            48.4f  /* 4.0 inches (101.6 mm) above Z=0 conveyor bed (150.0 mm - 101.6 mm) */
 #endif
 
 /* After X home/cal during bring-up, park here before seeking Z+ (joint mm). */

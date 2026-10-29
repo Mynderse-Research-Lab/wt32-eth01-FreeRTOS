@@ -281,7 +281,7 @@ menu "Gantry kinematics"
             default 80.0
         config GANTRY_SAFE_Z_HEIGHT_MM
             float "Z+ clearance margin (mm below Z+)"
-            default 35.7
+            default 48.4
             help
                 Coordinated X+Z Absolute only while joint Z is within this
                 margin of Z+ (band floor = z_max - this). Below that band,

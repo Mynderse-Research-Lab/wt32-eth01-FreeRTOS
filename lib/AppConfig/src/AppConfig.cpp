@@ -355,7 +355,7 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
     data_.gantry_safe_z_height_mm = (float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM;
 #else
-    data_.gantry_safe_z_height_mm = 35.7f;
+    data_.gantry_safe_z_height_mm = 48.4f;
 #endif
 
     // Bin-column X. Independent of the bring-up park (GANTRY_CAL_X_PARK_MM).

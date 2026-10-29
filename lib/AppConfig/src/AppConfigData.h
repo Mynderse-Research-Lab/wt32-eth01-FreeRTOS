@@ -63,7 +63,7 @@ struct AppConfigData {
     float gantry_theta_x_offset_mm = -55.0f;
     float gantry_gripper_x_offset_mm = 385.0f;
     float gantry_gripper_z_offset_mm = 80.0f;
-    float gantry_safe_z_height_mm = 35.7f;
+    float gantry_safe_z_height_mm = 48.4f;
     float gantry_cal_x_park_mm = 10.0f;
     float gantry_cal_z_park_mm = 90.8f;
     float gantry_cal_theta_park_deg = 90.0f;
