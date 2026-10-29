@@ -9,7 +9,7 @@
 #ifndef LINUX_RAW_SOCKET_L2_TRANSPORT_H
 #define LINUX_RAW_SOCKET_L2_TRANSPORT_H
 
-#ifndef ESP_PLATFORM
+#if defined(__linux__)
 
 #include "IL2Transport.h"
 #include "cell_net_l2_protocol.h"
@@ -164,6 +164,6 @@ class LinuxRawSocketL2Transport : public IL2Transport {
 
 }  // namespace CellNet
 
-#endif  // !ESP_PLATFORM
+#endif  // __linux__
 
 #endif  // LINUX_RAW_SOCKET_L2_TRANSPORT_H

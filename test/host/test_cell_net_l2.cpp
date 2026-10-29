@@ -106,10 +106,12 @@ static void test_framing_vision_detect_roundtrip(void) {
   payload.x_across_mm = 145.5f;
   payload.y_bat_mm = 12.25f;
   payload.theta_deg = -45.0f;
-  payload.battery_class = 2;
-  payload.width_mm = 18.3f;
-  payload.length_mm = 65.0f;
-  payload.height_from_belt_mm = 40.0f;
+  payload.battery_class = 4;
+  payload.reserved[0] = kVisionCaptureDispValid;
+  payload.capture_displacement_m = 1.25f;
+  payload.width_mm = 75.0f;
+  payload.length_mm = 120.0f;
+  payload.height_from_belt_mm = 80.0f;
 
   const auto bytes = CellNet::CellNetL2Framing::buildVisionDetectFrame(
       src_mac, CellNodeId::VISION, 101, 555123, payload);
@@ -132,13 +134,12 @@ static void test_framing_vision_detect_roundtrip(void) {
                            parsed.payload.vision_detect.y_bat_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, -45.0f,
                            parsed.payload.vision_detect.theta_deg);
-  TEST_ASSERT_EQUAL_UINT8(2, parsed.payload.vision_detect.battery_class);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 18.3f, parsed.payload.vision_detect.width_mm);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 65.0f, parsed.payload.vision_detect.length_mm);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 40.0f, parsed.payload.vision_detect.height_from_belt_mm);
-  TEST_ASSERT_EQUAL_UINT8(0, parsed.payload.vision_detect.reserved[0]);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f,
-                           parsed.payload.vision_detect.capture_displacement_m);
+  TEST_ASSERT_EQUAL_UINT8(4, parsed.payload.vision_detect.battery_class);
+  TEST_ASSERT_EQUAL_UINT8(kVisionCaptureDispValid, parsed.payload.vision_detect.reserved[0]);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.25f, parsed.payload.vision_detect.capture_displacement_m);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 75.0f, parsed.payload.vision_detect.width_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 120.0f, parsed.payload.vision_detect.length_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 80.0f, parsed.payload.vision_detect.height_from_belt_mm);
 }
 
 static void test_framing_old_padded_vision_frame_ignores_capture(void) {

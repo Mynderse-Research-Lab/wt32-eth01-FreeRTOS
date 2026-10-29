@@ -42,7 +42,6 @@ inline void setCellHeader(L2CellHeader& cell, CellMsgType msg_type,
 }  // namespace
 
 size_t CellNetL2Framing::expectedFrameLength(CellMsgType type) {
-  constexpr size_t kHdrLen = sizeof(L2EthernetHeader) + sizeof(L2CellHeader);
   switch (type) {
     case CellMsgType::HEARTBEAT:
       return sizeof(L2HeartbeatFrame);

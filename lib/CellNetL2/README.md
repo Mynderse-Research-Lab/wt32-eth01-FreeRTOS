@@ -157,7 +157,7 @@ int main() {
         float x_across_mm = 120.5f;
         float y_along_mm = 0.0f;
         float theta_deg = 45.0f;
-        uint8_t battery_class = 2; // 21700
+        uint8_t battery_class = 8; // 21700
 
         node.sendVisionDetect(item_id++, x_across_mm, y_along_mm, theta_deg, battery_class);
     }

@@ -74,18 +74,23 @@ struct L2VisionDetectPayload {
   float x_across_mm;       // Centroid across belt (linear X)
   float y_bat_mm;          // Along belt at capture, relative to camera center (world Y = cv_cam_y_mm + y_bat_mm)
   float theta_deg;         // Long axis: 0° along +Y, + about +Z toward −X (-180..+180; folded to ±90)
-  uint8_t battery_class;   // 1=18650, 2=21700, 3=Prismatic, 4=Pouch (label; does not override size)
-  uint8_t reserved[3];     // reserved[0] bit0: capture_displacement_m is valid
-  float capture_displacement_m;  // Conveyor displacement at exposure, metres. 0 if the flag is clear.
-  float width_mm;             // 24 Jaws close across this (perpendicular to the long axis). 0 = not sent.
-  float length_mm;            // 28 In-plane long-axis size. 0 = not sent. Not the vertical size.
-  float height_from_belt_mm;  // 32 Belt surface up to the object top. Grasp at half. 0 = not sent.
+  uint8_t battery_class;   // 1–10 pick, 11–13 pack occupant. Label and jaw-time slot only.
+  uint8_t reserved[3];     // reserved[0] bit0: capture_displacement_m is valid and required
+  float capture_displacement_m;  // Conveyor displacement at exposure, metres. Required.
+  float width_mm;             // Jaws close across this. Required, in (0, 80].
+  float length_mm;            // In-plane long-axis size. Required. Not the vertical size.
+  float height_from_belt_mm;  // Belt surface up to the object top. Required. Grasp is measured down from this top.
 };
 
 // Payload is 36 bytes (offsets 0..35). The frame is 58 bytes, so a 60-byte
-// padded frame still parses (two trailing pad bytes). A zero width, length, or
-// height_from_belt means that field was not sent and the class size is used.
-// Width must be in (0, 80] mm when sent; 80 mm is the open end-effector width.
+// padded frame still parses (two trailing pad bytes). Width, length, and
+// height_from_belt are required. Pick classes, length × width × height:
+// AAA 44.5×10.5×10.5, AA 50.5×14.5×14.5, D 61.5×34.2×34.2, C 50×26.2×26.2,
+// 9V 48.5×17.5×26.5, CR123A 34.5×17×17, 18650 65×18.3×18.3, 21700 70×21.2×21.2,
+// 26650 65×26.5×26.5, 32650 65×32×32. Packs are tracked and not picked:
+// 11 laptop 205×50×22, 12 Li-ion pack 114×66×25, 13 power-tool 120×75×80.
+// Width must be in (0, 80] mm. A missing size is rejected; the
+// class id does not supply one. Grasp is min(h/2, 25.4 mm) down from the top.
 constexpr uint8_t kVisionCaptureDispValid = 0x01;
 constexpr float kVisionMaxWidthMm = 80.0f;
 
@@ -102,7 +107,7 @@ struct L2ConveyorSpeedPayload {
  * @brief Payload for Message Type 0x03: Gantry Status.
  */
 struct L2GantryStatusPayload {
-  uint8_t motion_state;      // 0=IDLE, 1=HOMING, 2=INTERCEPTING, 3=GRIPPING, 4=FAULT
+  uint8_t motion_state;      // 0=IDLE, 1=HOMING, 2=INTERCEPTING, 3=GRIP_COMMANDED (hold unverified), 4=FAULT
   uint8_t active_slot;       // 0=ota_0, 1=ota_1
   uint16_t fault_flags;      // Bitmask of active drive warnings
   float x_pos_mm;            // Current X position
