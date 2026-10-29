@@ -13,8 +13,8 @@ Usage:
   python tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin
 
 Safety Interlock:
-  The firmware automatically rejects OTA attempts if the gantry is ENABLED or
-  BUSY to protect industrial actuators and mechanics.
+  The firmware disables enabled-but-idle motors itself at START (and again
+  before the reboot). It rejects OTA while a move, home or pick is running.
 """
 
 from __future__ import annotations
@@ -208,12 +208,15 @@ def flash_via_pi(
     pi_host: str = DEFAULT_PI_HOST,
     pi_user: str | None = None,
     pi_password: str | None = None,
+    pi_key: str | None = None,
     log: LogFn | None = None,
     progress: ProgressFn | None = None,
 ) -> bool:
     """SSH to the Pi and stream the image to the gantry on the cell LAN.
 
     `pi_password` defaults to `$PI_PASS`. It is never placed on the ssh command line.
+    `pi_key` (default `$PI_KEY`) is the private key the Pi trusts; when unset, ssh
+    picks its own default key.
     """
 
     def emit(msg: str, *, error: bool = False) -> None:
@@ -246,11 +249,22 @@ def flash_via_pi(
     env["DISPLAY"] = "localhost:0"
     stderr_chunks: list[bytes] = []
 
-    emit(f"Opening SSH forward {user}@{pi_host} -> {host}:{port}")
+    key = pi_key if pi_key is not None else os.environ.get("PI_KEY", "")
+    key_args: list[str] = []
+    if key:
+        key = os.path.expanduser(key)
+        if not os.path.isfile(key):
+            emit(f"[ERROR] SSH key not found: {key}", error=True)
+            return False
+        key_args = ["-i", key, "-o", "IdentitiesOnly=yes"]
+
+    emit(f"Opening SSH forward {user}@{pi_host} -> {host}:{port}"
+         + (f" (key {os.path.basename(key)})" if key else ""))
     proc = subprocess.Popen(
         [
             "ssh",
             "-N",
+            *key_args,
             "-o", "ExitOnForwardFailure=yes",
             "-o", "StrictHostKeyChecking=accept-new",
             # The Pi offers password only after a public-key attempt fails.
@@ -351,6 +365,12 @@ def main():
         default=DEFAULT_PI_USER,
         help="Supervisor SSH user for --wireless (default: $PI_USER or robotics)",
     )
+    parser.add_argument(
+        "--pi-key",
+        default=None,
+        help="Private key the supervisor trusts for --wireless, e.g. ~/.ssh/ltukey_s "
+        "(default: $PI_KEY, else ssh's default key)",
+    )
 
     args = parser.parse_args()
     if args.wireless:
@@ -361,6 +381,7 @@ def main():
             args.bin,
             pi_host=args.wireless,
             pi_user=args.pi_user,
+            pi_key=args.pi_key,
         )
     else:
         success = flash_ota(args.destination, args.port, args.password, args.bin)

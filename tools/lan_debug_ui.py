@@ -1562,7 +1562,7 @@ class LanDebugApp:
                   font=("Segoe UI", 8)).grid(row=3, column=0, columnspan=6, sticky="w")
         ttk.Label(
             ota,
-            text="Uses the connection-bar Host + Password. Firmware rejects START if ENABLED or BUSY. "
+            text="Uses the connection-bar Host + Password. Firmware disables idle motors itself; rejects START while BUSY. "
                  "Wireless relays through the supervisor (PI_PASS). CLI: py tools/ota_flash.py --destination <wt32_IP> [--wireless <Pi IP>] <bin>",
             foreground="#555",
             font=("Segoe UI", 8),
@@ -2509,7 +2509,7 @@ class LanDebugApp:
         if not self._confirm(
             "Dual-OTA flash",
             f"Stream {os.path.basename(path)} ({size / 1024:.1f} KB) to {host}:{port}{via}?\n\n"
-            "Motors must stay disabled. Firmware rejects START if ENABLED or BUSY.\n"
+            "Firmware disables the motors for the update; it rejects START while a move/home/pick runs.\n"
             "The WT32 will reboot into the other OTA slot; this console TCP session will drop.",
         ):
             return
