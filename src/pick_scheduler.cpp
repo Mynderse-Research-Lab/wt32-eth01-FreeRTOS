@@ -1146,12 +1146,22 @@ static void acceptDetect(const VisionItem& item) {
     return;
   }
   const auto& c = Config::AppConfig::instance().data();
+  // vis_batt_x: a trigger sensor sends one fixed 9V frame; only X is not
+  // measured, so it comes from batt_x (joint X, at theta 0) instead.
+  if (!item.simulated && c.vision_x_from_batt != 0) {
+    const float tcp_x =
+        s_gantry->forwardKinematics(Gantry::JointConfig(c.test_battery_x_mm, 0.0f, 0.0f)).x;
+    detect.x_across_mm = tcp_x - c.conveyor_x_across_to_gantry_x_offset_mm;
+    // Trigger sensor is 114 mm upstream of camera (-711 mm), so battery is at -114 mm relative to camera.
+    detect.y_bat_mm = -114.0f;
+  }
   const Gantry::JointLimits lim = s_gantry->getJointLimits();
   const PickConfig p = pickConfig(lim);
   PickIntercept::VisionSample sample;
   sample.item_id = detect.item_id;
   sample.battery_class = detect.battery_class;
-  sample.capture_valid = item.capture_valid;
+  // Allow trigger sensor (vis_batt_x) and latency fallback when encoder displacement is absent.
+  sample.capture_valid = item.capture_valid || (c.vision_x_from_batt != 0) || (c.pick_vision_latency_ms > 0);
   sample.x_across_mm = detect.x_across_mm;
   sample.y_bat_mm = detect.y_bat_mm;
   sample.theta_deg = detect.theta_deg;

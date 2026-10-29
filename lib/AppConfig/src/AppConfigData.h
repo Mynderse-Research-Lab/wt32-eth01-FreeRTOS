@@ -100,6 +100,8 @@ struct AppConfigData {
     int32_t pick_trim_hold_ms = 0;
     int32_t pick_offset_plunge_ms = 0;
     int32_t pick_offset_close_ms = 0;
+    // 1: vision detections take x_across from batt_x (fixed trigger-sensor frames).
+    int32_t vision_x_from_batt = 0;
     int32_t pick_offset_retract_ms = 0;
     // Class 1 dropout experiments (applied at boot): W5500 SPI2 clock and
     // whether the TFT UI runs (SPI3 display traffic on/off).

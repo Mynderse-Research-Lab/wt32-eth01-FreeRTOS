@@ -463,6 +463,7 @@ void AppConfig::loadDefaults() {
     data_.pick_trim_hold_ms = 0;
     data_.pick_offset_plunge_ms = 0;
     data_.pick_offset_close_ms = 0;
+    data_.vision_x_from_batt = 0;
     data_.pick_offset_retract_ms = 0;
     data_.eip_w5500_spi_khz = 10000;
     data_.display_tft_enable = 1;
@@ -877,6 +878,7 @@ bool AppConfig::load() {
     storage_->getInt32("pk_tr_hld", data_.pick_trim_hold_ms);
     storage_->getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     storage_->getInt32("pk_off_close", data_.pick_offset_close_ms);
+    storage_->getInt32("vis_batt_x", data_.vision_x_from_batt);
     storage_->getInt32("pk_off_retract", data_.pick_offset_retract_ms);
     storage_->getInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
     storage_->getInt32("disp_tft_en", data_.display_tft_enable);
@@ -1052,6 +1054,7 @@ bool AppConfig::save() {
     storage_->setInt32("pk_tr_hld", data_.pick_trim_hold_ms);
     storage_->setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     storage_->setInt32("pk_off_close", data_.pick_offset_close_ms);
+    storage_->setInt32("vis_batt_x", data_.vision_x_from_batt);
     storage_->setInt32("pk_off_retract", data_.pick_offset_retract_ms);
     storage_->setInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
     storage_->setInt32("disp_tft_en", data_.display_tft_enable);
@@ -1204,6 +1207,7 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "pk_tr_hld") == 0) out_val = data_.pick_trim_hold_ms;
     else if (std::strcmp(key, "pk_off_plunge") == 0) out_val = data_.pick_offset_plunge_ms;
     else if (std::strcmp(key, "pk_off_close") == 0) out_val = data_.pick_offset_close_ms;
+    else if (std::strcmp(key, "vis_batt_x") == 0) out_val = data_.vision_x_from_batt;
     else if (std::strcmp(key, "pk_off_retract") == 0) out_val = data_.pick_offset_retract_ms;
     else if (std::strcmp(key, "eip_spi_khz") == 0) out_val = data_.eip_w5500_spi_khz;
     else if (std::strcmp(key, "disp_tft_en") == 0) out_val = data_.display_tft_enable;
@@ -1277,6 +1281,7 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "pk_tr_hld") == 0) data_.pick_trim_hold_ms = val;
     else if (std::strcmp(key, "pk_off_plunge") == 0) data_.pick_offset_plunge_ms = val;
     else if (std::strcmp(key, "pk_off_close") == 0) data_.pick_offset_close_ms = val;
+    else if (std::strcmp(key, "vis_batt_x") == 0) data_.vision_x_from_batt = val;
     else if (std::strcmp(key, "pk_off_retract") == 0) data_.pick_offset_retract_ms = val;
     else if (std::strcmp(key, "eip_spi_khz") == 0) data_.eip_w5500_spi_khz = val;
     else if (std::strcmp(key, "disp_tft_en") == 0) data_.display_tft_enable = val;

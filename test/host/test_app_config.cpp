@@ -29,6 +29,7 @@ static void test_default_values(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 183.0f, d.conveyor_frame_near_x_mm);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 500.0f, d.conveyor_frame_far_x_mm);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 382.5f, d.test_battery_x_mm);
+    TEST_ASSERT_EQUAL_INT32(0, d.vision_x_from_batt);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 115.0f, d.gantry_conveyor_collision_z_min_mm);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, d.gantry_cal_x_park_mm);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.8f, d.gantry_cal_z_park_mm);

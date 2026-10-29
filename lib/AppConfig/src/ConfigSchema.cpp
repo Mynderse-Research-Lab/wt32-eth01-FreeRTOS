@@ -148,6 +148,7 @@ static const std::vector<ParamSchema> s_schemas = {
     // Strike plan offsets (strike_plan.h). Each moves only its own event.
     {"pk_off_plunge", "Z Plunge Offset",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
     {"pk_off_close",  "Grip Close Offset", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
+    {"vis_batt_x",    "Vision X = batt_x", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
     {"pk_off_retract","Z Retract Offset",  "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
     {"pk_bench",      "Bench Pick",        "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
     {"fin_spd_mm_s",  "Jaw Speed",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 2000.0f, 5.0f, "mm/s", {}},
