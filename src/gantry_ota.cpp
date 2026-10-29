@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -60,6 +61,35 @@ esp_err_t gantryOtaGetStatus(GantryOtaStatus &status) {
   return ESP_OK;
 }
 
+const char *gantryResetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:
+            return "POWERON (power applied)";
+        case ESP_RST_EXT:
+            return "EXT (reset pin)";
+        case ESP_RST_SW:
+            return "SW (esp_restart / OTA)";
+        case ESP_RST_PANIC:
+            return "PANIC (crash: exception or abort)";
+        case ESP_RST_INT_WDT:
+            return "INT_WDT (interrupt watchdog)";
+        case ESP_RST_TASK_WDT:
+            return "TASK_WDT (task watchdog)";
+        case ESP_RST_WDT:
+            return "WDT (other watchdog)";
+        case ESP_RST_DEEPSLEEP:
+            return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:
+            return "BROWNOUT (supply dipped)";
+        case ESP_RST_SDIO:
+            return "SDIO";
+        case ESP_RST_UNKNOWN:
+            return "UNKNOWN";
+        default:
+            return "OTHER";
+    }
+}
+
 void gantryOtaPrintStatus() {
   GantryOtaStatus status;
   if (gantryOtaGetStatus(status) != ESP_OK) {
@@ -103,6 +133,9 @@ void gantryOtaPrintStatus() {
   }
   ESP_LOGI(TAG, "Image State      : %s", state_str);
   ESP_LOGI(TAG, "Rollback Possible: %s", status.rollback_possible ? "YES" : "NO");
+  ESP_LOGI(TAG, "Last Reset       : %s (reason %d), uptime %lu s", gantryResetReasonName(),
+           static_cast<int>(esp_reset_reason()),
+           static_cast<unsigned long>(esp_timer_get_time() / 1000000LL));
   ESP_LOGI(TAG, "============================================================");
 }
 
@@ -128,12 +161,30 @@ esp_err_t gantryOtaConfirmBootValid() {
   return ESP_OK;
 }
 
+esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry) {
+    if (gantry == nullptr || !gantry->isEnabled()) {
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "OTA: disabling motors for the update (re-enable after reboot)");
+    gantry->disable();
+    if (gantry->isEnabled()) {
+        ESP_LOGE(TAG, "OTA REFUSED: motors did not disable");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
                               const esp_partition_t *&target_part) {
-  if (gantry != nullptr && (gantry->isEnabled() || gantry->isBusy())) {
-    ESP_LOGE(TAG, "OTA REFUSED: Gantry is ENABLED or BUSY! Disable drives before flashing.");
-    return ESP_ERR_INVALID_STATE;
-  }
+    // A move, home or pick in progress is not interrupted for an update.
+    if (gantry != nullptr && gantry->isBusy()) {
+        ESP_LOGE(TAG, "OTA REFUSED: Gantry is BUSY (move/home/pick). Stop it before flashing.");
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t disable_err = gantryOtaDisableMotors(gantry);
+    if (disable_err != ESP_OK) {
+        return disable_err;
+    }
 
   const esp_partition_t *running = esp_ota_get_running_partition();
   target_part = esp_ota_get_next_update_partition(running);
@@ -313,7 +364,7 @@ static void otaServerTask(void *param) {
     esp_err_t err = gantryOtaStartStream(ctx->gantry, ota_handle, target_part);
     if (err != ESP_OK) {
       if (err == ESP_ERR_INVALID_STATE) {
-        sendStr(client_fd, "ERR SAFETY: Gantry active (motors enabled/moving)\n");
+        sendStr(client_fd, "ERR SAFETY: Gantry busy (move/home/pick in progress)\n");
       } else {
         sendStr(client_fd, "ERR OTA_INIT\n");
       }
@@ -377,6 +428,9 @@ static void otaServerTask(void *param) {
     close(client_fd);
     close(listen_fd);
 
+    // A supervisor START during the upload re-enables the motors. Drop them
+    // under control before the reboot cuts Class 1.
+    (void)gantryOtaDisableMotors(ctx->gantry);
     ESP_LOGI(TAG, "Restarting ESP32 now...");
     vTaskDelay(pdMS_TO_TICKS(200));
     esp_restart();

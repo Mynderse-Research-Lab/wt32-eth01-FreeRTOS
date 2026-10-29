@@ -12,6 +12,7 @@ set(APP_SRCS
     "${APP_ROOT}/src/gantry_net_console.cpp"
     "${APP_ROOT}/src/gantry_ota.cpp"
     "${APP_ROOT}/src/gpio_expander.c"
+    "${APP_ROOT}/src/boot_log_ring.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -39,6 +40,8 @@ idf_component_register(
         nvs_flash
         esp_driver_spi
         esp_driver_gpio
+        esp_driver_ledc
+        esp_driver_uart
         esp_timer
         log
         freertos

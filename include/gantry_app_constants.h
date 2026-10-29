@@ -91,7 +91,15 @@
 #define GANTRY_UPDATE_TASK_STACK    4096
 #define GANTRY_UPDATE_TASK_PRIORITY    5
 #define GANTRY_UPDATE_TASK_CORE        1
-#define CONSOLE_TASK_STACK          4096
+// Reboot setting. 10 ms matches the Class 1 path; the Z strike edge does not wait on this loop.
+#if defined(CONFIG_GANTRY_UPDATE_PERIOD_MS)
+#define GANTRY_UPDATE_PERIOD_MS CONFIG_GANTRY_UPDATE_PERIOD_MS
+#elif !defined(GANTRY_UPDATE_PERIOD_MS)
+#define GANTRY_UPDATE_PERIOD_MS        10
+#endif
+// 8 KB: 'calibrate all' runs bring-up and the theta home inside the console
+// task (deep call chain + float log formatting + TCP tee). 4 KB panicked there.
+#define CONSOLE_TASK_STACK          8192
 // Above TftUiTask (2): UART/TCP must preempt SPI3 UI redraws under Class 1 load.
 #define CONSOLE_TASK_PRIORITY          3
 #define CONSOLE_TASK_CORE              0
@@ -105,5 +113,9 @@
 #define PICK_STRIKE_TASK_STACK      4096
 #define PICK_STRIKE_TASK_PRIORITY      6
 #define PICK_STRIKE_TASK_CORE          1
+// 1 kHz Z sampler for `ztrace`. Core 0, so it never preempts the strike or Class 1.
+#define PICK_TRACE_TASK_STACK       3072
+#define PICK_TRACE_TASK_PRIORITY       4
+#define PICK_TRACE_TASK_CORE           0
 
 #endif  // GANTRY_APP_CONSTANTS_H

@@ -13,6 +13,15 @@ menu "Gantry application"
             command and the basic_tests.cpp source from the firmware without
             losing test coverage.
 
+    config GANTRY_UPDATE_PERIOD_MS
+        int "Gantry update period (ms)"
+        range 2 10
+        default 10
+        help
+            Period of the GantryUpdate task. 10 ms is the default. The Z
+            strike edge is published from PickStrike and does not wait on
+            this loop. Do not set this below the 2 ms Class 1 RPI.
+
     config GANTRY_SUPPRESS_GEOMETRY_WARNING
         bool "Suppress dev-rig geometry compile reminder"
         default n
@@ -331,8 +340,20 @@ menu "Gantry kinematics"
             float "Pick Y position along belt (mm)"
             default 0.0
         config CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM
-            float "Across-belt X to gantry X offset (mm)"
-            default 0.0
+            float "Camera X, belt center (mm)"
+            default 245.0
+            help
+                Gantry X of the camera. Vision x_across is measured from the
+                camera, and gantry X is x_across plus this value. The camera
+                sits at the belt center: 150 mm past the conveyor edge at
+                95 mm. Runtime key cv_x_off_mm, no reboot.
+
+        config CONVEYOR_BELT_WIDTH_MM
+            float "Belt width across X (mm)"
+            default 300.0
+            help
+                Width of the belt along gantry X. Runtime key cv_belt_w_mm,
+                no reboot.
         config CONVEYOR_Z_PICK_JOINT_MM
             float "Joint Z pick height (mm)"
             default 140.0

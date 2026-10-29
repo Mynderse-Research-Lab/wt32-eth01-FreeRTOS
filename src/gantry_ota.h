@@ -42,6 +42,14 @@ struct GantryOtaStatus {
 esp_err_t gantryOtaGetStatus(GantryOtaStatus &status);
 
 /**
+ * @brief Why the ESP32 last reset (esp_reset_reason), as a short label.
+ *
+ * The UART boot log is lost on a TCP-only bench, so `ota` and `status` print
+ * this to tell an OTA restart (SW) from a crash (PANIC / WDT) or BROWNOUT.
+ */
+const char *gantryResetReasonName();
+
+/**
  * @brief Print OTA status, running slot, and version details to log.
  */
 void gantryOtaPrintStatus();
@@ -53,11 +61,22 @@ void gantryOtaPrintStatus();
 esp_err_t gantryOtaConfirmBootValid();
 
 /**
+ * @brief Disable the motors if they are enabled (OTA start and pre-reboot).
+ * @param gantry Active Gantry instance; nullptr is a no-op.
+ * @return ESP_OK when the motors are off, ESP_ERR_INVALID_STATE if they stayed enabled.
+ */
+esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry);
+
+/**
  * @brief Begin an OTA flash stream, verifying motion safety preconditions.
- * @param gantry Active Gantry instance to check for motion idle/disabled state.
+ *
+ * Idle motors are disabled automatically. A move, home or pick in progress
+ * refuses the update instead of being interrupted.
+ * @param gantry Active Gantry instance to check for motion idle state.
  * @param handle Output OTA transaction handle.
  * @param target_part Output pointer to target partition receiving update.
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE if gantry is enabled/moving.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the gantry is busy or
+ *         the motors would not disable.
  */
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
                               const esp_partition_t *&target_part);

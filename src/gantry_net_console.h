@@ -10,4 +10,7 @@
  */
 void gantryNetConsoleStart(const GantryTestConsoleConfig *cfg);
 
+/** One line of TCP send counters since boot (netcon). */
+void gantryNetConsoleStats(char *out, size_t out_len);
+
 #endif  // GANTRY_NET_CONSOLE_H

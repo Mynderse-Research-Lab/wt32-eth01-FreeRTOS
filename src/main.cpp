@@ -25,8 +25,11 @@
 #define AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS
 
 #include "Gantry.h"
+#include "GantryControlPeriod.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
 #include "gantry_test_console.h"
 #include "gantry_net_console.h"
 #include "gantry_app_constants.h"
@@ -37,6 +40,7 @@
 #include "EspEthL2Transport.h"
 #include "EthernetLink.h"
 #include "pick_scheduler.h"
+#include "boot_log_ring.h"
 #include "Spi3Bus.h"
 #include "SpiDisplay.h"
 #include "UiManager.h"
@@ -50,6 +54,7 @@
 
 #if CONFIG_EIP_SCANNER_ENABLED
 #include "W5500.h"
+#include "W5500Socket.h"
 #include "W5500SpiHal.h"
 #include "EipScannerTask.h"
 #include "EipProcessImage.h"
@@ -80,8 +85,9 @@ void gantryUpdateTask(void* param) {
         return;
     }
 
-    const TickType_t updateInterval = pdMS_TO_TICKS(10);
-    ESP_LOGI(TAG, "Gantry update task started (100 Hz)");
+    const TickType_t updateInterval = pdMS_TO_TICKS(GANTRY_UPDATE_PERIOD_MS);
+    Gantry::setControlPeriodUs(static_cast<uint32_t>(GANTRY_UPDATE_PERIOD_MS) * 1000u);
+    ESP_LOGI(TAG, "Gantry update task started (%d ms)", GANTRY_UPDATE_PERIOD_MS);
     TickType_t lastWakeTime = xTaskGetTickCount();
 
     while (1) {
@@ -164,6 +170,8 @@ void tftUiTask(void* param) {
 // app_main
 // ---------------------------------------------------------------------------
 extern "C" void app_main(void) {
+    // First: keep start-up logs readable from the LAN console ('bootlog').
+    bootLogRingInstall();
     ESP_LOGI(TAG, "\n========================================");
     ESP_LOGI(TAG, "WT32-ETH01 Gantry Controller (EIP over W5500)");
 #if defined(CONFIG_EIP_AXIS_THETA)
@@ -182,6 +190,26 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(nvs_err);
     Config::AppConfig::instance().init();
+
+    // cfg log_uart_async (reboot): without a UART driver every log line
+    // busy-waits on UART0 at 115200 (~22 ms per 250-char line) while holding
+    // stdout. On 2026-10-20 that stalled the Class 1 task 20-40 ms whenever it
+    // logged behind a Gantry log burst, and X/theta timed out. With the driver
+    // a line is copied into the TX ring and the UART drains it in the
+    // background; a full ring still blocks, so it is sized for long bursts.
+    if (Config::AppConfig::instance().data().log_uart_async != 0) {
+        constexpr int kLogUartTxBuf = 16384;
+        const esp_err_t uerr = uart_driver_install(
+            static_cast<uart_port_t>(CONFIG_ESP_CONSOLE_UART_NUM), 256, kLogUartTxBuf,
+            0, nullptr, 0);
+        if (uerr == ESP_OK) {
+            uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+            ESP_LOGW(TAG, "Log UART buffered (%d B TX ring, cfg log_uart_async=1)",
+                     kLogUartTxBuf);
+        } else {
+            ESP_LOGW(TAG, "Log UART driver install failed: %s", esp_err_to_name(uerr));
+        }
+    }
 
     // Enable WT32 LAN8720 crystal (GPIO16) before other bring-up so REFCLK and
     // RJ45 LEDs can come up; EthernetLink::start() will re-assert if needed.
@@ -241,7 +269,19 @@ extern "C" void app_main(void) {
             dispCfg.mcp_blk_pin = -1; // Moved to ESP32 for native PWM
             dispCfg.esp_blk_pin = TFT_BLK_GPIO;
             dispCfg.clock_hz = SPI3_TFT_CLOCK_HZ;
-            if (!display::UiManager::instance().init(dispCfg)) {
+            // disp_tft_en=0: Class 1 dropout experiment - no TFT traffic on
+            // SPI3 (MCP Field I/O and the gripper still run).
+            if (Config::AppConfig::instance().data().display_tft_enable == 0) {
+                // The TFT driver normally parks its CS; without it GPIO32
+                // floats and the panel can sit selected on the shared SPI3
+                // bus (MISO contention with the MCP23S17). Deselect it here.
+                gpio_config_t tft_cs = {};
+                tft_cs.pin_bit_mask = (1ULL << SPI3_CS_TFT_GPIO);
+                tft_cs.mode = GPIO_MODE_OUTPUT;
+                gpio_config(&tft_cs);
+                gpio_set_level(static_cast<gpio_num_t>(SPI3_CS_TFT_GPIO), 1);
+                ESP_LOGW(TAG, "TFT UI disabled (cfg disp_tft_en=0) - no display traffic on SPI3; TFT CS held high");
+            } else if (!display::UiManager::instance().init(dispCfg)) {
                 ESP_LOGW(TAG, "UiManager ST7789 display begin failed");
             }
         }
@@ -261,6 +301,34 @@ extern "C" void app_main(void) {
     w5500Cfg.miso_gpio = W5500_MISO_GPIO;
     w5500Cfg.sclk_gpio = W5500_SCLK_GPIO;
     w5500Cfg.sclk_hz   = W5500_SCLK_HZ;
+    {
+        // cfg eip_scope_gpio (reboot): Class 1 exchange marker for a logic
+        // analyzer. Only GPIO17 (TFT backlight), and only with the TFT off.
+        const int32_t scope = Config::AppConfig::instance().data().eip_scope_gpio;
+        if (scope == TFT_BLK_GPIO &&
+            Config::AppConfig::instance().data().display_tft_enable == 0) {
+            eip::setScopeMarkerGpio(scope);
+        } else if (scope >= 0) {
+            ESP_LOGW(TAG, "cfg eip_scope_gpio=%ld ignored (needs %d with disp_tft_en=0)",
+                     (long)scope, TFT_BLK_GPIO);
+        }
+    }
+    if (Config::AppConfig::instance().data().eip_spi_dma == 0) {
+        w5500Cfg.use_dma = false;
+        ESP_LOGW(TAG, "W5500 SPI2 without DMA (cfg eip_spi_dma=0)");
+    }
+    if (Config::AppConfig::instance().data().eip_txwr_split != 0) {
+        w5500::socketSetTxWrSplit(true);
+        ESP_LOGW(TAG, "W5500 TX_WR written as two 1-byte writes (cfg eip_txwr_split=1)");
+    }
+    {
+        // cfg eip_spi_khz (reboot): SPI2 clock experiment for the dropouts.
+        const int32_t khz = Config::AppConfig::instance().data().eip_w5500_spi_khz;
+        if (khz >= 1000 && khz <= 20000 && khz * 1000 != W5500_SCLK_HZ) {
+            w5500Cfg.sclk_hz = khz * 1000;
+            ESP_LOGW(TAG, "W5500 SPI clock from cfg eip_spi_khz: %ld kHz", (long)khz);
+        }
+    }
 
     ESP_LOGI(TAG, "W5500 pins: MOSI=%d MISO=%d SCLK=%d CS=%d RST=MCP_PB7 @ %d Hz",
              w5500Cfg.mosi_gpio, w5500Cfg.miso_gpio, w5500Cfg.sclk_gpio,
@@ -318,14 +386,13 @@ extern "C" void app_main(void) {
 
 #if defined(CONFIG_EIP_AXIS_THETA)
     // AXIS_THETA_* accel/decel are placeholders until IndraWorks numbers exist.
+    // Defaults go out in drive units: S-0-0259 scales with PUU/deg; S-0-0260 /
+    // S-0-0359 are 0.001 rad/s2 and do not.
     const double thetaPuuPerDeg = CONFIG_EIP_AXIS_THETA_PUU_PER_DEG;
     auto thetaAxis = std::make_unique<Gantry::GantryEipRotaryAxis>(
-        eipImageTheta, Gantry::EipRotaryAxisConfig{
-            thetaPuuPerDeg,
-            static_cast<int32_t>(AXIS_THETA_MAX_SPEED_DEG_PER_S * thetaPuuPerDeg),
-            static_cast<int32_t>(AXIS_THETA_ACCEL_DEG_PER_S2 * thetaPuuPerDeg),
-            static_cast<int32_t>(AXIS_THETA_DECEL_DEG_PER_S2 * thetaPuuPerDeg),
-        });
+        eipImageTheta, Gantry::eipRotaryAxisConfigFromDeg(
+            thetaPuuPerDeg, AXIS_THETA_MAX_SPEED_DEG_PER_S,
+            AXIS_THETA_ACCEL_DEG_PER_S2, AXIS_THETA_DECEL_DEG_PER_S2));
     ESP_LOGI(TAG,
              "Theta axis over EIP (HCS01 101/102, %.1f PUU/deg), CIP/FKM %s "
              "(eng HTTP is typically .22)",
@@ -432,12 +499,14 @@ extern "C" void app_main(void) {
     }
 
     static UiTaskConfig uiCfg = { &gantry, &ethernetLink };
-    result = xTaskCreatePinnedToCore(
-        tftUiTask, "TftUiTask",
-        TFT_UI_TASK_STACK, &uiCfg,
-        TFT_UI_TASK_PRIORITY, nullptr, TFT_UI_TASK_CORE);
-    if (result != pdPASS) {
-        ESP_LOGW(TAG, "Failed to create TftUiTask");
+    if (Config::AppConfig::instance().data().display_tft_enable != 0) {
+        result = xTaskCreatePinnedToCore(
+            tftUiTask, "TftUiTask",
+            TFT_UI_TASK_STACK, &uiCfg,
+            TFT_UI_TASK_PRIORITY, nullptr, TFT_UI_TASK_CORE);
+        if (result != pdPASS) {
+            ESP_LOGW(TAG, "Failed to create TftUiTask");
+        }
     }
 
     static GantryTestConsoleConfig consoleCfg = {};
