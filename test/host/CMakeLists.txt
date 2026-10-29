@@ -251,6 +251,15 @@ target_include_directories(test_pick_intercept PRIVATE
 target_link_libraries(test_pick_intercept PRIVATE unity)
 add_test(NAME test_pick_intercept COMMAND test_pick_intercept)
 
+add_executable(test_coordinated_grasp "test_coordinated_grasp.cpp")
+target_include_directories(test_coordinated_grasp PRIVATE
+    "${REPO_ROOT}/include"
+    "${REPO_ROOT}/lib/Gantry/src")
+target_compile_definitions(test_coordinated_grasp PRIVATE
+    COORDINATED_JSON="${REPO_ROOT}/test/host/data/coordinated_grasp_reference.json")
+target_link_libraries(test_coordinated_grasp PRIVATE unity)
+add_test(NAME test_coordinated_grasp COMMAND test_coordinated_grasp)
+
 # Limit-switch debounce / pin encoding + end-effector polarity
 add_executable(test_limit_switch_policy "test_limit_switch_policy.cpp")
 target_include_directories(test_limit_switch_policy PRIVATE
@@ -335,3 +344,9 @@ if(GANTRY_HOST_COVERAGE)
 endif()
 
 
+
+# Simulation strike planner port (strike_plan.h) against gantry_twin.py values
+add_executable(test_strike_plan "test_strike_plan.cpp")
+target_include_directories(test_strike_plan PRIVATE "${REPO_ROOT}/include")
+target_link_libraries(test_strike_plan PRIVATE unity)
+add_test(NAME test_strike_plan COMMAND test_strike_plan)

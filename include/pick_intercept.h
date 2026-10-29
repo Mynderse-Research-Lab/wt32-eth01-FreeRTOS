@@ -35,14 +35,18 @@ constexpr float kThetaStartS = Gantry::RotaryPhase::kStartMaxS;
 constexpr int64_t kConveyorPeriodUs = 250000;
 constexpr int64_t kStaleAfterUs = 2 * kConveyorPeriodUs;
 constexpr int kFlatFramesForFallback = 3;
-constexpr float kZCriticalMmS = 1000.0f;
+// Z pick-stroke speed limit. Deliberately below the 1000 mm/s ballscrew whip
+// ceiling (AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S).
+constexpr float kZCriticalMmS = 950.0f;
 constexpr float kGraspHeightMaxMm = 25.4f;
 // Approach pairs. The slow pair is the normal command. The fast pair is used
 // only when a later tracked part would be missed. Z does not use these.
-constexpr float kApproachSlowMmS = 500.0f;
+// 2026-10-21: slow X and both theta speeds raised 1.5x (500/60/180 before);
+// fast X stays at the 2000 mm/s X clamp.
+constexpr float kApproachSlowMmS = 750.0f;
 constexpr float kApproachFastMmS = 2000.0f;
-constexpr float kApproachSlowDegS = 60.0f;
-constexpr float kApproachFastDegS = 180.0f;
+constexpr float kApproachSlowDegS = 90.0f;
+constexpr float kApproachFastDegS = 270.0f;
 constexpr float kMeasuredStrokeMm = 105.5f;
 constexpr float kBenchPickZMm = 105.4f;
 constexpr float kLaneMarginMm = 4.0f;
@@ -53,7 +57,9 @@ constexpr float kDownstreamMm = 25.0f;
 constexpr float kArriveEpsMm = 1.0f;
 constexpr float kArriveEpsDeg = 0.05f;
 constexpr float kDegToRad = 0.0174532925f;
-constexpr int kClassCount = 4;
+constexpr int kClassCount = 10;
+constexpr int kUnusedPackCount = 3;
+constexpr int kKnownClassCount = kClassCount + kUnusedPackCount;
 constexpr int kTrackerCap = 16;
 constexpr int kTakenCap = 8;
 
@@ -95,22 +101,163 @@ inline float jawCloseTravelMm(float open_mm, float width_mm) {
   return 0.5f * (open_mm - width_mm);
 }
 
-// A zero field was not sent. A sent width must be in (0, 80]. Length is the
-// long axis and is not the vertical size.
+// Width is the side the jaws close across, and it is the smaller in-plane size.
+// Length is the long axis. A frame that names them the other way around is
+// swapped, and the long-axis angle turns 90°, so the pads stay on the length.
+struct GripAxes {
+  float width_mm = 0.0f;
+  float length_mm = 0.0f;
+  float theta_deg = 0.0f;
+};
+
+inline GripAxes gripAcrossWidth(float width_mm, float length_mm, float theta_deg) {
+  GripAxes axes;
+  axes.width_mm = width_mm;
+  axes.length_mm = length_mm;
+  axes.theta_deg = theta_deg;
+  if (width_mm > 0.0f && length_mm > 0.0f && width_mm > length_mm) {
+    axes.width_mm = length_mm;
+    axes.length_mm = width_mm;
+    axes.theta_deg = theta_deg + 90.0f;
+  }
+  return axes;
+}
+
+// Every live detection carries all three sizes. The jaws close across the
+// smaller in-plane size, which must be in (0, 80]. Length is the long axis.
+// A missing or non-finite field is rejected; the class id does not fill it.
 inline const char* visionSizeReject(float width_mm, float length_mm, float height_from_belt_mm,
                                    float open_mm) {
-  const auto absent = [](float v) { return !(v > 0.0f) && !(v < 0.0f); };
   const float limit = open_mm < kEndEffectorOpenMm ? open_mm : kEndEffectorOpenMm;
-  if (!absent(width_mm) && (!(width_mm > 0.0f) || width_mm > limit)) {
+  const GripAxes axes = gripAcrossWidth(width_mm, length_mm, 0.0f);
+  if (!std::isfinite(width_mm) || !std::isfinite(length_mm) || !(axes.width_mm > 0.0f) ||
+      axes.width_mm > limit) {
     return "width";
   }
-  if (!absent(length_mm) && !(length_mm > 0.0f)) {
+  if (!(axes.length_mm > 0.0f)) {
     return "length";
   }
-  if (!absent(height_from_belt_mm) && !(height_from_belt_mm > 0.0f)) {
+  if (!std::isfinite(height_from_belt_mm) || !(height_from_belt_mm > 0.0f)) {
     return "height";
   }
   return nullptr;
+}
+
+// Cells this gantry picks. Length × jaw width × height above the belt. Grasp Z
+// is at belt joint Z 115. Cylinders lie on their side, so width and height are
+// the diameter. These are not a firmware fallback: a live frame carries its sizes.
+// Ids: 1 AAA, 2 AA, 3 D, 4 C, 5 9V, 6 CR123A, 7 18650, 8 21700, 9 26650, 10 32650.
+struct DevProfile {
+  const char* name;
+  float length_mm;
+  float width_mm;
+  float height_from_belt_mm;
+  float grasp_joint_z_mm;
+};
+
+constexpr DevProfile kDevProfiles[kClassCount] = {
+    {"AAA", 44.5f, 10.5f, 10.5f, 109.75f},
+    {"AA", 50.5f, 14.5f, 14.5f, 107.75f},
+    {"D", 61.5f, 34.2f, 34.2f, 97.9f},
+    {"C", 50.0f, 26.2f, 26.2f, 101.9f},
+    {"9V", 48.5f, 17.5f, 26.5f, 101.75f},
+    {"CR123A", 34.5f, 17.0f, 17.0f, 106.5f},
+    {"18650", 65.0f, 18.3f, 18.3f, 105.85f},
+    {"21700", 70.0f, 21.2f, 21.2f, 104.4f},
+    {"26650", 65.0f, 26.5f, 26.5f, 101.75f},
+    {"32650", 65.0f, 32.0f, 32.0f, 99.0f},
+};
+
+// Packs vision may still report. They occupy the belt and are not pick targets.
+// Ids 11 laptop, 12 Li-ion pack, 13 power-tool.
+constexpr DevProfile kUnusedPackProfiles[kUnusedPackCount] = {
+    {"laptop", 205.0f, 50.0f, 22.0f, 104.0f},
+    {"cellpack", 114.0f, 66.0f, 25.0f, 102.5f},
+    {"powertool", 120.0f, 75.0f, 80.0f, 60.4f},
+};
+
+inline bool isPickClass(uint8_t battery_class) {
+  return battery_class >= 1 && battery_class <= kClassCount;
+}
+
+inline bool isUnusedPack(uint8_t battery_class) {
+  return battery_class > kClassCount && battery_class <= kKnownClassCount;
+}
+
+// nullptr when this gantry may pick the class. Packs are tracked and skipped.
+// Any other id is not a known body.
+inline const char* classPickReject(uint8_t battery_class) {
+  if (isPickClass(battery_class)) {
+    return nullptr;
+  }
+  if (isUnusedPack(battery_class)) {
+    return "pack not targeted";
+  }
+  return "class";
+}
+
+inline const DevProfile* devProfile(uint8_t battery_class) {
+  if (isPickClass(battery_class)) {
+    return &kDevProfiles[battery_class - 1];
+  }
+  if (isUnusedPack(battery_class)) {
+    return &kUnusedPackProfiles[battery_class - kClassCount - 1];
+  }
+  return nullptr;
+}
+
+inline CellGeom devCell(uint8_t battery_class) {
+  const DevProfile* profile = devProfile(battery_class);
+  CellGeom cell;
+  if (profile == nullptr) {
+    return cell;
+  }
+  cell.length_mm = profile->length_mm;
+  cell.height_mm = profile->height_from_belt_mm;
+  cell.width_mm = profile->width_mm;
+  return cell;
+}
+
+inline CellGeom cellFromVision(float width_mm, float length_mm, float height_from_belt_mm) {
+  CellGeom cell;
+  cell.width_mm = width_mm;
+  cell.length_mm = length_mm;
+  cell.height_mm = height_from_belt_mm;
+  return cell;
+}
+
+// Wire contract for one VISION_DETECT. Capture displacement is required; a
+// latency estimate is not a substitute.
+struct VisionSample {
+  uint32_t item_id = 0;
+  uint8_t battery_class = 0;
+  bool capture_valid = false;
+  float x_across_mm = 0.0f;
+  float y_bat_mm = 0.0f;
+  float theta_deg = 0.0f;
+  float width_mm = 0.0f;
+  float length_mm = 0.0f;
+  float height_from_belt_mm = 0.0f;
+};
+
+inline const char* visionContractReject(const VisionSample& sample, float open_mm) {
+  if (sample.item_id == 0) {
+    return "item id";
+  }
+  if (sample.battery_class < 1 || sample.battery_class > kKnownClassCount) {
+    return "class";
+  }
+  if (!sample.capture_valid) {
+    return "capture displacement";
+  }
+  if (!std::isfinite(sample.x_across_mm) || !std::isfinite(sample.y_bat_mm) ||
+      !std::isfinite(sample.theta_deg)) {
+    return "pose";
+  }
+  if (sample.theta_deg < -180.0f || sample.theta_deg >= 180.0f) {
+    return "theta";
+  }
+  return visionSizeReject(sample.width_mm, sample.length_mm, sample.height_from_belt_mm, open_mm);
 }
 
 inline CellGeom applyVisionSize(CellGeom cell, float width_mm, float length_mm,
@@ -136,8 +283,8 @@ inline CellGeom applyVisionSize(CellGeom cell, float width_mm, float length_mm,
 
 struct FingerGeom {
   float open_mm = 80.0f;
-  float thick_mm = 8.0f;
-  float width_mm = 30.0f;
+  float thick_mm = 10.0f;  // Finger width along the close axis.
+  float width_mm = 50.0f;  // Finger length along the pads.
   float jaw_mm_s = 210.0f;
 };
 
@@ -149,16 +296,7 @@ inline int classIndex(uint8_t battery_class) {
 }
 
 inline CellGeom defaultCell(uint8_t battery_class) {
-  switch (battery_class) {
-    case 2:
-      return CellGeom{70.0f, 21.2f};
-    case 3:
-      return CellGeom{50.0f, 34.0f};
-    case 4:
-      return CellGeom{60.0f, 45.0f};
-    default:
-      return CellGeom{65.0f, 18.3f};
-  }
+  return devCell(battery_class);
 }
 
 inline float wrapDeg(float deg) {
@@ -615,10 +753,25 @@ struct StrikeLeads {
   const char* reason = "ok";
 };
 
-// Contact is at arrival. The jaws close across g at jaw speed; if the belt
-// carries the cell along the jaw faster than that, the downstream finger
-// meets the cell first. Late Z is released so the fingertips are at z_g one
-// guard before contact, and only after the upstream finger is clear.
+// Provisional until bench calibration. With the jaws open, the object's face
+// meets the downstream finger this long before the center reaches the jaw
+// plane. A jaw perpendicular to the belt (along factor 0) or a zero gap has
+// no earlier belt contact; the commanded jaw close still meets the faces at
+// center arrival.
+inline float beltContactLeadS(float side_gap_mm, float belt_mm_s, float along_factor) {
+  const float along = belt_mm_s * along_factor;
+  if (!(side_gap_mm > 0.0f) || !(along > 0.0f)) {
+    return 0.0f;
+  }
+  return side_gap_mm / along;
+}
+
+// Contact of the closing jaws is at arrival. The jaws close across g at jaw
+// speed; if the belt carries the cell along the jaw faster than that, the
+// downstream finger meets the cell first. Late Z is released so the fingertips
+// are at z_g one guard before the earliest of those contacts, and only after
+// the upstream finger is clear. The lead, hover clearance, lane margin, and
+// guard are provisional.
 inline StrikeLeads strikeLeads(const StrikeTiming& t, float belt_mm_s) {
   StrikeLeads l;
   const float along = belt_mm_s * t.along_factor;
@@ -727,18 +880,76 @@ inline bool laterPartNeedsFastApproach(float free_after_slow_s, float next_arriv
   return free_after_slow_s + next_slow_approach_s > next_arrive_s;
 }
 
-// Later of the X trapezoid and the theta move at the slow pair.
-inline float slowApproachSeconds(float distance_mm, float delta_theta_deg, float accel,
-                                 float decel, float theta_accel, float theta_decel) {
-  const float t_x = profileSeconds(std::fabs(distance_mm), kApproachSlowMmS, accel, decel) +
-                    kPreloadS + kSettleS;
+// Later of the X trapezoid and the theta move at one approach pair.
+inline float approachSeconds(float distance_mm, float delta_theta_deg, float x_mm_s,
+                             float theta_deg_s, float accel, float decel, float theta_accel,
+                             float theta_decel) {
+  const float t_x = profileSeconds(std::fabs(distance_mm), x_mm_s, accel, decel) + kPreloadS +
+                    kSettleS;
   float t_th = 0.0f;
   if (std::fabs(delta_theta_deg) >= Gantry::Path::kThetaCommandMinDeg) {
     t_th = kTickS + kThetaStartS +
-           profileSeconds(std::fabs(delta_theta_deg), kApproachSlowDegS, theta_accel, theta_decel) +
+           profileSeconds(std::fabs(delta_theta_deg), theta_deg_s, theta_accel, theta_decel) +
            kSettleS;
   }
   return t_x > t_th ? t_x : t_th;
+}
+
+inline float slowApproachSeconds(float distance_mm, float delta_theta_deg, float accel,
+                                 float decel, float theta_accel, float theta_decel) {
+  return approachSeconds(distance_mm, delta_theta_deg, kApproachSlowMmS, kApproachSlowDegS, accel,
+                         decel, theta_accel, theta_decel);
+}
+
+// Time from contact until the fingers are back in the SAFE_Z band at the bin,
+// ready for the next approach. Transfer uses the slow pair.
+struct PostBinCycle {
+  float grip_dwell_s = 0.0f;
+  float retract_s = 0.0f;
+  float transfer_s = 0.0f;
+  float descend_s = 0.0f;
+  float open_dwell_s = 0.0f;
+  float bin_retract_s = 0.0f;
+  float total_s = 0.0f;
+};
+
+inline PostBinCycle postBinCycle(float pick_z_mm, float pick_x_mm, float pick_theta_deg,
+                                 float bin_x_mm, float z_safe_mm, float bin_z_mm,
+                                 float bin_theta_deg, float grip_dwell_s, float open_dwell_s,
+                                 float z_cap, float accel, float decel, float theta_accel,
+                                 float theta_decel) {
+  PostBinCycle cycle;
+  cycle.grip_dwell_s = grip_dwell_s;
+  cycle.retract_s = profileSeconds(std::fabs(pick_z_mm - z_safe_mm), z_cap, accel, decel) +
+                    kPreloadS + kSettleS;
+  cycle.transfer_s = approachSeconds(bin_x_mm - pick_x_mm, bin_theta_deg - pick_theta_deg,
+                                     kApproachSlowMmS, kApproachSlowDegS, accel, decel, theta_accel,
+                                     theta_decel);
+  cycle.descend_s = profileSeconds(std::fabs(bin_z_mm - z_safe_mm), z_cap, accel, decel) +
+                    kPreloadS + kSettleS;
+  cycle.open_dwell_s = open_dwell_s;
+  cycle.bin_retract_s = cycle.descend_s;
+  cycle.total_s = cycle.grip_dwell_s + cycle.retract_s + cycle.transfer_s + cycle.descend_s +
+                  cycle.open_dwell_s + cycle.bin_retract_s;
+  return cycle;
+}
+
+enum class FollowerPace : uint8_t { Slow, Fast, Skip };
+
+// The follower is timed from the post-bin pose. Slow when that pair arrives,
+// fast only when the slow pair does not, and a skip when neither does.
+inline FollowerPace followerPace(float ready_s, float follower_arrive_s, float slow_approach_s,
+                                 float fast_approach_s) {
+  if (!(follower_arrive_s > 0.0f) || follower_arrive_s >= kWaitS) {
+    return FollowerPace::Skip;
+  }
+  if (ready_s + slow_approach_s <= follower_arrive_s) {
+    return FollowerPace::Slow;
+  }
+  if (ready_s + fast_approach_s <= follower_arrive_s) {
+    return FollowerPace::Fast;
+  }
+  return FollowerPace::Skip;
 }
 
 struct MotionBudget {
@@ -902,7 +1113,10 @@ struct StrikeSchedule {
 };
 
 // Early Z starts right after the pre-position. Late Z releases from the hover
-// so the move finishes one guard before contact. Both require z_g by then.
+// so the move finishes one guard before the earliest jaw/object contact, which
+// may be earlier than center arrival by beltContactLeadS. Both require z_g by
+// then. Provisional: rigid flat rectangles, exact vision pose, 4 mm lanes,
+// 3 mm hover, and the configured guard (15 ms until measured).
 inline StrikeSchedule planPick(float arrive_s, float belt_mm_s, const MotionBudget& budget,
                                const GripGeometry& grip, const StrikeTiming& timing) {
   StrikeSchedule s;
@@ -919,15 +1133,17 @@ inline StrikeSchedule planPick(float arrive_s, float belt_mm_s, const MotionBudg
     return s;
   }
   const StrikeLeads leads = strikeLeads(timing, belt_mm_s);
+  const float contact_s =
+      arrive_s - beltContactLeadS(timing.side_gap_mm, belt_mm_s, timing.along_factor);
   s.window_s = leads.window_s;
   s.contact_mm_s = leads.contact_mm_s;
   s.grip_s = arrive_s - leads.grip_lead_s;
   if (grip.mode == Clearance::EarlyZ) {
     s.z_start_s = budget.approach_s + kPreloadS;
     s.z_done_s = s.z_start_s + budget.z_motion_s;
-    s.slack_s = arrive_s - timing.guard_s - s.z_done_s;
+    s.slack_s = contact_s - timing.guard_s - s.z_done_s;
   } else {
-    s.z_start_s = arrive_s - leads.release_lead_s;
+    s.z_start_s = contact_s - leads.release_lead_s;
     s.z_done_s = s.z_start_s + budget.z_motion_s;
     s.slack_s = s.z_start_s - budget.approach_s;
   }
@@ -943,7 +1159,7 @@ inline StrikeSchedule planPick(float arrive_s, float belt_mm_s, const MotionBudg
     s.reason = "missed";
     return s;
   }
-  if (s.z_done_s > arrive_s - timing.guard_s) {
+  if (s.z_done_s > contact_s - timing.guard_s) {
     s.reason = "late";
     return s;
   }
@@ -991,10 +1207,40 @@ inline Retime retimePick(const StrikeTiming& t, const BeltClock& belt, int64_t n
   const double remain = t.s_arrive_mm - beltPositionMm(belt, now_us);
   r.arrive_us = now_us + static_cast<int64_t>(remain / static_cast<double>(belt.speed_mm_s) * 1.0e6);
   r.grip_us = r.arrive_us - static_cast<int64_t>(leads.grip_lead_s * 1.0e6f);
-  r.release_us = r.arrive_us - static_cast<int64_t>(leads.release_lead_s * 1.0e6f);
+  const float contact_lead = beltContactLeadS(t.side_gap_mm, belt.speed_mm_s, t.along_factor);
+  r.release_us =
+      r.arrive_us - static_cast<int64_t>((leads.release_lead_s + contact_lead) * 1.0e6f);
   r.contact_mm_s = leads.contact_mm_s;
   r.ok = true;
   return r;
+}
+
+// Armed strike whose plunge, close and retract are fixed offsets from arrival
+// (strike_plan.h): only the arrival moves with the belt. grip_us and
+// release_us are left 0; the caller adds its own offsets.
+inline Retime retimeArrival(const StrikeTiming& t, const BeltClock& belt, int64_t now_us) {
+    Retime r;
+    if (!belt.valid) {
+        r.reason = "no conveyor clock";
+        return r;
+    }
+    if (belt.epoch != t.epoch) {
+        r.reason = "conveyor restart";
+        return r;
+    }
+    if (beltStale(belt, now_us)) {
+        r.reason = "stale frames";
+        return r;
+    }
+    if (belt.speed_mm_s <= 0.0f) {
+        r.reason = "belt stopped";
+        return r;
+    }
+    const double remain = t.s_arrive_mm - beltPositionMm(belt, now_us);
+    r.arrive_us =
+        now_us + static_cast<int64_t>(remain / static_cast<double>(belt.speed_mm_s) * 1.0e6);
+    r.ok = true;
+    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,8 +1305,9 @@ struct TrackedPart {
   float theta_deg = 0.0f;
   float width_mm = 0.0f;              // 0: class table. Jaws close across this.
   float length_mm = 0.0f;             // 0: class table. In-plane long axis.
-  float height_from_belt_mm = 0.0f;   // 0: class table. Belt surface to the top.
+  float height_from_belt_mm = 0.0f;   // Required from vision. Belt surface to the top.
   uint8_t battery_class = 1;
+  bool approach_fast = false;         // This part's own approach, chosen from the post-bin pose.
   double s_capture_mm = 0.0;
   double s_arrive_mm = 0.0;
 };
@@ -1168,6 +1415,16 @@ inline void trackDropDownstream(PartTracker& tracker, double s_now_mm) {
   tracker.count = w;
 }
 
+inline bool trackSetApproachFast(PartTracker& tracker, uint32_t token, bool fast) {
+  for (int i = 0; i < tracker.count; ++i) {
+    if (tracker.parts[i].token == token) {
+      tracker.parts[i].approach_fast = fast;
+      return true;
+    }
+  }
+  return false;
+}
+
 inline void trackRemove(PartTracker& tracker, uint32_t token) {
   int w = 0;
   for (int i = 0; i < tracker.count; ++i) {
@@ -1190,5 +1447,7 @@ inline int trackCopy(const PartTracker& tracker, TrackedPart* out, int cap) {
 }
 
 }  // namespace PickIntercept
+
+#include "coordinated_grasp.h"
 
 #endif  // PICK_INTERCEPT_H

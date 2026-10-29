@@ -18,10 +18,17 @@
 #endif
 
 // Across-belt mapping: gantry joint X = x_across + offset.
+// The camera is at the belt center: collision edge 95 mm + 150 mm.
 #if defined(CONFIG_CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM)
 #define CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM ((float)CONFIG_CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM)
 #else
-#define CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM (0.0f)
+#define CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM (245.0f)
+#endif
+
+#if defined(CONFIG_CONVEYOR_BELT_WIDTH_MM)
+#define CONVEYOR_BELT_WIDTH_MM                  ((float)CONFIG_CONVEYOR_BELT_WIDTH_MM)
+#else
+#define CONVEYOR_BELT_WIDTH_MM                  (300.0f)
 #endif
 
 // Joint-space pick heights for Gantry::moveTo(JointConfig).

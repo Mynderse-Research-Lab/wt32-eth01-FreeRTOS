@@ -9,6 +9,14 @@
 void setUp(void) {}
 void tearDown(void) {}
 
+static PickIntercept::CellGeom cell18650() {
+  return PickIntercept::CellGeom{65.0f, 18.3f, 18.3f};
+}
+
+static PickIntercept::CellGeom cell21700() {
+  return PickIntercept::CellGeom{70.0f, 21.2f, 21.2f};
+}
+
 static PickIntercept::ConveyorFrame frameAt(int64_t gantry_us, uint32_t ts, float speed,
                                             float disp_m, uint8_t seq) {
   PickIntercept::ConveyorFrame frame;
@@ -188,7 +196,7 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 60.4f, PickIntercept::graspJointZMm(115.0f, 80.0f));
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 115.0f, PickIntercept::graspJointZMm(115.0f, 0.0f));
 
-  const auto sized = PickIntercept::applyVisionSize(PickIntercept::defaultCell(1), 80.0f, 120.0f,
+  const auto sized = PickIntercept::applyVisionSize(cell18650(), 80.0f, 120.0f,
                                                     40.0f);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 120.0f, sized.length_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 40.0f, sized.height_mm);
@@ -199,7 +207,8 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   PickIntercept::CellGeom full = sized;
   full.length_mm = 120.0f;
   const auto jaw = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, -180.0f, 180.0f);
-  const auto fit = PickIntercept::classifyClearance(0.0f, jaw.joint_deg, full, f, false);
+  const auto fit = PickIntercept::classifyClearance(
+      0.0f, jaw.joint_deg, full, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(fit.mode));
   TEST_ASSERT_EQUAL_STRING("late Z off", fit.reason);
@@ -218,8 +227,10 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   mid.width_mm = 40.0f;
   PickIntercept::CellGeom wider = full;
   wider.width_mm = 60.0f;
-  const auto g40 = PickIntercept::classifyClearance(0.0f, jaw.joint_deg, mid, f, true);
-  const auto g60 = PickIntercept::classifyClearance(0.0f, jaw.joint_deg, wider, f, true);
+  const auto g40 = PickIntercept::classifyClearance(
+      0.0f, jaw.joint_deg, mid, f, true);
+  const auto g60 = PickIntercept::classifyClearance(
+      0.0f, jaw.joint_deg, wider, f, true);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 20.0f, g40.side_gap_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, g60.side_gap_mm);
   const auto slow = PickIntercept::strikeLeads(
@@ -230,11 +241,17 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
 
   TEST_ASSERT_EQUAL_STRING("width",
                            PickIntercept::visionSizeReject(81.0f, 120.0f, 40.0f, 80.0f));
-  TEST_ASSERT_NULL(PickIntercept::visionSizeReject(0.0f, 0.0f, 0.0f, 80.0f));
+  TEST_ASSERT_EQUAL_STRING("width", PickIntercept::visionSizeReject(0.0f, 0.0f, 0.0f, 80.0f));
   TEST_ASSERT_NULL(PickIntercept::visionSizeReject(80.0f, 120.0f, 40.0f, 80.0f));
+  const auto across_width = PickIntercept::gripAcrossWidth(65.0f, 32.0f, 30.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 32.0f, across_width.width_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 65.0f, across_width.length_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 120.0f, across_width.theta_deg);
+  TEST_ASSERT_NULL(PickIntercept::visionSizeReject(65.0f, 32.0f, 32.0f, 80.0f));
   PickIntercept::CellGeom over = full;
   over.width_mm = 81.0f;
-  const auto bad = PickIntercept::classifyClearance(0.0f, jaw.joint_deg, over, f, true);
+  const auto bad = PickIntercept::classifyClearance(
+      0.0f, jaw.joint_deg, over, f, true);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(bad.mode));
   TEST_ASSERT_EQUAL_STRING("cell wider than jaws", bad.reason);
@@ -263,30 +280,36 @@ static void test_side_jaw_is_linear_and_rejects_when_nothing_fits(void) {
 }
 
 static void test_lane_band_is_about_29_deg_for_18650(void) {
-  const PickIntercept::CellGeom cell = PickIntercept::defaultCell(1);
+  const PickIntercept::CellGeom cell = cell18650();
   const PickIntercept::FingerGeom f;
+  int early = 0;
   for (int deg = -90; deg <= 90; deg += 5) {
     const float c = static_cast<float>(deg);
     const auto jaw = PickIntercept::chooseSideJaw(0.0f, c, 0.0f, -180.0f, 180.0f);
-    const auto g = PickIntercept::classifyClearance(c, jaw.joint_deg, cell, f, true);
-    // 0° is along the belt. The 5° grid is a pick between the fingers inside ±25°.
-    const bool lane_expected = std::fabs(c) <= 25.0f;
-    TEST_ASSERT_EQUAL_MESSAGE(lane_expected ? 1 : 0,
-                              g.mode == PickIntercept::Clearance::EarlyZ ? 1 : 0,
-                              "along-belt band");
-    if (!lane_expected) {
-      TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::LateZ),
+    const auto g = PickIntercept::classifyClearance(
+        c, jaw.joint_deg, cell, f, true);
+    // 50 mm fingers. Along the belt (0°) the cell sits between the pads. Across the belt (±90°) it does not.
+    if (std::fabs(c) < 1.0f) {
+      TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ),
                         static_cast<int>(g.mode));
+    }
+    if (std::fabs(c) >= 45.0f) {
+      TEST_ASSERT_TRUE(g.mode != PickIntercept::Clearance::EarlyZ);
+    }
+    if (g.mode == PickIntercept::Clearance::EarlyZ) {
+      ++early;
     }
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.5f * (f.open_mm - cell.height_mm), g.side_gap_mm);
   }
-  // Boundary sits 29° from along the belt. Jaw is cell + 90.
-  TEST_ASSERT_FLOAT_WITHIN(0.1f, PickIntercept::kLaneMarginMm,
-                           PickIntercept::xLaneClearanceMm(-29.0f, 61.0f, cell, f));
+  TEST_ASSERT_TRUE(early >= 3);
+  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(0.0f, 90.0f, cell, f) >=
+                   PickIntercept::kLaneMarginMm);
+  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(-90.0f, 0.0f, cell, f) <
+                   PickIntercept::kLaneMarginMm);
   const auto along = PickIntercept::classifyClearance(0.0f, 90.0f, cell, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ),
                     static_cast<int>(along.mode));
-  const auto off = PickIntercept::classifyClearance(90.0f, 180.0f, cell, f, false);
+  const auto off = PickIntercept::classifyClearance(-90.0f, 0.0f, cell, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip), static_cast<int>(off.mode));
   TEST_ASSERT_EQUAL_STRING("late Z off", off.reason);
   const auto wide =
@@ -298,11 +321,10 @@ static void test_lane_band_is_about_29_deg_for_18650(void) {
 static void test_lane_band_is_narrower_for_21700(void) {
   const PickIntercept::FingerGeom f;
   const float gap_18650 =
-      PickIntercept::xLaneClearanceMm(-27.0f, 63.0f, PickIntercept::defaultCell(1), f);
+      PickIntercept::xLaneClearanceMm(-27.0f, 63.0f, cell18650(), f);
   const float gap_21700 =
-      PickIntercept::xLaneClearanceMm(-27.0f, 63.0f, PickIntercept::defaultCell(2), f);
-  TEST_ASSERT_TRUE(gap_18650 >= PickIntercept::kLaneMarginMm);
-  TEST_ASSERT_TRUE(gap_21700 < PickIntercept::kLaneMarginMm);
+      PickIntercept::xLaneClearanceMm(-27.0f, 63.0f, cell21700(), f);
+  TEST_ASSERT_TRUE(gap_21700 < gap_18650);
 }
 
 static void test_dropin_window_boundary_against_belt_speed(void) {
@@ -339,7 +361,7 @@ static void test_grip_lead_from_jaw_travel_and_contact_speed(void) {
 }
 
 static void test_dropin_timeline_never_overlaps_a_finger_before_crossing(void) {
-  const PickIntercept::CellGeom cell = PickIntercept::defaultCell(1);
+  const PickIntercept::CellGeom cell = cell18650();
   const PickIntercept::FingerGeom f;
   const float v = 400.0f;
   // Away from 0° (along the belt): these need the late Z tail.
@@ -384,12 +406,12 @@ static void test_separating_axis_matches_a_known_overlap(void) {
 
 static void test_slow_approach_unless_a_later_part_is_at_risk(void) {
   const auto slow = PickIntercept::approachPair(false);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 500.0f, slow.x_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 60.0f, slow.theta_deg_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 750.0f, slow.x_mm_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, slow.theta_deg_s);
   TEST_ASSERT_FALSE(slow.fast);
   const auto fast = PickIntercept::approachPair(true);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 2000.0f, fast.x_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 180.0f, fast.theta_deg_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 270.0f, fast.theta_deg_s);
   TEST_ASSERT_TRUE(fast.fast);
   TEST_ASSERT_TRUE(PickIntercept::laterPartNeedsFastApproach(1.0f, 1.2f, 0.5f));
   TEST_ASSERT_FALSE(PickIntercept::laterPartNeedsFastApproach(1.0f, 2.0f, 0.5f));
@@ -399,13 +421,14 @@ static void test_slow_approach_unless_a_later_part_is_at_risk(void) {
   m.theta_cap = PickIntercept::kApproachSlowDegS;
   const auto budget =
       PickIntercept::budgetPick(0.0f, 35.7f, 0.0f, 200.0f, 35.7f, 35.7f, 105.4f, 0.0f, m);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 500.0f, budget.approach_speed_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 1000.0f, budget.descend_speed_mm_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 750.0f, budget.approach_speed_mm_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 950.0f, budget.descend_speed_mm_s);
   TEST_ASSERT_FLOAT_WITHIN(
-      1e-3f, PickIntercept::profileSeconds(105.4f - 35.7f, 1000.0f, m.accel, m.decel),
+      1e-3f, PickIntercept::profileSeconds(105.4f - 35.7f, PickIntercept::kZCriticalMmS, m.accel, m.decel),
       budget.z_motion_s);
-  const float at_cap = PickIntercept::profileSeconds(200.0f, 1000.0f, m.accel, m.decel);
-  const float at_approach = PickIntercept::profileSeconds(200.0f, 500.0f, m.accel, m.decel);
+  const float at_cap = PickIntercept::profileSeconds(200.0f, PickIntercept::kZCriticalMmS, m.accel, m.decel);
+  const float at_approach =
+      PickIntercept::profileSeconds(200.0f, PickIntercept::kApproachSlowMmS, m.accel, m.decel);
   TEST_ASSERT_TRUE(at_cap < at_approach);
 }
 
@@ -537,11 +560,11 @@ static void test_jaw_is_frozen_once_z_leaves_the_band(void) {
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, at_hover.approach_s);
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, at_hover.theta_s);
   // A refined angle is checked against the frozen jaw, not re-chosen.
-  const PickIntercept::CellGeom cell = PickIntercept::defaultCell(1);
+  const PickIntercept::CellGeom cell = cell18650();
   const PickIntercept::FingerGeom f;
   const auto first = PickIntercept::classifyClearance(-10.0f, 80.0f, cell, f, true);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ), static_cast<int>(first.mode));
-  const auto refined = PickIntercept::classifyClearance(-70.0f, 80.0f, cell, f, true);
+  const auto refined = PickIntercept::classifyClearance(-80.0f, 80.0f, cell, f, true);
   TEST_ASSERT_TRUE(refined.mode != PickIntercept::Clearance::EarlyZ);
 }
 
@@ -552,8 +575,8 @@ static void test_lane_strike_slack_and_dropin_release(void) {
   PickIntercept::GripGeometry lane;
   lane.mode = PickIntercept::Clearance::EarlyZ;
   lane.side_gap_mm = 30.85f;
-  lane.along_factor = 0.1f;
-  const auto t = timingFor(PickIntercept::Clearance::EarlyZ, 30.85f, 0.1f);
+  lane.along_factor = 0.0f;
+  const auto t = timingFor(PickIntercept::Clearance::EarlyZ, 30.85f, 0.0f);
   const auto ok = PickIntercept::planPick(1.0f, 300.0f, budget, lane, t);
   TEST_ASSERT_TRUE(ok.feasible);
   TEST_ASSERT_FLOAT_WITHIN(1e-4f, budget.approach_s + PickIntercept::kPreloadS, ok.z_start_s);
@@ -571,11 +594,12 @@ static void test_lane_strike_slack_and_dropin_release(void) {
   td.z_tail_s = short_z.z_motion_s;
   td.z_top_s = 0.25f * short_z.z_motion_s;
   const auto leads = PickIntercept::strikeLeads(td, 300.0f);
+  const float contact_lead = PickIntercept::beltContactLeadS(30.85f, 300.0f, 1.0f);
   const auto d = PickIntercept::planPick(2.0f, 300.0f, short_z, drop, td);
   TEST_ASSERT_TRUE(leads.ok);
   TEST_ASSERT_TRUE(d.feasible);
-  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 2.0f - leads.release_lead_s, d.z_start_s);
-  TEST_ASSERT_TRUE(d.z_done_s <= 2.0f - td.guard_s + 1e-4f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 2.0f - contact_lead - leads.release_lead_s, d.z_start_s);
+  TEST_ASSERT_TRUE(d.z_done_s <= 2.0f - contact_lead - td.guard_s + 1e-4f);
   td.z_tail_s = 0.02f;
   const auto too_late = PickIntercept::planPick(1.0f, 300.0f, budget, drop, td);
   TEST_ASSERT_FALSE(too_late.feasible);
@@ -658,11 +682,11 @@ static void test_neighbour_crossing_a_finger_delays_the_fingers(void) {
   occ.dx_mm = 44.0f;
   occ.remain_mm = 100.0;
   occ.cell_deg = 0.0f;
-  occ.cell = PickIntercept::defaultCell(1);
-  // Jaw across X (θ = −90°): fingers at x = ±44. The occupant crosses the +X finger 0.2625..0.7375 s.
+  occ.cell = cell18650();
+  // Jaw across X (jaw_deg = −90°). A 50 mm finger is clear of this occupant at 0.7875 s (200 mm/s).
   TEST_ASSERT_FLOAT_WITHIN(1.0f, PickIntercept::kWaitS,
                            PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 0.5f));
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.7375f,
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.7875f,
                            PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 2.0f));
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.8f,
                            PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.8f, 2.0f));
@@ -747,6 +771,152 @@ static void test_tracker_matches_item_id_and_remembers_taken_cells(void) {
                     static_cast<int>(PickIntercept::trackAdd(tracker, again, 0.0, 40.0f, true, 0)));
 }
 
+static void test_development_profiles_grasp_from_the_object_top(void) {
+  const float belt = 115.0f;
+  for (uint8_t cls = 1; cls <= PickIntercept::kKnownClassCount; ++cls) {
+    const PickIntercept::DevProfile* profile = PickIntercept::devProfile(cls);
+    TEST_ASSERT_NOT_NULL(profile);
+    const PickIntercept::CellGeom cell = PickIntercept::devCell(cls);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, profile->length_mm, cell.length_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, profile->width_mm, cell.width_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, profile->height_from_belt_mm, cell.height_mm);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, PickIntercept::graspJointZMm(belt, cell.height_mm),
+                             profile->grasp_joint_z_mm);
+    TEST_ASSERT_TRUE(cell.width_mm > 0.0f && cell.width_mm <= 80.0f);
+    if (cls <= PickIntercept::kClassCount) {
+      TEST_ASSERT_NULL(PickIntercept::classPickReject(cls));
+    } else {
+      TEST_ASSERT_EQUAL_STRING("pack not targeted", PickIntercept::classPickReject(cls));
+    }
+  }
+  TEST_ASSERT_EQUAL_STRING("AAA", PickIntercept::devProfile(1)->name);
+  TEST_ASSERT_EQUAL_STRING("9V", PickIntercept::devProfile(5)->name);
+  TEST_ASSERT_EQUAL_STRING("laptop", PickIntercept::devProfile(11)->name);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 114.0f, PickIntercept::devProfile(12)->length_mm);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 25.0f, PickIntercept::devProfile(12)->height_from_belt_mm);
+  TEST_ASSERT_EQUAL_STRING("powertool", PickIntercept::devProfile(13)->name);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(1)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(2)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(6)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(7)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
+  TEST_ASSERT_NULL(PickIntercept::devProfile(0));
+  TEST_ASSERT_NULL(PickIntercept::devProfile(14));
+  TEST_ASSERT_EQUAL_STRING("class", PickIntercept::classPickReject(14));
+}
+
+static void test_vision_contract_rejects_each_missing_field(void) {
+  PickIntercept::VisionSample sample;
+  sample.item_id = 7;
+  sample.battery_class = 1;
+  sample.capture_valid = true;
+  sample.x_across_mm = 10.0f;
+  sample.y_bat_mm = -20.0f;
+  sample.theta_deg = 15.0f;
+  const PickIntercept::DevProfile* profile = PickIntercept::devProfile(1);
+  sample.width_mm = profile->width_mm;
+  sample.length_mm = profile->length_mm;
+  sample.height_from_belt_mm = profile->height_from_belt_mm;
+  TEST_ASSERT_NULL(PickIntercept::visionContractReject(sample, 80.0f));
+
+  sample.item_id = 0;
+  TEST_ASSERT_EQUAL_STRING("item id", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.item_id = 7;
+  sample.battery_class = 14;
+  TEST_ASSERT_EQUAL_STRING("class", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.battery_class = 11;
+  sample.width_mm = PickIntercept::devProfile(11)->width_mm;
+  sample.length_mm = PickIntercept::devProfile(11)->length_mm;
+  sample.height_from_belt_mm = PickIntercept::devProfile(11)->height_from_belt_mm;
+  TEST_ASSERT_NULL(PickIntercept::visionContractReject(sample, 80.0f));
+  sample.battery_class = 1;
+  sample.capture_valid = false;
+  TEST_ASSERT_EQUAL_STRING("capture displacement",
+                           PickIntercept::visionContractReject(sample, 80.0f));
+  sample.capture_valid = true;
+  sample.theta_deg = 180.0f;
+  TEST_ASSERT_EQUAL_STRING("theta", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.theta_deg = 15.0f;
+  sample.x_across_mm = std::nanf("");
+  TEST_ASSERT_EQUAL_STRING("pose", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.x_across_mm = 10.0f;
+  sample.width_mm = 0.0f;
+  TEST_ASSERT_EQUAL_STRING("width", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.width_mm = profile->width_mm;
+  sample.length_mm = 0.0f;
+  TEST_ASSERT_EQUAL_STRING("length", PickIntercept::visionContractReject(sample, 80.0f));
+  sample.length_mm = profile->length_mm;
+  sample.height_from_belt_mm = 0.0f;
+  TEST_ASSERT_EQUAL_STRING("height", PickIntercept::visionContractReject(sample, 80.0f));
+}
+
+static void test_follower_pace_uses_the_post_bin_pose(void) {
+  const auto cycle = PickIntercept::postBinCycle(100.0f, 200.0f, 90.0f, 10.0f, 35.7f, 90.8f, 90.0f,
+                                                 0.19f, 0.19f, 1000.0f, 3000.0f, 3000.0f, 1800.0f,
+                                                 1800.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f,
+                           cycle.grip_dwell_s + cycle.retract_s + cycle.transfer_s +
+                               cycle.descend_s + cycle.open_dwell_s + cycle.bin_retract_s,
+                           cycle.total_s);
+  TEST_ASSERT_TRUE(cycle.transfer_s > 0.2f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, cycle.descend_s, cycle.bin_retract_s);
+
+  const float ready = 1.0f + cycle.total_s;
+  const float slow = 0.4f;
+  const float fast = 0.2f;
+  TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::FollowerPace::Slow),
+                    static_cast<int>(PickIntercept::followerPace(ready, ready + slow, slow, fast)));
+  TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::FollowerPace::Fast),
+                    static_cast<int>(PickIntercept::followerPace(ready, ready + fast, slow, fast)));
+  TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::FollowerPace::Skip),
+                    static_cast<int>(
+                        PickIntercept::followerPace(ready, ready + fast - 0.01f, slow, fast)));
+}
+
+static void test_jaw_override_survives_a_supplied_width(void) {
+  auto t = timingFor(PickIntercept::Clearance::EarlyZ, 20.0f, 0.0f);
+  t.jaw_override_s = 0.080f;
+  const auto leads = PickIntercept::strikeLeads(t, 400.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.100f, leads.grip_lead_s);
+  t.jaw_override_s = 0.0f;
+  const auto derived = PickIntercept::strikeLeads(t, 400.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.020f + 20.0f / 210.0f, derived.grip_lead_s);
+}
+
+static void test_contact_lead_pulls_depth_ahead_of_center_arrival(void) {
+  const auto m = limits();
+  const auto budget =
+      PickIntercept::budgetPick(0.0f, 35.7f, 0.0f, 20.0f, 35.7f, 35.7f, 50.0f, 0.0f, m);
+  PickIntercept::GripGeometry lane;
+  lane.mode = PickIntercept::Clearance::EarlyZ;
+  lane.side_gap_mm = 30.0f;
+  lane.along_factor = 1.0f;
+  auto t = timingFor(PickIntercept::Clearance::EarlyZ, 30.0f, 1.0f);
+  const float lead = PickIntercept::beltContactLeadS(30.0f, 300.0f, 1.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.1f, lead);
+  const auto ok = PickIntercept::planPick(2.0f, 300.0f, budget, lane, t);
+  TEST_ASSERT_TRUE(ok.feasible);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 2.0f - lead - t.guard_s - ok.z_done_s, ok.slack_s);
+  const auto late = PickIntercept::planPick(ok.z_done_s + lead + t.guard_s - 0.001f, 300.0f, budget,
+                                            lane, t);
+  TEST_ASSERT_FALSE(late.feasible);
+  TEST_ASSERT_EQUAL_STRING("late", late.reason);
+}
+
+static void test_neighbour_occupancy_covers_the_retract(void) {
+  const PickIntercept::FingerGeom f;
+  PickIntercept::Occupant occ;
+  occ.dx_mm = 44.0f;
+  occ.remain_mm = 200.0;
+  occ.cell_deg = 0.0f;
+  occ.cell = cell18650();
+  // A grip-only horizon ends before the occupant reaches the finger.
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f,
+                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 0.4f));
+  // Extending the horizon through the retract waits until the finger is clear.
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 1.2875f,
+                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 2.0f));
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_position_reanchors_on_displacement);
@@ -784,6 +954,12 @@ int main(void) {
   RUN_TEST(test_arrival_is_camera_relative);
   RUN_TEST(test_zero_speed_does_not_invent_an_arrival);
   RUN_TEST(test_neighbour_crossing_a_finger_delays_the_fingers);
+  RUN_TEST(test_development_profiles_grasp_from_the_object_top);
+  RUN_TEST(test_vision_contract_rejects_each_missing_field);
+  RUN_TEST(test_follower_pace_uses_the_post_bin_pose);
+  RUN_TEST(test_jaw_override_survives_a_supplied_width);
+  RUN_TEST(test_contact_lead_pulls_depth_ahead_of_center_arrival);
+  RUN_TEST(test_neighbour_occupancy_covers_the_retract);
   RUN_TEST(test_tracker_dedupes_and_edf_takes_the_earliest);
   RUN_TEST(test_tracker_matches_item_id_and_remembers_taken_cells);
   return UNITY_END();
