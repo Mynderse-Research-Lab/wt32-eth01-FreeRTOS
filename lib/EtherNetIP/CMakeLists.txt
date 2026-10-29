@@ -8,6 +8,7 @@ idf_component_register(
         "src/EipEncapsulation.cpp"
         "src/EipCpf.cpp"
         "src/CipMessageRouter.cpp"
+        "src/CipEthernetLink.cpp"
         "src/EipConnectionManager.cpp"
         "src/Kinetix5100Assembly.cpp"
         "src/Kinetix5100ParamAccess.cpp"
@@ -31,6 +32,7 @@ idf_component_register(
         esp_netif
         W5500
         Spi3Bus
+        esp_driver_gpio
         freertos
         log
         esp_timer

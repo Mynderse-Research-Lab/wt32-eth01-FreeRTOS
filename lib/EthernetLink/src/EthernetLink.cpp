@@ -220,6 +220,9 @@ bool EthernetLink::start() {
     }
 
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    // emac_rx (prio 15) carries CellNet L2 RX hooks; pin it to the creating
+    // core (app_main, core 0) so it never preempts the Class 1 task on core 1.
+    mac_config.flags |= ETH_MAC_FLAG_PIN_TO_CORE;
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ETH_PHY_ADDR;
     // Crystal enable is handled only by enablePhyOscillator(). Do NOT set

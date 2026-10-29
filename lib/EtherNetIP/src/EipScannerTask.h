@@ -29,6 +29,10 @@ void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
 // Dump Class 1 latency ring stats (exchange / O->T / cycle / cmd-to-StartMotion).
 void dumpClass1TimingStats();
 
+// Logic-analyzer marker: drive `gpio` high for each Class 1 exchange (multi-axis
+// loop). -1 disables. Call before startScannerTask(). Diagnostic only.
+void setScopeMarkerGpio(int gpio);
+
 }  // namespace eip
 
 #endif  // ETHERNET_IP_EIP_SCANNER_TASK_H

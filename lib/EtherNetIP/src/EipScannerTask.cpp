@@ -14,6 +14,9 @@
 #include "EipSocketW5500.h"
 #include "Hcs01Assembly.h"
 #include "W5500.h"
+#include "W5500BusMutex.h"
+#include "W5500Diag.h"
+#include "W5500Socket.h"
 #include "Spi3Bus.h"
 
 #include "esp_log.h"
@@ -21,6 +24,11 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include <atomic>
+#include <mutex>
+
+#include "driver/gpio.h"
 
 namespace eip {
 
@@ -62,10 +70,20 @@ struct ScannerTaskCtx {
 
 struct KeepaliveCtx {
   EipMultiScanner* scanner;
-  volatile bool run;
-  volatile bool failed;
+  std::atomic<bool> run;
+  std::atomic<bool> failed;
   uint32_t period_ms;
+  // Also drain T->O so connected axes keep fresh feedback (per-axis reopen,
+  // where the cyclic exchange is paused for the whole FO).
+  bool drain = false;
+  // Set by the helper just before it deletes itself.
+  std::atomic<bool> exited{false};
 };
+
+// Keepalive pumping during a per-axis reopen. 2 ms matches the Kinetix RPI so
+// X/Z neither starve the drive (16x RPI) nor go stale on our side (10x RPI).
+static constexpr uint32_t kReopenKeepalivePeriodMs = 2;
+static constexpr uint32_t kKeepaliveExitWaitMs = 50;
 
 // Tick-aligned Class 1 cadence. xTaskDelayUntil always blocks when on time so
 // IDLE1 can feed the task WDT. Sub-ms RPI fraction (if any) is paced after
@@ -104,6 +122,335 @@ void paceClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
   }
 }
 
+// Dropout diagnostics (W5500Diag): read-only, nothing here recovers anything.
+constexpr uint32_t kSpiCheckEveryN = 50;  // 100 ms at RPI 2 ms
+
+// Dump the chip state captured at the first failure. Runs after the exchange
+// released the bus and before teardown or the chip reset touch it.
+void logW5500FailureSnapshot(w5500::W5500Hal& hal, w5500::FailReason fallback) {
+    w5500::FailureSnapshot snap;
+    if (!w5500::takeFailureSnapshot(snap)) {
+        // No failed send recorded one (stale T->O / reopen): capture now.
+        {
+            std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+            w5500::captureFailureSnapshot(hal, 0xFF, fallback,
+                                          w5500::socketSoftTxState());
+        }
+        if (!w5500::takeFailureSnapshot(snap)) {
+            ESP_LOGW(TAG, "W5500 snapshot: none captured");
+            return;
+        }
+    }
+    char line[320];
+    w5500::formatSnapshotCommon(snap, line, sizeof(line));
+    ESP_LOGW(TAG, "W5500 snapshot: %s", line);
+    {
+        // Second PHYCFGR read, milliseconds later: tells a real speed/duplex
+        // change from a one-off bad read of the snapshot value.
+        uint8_t phy_now = 0;
+        {
+            std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+            phy_now = hal.readReg(kBlockCommon(), REG_PHYCFGR);
+        }
+        char mode[24];
+        w5500::formatPhy(phy_now, mode, sizeof(mode));
+        ESP_LOGW(TAG, "W5500 snapshot: phy re-read %lld ms later = 0x%02X (%s)",
+                 static_cast<long long>((esp_timer_get_time() - snap.t_us) / 1000),
+                 phy_now, mode);
+    }
+    for (uint8_t i = 0; i < 8; ++i) {
+        w5500::formatSnapshotSocket(snap, i, line, sizeof(line));
+        ESP_LOGW(TAG, "W5500 snapshot: %s", line);
+    }
+    const w5500::SpiCheckStats st = w5500::spiCheckStats();
+    ESP_LOGW(TAG,
+             "W5500 SPI check: %lu reads, bad ver/mac/ip=%lu/%lu/%lu, bad rx hdr=%lu",
+             static_cast<unsigned long>(st.checks),
+             static_cast<unsigned long>(st.version_bad),
+             static_cast<unsigned long>(st.mac_bad),
+             static_cast<unsigned long>(st.ip_bad),
+             static_cast<unsigned long>(st.rx_hdr_bad));
+}
+
+// Negotiated link mode, logged whenever Class 1 starts so a 10M/half-duplex
+// link after a chip reset is visible.
+uint8_t logW5500LinkMode(w5500::W5500Hal& hal) {
+    uint8_t phy = 0;
+    {
+        std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+        phy = hal.readReg(kBlockCommon(), REG_PHYCFGR);
+    }
+    char mode[24];
+    w5500::formatPhy(phy, mode, sizeof(mode));
+    ESP_LOGI(TAG, "W5500 link: %s (phy=0x%02X)", mode, phy);
+    return phy;
+}
+
+// Cyclic loop left because PHYCFGR LNK read 0. Log it with a snapshot, then
+// probe for a short blip (connector break) vs a real drop. Read-only: teardown
+// and reconnect proceed exactly as before.
+constexpr int kLinkBlipProbeMs = 50;
+
+int64_t logW5500LinkDown(w5500::W5500Hal& hal) {
+    const int64_t down_us = esp_timer_get_time();
+    uint8_t phy = 0;
+    {
+        std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+        phy = hal.readReg(kBlockCommon(), REG_PHYCFGR);
+    }
+    char mode[24];
+    w5500::formatPhy(phy, mode, sizeof(mode));
+    ESP_LOGW(TAG, "W5500 link DOWN (%s, phy=0x%02X) — Class 1 teardown", mode, phy);
+    logW5500FailureSnapshot(hal, w5500::FailReason::kLinkDown);
+    for (int ms = 1; ms <= kLinkBlipProbeMs; ++ms) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+        {
+            std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+            phy = hal.readReg(kBlockCommon(), REG_PHYCFGR);
+        }
+        if (phy & 0x01) {
+            w5500::formatPhy(phy, mode, sizeof(mode));
+            ESP_LOGW(TAG, "W5500 link back after %d ms (%s) — a blip, not a renegotiation",
+                     ms, mode);
+            return down_us;
+        }
+    }
+    ESP_LOGW(TAG, "W5500 link still down after %d ms", kLinkBlipProbeMs);
+    return down_us;
+}
+
+// A real 100BASE-TX link loss lasts >1 s (renegotiation). Require LNK=0 on
+// this many consecutive cycles before tearing down: on 2026-10-20 16:24 one
+// LNK=0 read (link back within 1 ms, no renegotiation) caused a full drop.
+constexpr uint32_t kLinkDownConfirmReads = 3;
+
+// True when the W5500 no longer holds the MAC/IP written at init/recover: the
+// chip reset itself (RSTn pulse or brownout) and every connect would fail.
+// The caller restores the chip config; motion stays held (servos off, E602).
+bool w5500LostConfig(w5500::W5500Hal& hal) {
+    const w5500::SpiCheckResult res = w5500::spiIntegrityCheck(hal);
+    if (res.ok) return false;
+    ESP_LOGW(TAG,
+             "W5500 reset itself (ver=0x%02X mac=%02X:%02X:%02X:%02X:%02X:%02X "
+             "ip=%u.%u.%u.%u) — restoring chip config; motion stays held",
+             res.version, res.mac[0], res.mac[1], res.mac[2], res.mac[3],
+             res.mac[4], res.mac[5], res.ip[0], res.ip[1], res.ip[2], res.ip[3]);
+    return true;
+}
+
+// Class 1 stall diagnostics: on 2026-10-20 the stale ages showed the multi
+// task skipping 10-40 ms between exchanges. Track the worst loop gap (split
+// into the previous iteration's exchange / log flush / rest) and the W5500
+// bus mutex's longest hold and wait. The Class 1 task only records; the
+// class1LogTask (core 0) prints, so no ESP_LOG or console TCP send runs in
+// the cyclic loop.
+constexpr uint32_t kLoopGapReportUs = 6000;
+constexpr uint32_t kBusHoldReportUs = 3000;
+
+struct LoopGap {
+    uint32_t gap_us = 0;
+    uint32_t exchange_us = 0;
+    uint32_t ot_us = 0;     // of exchange: O->T sends
+    uint32_t drain_us = 0;  // of exchange: T->O drain
+    uint32_t flush_us = 0;
+    uint32_t rest_us = 0;  // periodic checks + pacing + anything preempting
+    uint32_t pace_us = 0;  // of rest: inside paceClass1Cycle (delay + wake latency)
+};
+portMUX_TYPE g_diag_mux = portMUX_INITIALIZER_UNLOCKED;
+LoopGap g_worst_gap;    // guarded by g_diag_mux
+int64_t g_pace_us = 0;  // previous iteration's time in paceClass1Cycle
+
+// paceClass1Cycle, timed for the loop-gap breakdown (multi-axis loop).
+void pacedClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
+    const int64_t tp = class1NowUs();
+    paceClass1Cycle(last_wake, rpi_us);
+    g_pace_us = class1NowUs() - tp;
+}
+
+void noteLoopGap(int64_t t0, int64_t prev_t0, int64_t prev_t1, int64_t prev_t2,
+                 uint32_t prev_ot_us, uint32_t prev_drain_us) {
+    if (prev_t0 <= 0 || t0 <= prev_t0) return;
+    const uint32_t gap = static_cast<uint32_t>(t0 - prev_t0);
+    portENTER_CRITICAL(&g_diag_mux);
+    if (gap > g_worst_gap.gap_us) {
+        g_worst_gap.gap_us = gap;
+        g_worst_gap.exchange_us = static_cast<uint32_t>(prev_t1 - prev_t0);
+        g_worst_gap.ot_us = prev_ot_us;
+        g_worst_gap.drain_us = prev_drain_us;
+        g_worst_gap.flush_us = static_cast<uint32_t>(prev_t2 - prev_t1);
+        g_worst_gap.rest_us = static_cast<uint32_t>(t0 - prev_t2);
+        g_worst_gap.pace_us = static_cast<uint32_t>(g_pace_us);
+    }
+    portEXIT_CRITICAL(&g_diag_mux);
+}
+
+void logClass1StallDiag(bool force) {
+    const w5500::BusHoldStats bus = w5500::spiBusMutex().take();
+    portENTER_CRITICAL(&g_diag_mux);
+    const LoopGap gap = g_worst_gap;
+    g_worst_gap = LoopGap{};
+    portEXIT_CRITICAL(&g_diag_mux);
+    if (force || gap.gap_us >= kLoopGapReportUs) {
+        ESP_LOGW(TAG,
+                 "Class 1 loop gap %lu us: exchange %lu (ot %lu, drain %lu), "
+                 "log flush %lu, rest %lu (pace %lu)",
+                 static_cast<unsigned long>(gap.gap_us),
+                 static_cast<unsigned long>(gap.exchange_us),
+                 static_cast<unsigned long>(gap.ot_us),
+                 static_cast<unsigned long>(gap.drain_us),
+                 static_cast<unsigned long>(gap.flush_us),
+                 static_cast<unsigned long>(gap.rest_us),
+                 static_cast<unsigned long>(gap.pace_us));
+    }
+    if (force || bus.max_hold_us >= kBusHoldReportUs ||
+        bus.max_wait_us >= kBusHoldReportUs) {
+        ESP_LOGW(TAG, "W5500 bus mutex: longest hold %lu us by %s, longest wait %lu us by %s",
+                 static_cast<unsigned long>(bus.max_hold_us), bus.holder,
+                 static_cast<unsigned long>(bus.max_wait_us), bus.waiter);
+    }
+}
+
+// Logic-analyzer marker (cfg eip_scope_gpio): high during each exchange.
+int g_scope_gpio = -1;
+
+inline void scopeMark(int level) {
+    if (g_scope_gpio >= 0) {
+        gpio_set_level(static_cast<gpio_num_t>(g_scope_gpio), static_cast<uint32_t>(level));
+    }
+}
+
+// Snapshot taken while X/Z stay up (theta reopen); class1LogTask prints it
+// one line per 100 ms.
+std::mutex g_trickle_mutex;
+w5500::FailureSnapshot g_trickle_snap;  // guarded by g_trickle_mutex
+int g_trickle_line = -1;  // -1 idle; 0 announce; 1 common line; 2..9 sockets
+uint8_t g_trickle_axis = 0;
+
+void captureSnapshotForTrickle(w5500::W5500Hal& hal, size_t axis) {
+    {
+        std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+        w5500::captureFailureSnapshot(hal, 0xFF, w5500::FailReason::kInputStale,
+                                      w5500::socketSoftTxState());
+    }
+    std::lock_guard<std::mutex> lock(g_trickle_mutex);
+    if (g_trickle_line < 0 && w5500::takeFailureSnapshot(g_trickle_snap)) {
+        g_trickle_axis = static_cast<uint8_t>(axis);
+        g_trickle_line = 0;
+    }
+}
+
+void trickleSnapshotLine() {
+    char line[320];
+    int which = -1;
+    uint8_t axis = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_trickle_mutex);
+        if (g_trickle_line < 0) return;
+        which = g_trickle_line;
+        axis = g_trickle_axis;
+        if (which == 1) {
+            w5500::formatSnapshotCommon(g_trickle_snap, line, sizeof(line));
+        } else if (which >= 2) {
+            w5500::formatSnapshotSocket(g_trickle_snap, static_cast<uint8_t>(which - 2),
+                                        line, sizeof(line));
+        }
+        g_trickle_line = (which >= 9) ? -1 : which + 1;
+    }
+    if (which == 0) {
+        ESP_LOGW(TAG, "axis%u silent — W5500 snapshot before reopen follows",
+                 static_cast<unsigned>(axis));
+    } else {
+        ESP_LOGW(TAG, "W5500 snapshot: %s", line);
+    }
+}
+
+// Scanner whose deferred Class 1 log the logger task drains while the cyclic
+// loop runs. Cleared (under the mutex) before the scanner goes out of scope.
+std::mutex g_log_scanner_mutex;
+EipMultiScanner* g_log_scanner = nullptr;
+
+void setLogScanner(EipMultiScanner* scanner) {
+    std::lock_guard<std::mutex> lock(g_log_scanner_mutex);
+    g_log_scanner = scanner;
+}
+
+constexpr UBaseType_t kLogTaskPriority = 2;
+constexpr BaseType_t kLogTaskCore = 0;
+constexpr uint32_t kLogTaskStack = 4096;
+constexpr uint32_t kLogTaskPeriodMs = 20;
+
+void class1LogTask(void*) {
+    uint32_t ticks = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(kLogTaskPeriodMs));
+        {
+            std::lock_guard<std::mutex> lock(g_log_scanner_mutex);
+            if (g_log_scanner != nullptr) {
+                (void)g_log_scanner->flushDeferredLogs();
+            }
+        }
+        if (++ticks >= 100 / kLogTaskPeriodMs) {
+            ticks = 0;
+            trickleSnapshotLine();
+            logClass1StallDiag(false);
+        }
+    }
+}
+
+// Class 1 UDP destinations are written once and cached, so a write that lands
+// in Sn_DIPR/Sn_DPORT would silently send every later frame elsewhere (SENDOK
+// still fires). Compare them with the cache; log each socket once per change.
+void checkW5500SocketDests(w5500::W5500Hal& hal) {
+    static uint8_t reported = 0;
+    w5500::DestMismatch bad[8];
+    const size_t n =
+        w5500::checkSocketDests(hal, w5500::socketSoftTxState(), bad, 8);
+    uint8_t now_bad = 0;
+    for (size_t k = 0; k < n; ++k) {
+        const w5500::DestMismatch& m = bad[k];
+        const uint8_t bit = static_cast<uint8_t>(1u << m.sock);
+        now_bad = static_cast<uint8_t>(now_bad | bit);
+        if (reported & bit) continue;
+        ESP_LOGW(TAG,
+                 "W5500 s%u destination changed: chip %u.%u.%u.%u:%u, written "
+                 "%lu.%lu.%lu.%lu:%u",
+                 static_cast<unsigned>(m.sock), m.raw[0], m.raw[1], m.raw[2],
+                 m.raw[3],
+                 static_cast<unsigned>((static_cast<unsigned>(m.raw[4]) << 8) | m.raw[5]),
+                 static_cast<unsigned long>((m.exp_ip >> 24) & 0xFF),
+                 static_cast<unsigned long>((m.exp_ip >> 16) & 0xFF),
+                 static_cast<unsigned long>((m.exp_ip >> 8) & 0xFF),
+                 static_cast<unsigned long>(m.exp_ip & 0xFF),
+                 static_cast<unsigned>(m.exp_port));
+    }
+    reported = now_bad;
+}
+
+// Read back VERSIONR/SHAR/SIPR every 100 ms; a mismatch is a corrupted read.
+// The same read reports PHYCFGR, so any link-mode change is logged too.
+void checkW5500SpiPeriodic(w5500::W5500Hal& hal, uint32_t& cycles,
+                           uint8_t& last_phy) {
+    if (++cycles < kSpiCheckEveryN) return;
+    cycles = 0;
+    const w5500::SpiCheckResult res = w5500::spiIntegrityCheck(hal);
+    if (res.phycfgr != last_phy) {
+        char was[24];
+        char now[24];
+        w5500::formatPhy(last_phy, was, sizeof(was));
+        w5500::formatPhy(res.phycfgr, now, sizeof(now));
+        ESP_LOGW(TAG, "W5500 link changed: %s (0x%02X) -> %s (0x%02X)", was,
+                 last_phy, now, res.phycfgr);
+        last_phy = res.phycfgr;
+    }
+    checkW5500SocketDests(hal);
+    if (res.ok) return;
+    ESP_LOGW(TAG,
+             "W5500 SPI read-back mismatch: ver=0x%02X mac=%02X:%02X:%02X:%02X:%02X:%02X "
+             "ip=%u.%u.%u.%u",
+             res.version, res.mac[0], res.mac[1], res.mac[2], res.mac[3],
+             res.mac[4], res.mac[5], res.ip[0], res.ip[1], res.ip[2], res.ip[3]);
+}
+
 void logTimingSnapshotPeriodic(uint32_t& cycles) {
   ++cycles;
   if ((cycles % kTimingLogEveryN) != 0) return;
@@ -128,12 +475,16 @@ void logTimingSnapshotPeriodic(uint32_t& cycles) {
 
 void keepaliveTask(void* arg) {
   auto* ctx = static_cast<KeepaliveCtx*>(arg);
-  while (ctx->run) {
+  while (ctx->run.load()) {
     if (!ctx->scanner->sendKeepaliveAll()) {
       ctx->failed = true;
     }
+    if (ctx->drain) {
+      (void)ctx->scanner->drainBufferedInputs();
+    }
     vTaskDelay(pdMS_TO_TICKS(ctx->period_ms > 0 ? ctx->period_ms : 5));
   }
+  ctx->exited = true;
   vTaskDelete(nullptr);
 }
 
@@ -162,6 +513,46 @@ void escalateChipRecover(ScannerTaskCtx* ctx, unsigned& recover_streak,
     vTaskDelay(pdMS_TO_TICKS(backoff_ms));
     backoff_ms = chipRecoverNextBackoffMs(backoff_ms, false);
   }
+}
+
+// Stop a keepalive helper and wait for it to leave (its ctx lives on our
+// stack, so it must be gone before the ctx goes out of scope).
+void stopKeepalive(KeepaliveCtx& ka) {
+  ka.run = false;
+  const TickType_t start = xTaskGetTickCount();
+  while (!ka.exited.load() &&
+         (xTaskGetTickCount() - start) < pdMS_TO_TICKS(kKeepaliveExitWaitMs)) {
+    vTaskDelay(1);
+  }
+  if (!ka.exited.load()) {
+    ESP_LOGE(TAG, "Keepalive helper did not exit within %lu ms",
+             static_cast<unsigned long>(kKeepaliveExitWaitMs));
+  }
+}
+
+// Per-axis reopen (HCS01 theta) while X/Z stay up. The FO blocks this task
+// for up to the TCP connect + explicit-message timeouts, so a helper keeps
+// sending X/Z O->T and draining their T->O meanwhile. Returns false if the
+// helper saw a Kinetix O->T failure (caller escalates to full recover).
+bool reopenAxisWithKeepalive(EipMultiScanner& scanner, size_t axis) {
+  // Mark the axis idle *before* the helper exists so it never touches it.
+  scanner.prepareAxisReopen(axis);
+
+  KeepaliveCtx ka{&scanner, true, false, kReopenKeepalivePeriodMs};
+  ka.drain = true;
+  TaskHandle_t handle = nullptr;
+  if (xTaskCreatePinnedToCore(keepaliveTask, "EipReopenKA", kKeepaliveStack, &ka,
+                              kKeepalivePriority, &handle, kScannerCore) != pdPASS) {
+    ESP_LOGE(TAG, "EipReopenKA create failed — axis%u reopen deferred",
+             static_cast<unsigned>(axis));
+    scanner.deferAxisReopen(axis);
+    return true;
+  }
+
+  (void)scanner.reopenAxis(axis);
+  stopKeepalive(ka);
+  (void)scanner.flushDeferredLogs();
+  return !ka.failed.load();
 }
 
 ScannerConfig makeKinetixConfig(const char* ip, uint16_t connection_serial,
@@ -281,6 +672,7 @@ void multiAxisTask(void* arg) {
   auto* ctx = static_cast<ScannerTaskCtx*>(arg);
   uint32_t backoff_ms = 1000;
   unsigned recover_streak = 0;
+  int64_t link_down_us = 0;  // set when the cyclic loop saw LNK=0
 
   MultiAxisSlot slots[EipMultiScanner::kMaxAxes];
   size_t n = 0;
@@ -314,9 +706,27 @@ void multiAxisTask(void* arg) {
   ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
 
   while (true) {
+    uint32_t link_wait_polls = 0;
     while (!ctx->link->isUp()) {
       backoff_ms = 1000;
+      // This wait is otherwise silent: report a W5500 that never shows link
+      // (unreadable chip, held in reset, cable) every 5 s.
+      if (++link_wait_polls % 10 == 0) {
+        uint8_t phy = 0;
+        {
+          std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+          phy = ctx->hal->readReg(kBlockCommon(), REG_PHYCFGR);
+        }
+        ESP_LOGW(TAG, "W5500 link not up after %lu s (phy=0x%02X) — waiting",
+                 static_cast<unsigned long>(link_wait_polls * kLinkPollMs / 1000), phy);
+      }
       vTaskDelay(pdMS_TO_TICKS(kLinkPollMs));
+    }
+    if (link_down_us != 0) {
+      // Upper bound: teardown plus the link poll period sit in between.
+      ESP_LOGW(TAG, "W5500 link up again (seen %lld ms after it dropped)",
+               static_cast<long long>((esp_timer_get_time() - link_down_us) / 1000));
+      link_down_us = 0;
     }
     // PHYCFGR can assert LNK before the partner finishes auto-neg; brief settle
     // avoids INIT→CLOSED ARP failures right after cable/drive recovery.
@@ -341,8 +751,13 @@ void multiAxisTask(void* arg) {
     TaskHandle_t ka_handle = nullptr;
     if (ok && n > 1) {
       ka.run = true;
-      xTaskCreatePinnedToCore(keepaliveTask, "EipHoldKA", kKeepaliveStack, &ka,
-                              kKeepalivePriority, &ka_handle, kScannerCore);
+      if (xTaskCreatePinnedToCore(keepaliveTask, "EipHoldKA", kKeepaliveStack, &ka,
+                                  kKeepalivePriority, &ka_handle,
+                                  kScannerCore) != pdPASS) {
+        ESP_LOGE(TAG, "EipHoldKA create failed — peer FO without keepalive");
+        ka.run = false;
+        ka.exited = true;
+      }
       for (size_t i = 1; i < n; ++i) {
         const bool opened = scanner.openAxis(i);
         if (opened) {
@@ -352,14 +767,14 @@ void multiAxisTask(void* arg) {
             ScannerConfig::DriveFamily::kHcs01) {
           ESP_LOGW(TAG,
                    "Theta ForwardOpen failed — X/Z stay up; check HCS01 "
-                   "map/FO sizes");
+                   "map/FO sizes (per-axis reopen will retry)");
+          scanner.requestAxisReopen(i);
           continue;
         }
         ok = false;
         break;
       }
-      ka.run = false;
-      vTaskDelay(pdMS_TO_TICKS(20));
+      stopKeepalive(ka);
       if (ka.failed) {
         ESP_LOGW(TAG, "HoldKA O->T send failed during peer FO");
         ok = false;
@@ -374,7 +789,16 @@ void multiAxisTask(void* arg) {
         vTaskDelay(pdMS_TO_TICKS(2));
       }
     }
+    // Keepalive / priming events print here, before the Class 1 loop starts.
+    (void)scanner.flushDeferredLogs();
 
+    if (!ok && w5500LostConfig(*ctx->hal)) {
+      // Not a CIP reject: the chip lost its MAC/IP, so soft retries can
+      // never connect. Restore it through the existing chip recover.
+      scanner.disconnect();
+      escalateChipRecover(ctx, recover_streak, backoff_ms);
+      continue;
+    }
     if (!ok) {
       // CIP ForwardOpen reject (ownership / RPI / size) is not a W5500 fault.
       // Chip recover + esp_restart() only masks the real extended status and
@@ -406,17 +830,40 @@ void multiAxisTask(void* arg) {
     uint32_t input_miss_streak = 0;
     bool need_chip_recover = false;
     uint32_t timing_cycles = 0;
+    uint32_t spi_check_cycles = 0;
+    uint8_t last_phy = logW5500LinkMode(*ctx->hal);
     int64_t cycle_anchor_us = class1NowUs();
     TickType_t last_wake = xTaskGetTickCount();
+    uint32_t lnk_low_reads = 0;
+    int64_t prev_t0 = 0;
+    int64_t prev_t1 = 0;
+    int64_t prev_t2 = 0;
+    setLogScanner(&scanner);
 
-    while (ctx->link->isUp()) {
+    while (true) {
+      if (!ctx->link->isUp()) {
+        if (++lnk_low_reads >= kLinkDownConfirmReads) break;
+      } else if (lnk_low_reads != 0) {
+        ESP_LOGW(TAG, "W5500 LNK=0 on %lu read(s), then up — not a link loss",
+                 static_cast<unsigned long>(lnk_low_reads));
+        lnk_low_reads = 0;
+      }
       const int64_t t0 = class1NowUs();
+      noteLoopGap(t0, prev_t0, prev_t1, prev_t2, scanner.lastOtSendUs(),
+                  scanner.lastDrainUs());
+      scopeMark(1);
       spi3_class1_critical_enter();
       (void)ctx->chip->acquireBus();
       const ExchangeStatus st = scanner.exchangeOnce(0);
       ctx->chip->releaseBus();
       spi3_class1_critical_exit();
+      scopeMark(0);
       const int64_t t1 = class1NowUs();
+      // Queued Class 1 events are printed by class1LogTask (core 0): a log
+      // line here waits on stdout and the LAN console's lwIP send.
+      prev_t0 = t0;
+      prev_t1 = t1;
+      prev_t2 = class1NowUs();
       const uint32_t elapsed_us =
           (t1 > t0) ? static_cast<uint32_t>(t1 - t0) : 0u;
       class1TimingStats().recordExchangeUs(elapsed_us);
@@ -431,6 +878,7 @@ void multiAxisTask(void* arg) {
       if (st == ExchangeStatus::kOutputSendFailed) {
         reliabilityStats().noteSendOkFail();
         ESP_LOGW(TAG, "O->T send failed — reconnect + chip recover");
+        logW5500FailureSnapshot(*ctx->hal, w5500::FailReason::kSendOkTimeout);
         need_chip_recover = true;
         break;
       }
@@ -440,24 +888,56 @@ void multiAxisTask(void* arg) {
         const uint32_t now_ms =
             static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
         if (shouldWarnSoftMiss(soft_miss_last_warn_ms, now_ms)) {
-          ESP_LOGW(TAG, "T->O soft-miss #%lu (stale beyond 3x RPI after cyclic)",
-                   static_cast<unsigned long>(input_miss_streak));
+          ESP_LOGW(TAG, "T->O soft-miss #%lu (stale beyond %lux RPI after cyclic)",
+                   static_cast<unsigned long>(input_miss_streak),
+                   static_cast<unsigned long>(kClass1StaleTeardownRpiMultiples));
         }
         // Keep pumping O->T for a few cycles before dual teardown + recover.
         if (shouldTeardownAfterInputMisses(input_miss_streak)) {
           ESP_LOGW(TAG, "T->O stale beyond soft-retry — reconnect + chip recover");
+          logClass1StallDiag(true);
+          logW5500FailureSnapshot(*ctx->hal, w5500::FailReason::kInputStale);
           need_chip_recover = true;
           break;
         }
-        paceClass1Cycle(last_wake, rpi_us);
+        pacedClass1Cycle(last_wake, rpi_us);
         continue;
       }
       input_miss_streak = 0;
 
+      // Theta (HCS01) dropped while X/Z are healthy: re-open just that axis.
+      const size_t reopen_axis = scanner.nextAxisToReopen();
+      if (reopen_axis < EipMultiScanner::kMaxAxes) {
+        // Chip state before the reopen rebuilds the axis socket; printed a
+        // line per 100 ms so X/Z keep their cycle.
+        captureSnapshotForTrickle(*ctx->hal, reopen_axis);
+        if (!reopenAxisWithKeepalive(scanner, reopen_axis)) {
+          reliabilityStats().noteSendOkFail();
+          ESP_LOGW(TAG, "O->T send failed during axis%u reopen — reconnect + chip recover",
+                   static_cast<unsigned>(reopen_axis));
+          logW5500FailureSnapshot(*ctx->hal, w5500::FailReason::kSendOkTimeout);
+          need_chip_recover = true;
+          break;
+        }
+        // The reopen blocked this task; restart pacing from now.
+        last_wake = xTaskGetTickCount();
+        cycle_anchor_us = class1NowUs();
+        continue;
+      }
+
       logTimingSnapshotPeriodic(timing_cycles);
-      paceClass1Cycle(last_wake, rpi_us);
+      checkW5500SpiPeriodic(*ctx->hal, spi_check_cycles, last_phy);
+      pacedClass1Cycle(last_wake, rpi_us);
     }
 
+    // Every break above sets need_chip_recover, so a plain exit is a
+    // confirmed LNK=0. A chip that reset itself also needs its config back.
+    if (!need_chip_recover) {
+      link_down_us = logW5500LinkDown(*ctx->hal);
+      need_chip_recover = w5500LostConfig(*ctx->hal);
+    }
+    setLogScanner(nullptr);
+    (void)scanner.flushDeferredLogs();
     scanner.disconnect();
     reliabilityStats().noteReconnect();
     vTaskDelay(pdMS_TO_TICKS(kReconnectIdleMs));
@@ -468,6 +948,20 @@ void multiAxisTask(void* arg) {
 }
 
 }  // namespace
+
+void setScopeMarkerGpio(int gpio) {
+  if (gpio < 0) {
+    g_scope_gpio = -1;
+    return;
+  }
+  gpio_config_t io = {};
+  io.pin_bit_mask = (1ULL << gpio);
+  io.mode = GPIO_MODE_OUTPUT;
+  if (gpio_config(&io) != ESP_OK) return;
+  gpio_set_level(static_cast<gpio_num_t>(gpio), 0);
+  g_scope_gpio = gpio;
+  ESP_LOGW(TAG, "Class 1 exchange marker on GPIO%d (cfg eip_scope_gpio)", gpio);
+}
 
 void dumpClass1TimingStats() {
   const Class1TimingSnapshot ex = class1TimingStats().exchange();
@@ -534,6 +1028,11 @@ void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
   ctx.image_z = image_z;
   ctx.image_theta = image_theta;
 
+  if (xTaskCreatePinnedToCore(class1LogTask, "EipLog", kLogTaskStack, nullptr,
+                              kLogTaskPriority, nullptr, kLogTaskCore) != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create EipLog task (Class 1 events will not print)");
+  }
+
 #if defined(CONFIG_EIP_AXIS_X) || defined(CONFIG_EIP_AXIS_Z)
   BaseType_t ok_multi =
       xTaskCreatePinnedToCore(multiAxisTask, "EipScannerM", kScannerStack, &ctx,
@@ -565,6 +1064,7 @@ namespace eip {
 void startScannerTask(W5500&, w5500::W5500Hal&, ILinkStatus&, EipProcessImage*,
                       EipProcessImage*, EipProcessImage*) {}
 void dumpClass1TimingStats() {}
+void setScopeMarkerGpio(int) {}
 }  // namespace eip
 
 #endif

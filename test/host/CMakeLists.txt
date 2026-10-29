@@ -62,6 +62,7 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/EipEncapsulation.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipCpf.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/CipEthernetLink.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100ParamAccess.cpp"
@@ -106,6 +107,10 @@ add_host_test(test_trajectory)
 add_executable(test_eip_encoding "test_eip_encoding.cpp")
 target_link_libraries(test_eip_encoding PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_encoding COMMAND test_eip_encoding)
+
+add_executable(test_cip_ethernet_link "test_cip_ethernet_link.cpp")
+target_link_libraries(test_cip_ethernet_link PRIVATE ethernet_ip unity)
+add_test(NAME test_cip_ethernet_link COMMAND test_cip_ethernet_link)
 
 add_executable(test_k5100_param_access "test_k5100_param_access.cpp")
 target_link_libraries(test_k5100_param_access PRIVATE ethernet_ip unity)
