@@ -10,6 +10,43 @@
 #include "sdkconfig.h"
 #endif
 
+namespace {
+
+struct PickClassKey {
+  const char* jaw;
+  const char* len;
+  const char* height;
+};
+
+// NVS keys are at most 15 characters. Old cv_jaw1_ms / cell1_* keys are not read.
+constexpr int kPickClassSlots = 10;
+const PickClassKey kPickClassKeys[kPickClassSlots] = {
+    {"cv_jaw_aaa_ms", "cell_aaa_len_mm", "cell_aaa_h_mm"},
+    {"cv_jaw_aa_ms", "cell_aa_len_mm", "cell_aa_h_mm"},
+    {"cv_jaw_d_ms", "cell_d_len_mm", "cell_d_h_mm"},
+    {"cv_jaw_c_ms", "cell_c_len_mm", "cell_c_h_mm"},
+    {"cv_jaw_9v_ms", "cell_9v_len_mm", "cell_9v_h_mm"},
+    {"cv_jaw_cr123_ms", "cell_cr123_len", "cell_cr123_h_mm"},
+    {"cv_jaw_18650_ms", "cell_18650_len", "cell_18650_h_mm"},
+    {"cv_jaw_21700_ms", "cell_21700_len", "cell_21700_h_mm"},
+    {"cv_jaw_26650_ms", "cell_26650_len", "cell_26650_h_mm"},
+    {"cv_jaw_32650_ms", "cell_32650_len", "cell_32650_h_mm"},
+};
+
+int pickKeySlot(const char* key, int field) {
+  for (int i = 0; i < kPickClassSlots; ++i) {
+    const char* name = field == 0 ? kPickClassKeys[i].jaw
+                       : field == 1 ? kPickClassKeys[i].len
+                                    : kPickClassKeys[i].height;
+    if (std::strcmp(key, name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+}  // namespace
+
 namespace Config {
 
 AppConfig& AppConfig::instance() {
@@ -62,19 +99,19 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
     data_.gantry_path_max_speed_mm_per_s = CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S;
 #else
-    data_.gantry_path_max_speed_mm_per_s = 2000;
+    data_.gantry_path_max_speed_mm_per_s = 3333;
 #endif
 
 #if defined(CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
     data_.gantry_path_max_accel_mm_per_s2 = CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2;
 #else
-    data_.gantry_path_max_accel_mm_per_s2 = 3000;
+    data_.gantry_path_max_accel_mm_per_s2 = 20000;
 #endif
 
 #if defined(CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
     data_.gantry_path_max_decel_mm_per_s2 = CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2;
 #else
-    data_.gantry_path_max_decel_mm_per_s2 = 3000;
+    data_.gantry_path_max_decel_mm_per_s2 = 20000;
 #endif
 
 #if defined(CONFIG_GANTRY_EIP_ASSUMED_STOP_DECEL_MM_S2)
@@ -105,19 +142,19 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
     data_.axis_x_max_speed_mm_per_s = (float)CONFIG_AXIS_X_MAX_SPEED_MM_PER_S;
 #else
-    data_.axis_x_max_speed_mm_per_s = 500.0f;
+    data_.axis_x_max_speed_mm_per_s = 3333.3f;
 #endif
 
 #if defined(CONFIG_AXIS_X_ACCEL_MM_PER_S2)
     data_.axis_x_accel_mm_per_s2 = (float)CONFIG_AXIS_X_ACCEL_MM_PER_S2;
 #else
-    data_.axis_x_accel_mm_per_s2 = 3000.0f;
+    data_.axis_x_accel_mm_per_s2 = 20000.0f;
 #endif
 
 #if defined(CONFIG_AXIS_X_DECEL_MM_PER_S2)
     data_.axis_x_decel_mm_per_s2 = (float)CONFIG_AXIS_X_DECEL_MM_PER_S2;
 #else
-    data_.axis_x_decel_mm_per_s2 = 3000.0f;
+    data_.axis_x_decel_mm_per_s2 = 20000.0f;
 #endif
 
 #if defined(CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
@@ -376,8 +413,19 @@ void AppConfig::loadDefaults() {
 #if defined(CONFIG_CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM)
     data_.conveyor_x_across_to_gantry_x_offset_mm = (float)CONFIG_CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM;
 #else
-    data_.conveyor_x_across_to_gantry_x_offset_mm = 0.0f;
+    data_.conveyor_x_across_to_gantry_x_offset_mm = 245.0f;
 #endif
+
+#if defined(CONFIG_CONVEYOR_BELT_WIDTH_MM)
+    data_.conveyor_belt_width_mm = (float)CONFIG_CONVEYOR_BELT_WIDTH_MM;
+#else
+    data_.conveyor_belt_width_mm = 300.0f;
+#endif
+    data_.conveyor_belt_near_x_mm = 225.0f;
+    data_.conveyor_belt_far_x_mm = 500.0f;
+    data_.conveyor_frame_near_x_mm = 183.0f;
+    data_.conveyor_frame_far_x_mm = 500.0f;
+    data_.test_battery_x_mm = 382.5f;
 
 #if defined(CONFIG_CONVEYOR_Z_PICK_JOINT_MM)
     data_.conveyor_z_pick_joint_mm = (float)CONFIG_CONVEYOR_Z_PICK_JOINT_MM;
@@ -405,23 +453,40 @@ void AppConfig::loadDefaults() {
 
     data_.pick_vision_latency_ms = 40;
     data_.pick_valve_ms = 30;
-    data_.pick_jaw_ms[0] = 0;
-    data_.pick_jaw_ms[1] = 0;
-    data_.pick_jaw_ms[2] = 0;
-    data_.pick_jaw_ms[3] = 0;
+    data_.pick_valve_on_ms = 8;
+    data_.pick_valve_off_ms = 17;
+    data_.pick_trim_von_ms = 0;
+    data_.pick_trim_voff_ms = 0;
+    data_.pick_trim_close_ms = 0;
+    data_.pick_trim_z_ms = 0;
+    data_.pick_trim_grip_ms = 0;
+    data_.pick_trim_hold_ms = 0;
+    data_.pick_offset_plunge_ms = 0;
+    data_.pick_offset_close_ms = 0;
+    data_.pick_offset_retract_ms = 0;
+    data_.eip_w5500_spi_khz = 10000;
+    data_.display_tft_enable = 1;
+    data_.eip_txwr_split = 0;
+    data_.eip_spi_dma = 0;
+    data_.log_uart_async = 1;
+    data_.eip_scope_gpio = -1;
+    data_.pick_bench_enable = false;
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      data_.pick_jaw_ms[i] = 0;
+    }
     data_.pick_jaw_offset_deg = 0.0f;
     data_.pick_dedupe_mm = 40.0f;
-    data_.pick_cell_len_mm[0] = 65.0f;
-    data_.pick_cell_len_mm[1] = 70.0f;
-    data_.pick_cell_len_mm[2] = 50.0f;
-    data_.pick_cell_len_mm[3] = 60.0f;
-    data_.pick_cell_h_mm[0] = 18.3f;
-    data_.pick_cell_h_mm[1] = 21.2f;
-    data_.pick_cell_h_mm[2] = 34.0f;
-    data_.pick_cell_h_mm[3] = 45.0f;
+    const float len_mm[kPickClassSlots] = {44.5f, 50.5f, 61.5f, 50.0f, 48.5f,
+                                            34.5f, 65.0f, 70.0f, 65.0f, 65.0f};
+    const float height_mm[kPickClassSlots] = {10.5f, 14.5f, 34.2f, 26.2f, 26.5f,
+                                               17.0f, 18.3f, 21.2f, 26.5f, 32.0f};
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      data_.pick_cell_len_mm[i] = len_mm[i];
+      data_.pick_cell_h_mm[i] = height_mm[i];
+    }
     data_.pick_finger_open_mm = 80.0f;
-    data_.pick_finger_thick_mm = 8.0f;
-    data_.pick_finger_width_mm = 30.0f;
+    data_.pick_finger_thick_mm = 10.0f;
+    data_.pick_finger_width_mm = 50.0f;
     data_.pick_jaw_speed_mm_s = 210.0f;
     data_.pick_guard_ms = 15;
     data_.pick_dropin_enable = false;
@@ -790,29 +855,48 @@ bool AppConfig::load() {
     storage_->getFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
     storage_->getFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
     storage_->getFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    storage_->getFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
+    storage_->getFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
+    storage_->getFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
+    storage_->getFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
+    storage_->getFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
+    storage_->getFloat("batt_x", data_.test_battery_x_mm);
     storage_->getFloat("cv_z_pick_mm", data_.conveyor_z_pick_joint_mm);
     storage_->getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->getInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->getInt32("cv_tau_max_us", data_.tau_max_us);
     storage_->getInt32("cv_vis_ms", data_.pick_vision_latency_ms);
     storage_->getInt32("cv_valve_ms", data_.pick_valve_ms);
-    storage_->getInt32("cv_jaw1_ms", data_.pick_jaw_ms[0]);
-    storage_->getInt32("cv_jaw2_ms", data_.pick_jaw_ms[1]);
-    storage_->getInt32("cv_jaw3_ms", data_.pick_jaw_ms[2]);
-    storage_->getInt32("cv_jaw4_ms", data_.pick_jaw_ms[3]);
+    storage_->getInt32("pk_von_ms", data_.pick_valve_on_ms);
+    storage_->getInt32("pk_voff_ms", data_.pick_valve_off_ms);
+    storage_->getInt32("pk_tr_von", data_.pick_trim_von_ms);
+    storage_->getInt32("pk_tr_voff", data_.pick_trim_voff_ms);
+    storage_->getInt32("pk_tr_cls", data_.pick_trim_close_ms);
+    storage_->getInt32("pk_tr_z", data_.pick_trim_z_ms);
+    storage_->getInt32("pk_tr_grp", data_.pick_trim_grip_ms);
+    storage_->getInt32("pk_tr_hld", data_.pick_trim_hold_ms);
+    storage_->getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
+    storage_->getInt32("pk_off_close", data_.pick_offset_close_ms);
+    storage_->getInt32("pk_off_retract", data_.pick_offset_retract_ms);
+    storage_->getInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
+    storage_->getInt32("disp_tft_en", data_.display_tft_enable);
+    storage_->getInt32("eip_txwr_split", data_.eip_txwr_split);
+    storage_->getInt32("eip_spi_dma", data_.eip_spi_dma);
+    storage_->getInt32("log_uart_async", data_.log_uart_async);
+    storage_->getInt32("eip_scope_gpio", data_.eip_scope_gpio);
+    storage_->getBool("pk_bench", data_.pick_bench_enable);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      storage_->getInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    }
     storage_->getFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
     storage_->getFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
-    storage_->getFloat("cell1_len_mm", data_.pick_cell_len_mm[0]);
-    storage_->getFloat("cell2_len_mm", data_.pick_cell_len_mm[1]);
-    storage_->getFloat("cell3_len_mm", data_.pick_cell_len_mm[2]);
-    storage_->getFloat("cell4_len_mm", data_.pick_cell_len_mm[3]);
-    storage_->getFloat("cell1_h_mm", data_.pick_cell_h_mm[0]);
-    storage_->getFloat("cell2_h_mm", data_.pick_cell_h_mm[1]);
-    storage_->getFloat("cell3_h_mm", data_.pick_cell_h_mm[2]);
-    storage_->getFloat("cell4_h_mm", data_.pick_cell_h_mm[3]);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      storage_->getFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
+      storage_->getFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+    }
     storage_->getFloat("fin_open_mm", data_.pick_finger_open_mm);
-    storage_->getFloat("fin_thk_mm", data_.pick_finger_thick_mm);
-    storage_->getFloat("fin_w_mm", data_.pick_finger_width_mm);
+    storage_->getFloat("fin_wid_mm", data_.pick_finger_thick_mm);
+    storage_->getFloat("fin_len_mm", data_.pick_finger_width_mm);
     storage_->getFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
     storage_->getInt32("pk_guard_ms", data_.pick_guard_ms);
     storage_->getBool("pk_dropin", data_.pick_dropin_enable);
@@ -946,29 +1030,48 @@ bool AppConfig::save() {
     storage_->setFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
     storage_->setFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
     storage_->setFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    storage_->setFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
+    storage_->setFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
+    storage_->setFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
+    storage_->setFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
+    storage_->setFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
+    storage_->setFloat("batt_x", data_.test_battery_x_mm);
     storage_->setFloat("cv_z_pick_mm", data_.conveyor_z_pick_joint_mm);
     storage_->setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->setInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->setInt32("cv_tau_max_us", data_.tau_max_us);
     storage_->setInt32("cv_vis_ms", data_.pick_vision_latency_ms);
     storage_->setInt32("cv_valve_ms", data_.pick_valve_ms);
-    storage_->setInt32("cv_jaw1_ms", data_.pick_jaw_ms[0]);
-    storage_->setInt32("cv_jaw2_ms", data_.pick_jaw_ms[1]);
-    storage_->setInt32("cv_jaw3_ms", data_.pick_jaw_ms[2]);
-    storage_->setInt32("cv_jaw4_ms", data_.pick_jaw_ms[3]);
+    storage_->setInt32("pk_von_ms", data_.pick_valve_on_ms);
+    storage_->setInt32("pk_voff_ms", data_.pick_valve_off_ms);
+    storage_->setInt32("pk_tr_von", data_.pick_trim_von_ms);
+    storage_->setInt32("pk_tr_voff", data_.pick_trim_voff_ms);
+    storage_->setInt32("pk_tr_cls", data_.pick_trim_close_ms);
+    storage_->setInt32("pk_tr_z", data_.pick_trim_z_ms);
+    storage_->setInt32("pk_tr_grp", data_.pick_trim_grip_ms);
+    storage_->setInt32("pk_tr_hld", data_.pick_trim_hold_ms);
+    storage_->setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
+    storage_->setInt32("pk_off_close", data_.pick_offset_close_ms);
+    storage_->setInt32("pk_off_retract", data_.pick_offset_retract_ms);
+    storage_->setInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
+    storage_->setInt32("disp_tft_en", data_.display_tft_enable);
+    storage_->setInt32("eip_txwr_split", data_.eip_txwr_split);
+    storage_->setInt32("eip_spi_dma", data_.eip_spi_dma);
+    storage_->setInt32("log_uart_async", data_.log_uart_async);
+    storage_->setInt32("eip_scope_gpio", data_.eip_scope_gpio);
+    storage_->setBool("pk_bench", data_.pick_bench_enable);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      storage_->setInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    }
     storage_->setFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
     storage_->setFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
-    storage_->setFloat("cell1_len_mm", data_.pick_cell_len_mm[0]);
-    storage_->setFloat("cell2_len_mm", data_.pick_cell_len_mm[1]);
-    storage_->setFloat("cell3_len_mm", data_.pick_cell_len_mm[2]);
-    storage_->setFloat("cell4_len_mm", data_.pick_cell_len_mm[3]);
-    storage_->setFloat("cell1_h_mm", data_.pick_cell_h_mm[0]);
-    storage_->setFloat("cell2_h_mm", data_.pick_cell_h_mm[1]);
-    storage_->setFloat("cell3_h_mm", data_.pick_cell_h_mm[2]);
-    storage_->setFloat("cell4_h_mm", data_.pick_cell_h_mm[3]);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      storage_->setFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
+      storage_->setFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+    }
     storage_->setFloat("fin_open_mm", data_.pick_finger_open_mm);
-    storage_->setFloat("fin_thk_mm", data_.pick_finger_thick_mm);
-    storage_->setFloat("fin_w_mm", data_.pick_finger_width_mm);
+    storage_->setFloat("fin_wid_mm", data_.pick_finger_thick_mm);
+    storage_->setFloat("fin_len_mm", data_.pick_finger_width_mm);
     storage_->setFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
     storage_->setInt32("pk_guard_ms", data_.pick_guard_ms);
     storage_->setBool("pk_dropin", data_.pick_dropin_enable);
@@ -1091,10 +1194,24 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "cv_tau_max_us") == 0) out_val = data_.tau_max_us;
     else if (std::strcmp(key, "cv_vis_ms") == 0) out_val = data_.pick_vision_latency_ms;
     else if (std::strcmp(key, "cv_valve_ms") == 0) out_val = data_.pick_valve_ms;
-    else if (std::strcmp(key, "cv_jaw1_ms") == 0) out_val = data_.pick_jaw_ms[0];
-    else if (std::strcmp(key, "cv_jaw2_ms") == 0) out_val = data_.pick_jaw_ms[1];
-    else if (std::strcmp(key, "cv_jaw3_ms") == 0) out_val = data_.pick_jaw_ms[2];
-    else if (std::strcmp(key, "cv_jaw4_ms") == 0) out_val = data_.pick_jaw_ms[3];
+    else if (std::strcmp(key, "pk_von_ms") == 0) out_val = data_.pick_valve_on_ms;
+    else if (std::strcmp(key, "pk_voff_ms") == 0) out_val = data_.pick_valve_off_ms;
+    else if (std::strcmp(key, "pk_tr_von") == 0) out_val = data_.pick_trim_von_ms;
+    else if (std::strcmp(key, "pk_tr_voff") == 0) out_val = data_.pick_trim_voff_ms;
+    else if (std::strcmp(key, "pk_tr_cls") == 0) out_val = data_.pick_trim_close_ms;
+    else if (std::strcmp(key, "pk_tr_z") == 0) out_val = data_.pick_trim_z_ms;
+    else if (std::strcmp(key, "pk_tr_grp") == 0) out_val = data_.pick_trim_grip_ms;
+    else if (std::strcmp(key, "pk_tr_hld") == 0) out_val = data_.pick_trim_hold_ms;
+    else if (std::strcmp(key, "pk_off_plunge") == 0) out_val = data_.pick_offset_plunge_ms;
+    else if (std::strcmp(key, "pk_off_close") == 0) out_val = data_.pick_offset_close_ms;
+    else if (std::strcmp(key, "pk_off_retract") == 0) out_val = data_.pick_offset_retract_ms;
+    else if (std::strcmp(key, "eip_spi_khz") == 0) out_val = data_.eip_w5500_spi_khz;
+    else if (std::strcmp(key, "disp_tft_en") == 0) out_val = data_.display_tft_enable;
+    else if (std::strcmp(key, "eip_txwr_split") == 0) out_val = data_.eip_txwr_split;
+    else if (std::strcmp(key, "eip_spi_dma") == 0) out_val = data_.eip_spi_dma;
+    else if (std::strcmp(key, "log_uart_async") == 0) out_val = data_.log_uart_async;
+    else if (std::strcmp(key, "eip_scope_gpio") == 0) out_val = data_.eip_scope_gpio;
+    else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) out_val = data_.pick_jaw_ms[jaw];
     else if (std::strcmp(key, "pk_guard_ms") == 0) out_val = data_.pick_guard_ms;
     else if (std::strcmp(key, "pk_spd_mm_s") == 0) out_val = data_.pick_speed_mm_s;
     else if (std::strcmp(key, "pk_acc_mm_s2") == 0) out_val = data_.pick_accel_mm_s2;
@@ -1150,10 +1267,24 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_tau_max_us") == 0) data_.tau_max_us = val;
     else if (std::strcmp(key, "cv_vis_ms") == 0) data_.pick_vision_latency_ms = val;
     else if (std::strcmp(key, "cv_valve_ms") == 0) data_.pick_valve_ms = val;
-    else if (std::strcmp(key, "cv_jaw1_ms") == 0) data_.pick_jaw_ms[0] = val;
-    else if (std::strcmp(key, "cv_jaw2_ms") == 0) data_.pick_jaw_ms[1] = val;
-    else if (std::strcmp(key, "cv_jaw3_ms") == 0) data_.pick_jaw_ms[2] = val;
-    else if (std::strcmp(key, "cv_jaw4_ms") == 0) data_.pick_jaw_ms[3] = val;
+    else if (std::strcmp(key, "pk_von_ms") == 0) data_.pick_valve_on_ms = val;
+    else if (std::strcmp(key, "pk_voff_ms") == 0) data_.pick_valve_off_ms = val;
+    else if (std::strcmp(key, "pk_tr_von") == 0) data_.pick_trim_von_ms = val;
+    else if (std::strcmp(key, "pk_tr_voff") == 0) data_.pick_trim_voff_ms = val;
+    else if (std::strcmp(key, "pk_tr_cls") == 0) data_.pick_trim_close_ms = val;
+    else if (std::strcmp(key, "pk_tr_z") == 0) data_.pick_trim_z_ms = val;
+    else if (std::strcmp(key, "pk_tr_grp") == 0) data_.pick_trim_grip_ms = val;
+    else if (std::strcmp(key, "pk_tr_hld") == 0) data_.pick_trim_hold_ms = val;
+    else if (std::strcmp(key, "pk_off_plunge") == 0) data_.pick_offset_plunge_ms = val;
+    else if (std::strcmp(key, "pk_off_close") == 0) data_.pick_offset_close_ms = val;
+    else if (std::strcmp(key, "pk_off_retract") == 0) data_.pick_offset_retract_ms = val;
+    else if (std::strcmp(key, "eip_spi_khz") == 0) data_.eip_w5500_spi_khz = val;
+    else if (std::strcmp(key, "disp_tft_en") == 0) data_.display_tft_enable = val;
+    else if (std::strcmp(key, "eip_txwr_split") == 0) data_.eip_txwr_split = val;
+    else if (std::strcmp(key, "eip_spi_dma") == 0) data_.eip_spi_dma = val;
+    else if (std::strcmp(key, "log_uart_async") == 0) data_.log_uart_async = val;
+    else if (std::strcmp(key, "eip_scope_gpio") == 0) data_.eip_scope_gpio = val;
+    else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) data_.pick_jaw_ms[jaw] = val;
     else if (std::strcmp(key, "pk_guard_ms") == 0) data_.pick_guard_ms = val;
     else if (std::strcmp(key, "pk_spd_mm_s") == 0) data_.pick_speed_mm_s = val;
     else if (std::strcmp(key, "pk_acc_mm_s2") == 0) data_.pick_accel_mm_s2 = val;
@@ -1224,21 +1355,21 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "cv_cam_y_mm") == 0) out_val = data_.conveyor_y_cam_mm;
     else if (std::strcmp(key, "cv_pick_y_mm") == 0) out_val = data_.conveyor_y_pick_mm;
     else if (std::strcmp(key, "cv_x_off_mm") == 0) out_val = data_.conveyor_x_across_to_gantry_x_offset_mm;
+    else if (std::strcmp(key, "cv_belt_w_mm") == 0) out_val = data_.conveyor_belt_width_mm;
+    else if (std::strcmp(key, "cv_belt_near_mm") == 0) out_val = data_.conveyor_belt_near_x_mm;
+    else if (std::strcmp(key, "cv_belt_far_mm") == 0) out_val = data_.conveyor_belt_far_x_mm;
+    else if (std::strcmp(key, "cv_cnv_near_mm") == 0) out_val = data_.conveyor_frame_near_x_mm;
+    else if (std::strcmp(key, "cv_cnv_far_mm") == 0) out_val = data_.conveyor_frame_far_x_mm;
+    else if (std::strcmp(key, "batt_x") == 0) out_val = data_.test_battery_x_mm;
     else if (std::strcmp(key, "cv_z_pick_mm") == 0) out_val = data_.conveyor_z_pick_joint_mm;
     else if (std::strcmp(key, "cv_belt_spd") == 0) out_val = data_.pick_default_belt_speed_mm_s;
     else if (std::strcmp(key, "cv_jaw_deg") == 0) out_val = data_.pick_jaw_offset_deg;
     else if (std::strcmp(key, "cv_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
-    else if (std::strcmp(key, "cell1_len_mm") == 0) out_val = data_.pick_cell_len_mm[0];
-    else if (std::strcmp(key, "cell2_len_mm") == 0) out_val = data_.pick_cell_len_mm[1];
-    else if (std::strcmp(key, "cell3_len_mm") == 0) out_val = data_.pick_cell_len_mm[2];
-    else if (std::strcmp(key, "cell4_len_mm") == 0) out_val = data_.pick_cell_len_mm[3];
-    else if (std::strcmp(key, "cell1_h_mm") == 0) out_val = data_.pick_cell_h_mm[0];
-    else if (std::strcmp(key, "cell2_h_mm") == 0) out_val = data_.pick_cell_h_mm[1];
-    else if (std::strcmp(key, "cell3_h_mm") == 0) out_val = data_.pick_cell_h_mm[2];
-    else if (std::strcmp(key, "cell4_h_mm") == 0) out_val = data_.pick_cell_h_mm[3];
+    else if (const int len = pickKeySlot(key, 1); len >= 0) out_val = data_.pick_cell_len_mm[len];
+    else if (const int height = pickKeySlot(key, 2); height >= 0) out_val = data_.pick_cell_h_mm[height];
     else if (std::strcmp(key, "fin_open_mm") == 0) out_val = data_.pick_finger_open_mm;
-    else if (std::strcmp(key, "fin_thk_mm") == 0) out_val = data_.pick_finger_thick_mm;
-    else if (std::strcmp(key, "fin_w_mm") == 0) out_val = data_.pick_finger_width_mm;
+    else if (std::strcmp(key, "fin_wid_mm") == 0) out_val = data_.pick_finger_thick_mm;
+    else if (std::strcmp(key, "fin_len_mm") == 0) out_val = data_.pick_finger_width_mm;
     else if (std::strcmp(key, "fin_spd_mm_s") == 0) out_val = data_.pick_jaw_speed_mm_s;
     else if (std::strcmp(key, "pk_stage_x_mm") == 0) out_val = data_.pick_stage_x_mm;
     else if (std::strcmp(key, "pk_th_spd") == 0) out_val = data_.pick_theta_speed_deg_s;
@@ -1303,21 +1434,21 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_cam_y_mm") == 0) data_.conveyor_y_cam_mm = val;
     else if (std::strcmp(key, "cv_pick_y_mm") == 0) data_.conveyor_y_pick_mm = val;
     else if (std::strcmp(key, "cv_x_off_mm") == 0) data_.conveyor_x_across_to_gantry_x_offset_mm = val;
+    else if (std::strcmp(key, "cv_belt_w_mm") == 0) data_.conveyor_belt_width_mm = val;
+    else if (std::strcmp(key, "cv_belt_near_mm") == 0) data_.conveyor_belt_near_x_mm = val;
+    else if (std::strcmp(key, "cv_belt_far_mm") == 0) data_.conveyor_belt_far_x_mm = val;
+    else if (std::strcmp(key, "cv_cnv_near_mm") == 0) data_.conveyor_frame_near_x_mm = val;
+    else if (std::strcmp(key, "cv_cnv_far_mm") == 0) data_.conveyor_frame_far_x_mm = val;
+    else if (std::strcmp(key, "batt_x") == 0) data_.test_battery_x_mm = val;
     else if (std::strcmp(key, "cv_z_pick_mm") == 0) data_.conveyor_z_pick_joint_mm = val;
     else if (std::strcmp(key, "cv_belt_spd") == 0) data_.pick_default_belt_speed_mm_s = val;
     else if (std::strcmp(key, "cv_jaw_deg") == 0) data_.pick_jaw_offset_deg = val;
     else if (std::strcmp(key, "cv_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
-    else if (std::strcmp(key, "cell1_len_mm") == 0) data_.pick_cell_len_mm[0] = val;
-    else if (std::strcmp(key, "cell2_len_mm") == 0) data_.pick_cell_len_mm[1] = val;
-    else if (std::strcmp(key, "cell3_len_mm") == 0) data_.pick_cell_len_mm[2] = val;
-    else if (std::strcmp(key, "cell4_len_mm") == 0) data_.pick_cell_len_mm[3] = val;
-    else if (std::strcmp(key, "cell1_h_mm") == 0) data_.pick_cell_h_mm[0] = val;
-    else if (std::strcmp(key, "cell2_h_mm") == 0) data_.pick_cell_h_mm[1] = val;
-    else if (std::strcmp(key, "cell3_h_mm") == 0) data_.pick_cell_h_mm[2] = val;
-    else if (std::strcmp(key, "cell4_h_mm") == 0) data_.pick_cell_h_mm[3] = val;
+    else if (const int len = pickKeySlot(key, 1); len >= 0) data_.pick_cell_len_mm[len] = val;
+    else if (const int height = pickKeySlot(key, 2); height >= 0) data_.pick_cell_h_mm[height] = val;
     else if (std::strcmp(key, "fin_open_mm") == 0) data_.pick_finger_open_mm = val;
-    else if (std::strcmp(key, "fin_thk_mm") == 0) data_.pick_finger_thick_mm = val;
-    else if (std::strcmp(key, "fin_w_mm") == 0) data_.pick_finger_width_mm = val;
+    else if (std::strcmp(key, "fin_wid_mm") == 0) data_.pick_finger_thick_mm = val;
+    else if (std::strcmp(key, "fin_len_mm") == 0) data_.pick_finger_width_mm = val;
     else if (std::strcmp(key, "fin_spd_mm_s") == 0) data_.pick_jaw_speed_mm_s = val;
     else if (std::strcmp(key, "pk_stage_x_mm") == 0) data_.pick_stage_x_mm = val;
     else if (std::strcmp(key, "pk_th_spd") == 0) data_.pick_theta_speed_deg_s = val;
@@ -1356,6 +1487,7 @@ bool AppConfig::getParamBool(const char* key, bool& out_val) const {
     else if (std::strcmp(key, "eip_z_en") == 0) out_val = data_.eip_axis_z;
     else if (std::strcmp(key, "eip_th_en") == 0) out_val = data_.eip_axis_theta;
     else if (std::strcmp(key, "pk_dropin") == 0) out_val = data_.pick_dropin_enable;
+    else if (std::strcmp(key, "pk_bench") == 0) out_val = data_.pick_bench_enable;
     else if (std::strcmp(key, "pk_drop_any_th") == 0) out_val = data_.pick_drop_any_theta;
     else return false;
 
@@ -1380,6 +1512,7 @@ bool AppConfig::setParamBool(const char* key, bool val, bool& out_reboot_require
     else if (std::strcmp(key, "eip_z_en") == 0) data_.eip_axis_z = val;
     else if (std::strcmp(key, "eip_th_en") == 0) data_.eip_axis_theta = val;
     else if (std::strcmp(key, "pk_dropin") == 0) data_.pick_dropin_enable = val;
+    else if (std::strcmp(key, "pk_bench") == 0) data_.pick_bench_enable = val;
     else if (std::strcmp(key, "pk_drop_any_th") == 0) data_.pick_drop_any_theta = val;
     else return false;
 

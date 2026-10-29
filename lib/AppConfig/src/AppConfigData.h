@@ -13,18 +13,18 @@ struct AppConfigData {
     int32_t gantry_default_speed_deg_per_s = 30;
     int32_t gantry_default_accel_deg_per_s2 = 180;
     int32_t gantry_default_decel_deg_per_s2 = 180;
-    int32_t gantry_path_max_speed_mm_per_s = 2000;
-    int32_t gantry_path_max_accel_mm_per_s2 = 3000;
-    int32_t gantry_path_max_decel_mm_per_s2 = 3000;
+    int32_t gantry_path_max_speed_mm_per_s = 3333;
+    int32_t gantry_path_max_accel_mm_per_s2 = 20000;
+    int32_t gantry_path_max_decel_mm_per_s2 = 20000;
     int32_t gantry_eip_assumed_stop_decel_mm_s2 = 300;
 
     // 2. X Axis
     float axis_x_lead_mm_per_rev = 200.0f;
     float axis_x_hard_limit_min_mm = 0.0f;
     float axis_x_hard_limit_max_mm = 550.0f;
-    float axis_x_max_speed_mm_per_s = 500.0f;
-    float axis_x_accel_mm_per_s2 = 3000.0f;
-    float axis_x_decel_mm_per_s2 = 3000.0f;
+    float axis_x_max_speed_mm_per_s = 3333.3f;
+    float axis_x_accel_mm_per_s2 = 20000.0f;
+    float axis_x_decel_mm_per_s2 = 20000.0f;
     float axis_x_position_tolerance_mm = 0.08f;
     int32_t axis_x_encoder_ppr = 2097152;
     float axis_x_motor_reducer_ratio = 5.0f;
@@ -75,19 +75,55 @@ struct AppConfigData {
     // 6. Conveyor Intercept
     float conveyor_y_cam_mm = -711.0f;
     float conveyor_y_pick_mm = 0.0f;
-    float conveyor_x_across_to_gantry_x_offset_mm = 0.0f;
+    // Vision x is from the camera. Gantry X = x + this. Belt center is the
+    // collision edge (95 mm) plus half the 300 mm belt (150 mm).
+    float conveyor_x_across_to_gantry_x_offset_mm = 245.0f;
+    float conveyor_belt_width_mm = 300.0f;
+    // Belt edges (beltcal near/far), conveyor frame edges (beltcal cnvyr
+    // near/far) and the test battery (beltcal batt), all joint X as `move` uses.
+    float conveyor_belt_near_x_mm = 225.0f;
+    float conveyor_belt_far_x_mm = 500.0f;
+    float conveyor_frame_near_x_mm = 183.0f;
+    float conveyor_frame_far_x_mm = 500.0f;
+    // Test battery position, joint X (beltcal batt).
+    float test_battery_x_mm = 382.5f;
     float conveyor_z_pick_joint_mm = 105.4f;
     int32_t pick_vision_latency_ms = 40;
     int32_t pick_valve_ms = 30;
-    int32_t pick_jaw_ms[4] = {0, 0, 0, 0};  // 0 = derive from jaw travel
+    int32_t pick_valve_on_ms = 8;
+    int32_t pick_valve_off_ms = 17;
+    int32_t pick_trim_von_ms = 0;
+    int32_t pick_trim_voff_ms = 0;
+    int32_t pick_trim_close_ms = 0;
+    int32_t pick_trim_z_ms = 0;
+    int32_t pick_trim_grip_ms = 0;
+    int32_t pick_trim_hold_ms = 0;
+    int32_t pick_offset_plunge_ms = 0;
+    int32_t pick_offset_close_ms = 0;
+    int32_t pick_offset_retract_ms = 0;
+    // Class 1 dropout experiments (applied at boot): W5500 SPI2 clock and
+    // whether the TFT UI runs (SPI3 display traffic on/off).
+    int32_t eip_w5500_spi_khz = 10000;
+    int32_t display_tft_enable = 1;
+    int32_t eip_txwr_split = 0;
+    // 0 (default): W5500 SPI2 without DMA. Logic-analyzer capture 2026-10-20:
+    // with DMA, a 4-byte (TXDATA) transfer right after a DMA transfer put the
+    // previous DMA buffer's first bytes on MOSI (SEND became a stale TX_WR
+    // write), which caused the lost/misplaced W5500 writes and Class 1 drops.
+    int32_t eip_spi_dma = 0;
+    int32_t log_uart_async = 1;  // buffered UART0 log output (driver TX ring)
+    int32_t eip_scope_gpio = -1; // Class 1 exchange marker GPIO (-1 off; 17 with TFT off)
+    bool pick_bench_enable = false;
+    int32_t pick_jaw_ms[10] = {};  // 0 = derive from jaw travel. One slot per pick class.
     float pick_jaw_offset_deg = 0.0f;
     float pick_dedupe_mm = 40.0f;
     float pick_default_belt_speed_mm_s = 1524.0f;
-    float pick_cell_len_mm[4] = {65.0f, 70.0f, 50.0f, 60.0f};
-    float pick_cell_h_mm[4] = {18.3f, 21.2f, 34.0f, 45.0f};
+    // Length and height labels for classes 1–10. Not a vision fallback.
+    float pick_cell_len_mm[10] = {44.5f, 50.5f, 61.5f, 50.0f, 48.5f, 34.5f, 65.0f, 70.0f, 65.0f, 65.0f};
+    float pick_cell_h_mm[10] = {10.5f, 14.5f, 34.2f, 26.2f, 26.5f, 17.0f, 18.3f, 21.2f, 26.5f, 32.0f};
     float pick_finger_open_mm = 80.0f;
-    float pick_finger_thick_mm = 8.0f;
-    float pick_finger_width_mm = 30.0f;
+    float pick_finger_thick_mm = 10.0f;
+    float pick_finger_width_mm = 50.0f;
     float pick_jaw_speed_mm_s = 210.0f;
     int32_t pick_guard_ms = 15;
     bool pick_dropin_enable = false;
