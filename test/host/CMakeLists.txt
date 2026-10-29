@@ -169,6 +169,7 @@ add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
 add_executable(test_w5500_socket_fastpath
     "test_w5500_socket_fastpath.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
 target_include_directories(test_w5500_socket_fastpath PRIVATE
@@ -176,6 +177,18 @@ target_include_directories(test_w5500_socket_fastpath PRIVATE
 )
 target_link_libraries(test_w5500_socket_fastpath PRIVATE unity)
 add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
+
+# W5500 dropout diagnostics (failure snapshot + SPI read-back check)
+add_executable(test_w5500_diag
+    "test_w5500_diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+)
+target_include_directories(test_w5500_diag PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+)
+target_link_libraries(test_w5500_diag PRIVATE unity)
+add_test(NAME test_w5500_diag COMMAND test_w5500_diag)
 
 # W5500 poll helper + soft-miss gate + reliability counters
 add_executable(test_w5500_poll "test_w5500_poll.cpp")
@@ -263,6 +276,7 @@ add_executable(test_eip_socket_w5500
     "test_eip_socket_w5500.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipSocketW5500.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
 target_include_directories(test_eip_socket_w5500 PRIVATE

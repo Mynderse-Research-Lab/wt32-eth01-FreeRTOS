@@ -115,6 +115,11 @@ struct W5500Config {
     /// Optional external RST (e.g. MCP23S17). Called with level 0 then 1.
     void (*rst_set_level)(void* ctx, int level) = nullptr;
     void* rst_ctx = nullptr;
+    /// false: SPI bus without DMA; transfers over 64 bytes are split into
+    /// separate W5500 frames. The gantry app runs without DMA (cfg eip_spi_dma
+    /// 0): on the ESP32 a short TXDATA transfer after a DMA transfer re-sent
+    /// stale DMA bytes (captured on the bus 2026-10-20).
+    bool use_dma = true;
 };
 
 // ==========================================================================

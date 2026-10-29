@@ -69,6 +69,37 @@ inline bool busyPollMs(uint32_t timeout_ms, const std::function<bool()>& check) 
   return busyPollUs(us, check);
 }
 
+/// Block the calling task for about `ms` (vTaskDelay on target, so tasks of
+/// any priority can run; taskYIELD only lets equal/higher priority run).
+inline void pollSleepMs(uint32_t ms) {
+#ifdef ESP_PLATFORM
+  const TickType_t ticks = pdMS_TO_TICKS(ms);
+  vTaskDelay(ticks > 0 ? ticks : 1);
+#else
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+}
+
+/// Slow-wait poll: check, then sleep `interval_ms`, until `check()` is true or
+/// `timeout_ms` of wall time elapses. `check` receives the real elapsed
+/// milliseconds (for diagnostics). Returns true on success. Use for TCP
+/// connect/ARP, never for Class 1 paths.
+inline bool sleepPollMs(uint32_t timeout_ms, uint32_t interval_ms,
+                        const std::function<bool(uint32_t elapsed_ms)>& check) {
+  const int64_t start = pollNowUs();
+  const int64_t deadline = start + static_cast<int64_t>(timeout_ms) * 1000;
+  while (true) {
+    const int64_t now = pollNowUs();
+    const uint32_t elapsed_ms = static_cast<uint32_t>((now - start) / 1000);
+    if (check(elapsed_ms)) return true;
+    if (now >= deadline) return false;
+    pollSleepMs(interval_ms);
+  }
+}
+
+// TCP connect: Sn_SR poll interval (one FreeRTOS tick at 1000 Hz).
+constexpr uint32_t kConnectPollIntervalMs = 1;
+
 // SENDOK waits: UDP Class 1 must fail fast; TCP FO can wait longer.
 constexpr uint32_t kUdpSendOkTimeoutUs = 2000;    // 2 ms tight (was 20 ms + yields)
 // First UDP datagram to a new DIPR (3-axis Class 1 on one socket) may ARP.

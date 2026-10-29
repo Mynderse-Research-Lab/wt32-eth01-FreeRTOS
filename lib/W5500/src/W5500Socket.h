@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstddef>
 
+#include "W5500Diag.h"
 #include "W5500Hal.h"
 
 namespace w5500 {
@@ -46,6 +47,14 @@ void socketClose(W5500Hal& hal, uint8_t sock);
 // this or a later send can inherit a stale deferred SENDOK or TX pointer.
 // Caller must already hold spiBusMutex() (or be single-threaded).
 void socketResetSoftwareState();
+
+// Dropout experiment (cfg eip_txwr_split): write Sn_TX_WR as two single-byte
+// register writes (no DMA) instead of one 2-byte write. Set once at boot.
+void socketSetTxWrSplit(bool split);
+
+// Software TX state (cached Sn_TX_WR, deferred-SENDOK flags, last SEND time)
+// for the dropout failure snapshot. Caller must hold spiBusMutex().
+SoftTxState socketSoftTxState();
 
 // TCP client connect. Sets destination IP/port, issues OPEN+CONNECT,
 // polls Sn_SR until SOCK_ESTABLISHED or timeout. Returns true on connect.

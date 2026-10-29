@@ -36,6 +36,37 @@ static void test_busy_poll_tight_timeout(void) {
   TEST_ASSERT_FALSE(ok);
 }
 
+// Regression (bench log 2026-10-13): connect diag counted iterations and
+// printed "elapsed=14377 ms" for a 500 ms timeout. Elapsed must be wall time
+// and the poll must sleep, not spin, between checks.
+static void test_sleep_poll_reports_wall_time_and_times_out(void) {
+  constexpr uint32_t kTimeoutMs = 30;
+  uint32_t calls = 0;
+  uint32_t last_elapsed_ms = 0;
+  const bool ok = w5500::sleepPollMs(kTimeoutMs, w5500::kConnectPollIntervalMs,
+                                     [&](uint32_t elapsed_ms) {
+                                       ++calls;
+                                       last_elapsed_ms = elapsed_ms;
+                                       return false;
+                                     });
+  TEST_ASSERT_FALSE(ok);
+  TEST_ASSERT_TRUE(last_elapsed_ms >= kTimeoutMs);
+  // At most one check per interval (plus the final check), never thousands.
+  TEST_ASSERT_TRUE(calls <= kTimeoutMs / w5500::kConnectPollIntervalMs + 2u);
+  TEST_ASSERT_TRUE(calls >= 2u);
+}
+
+static void test_sleep_poll_immediate_success(void) {
+  uint32_t calls = 0;
+  const bool ok = w5500::sleepPollMs(500, 1, [&](uint32_t elapsed_ms) {
+    ++calls;
+    TEST_ASSERT_TRUE(elapsed_ms < 5u);
+    return true;
+  });
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_EQUAL_UINT32(1u, calls);
+}
+
 static void test_soft_miss_warn_gate(void) {
   uint32_t last = 0;
   TEST_ASSERT_TRUE(eip::shouldWarnSoftMiss(last, 1000, 1000));
@@ -74,6 +105,8 @@ int main(void) {
   RUN_TEST(test_busy_poll_us_timeout);
   RUN_TEST(test_sendok_timeout_constants);
   RUN_TEST(test_busy_poll_tight_timeout);
+  RUN_TEST(test_sleep_poll_reports_wall_time_and_times_out);
+  RUN_TEST(test_sleep_poll_immediate_success);
   RUN_TEST(test_soft_miss_warn_gate);
   RUN_TEST(test_reliability_counters);
   RUN_TEST(test_likely_limit_stop_heuristic);
