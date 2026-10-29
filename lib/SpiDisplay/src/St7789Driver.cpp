@@ -359,6 +359,45 @@ void St7789Driver::drawChar(int16_t x, int16_t y, char c, uint16_t fg, uint16_t 
     });
 }
 
+void St7789Driver::drawTextChunk(int16_t x, int16_t y, const char* str, int n, uint16_t fg,
+                                 uint16_t bg) {
+    // Row-major pixels of n glyphs side by side (n * 8 x 16).
+    alignas(4) static uint8_t buf[kTextChunk * FONT_WIDTH * FONT_HEIGHT * 2];
+    const uint8_t fg_hi = static_cast<uint8_t>(fg >> 8);
+    const uint8_t fg_lo = static_cast<uint8_t>(fg & 0xFF);
+    const uint8_t bg_hi = static_cast<uint8_t>(bg >> 8);
+    const uint8_t bg_lo = static_cast<uint8_t>(bg & 0xFF);
+    size_t idx = 0;
+    for (uint8_t row = 0; row < FONT_HEIGHT; ++row) {
+        for (int k = 0; k < n; ++k) {
+            char c = str[k];
+            if (c < FONT_FIRST_CHAR || c > FONT_LAST_CHAR) {
+                c = ' ';
+            }
+            const uint8_t line = font8x16[c - FONT_FIRST_CHAR][row];
+            for (uint8_t col = 0; col < FONT_WIDTH; ++col) {
+                const bool on = (line & (0x80 >> col)) != 0;
+                buf[idx++] = on ? fg_hi : bg_hi;
+                buf[idx++] = on ? fg_lo : bg_lo;
+            }
+        }
+    }
+
+    setAddrWindow(x, y, x + n * FONT_WIDTH - 1, y + FONT_HEIGHT - 1);
+    (void)spi3::withTft([this, idx]() -> esp_err_t {
+        mcp23s17_write_pin(cfg_.mcp, static_cast<mcp23s17_pin_t>(cfg_.mcp_dc_pin), 1);
+        assertCs();
+
+        spi_transaction_t t = {};
+        t.length = idx * 8;
+        t.tx_buffer = buf;
+        esp_err_t e = spi_device_polling_transmit(spi_dev_, &t);
+
+        deassertCs();
+        return e;
+    });
+}
+
 void St7789Driver::drawString(int16_t x, int16_t y, const char* str, uint16_t fg, uint16_t bg) {
     if (!str) return;
     int16_t cur_x = x;
@@ -366,11 +405,24 @@ void St7789Driver::drawString(int16_t x, int16_t y, const char* str, uint16_t fg
         if (*str == '\n') {
             cur_x = x;
             y += FONT_HEIGHT;
-        } else {
-            drawChar(cur_x, y, *str, fg, bg);
-            cur_x += FONT_WIDTH;
+            str++;
+            continue;
         }
-        str++;
+        // Run of characters on this line that fits on screen, up to one chunk.
+        int n = 0;
+        while (n < kTextChunk && str[n] != '\0' && str[n] != '\n' && cur_x >= 0 && y >= 0 &&
+               y + FONT_HEIGHT <= height_ && cur_x + (n + 1) * FONT_WIDTH <= width_) {
+            ++n;
+        }
+        if (n == 0) {
+            drawChar(cur_x, y, *str, fg, bg);  // clipped: pixel-by-pixel fallback
+            cur_x += FONT_WIDTH;
+            str++;
+            continue;
+        }
+        drawTextChunk(cur_x, y, str, n, fg, bg);
+        cur_x += n * FONT_WIDTH;
+        str += n;
     }
 }
 

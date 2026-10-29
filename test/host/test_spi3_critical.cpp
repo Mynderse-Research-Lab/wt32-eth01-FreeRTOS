@@ -47,10 +47,32 @@ static void test_reset_clears_active(void) {
   TEST_ASSERT_EQUAL_INT(0, c.load());
 }
 
+// enter()/exit() report idle<->active edges; the target signals the SPI3
+// "Class 1 idle" event exactly on the reported exit edge.
+static void test_transitions_reported_only_on_edges(void) {
+  spi3::Class1Critical c;
+  TEST_ASSERT_TRUE(c.enter());   // idle -> active
+  TEST_ASSERT_FALSE(c.enter());  // nested
+  TEST_ASSERT_FALSE(c.exit());   // still active
+  TEST_ASSERT_TRUE(c.exit());    // active -> idle
+  TEST_ASSERT_FALSE(c.active());
+}
+
+static void test_unmatched_exit_reports_idle(void) {
+  spi3::Class1Critical c;
+  // An unmatched exit must still report idle so waiters are never stranded.
+  TEST_ASSERT_TRUE(c.exit());
+  TEST_ASSERT_EQUAL_INT(0, c.load());
+  TEST_ASSERT_TRUE(c.enter());
+  TEST_ASSERT_TRUE(c.exit());
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_nested_enter_exit);
   RUN_TEST(test_underflow_clamped_to_zero);
   RUN_TEST(test_reset_clears_active);
+  RUN_TEST(test_transitions_reported_only_on_edges);
+  RUN_TEST(test_unmatched_exit_reports_idle);
   return UNITY_END();
 }

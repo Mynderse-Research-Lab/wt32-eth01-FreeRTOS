@@ -28,6 +28,8 @@ SemaphoreHandle_t mutex();
 void class1CriticalEnter();
 void class1CriticalExit();
 bool class1CriticalActive();
+/// Wait (event-driven) until Class 1 leaves its SPI critical section.
+bool waitClass1Idle(uint32_t timeout_ms);
 
 esp_err_t withMcp(const std::function<esp_err_t()>& fn);
 esp_err_t withTft(const std::function<esp_err_t()>& fn);
@@ -40,6 +42,9 @@ extern "C" {
 void spi3_class1_critical_enter(void);
 void spi3_class1_critical_exit(void);
 bool spi3_class1_critical_active(void);
+/// Block until no Class 1 exchange is in its SPI critical section, waking on
+/// the exact exit edge (not per-tick polling). Returns false on timeout.
+bool spi3_wait_class1_idle(uint32_t timeout_ms);
 #ifdef __cplusplus
 }
 #endif

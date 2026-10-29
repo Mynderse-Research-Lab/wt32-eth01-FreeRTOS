@@ -21,6 +21,7 @@
 #define MCP23S17_INTCONA  0x08  // Interrupt Control Port A
 #define MCP23S17_INTCONB  0x09  // Interrupt Control Port B
 #define MCP23S17_IOCON    0x0A  // I/O Configuration (shared)
+#define MCP23S17_IOCON_INIT 0x08  // HAEN; mcp23s17_verify_config() expects it
 #define MCP23S17_GPPUA    0x0C  // Pull-up Resistor Port A
 #define MCP23S17_GPPUB    0x0D  // Pull-up Resistor Port B
 #define MCP23S17_INTFA    0x0E  // Interrupt Flag Port A
@@ -55,33 +56,45 @@ static const char *TAG = "MCP23S17";
 #include "Spi3Bus.h"
 
 static constexpr TickType_t kMcpSpiLockTimeoutTicks = pdMS_TO_TICKS(8);
+static constexpr uint32_t kMcpClass1WaitMs = 8;
+// Re-checks if Class 1 re-entered between the idle wake-up and the mutex.
+static constexpr int kMcpClass1RetryAttempts = 4;
+
+// Why the last mcp23s17_lock() failed (for the error log).
+static const char* s_lock_fail = "";
 
 static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (handle == NULL || handle->spi_mutex == NULL) {
+        s_lock_fail = "no handle";
         return false;
     }
-
-    if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) != pdTRUE) {
-        return false;
-    }
-
-    // Defer when on shared SPI3 bus and Class 1 scanner critical section is active.
-    // vTaskDelay (not busy-spin): same-core SerialCmd must run while we wait.
-    if (!handle->owns_bus) {
-        const TickType_t start = xTaskGetTickCount();
-        while (spi3_class1_critical_active()) {
-            xSemaphoreGive(handle->spi_mutex);
-            if ((xTaskGetTickCount() - start) >= kMcpSpiLockTimeoutTicks) {
-                return false;
-            }
-            vTaskDelay(1);
-            if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) != pdTRUE) {
-                return false;
-            }
+    if (handle->owns_bus) {
+        if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) == pdTRUE) {
+            return true;
         }
+        s_lock_fail = "mutex timeout";
+        return false;
     }
 
-    return true;
+    // Shared SPI3: defer while a Class 1 exchange is in its critical section.
+    // Block on the exit edge (no mutex held) instead of per-tick polling,
+    // which aliased with the tick-aligned 2 ms exchange and timed out.
+    for (int attempt = 0; attempt < kMcpClass1RetryAttempts; ++attempt) {
+        if (!spi3_wait_class1_idle(kMcpClass1WaitMs)) {
+            s_lock_fail = "Class 1 idle wait timeout";
+            return false;
+        }
+        if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) != pdTRUE) {
+            s_lock_fail = "mutex timeout";
+            return false;
+        }
+        if (!spi3_class1_critical_active()) {
+            return true;
+        }
+        xSemaphoreGive(handle->spi_mutex);
+    }
+    s_lock_fail = "Class 1 re-entered on every retry";
+    return false;
 }
 
 static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
@@ -124,7 +137,7 @@ static esp_err_t mcp23s17_read_register_unlocked(mcp23s17_handle_t handle, uint8
 
 static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
     if (!mcp23s17_lock(handle)) {
-        ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X", reg);
+        ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X (%s)", reg, s_lock_fail);
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, value);
@@ -134,7 +147,7 @@ static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, 
 
 static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
     if (!mcp23s17_lock(handle)) {
-        ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X", reg);
+        ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X (%s)", reg, s_lock_fail);
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = mcp23s17_read_register_unlocked(handle, reg, value);
@@ -204,35 +217,24 @@ mcp23s17_handle_t mcp23s17_init(const mcp23s17_config_t* config) {
         return NULL;
     }
 
-    // Auto-detect hardware address (A0..A2: 0x00..0x07)
-    // On power-up, IODIRA register (0x00) defaults to 0xFF.
-    int found_addr = -1;
-    uint8_t scan_vals[8] = {0};
-    for (uint8_t a = 0; a < 8; ++a) {
-        handle->device_address = a;
-        uint8_t val = 0;
-        esp_err_t pr = mcp23s17_read_register_unlocked(handle, MCP23S17_IODIRA, &val);
-        if (pr == ESP_OK) {
-            scan_vals[a] = val;
-            if (val == 0xFF && found_addr < 0) {
-                found_addr = a;
-            }
+    // Use the configured hardware address (A2..A0 strapping). No auto-detect:
+    // it looked for the power-on IODIRA value 0xFF, but after a software reset
+    // the chip is still powered and keeps its configured IODIRA, while an empty
+    // address reads a floating MISO that can come back 0xFF - the scan then
+    // picked a non-existent address and every access failed until a power
+    // cycle (2026-10-21 capture: opcodes 0x42/0x43 with A2..A0 = 0).
+    handle->device_address = config->device_address & 0x07;
+    {
+        uint8_t iodira = 0;
+        if (mcp23s17_read_register_unlocked(handle, MCP23S17_IODIRA, &iodira) == ESP_OK) {
+            ESP_LOGI(TAG, "MCP23S17 at address 0x%02X: IODIRA=0x%02X (%s)",
+                     0x20 | handle->device_address, iodira,
+                     iodira == 0xFF ? "power-on default" : "kept through software reset");
         }
     }
 
-    if (found_addr >= 0) {
-        handle->device_address = static_cast<uint8_t>(found_addr);
-        ESP_LOGI(TAG, "MCP23S17 detected at address 0x%02X (A2..A0 = %d)",
-                 0x20 | found_addr, found_addr);
-    } else {
-        ESP_LOGW(TAG, "MCP23S17 address scan [0..7]: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
-                 scan_vals[0], scan_vals[1], scan_vals[2], scan_vals[3],
-                 scan_vals[4], scan_vals[5], scan_vals[6], scan_vals[7]);
-        handle->device_address = config->device_address & 0x07;
-    }
-
     // Configure IOCON: enable HAEN (bit 3 = 0x08) so hardware address pins are active
-    ret = mcp23s17_write_register(handle, MCP23S17_IOCON, 0x08);
+    ret = mcp23s17_write_register(handle, MCP23S17_IOCON, MCP23S17_IOCON_INIT);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "IOCON init failed");
         mcp23s17_deinit(handle);
@@ -349,6 +351,32 @@ esp_err_t mcp23s17_write_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin, uint8
     esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, *output_cache);
     mcp23s17_unlock(handle);
     return ret;
+}
+
+esp_err_t mcp23s17_read_latch(mcp23s17_handle_t handle, mcp23s17_port_t port, uint8_t* value) {
+    if (handle == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint8_t reg = (port == MCP23S17_PORT_A) ? MCP23S17_OLATA : MCP23S17_OLATB;
+    return mcp23s17_read_register(handle, reg, value);
+}
+
+esp_err_t mcp23s17_verify_config(mcp23s17_handle_t handle, uint8_t* iocon,
+                                 uint8_t* iodira, uint8_t* iodirb) {
+    if (handle == NULL || iocon == NULL || iodira == NULL || iodirb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = mcp23s17_read_register(handle, MCP23S17_IOCON, iocon);
+    if (ret == ESP_OK) ret = mcp23s17_read_register(handle, MCP23S17_IODIRA, iodira);
+    if (ret == ESP_OK) ret = mcp23s17_read_register(handle, MCP23S17_IODIRB, iodirb);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (*iocon != MCP23S17_IOCON_INIT || *iodira != handle->port_a_dir ||
+        *iodirb != handle->port_b_dir) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    return ESP_OK;
 }
 
 uint8_t mcp23s17_read_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin) {

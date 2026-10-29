@@ -31,6 +31,10 @@ esp_err_t gpio_expander_write(int pin, uint8_t level);
 uint8_t gpio_expander_read(int pin);
 mcp23s17_handle_t gpio_expander_get_mcp_handle(void);
 uint8_t gpio_expander_read_port_b(void);
+/** Output latch bit of an MCP pin (what the chip holds as written). */
+esp_err_t gpio_expander_read_latch(int pin, uint8_t* level);
+/** MCP23S17 config read-back; ESP_ERR_INVALID_RESPONSE when it no longer matches. */
+esp_err_t gpio_expander_verify(uint8_t* iocon, uint8_t* iodira, uint8_t* iodirb);
 
 esp_err_t gpio_expander_configure_field_and_ui(void);
 esp_err_t field_dout_set(unsigned channel, bool level);

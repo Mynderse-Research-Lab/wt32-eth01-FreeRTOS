@@ -64,6 +64,13 @@ public:
     void drawStringCentered(int16_t y, const char* str, uint16_t fg, uint16_t bg);
 
 private:
+    // Characters rendered per address window by drawString. Each window costs
+    // three command/data pairs, i.e. six D/C writes through the MCP23S17.
+    static constexpr int kTextChunk = 8;
+
+    // Draw up to kTextChunk on-screen characters as one window.
+    void drawTextChunk(int16_t x, int16_t y, const char* str, int n, uint16_t fg, uint16_t bg);
+
     void writeCommand(uint8_t cmd);
     void writeDataByte(uint8_t data);
     void writeDataBytes(const uint8_t* data, size_t len);
