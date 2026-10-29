@@ -178,7 +178,7 @@ static void test_side_jaw_sweep_is_perpendicular_and_short(void) {
     const PickIntercept::JawChoice jaw =
         PickIntercept::chooseSideJaw(0.0f, cell, 0.0f, -180.0f, 180.0f);
     TEST_ASSERT_TRUE(jaw.ok);
-    const float rel = std::remainder(jaw.joint_deg - cell - 90.0f, 180.0f);
+    const float rel = std::remainder(jaw.joint_deg - cell, 180.0f);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, rel);
     TEST_ASSERT_TRUE(jaw.travel_deg <= 90.0f + 1e-3f);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, std::fabs(jaw.joint_deg), jaw.travel_deg);
@@ -186,7 +186,7 @@ static void test_side_jaw_sweep_is_perpendicular_and_short(void) {
         PickIntercept::chooseSideJaw(0.0f, cell, 10.0f, -180.0f, 180.0f);
     TEST_ASSERT_TRUE(offset.ok);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f,
-                             std::remainder(offset.joint_deg - cell - 100.0f, 180.0f));
+                             std::remainder(offset.joint_deg - cell - 10.0f, 180.0f));
   }
 }
 
@@ -208,7 +208,7 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   full.length_mm = 120.0f;
   const auto jaw = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, -180.0f, 180.0f);
   const auto fit = PickIntercept::classifyClearance(
-      0.0f, jaw.joint_deg, full, f, false);
+      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), full, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(fit.mode));
   TEST_ASSERT_EQUAL_STRING("late Z off", fit.reason);
@@ -228,9 +228,9 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   PickIntercept::CellGeom wider = full;
   wider.width_mm = 60.0f;
   const auto g40 = PickIntercept::classifyClearance(
-      0.0f, jaw.joint_deg, mid, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), mid, f, true);
   const auto g60 = PickIntercept::classifyClearance(
-      0.0f, jaw.joint_deg, wider, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), wider, f, true);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 20.0f, g40.side_gap_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, g60.side_gap_mm);
   const auto slow = PickIntercept::strikeLeads(
@@ -251,7 +251,7 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   PickIntercept::CellGeom over = full;
   over.width_mm = 81.0f;
   const auto bad = PickIntercept::classifyClearance(
-      0.0f, jaw.joint_deg, over, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), over, f, true);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(bad.mode));
   TEST_ASSERT_EQUAL_STRING("cell wider than jaws", bad.reason);
@@ -268,14 +268,14 @@ static void test_command_theta_quantizes_to_a_tenth(void) {
 static void test_side_jaw_is_linear_and_rejects_when_nothing_fits(void) {
   const auto from_plus = PickIntercept::chooseSideJaw(170.0f, 0.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_TRUE(from_plus.ok);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, from_plus.joint_deg);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 80.0f, from_plus.travel_deg);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 180.0f, from_plus.joint_deg);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, from_plus.travel_deg);
   const auto from_minus = PickIntercept::chooseSideJaw(-170.0f, 0.0f, 0.0f, -180.0f, 180.0f);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, -90.0f, from_minus.joint_deg);
-  // Wrapped, 175 -> -175 is 10 deg; theta is linear, so it is 350 and loses.
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, -180.0f, from_minus.joint_deg);
+  // 175 to -85 is a linear 260°. The equivalent joint at 95° is only 80° away.
   const auto no_wrap = PickIntercept::chooseSideJaw(175.0f, -85.0f, 0.0f, -180.0f, 180.0f);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 5.0f, no_wrap.joint_deg);
-  const auto none = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, 0.0f, 60.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 95.0f, no_wrap.joint_deg);
+  const auto none = PickIntercept::chooseSideJaw(0.0f, 90.0f, 0.0f, 0.0f, 60.0f);
   TEST_ASSERT_FALSE(none.ok);
 }
 
@@ -287,13 +287,13 @@ static void test_lane_band_is_about_29_deg_for_18650(void) {
     const float c = static_cast<float>(deg);
     const auto jaw = PickIntercept::chooseSideJaw(0.0f, c, 0.0f, -180.0f, 180.0f);
     const auto g = PickIntercept::classifyClearance(
-        c, jaw.joint_deg, cell, f, true);
-    // 50 mm fingers. Along the belt (0°) the cell sits between the pads. Across the belt (±90°) it does not.
-    if (std::fabs(c) < 1.0f) {
+        c, PickIntercept::closeAxisDeg(jaw.joint_deg), cell, f, true);
+    // 50 mm fingers. Along the belt (90°) the cell sits between the pads. Across the belt (0°) it does not.
+    if (std::fabs(std::fabs(c) - 90.0f) < 1.0f) {
       TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ),
                         static_cast<int>(g.mode));
     }
-    if (std::fabs(c) >= 45.0f) {
+    if (std::fabs(c) <= 45.0f) {
       TEST_ASSERT_TRUE(g.mode != PickIntercept::Clearance::EarlyZ);
     }
     if (g.mode == PickIntercept::Clearance::EarlyZ) {
@@ -302,14 +302,14 @@ static void test_lane_band_is_about_29_deg_for_18650(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.5f * (f.open_mm - cell.height_mm), g.side_gap_mm);
   }
   TEST_ASSERT_TRUE(early >= 3);
-  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(0.0f, 90.0f, cell, f) >=
+  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(90.0f, 180.0f, cell, f) >=
                    PickIntercept::kLaneMarginMm);
-  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(-90.0f, 0.0f, cell, f) <
+  TEST_ASSERT_TRUE(PickIntercept::xLaneClearanceMm(0.0f, 90.0f, cell, f) <
                    PickIntercept::kLaneMarginMm);
-  const auto along = PickIntercept::classifyClearance(0.0f, 90.0f, cell, f, false);
+  const auto along = PickIntercept::classifyClearance(90.0f, 180.0f, cell, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ),
                     static_cast<int>(along.mode));
-  const auto off = PickIntercept::classifyClearance(-90.0f, 0.0f, cell, f, false);
+  const auto off = PickIntercept::classifyClearance(0.0f, 90.0f, cell, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip), static_cast<int>(off.mode));
   TEST_ASSERT_EQUAL_STRING("late Z off", off.reason);
   const auto wide =
@@ -364,9 +364,9 @@ static void test_dropin_timeline_never_overlaps_a_finger_before_crossing(void) {
   const PickIntercept::CellGeom cell = cell18650();
   const PickIntercept::FingerGeom f;
   const float v = 400.0f;
-  // Away from 0° (along the belt): these need the late Z tail.
+  // Away from ±90° (along the belt): these across-belt orientations need the late Z tail.
   for (int deg = -90; deg <= 90; deg += 15) {
-    if (deg > -45 && deg < 45) {
+    if (std::fabs(static_cast<float>(deg)) > 45.0f) {
       continue;
     }
     const float c = static_cast<float>(deg);
@@ -388,10 +388,10 @@ static void test_dropin_timeline_never_overlaps_a_finger_before_crossing(void) {
       TEST_ASSERT_FALSE(PickIntercept::rectsOverlap(r, fin[1]));
     }
   }
-  // Sanity: across the belt (−90° is +X), just before the window the cell is under the upstream finger.
+  // Sanity: across the belt (0° is New +X), just before the window the cell is under the upstream finger.
   PickIntercept::Rect fin[2];
-  PickIntercept::fingerRects(0.0f, 0.0f, 0.0f, f, fin);
-  const auto under = PickIntercept::cellRect(0.0f, -(30.85f + 4.0f), -90.0f, cell);
+  PickIntercept::fingerRects(0.0f, 0.0f, 90.0f, f, fin);
+  const auto under = PickIntercept::cellRect(0.0f, -(30.85f + 4.0f), 0.0f, cell);
   TEST_ASSERT_TRUE(PickIntercept::rectsOverlap(under, fin[0]) ||
                    PickIntercept::rectsOverlap(under, fin[1]));
 }
@@ -562,9 +562,9 @@ static void test_jaw_is_frozen_once_z_leaves_the_band(void) {
   // A refined angle is checked against the frozen jaw, not re-chosen.
   const PickIntercept::CellGeom cell = cell18650();
   const PickIntercept::FingerGeom f;
-  const auto first = PickIntercept::classifyClearance(-10.0f, 80.0f, cell, f, true);
+  const auto first = PickIntercept::classifyClearance(80.0f, 170.0f, cell, f, true);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ), static_cast<int>(first.mode));
-  const auto refined = PickIntercept::classifyClearance(-80.0f, 80.0f, cell, f, true);
+  const auto refined = PickIntercept::classifyClearance(10.0f, 170.0f, cell, f, true);
   TEST_ASSERT_TRUE(refined.mode != PickIntercept::Clearance::EarlyZ);
 }
 
@@ -681,18 +681,18 @@ static void test_neighbour_crossing_a_finger_delays_the_fingers(void) {
   PickIntercept::Occupant occ;
   occ.dx_mm = 44.0f;
   occ.remain_mm = 100.0;
-  occ.cell_deg = 0.0f;
+  occ.cell_deg = 90.0f;
   occ.cell = cell18650();
-  // Jaw across X (jaw_deg = −90°). A 50 mm finger is clear of this occupant at 0.7875 s (200 mm/s).
+  // Jaw across X (jaw_deg = 0°). A 50 mm finger is clear of this occupant at 0.7875 s (200 mm/s).
   TEST_ASSERT_FLOAT_WITHIN(1.0f, PickIntercept::kWaitS,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 0.5f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 0.5f));
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.7875f,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 2.0f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 2.0f));
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.8f,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.8f, 2.0f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.8f, 2.0f));
   occ.dx_mm = 0.0f;
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 2.0f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 2.0f));
 }
 
 static void test_tracker_dedupes_and_edf_takes_the_earliest(void) {
@@ -907,14 +907,14 @@ static void test_neighbour_occupancy_covers_the_retract(void) {
   PickIntercept::Occupant occ;
   occ.dx_mm = 44.0f;
   occ.remain_mm = 200.0;
-  occ.cell_deg = 0.0f;
+  occ.cell_deg = 90.0f;
   occ.cell = cell18650();
   // A grip-only horizon ends before the occupant reaches the finger.
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 0.4f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 0.4f));
   // Extending the horizon through the retract waits until the finger is clear.
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 1.2875f,
-                           PickIntercept::fingersFreeFromS(&occ, 1, -90.0f, f, 200.0f, 0.0f, 2.0f));
+                           PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 2.0f));
 }
 
 int main(void) {

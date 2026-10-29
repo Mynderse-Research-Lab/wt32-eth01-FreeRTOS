@@ -900,12 +900,15 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
   eval.z = zPlan(p, partHeightMm(part), tallestMm(others, n_others, part),
                  frozen_joint != nullptr ? pose.z : -1.0f);
   const float tcp_x = p.x_off + part.x_across_mm;
-  eval.pick = s_gantry->inverseKinematics(Gantry::EndEffectorPose(
-      tcp_x, 0.0f, eval.z.grip + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint));
+  const float joint_x = s_gantry != nullptr
+                            ? s_gantry->inverseKinematics(Gantry::EndEffectorPose(tcp_x, 0.0f, 0.0f, 0.0f)).x
+                            : tcp_x;
+  eval.pick = Gantry::JointConfig(
+      joint_x, eval.z.grip + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint);
 
   // Lane and side gap are kept for the log and the neighbour test.
   const PickIntercept::GripGeometry grip = PickIntercept::classifyClearance(
-      axes.theta_deg, eval.jaw_world_deg, cell, p.fingers, p.dropin);
+      axes.theta_deg, PickIntercept::closeAxisDeg(eval.jaw_world_deg), cell, p.fingers, p.dropin);
   eval.timing = strikeTiming(p, cls, grip, eval.z, belt.epoch, part.s_arrive_mm);
 
   // Simulation scheduler: hover, plunge, close and retract from the vision size.
@@ -913,8 +916,8 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
   eval.sim = strikePlan(p, lim, PickIntercept::beltCrossMm(cell), cell.height_mm, axes.theta_deg,
                         belt.speed_mm_s, eval.z.grip);
   const float hover_z = eval.sim.ok ? static_cast<float>(eval.sim.z_hover_mm) : lim.z_min + p.z_safe;
-  eval.hover = s_gantry->inverseKinematics(Gantry::EndEffectorPose(
-      tcp_x, 0.0f, hover_z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint));
+  eval.hover = Gantry::JointConfig(
+      joint_x, hover_z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint);
   eval.approach = eval.hover;
 
   PickIntercept::MotionLimits motion = p.limits;
@@ -971,7 +974,7 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
       PickIntercept::kPreloadS + PickIntercept::kSettleS;
   const float t_up = arrive_s + static_cast<float>(eval.sim.t_retract_s) + retract_s;
   const float free_s = PickIntercept::fingersFreeFromS(
-      occ, n_occ, eval.jaw_world_deg, p.fingers, belt.speed_mm_s,
+      occ, n_occ, PickIntercept::closeAxisDeg(eval.jaw_world_deg), p.fingers, belt.speed_mm_s,
       eval.strike.z_start_s, t_up);
   if (free_s > eval.strike.z_start_s + 1.0e-3f) {
       markLate(eval, "neighbour");
@@ -1956,8 +1959,8 @@ static void drainCellCommands(PickSchedulerTaskConfig *cfg) {
   }
 }
 
-// Staging: belt middle at SAFE_Z. Theta 0° puts the jaw axis along +Y, so the
-// next side-grip jaw is at most 90° away.
+// Staging: belt middle at SAFE_Z. Theta 0° holds the pads parallel to +Y and
+// the open/close motion along ±X, so a cell along the belt needs no turn.
 static void goToStaging(PickSchedulerTaskConfig* cfg) {
   const auto& c = Config::AppConfig::instance().data();
   const Gantry::JointLimits lim = cfg->gantry->getJointLimits();

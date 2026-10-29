@@ -56,15 +56,15 @@ void assertPlan(const StrikePlan::Plan& p, double tau_plunge, double tau_band, d
 
 }  // namespace
 
-// Crossing belt (theta 90): the plunge waits for the cell to enter the gap.
+// Crossing belt (theta 0): the plunge waits for the cell to enter the gap.
 static void test_matches_sim_nine_volt_flatface_600_at_90(void) {
-    assertPlan(StrikePlan::plan(simInputs(26.6, 17.3, 90.0, 600.0, 99.0)), 0.107725, 0.044614,
+    assertPlan(StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 600.0, 99.0)), 0.107725, 0.044614,
                -0.107611, -0.085280, 0.000114);
 }
 
-// Belt along the jaws (theta 0): no crossing, depth reached at arrival.
+// Belt along the jaws (theta 90): no crossing, depth reached at arrival.
 static void test_matches_sim_nine_volt_shortface_1500_at_0(void) {
-    assertPlan(StrikePlan::plan(simInputs(17.3, 26.6, 0.0, 1500.0, 99.0)), 0.107725, 0.052471,
+    assertPlan(StrikePlan::plan(simInputs(17.3, 26.6, 90.0, 1500.0, 99.0)), 0.107725, 0.052471,
                -0.107725, -0.095752, 0.000000);
 }
 
@@ -75,12 +75,12 @@ static void test_matches_sim_pack_300_at_45(void) {
 }
 
 static void test_matches_sim_power_tool_makita_1000_at_30(void) {
-    assertPlan(StrikePlan::plan(simInputs(73.8, 49.6, 30.0, 1000.0, 98.0)), 0.106475, 0.079034,
+    assertPlan(StrikePlan::plan(simInputs(73.8, 49.6, 60.0, 1000.0, 98.0)), 0.106475, 0.079034,
                -0.091475, -0.016115, 0.015000);
 }
 
 static void test_each_offset_moves_only_its_event(void) {
-    const StrikePlan::Inputs base = simInputs(26.6, 17.3, 90.0, 600.0, 99.0);
+    const StrikePlan::Inputs base = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
     const StrikePlan::Plan p0 = StrikePlan::plan(base);
 
     StrikePlan::Inputs in = base;
@@ -110,7 +110,7 @@ static void test_each_offset_moves_only_its_event(void) {
 
 // The retract never reverses Z before the plunge finishes.
 static void test_early_retract_is_clamped_to_full_plunge(void) {
-    StrikePlan::Inputs in = simInputs(26.6, 17.3, 90.0, 600.0, 99.0);
+    StrikePlan::Inputs in = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
     in.retract_offset_ms = -40;
     const StrikePlan::Plan p = StrikePlan::plan(in);
     TEST_ASSERT_TRUE(p.ok);
@@ -119,7 +119,7 @@ static void test_early_retract_is_clamped_to_full_plunge(void) {
 }
 
 static void test_close_stays_between_plunge_and_retract(void) {
-    StrikePlan::Inputs in = simInputs(26.6, 17.3, 90.0, 600.0, 99.0);
+    StrikePlan::Inputs in = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
     in.close_offset_ms = -100;
     StrikePlan::Plan p = StrikePlan::plan(in);
     TEST_ASSERT_TRUE(p.clamped);
@@ -132,7 +132,7 @@ static void test_close_stays_between_plunge_and_retract(void) {
 }
 
 static void test_offsets_are_limited_to_100_ms(void) {
-    StrikePlan::Inputs in = simInputs(17.3, 26.6, 0.0, 1500.0, 99.0);
+    StrikePlan::Inputs in = simInputs(17.3, 26.6, 90.0, 1500.0, 99.0);
     const StrikePlan::Plan p0 = StrikePlan::plan(in);
     in.retract_offset_ms = 250;
     const StrikePlan::Plan p = StrikePlan::plan(in);
@@ -142,20 +142,20 @@ static void test_offsets_are_limited_to_100_ms(void) {
 
 static void test_hover_clears_tall_object_and_respects_ceiling(void) {
     // Short cell: hover at the band ceiling.
-    StrikePlan::Plan p = StrikePlan::plan(simInputs(26.6, 17.3, 90.0, 600.0, 99.0));
+    StrikePlan::Plan p = StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 600.0, 99.0));
     ASSERT_NEAR(1e-9, 44.82, p.z_hover_mm);
     // Tall shortface power tool (111.7 mm): hover 6 mm above its top.
-    p = StrikePlan::plan(simInputs(49.6, 73.8, 0.0, 600.0, 61.0));
+    p = StrikePlan::plan(simInputs(49.6, 73.8, 90.0, 600.0, 61.0));
     TEST_ASSERT_TRUE(p.ok);
     ASSERT_NEAR(1e-9, 101.95 - 73.8 - 6.0, p.z_hover_mm);
 }
 
 static void test_rejects_unpickable_inputs(void) {
-    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(0.0, 17.3, 90.0, 600.0, 99.0)).ok);
-    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(92.1, 53.0, 90.0, 600.0, 99.0)).ok);
-    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(26.6, 17.3, 90.0, 0.0, 99.0)).ok);
+    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(0.0, 17.3, 0.0, 600.0, 99.0)).ok);
+    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(92.1, 53.0, 0.0, 600.0, 99.0)).ok);
+    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 0.0, 99.0)).ok);
     // Grasp above the hover cannot be reached by a plunge.
-    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(26.6, 17.3, 90.0, 600.0, 30.0)).ok);
+    TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 600.0, 30.0)).ok);
 }
 
 static void test_jaw_stroke_solves_pneumatic_model(void) {

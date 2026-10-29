@@ -4,8 +4,8 @@
  *
  * Grouped as in docs/PICK_SCHEDULER_KINEMATICS.md: frames, body, belt odometer,
  * clearance, motion time, then neighbours and the part tracker. Vision Y is
- * camera-relative. Cell angle 0° is the long axis parallel to +Y; positive
- * rotation about +Z goes from +Y toward −X. The jaws grip across the cell.
+ * camera-relative. Cell angle 0° is the long axis parallel to New +X (across belt);
+ * positive rotation turns from New +X toward +Y (downstream). The jaws grip across the cell.
  * Fingers go to grasp height early only when the X-projection misses both
  * finger lanes; otherwise Z waits and must still be at grasp height before contact.
  */
@@ -324,12 +324,13 @@ struct JawChoice {
   float travel_deg = 0.0f;
 };
 
-// Side grip: jaw joint = cell angle + 90 + offset, perpendicular to the long
-// axis. 0° is along +Y. The two equivalent joints (and their 360 repeats) are
-// ranked by linear travel; theta is not modulo.
+// Theta joint 0°: the pad faces are parallel to New +X (across belt) and the
+// open/close motion runs along ±Y (along belt). The joint matches the cell long
+// axis (side grip). The finger rectangles use the close axis, 90° from this datum. The two equivalent
+// joints differ by 180° and are ranked by linear travel; theta is not modulo.
 inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offset_deg,
                                float lim_min_deg, float lim_max_deg) {
-  const float base = halfTurnDeg(cell_deg) + 90.0f + jaw_offset_deg;
+  const float base = halfTurnDeg(cell_deg) + jaw_offset_deg;
   JawChoice best;
   for (int k = -3; k <= 3; ++k) {
     const float cand = base + 180.0f * static_cast<float>(k);
@@ -344,6 +345,11 @@ inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offs
     }
   }
   return best;
+}
+
+// Open/close direction for the finger rectangles. Perpendicular to the pads.
+inline float closeAxisDeg(float theta_joint_deg) {
+  return theta_joint_deg + 90.0f;
 }
 
 inline bool jointsArrived(float x, float z, float theta, float x_t, float z_t, float theta_t,
@@ -537,7 +543,7 @@ inline float secondsToPlane(float remaining_mm, float speed_mm_s) {
 
 // ---------------------------------------------------------------------------
 // 4. Clearance. Belt plane, +X across, +Y downstream. half_u runs along deg.
-// deg 0 is +Y; positive rotation about +Z points the axis toward −X.
+// deg 0 is +X (across belt); positive rotation turns from +X toward +Y (downstream).
 // ---------------------------------------------------------------------------
 
 struct Rect {
@@ -558,8 +564,8 @@ inline void fingerRects(float jx, float jy, float jaw_deg, const FingerGeom& f, 
   const float d = 0.5f * (f.open_mm + f.thick_mm);
   const float c = std::cos(jaw_deg * kDegToRad);
   const float s = std::sin(jaw_deg * kDegToRad);
-  const float ax = -s;
-  const float ay = c;
+  const float ax = c;
+  const float ay = s;
   out[0] = Rect{jx + d * ax, jy + d * ay, 0.5f * f.thick_mm, 0.5f * f.width_mm, jaw_deg};
   out[1] = Rect{jx - d * ax, jy - d * ay, 0.5f * f.thick_mm, 0.5f * f.width_mm, jaw_deg};
 }
@@ -567,19 +573,19 @@ inline void fingerRects(float jx, float jy, float jaw_deg, const FingerGeom& f, 
 inline float halfExtentX(const Rect& r) {
   const float c = std::fabs(std::cos(r.deg * kDegToRad));
   const float s = std::fabs(std::sin(r.deg * kDegToRad));
-  return r.half_u * s + r.half_v * c;
+  return r.half_u * c + r.half_v * s;
 }
 
 inline float halfExtentY(const Rect& r) {
   const float c = std::fabs(std::cos(r.deg * kDegToRad));
   const float s = std::fabs(std::sin(r.deg * kDegToRad));
-  return r.half_u * c + r.half_v * s;
+  return r.half_u * s + r.half_v * c;
 }
 
 inline float projectedRadius(const Rect& r, float nx, float ny) {
   const float c = std::cos(r.deg * kDegToRad);
   const float s = std::sin(r.deg * kDegToRad);
-  return r.half_u * std::fabs(-s * nx + c * ny) + r.half_v * std::fabs(c * nx + s * ny);
+  return r.half_u * std::fabs(c * nx + s * ny) + r.half_v * std::fabs(-s * nx + c * ny);
 }
 
 // Separating-axis test for two rotated rectangles.
@@ -631,7 +637,7 @@ inline float sideGapMm(float cell_deg, float jaw_deg, const CellGeom& cell,
 
 // Share of belt speed that moves the cell along the jaw axis.
 inline float alongFactor(float jaw_deg) {
-  return std::fabs(std::cos(jaw_deg * kDegToRad));
+  return std::fabs(std::sin(jaw_deg * kDegToRad));
 }
 
 // ---------------------------------------------------------------------------

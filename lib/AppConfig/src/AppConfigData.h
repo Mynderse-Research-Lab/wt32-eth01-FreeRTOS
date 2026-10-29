@@ -115,7 +115,7 @@ struct AppConfigData {
     int32_t eip_scope_gpio = -1; // Class 1 exchange marker GPIO (-1 off; 17 with TFT off)
     bool pick_bench_enable = false;
     int32_t pick_jaw_ms[10] = {};  // 0 = derive from jaw travel. One slot per pick class.
-    float pick_jaw_offset_deg = 0.0f;
+    float pick_jaw_offset_deg = 90.0f;
     float pick_dedupe_mm = 40.0f;
     float pick_default_belt_speed_mm_s = 1524.0f;
     // Length and height labels for classes 1–10. Not a vision fallback.

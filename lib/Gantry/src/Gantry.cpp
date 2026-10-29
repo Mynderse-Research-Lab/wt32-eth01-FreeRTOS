@@ -285,6 +285,12 @@ void Gantry::setJointLimits(float xMin, float xMax,
     config_.limits.x_max     = xMax;
     config_.limits.z_min     = zMin;
     config_.limits.z_max     = zMax;
+    if (xMax > 0.0f) {
+        kinematicParams_.x_stroke_mm = xMax;
+    }
+    if (zMax > 0.0f) {
+        kinematicParams_.z_stroke_mm = zMax;
+    }
     if (axisTheta_) {
         axisTheta_->setAngleRange(thetaMin, thetaMax);
         config_.limits.theta_min = axisTheta_->getMinDeg();

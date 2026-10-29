@@ -484,11 +484,7 @@ static void test_above_to_above_arms_x_at_band_entry(void) {
 
 static void test_pnp_gripper_then_retract(void) {
     Harness h = makeHarness();
-    EndEffectorPose pose;
-    pose.x = Gantry::KinematicParameters().theta_x_offset_mm;
-    pose.y = 0.0f;
-    pose.z = 80.0f;
-    pose.theta = 0.0f;
+    EndEffectorPose pose = h.g->forwardKinematics(JointConfig(0.0f, 80.0f, 90.0f));
     TEST_ASSERT_EQUAL(GantryError::OK, h.g->moveTo(pose, 50, 30, 3000, 3000));
     h.z->completeMove();
     tick(*h.g);

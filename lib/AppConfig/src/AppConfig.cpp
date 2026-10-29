@@ -474,7 +474,7 @@ void AppConfig::loadDefaults() {
     for (int i = 0; i < kPickClassSlots; ++i) {
       data_.pick_jaw_ms[i] = 0;
     }
-    data_.pick_jaw_offset_deg = 0.0f;
+    data_.pick_jaw_offset_deg = 90.0f;
     data_.pick_dedupe_mm = 40.0f;
     const float len_mm[kPickClassSlots] = {44.5f, 50.5f, 61.5f, 50.0f, 48.5f,
                                             34.5f, 65.0f, 70.0f, 65.0f, 65.0f};

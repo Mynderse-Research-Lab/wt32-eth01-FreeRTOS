@@ -48,7 +48,7 @@ constexpr double kMinTopMm = 0.005;
 struct Inputs {
     double width_mm = 0.0;           // jaw-close size (vision width)
     double height_mm = 0.0;          // object top above the belt
-    double theta_deg = 0.0;          // cell long axis, 0 along +Y
+    double theta_deg = 0.0;          // cell long axis: 0° along New +X (across belt), 90° along +Y (along belt)
     double belt_mm_s = 0.0;
     double z_belt_mm = 0.0;          // joint Z of the belt surface (+Z down)
     double z_ceiling_mm = 0.0;       // SAFE_Z band ceiling (deepest hover)
@@ -173,13 +173,15 @@ inline Plan plan(const Inputs& in) {
 
     // Strike window: Z crosses the top once the cell is inside the open gap
     // and reaches depth before it runs off the pads.
+    // Coordinate convention: 0° is along +X (across belt), 90° is along +Y (along belt).
+    // The crossing velocity into the jaw gap is therefore belt_speed * |cos(theta)|.
     const double rad = std::fabs(in.theta_deg) * (3.141592653589793 / 180.0);
-    const double sin_th = std::fabs(std::sin(rad));
+    const double cos_th = std::fabs(std::cos(rad));
     double c_clear = in.pad_half_open_mm - 0.5 * in.width_mm;
     if (c_clear < 1.0) {
         c_clear = 1.0;
     }
-    const double v_cross = in.belt_mm_s * sin_th;
+    const double v_cross = in.belt_mm_s * cos_th;
     const double t_enter =
         v_cross > kMinCrossMmS ? -(c_clear - kEnterMarginMm) / v_cross : kEnterAlongS;
     double t_safe_cross = t_enter + kEnterGuardS;
