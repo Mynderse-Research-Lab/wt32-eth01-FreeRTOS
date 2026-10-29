@@ -105,17 +105,17 @@
 #if defined(CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #define AXIS_X_MAX_SPEED_MM_PER_S          ((float)CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #else
-#define AXIS_X_MAX_SPEED_MM_PER_S          500.0f  /* placeholder; refine from Trap Moves */
+#define AXIS_X_MAX_SPEED_MM_PER_S          3333.3f  /* Maximum permissible: MPL-A320P 5000 rpm / 5:1 reducer * 200 mm/rev lead */
 #endif
 #if defined(CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #define AXIS_X_ACCEL_MM_PER_S2             ((float)CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #else
-#define AXIS_X_ACCEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
+#define AXIS_X_ACCEL_MM_PER_S2             20000.0f  /* Maximum permissible: AB MPL-A320P + Kinetix 5100 throughput (20 m/s^2) */
 #endif
 #if defined(CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #define AXIS_X_DECEL_MM_PER_S2             ((float)CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #else
-#define AXIS_X_DECEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
+#define AXIS_X_DECEL_MM_PER_S2             20000.0f  /* Maximum permissible: AB MPL-A320P + Kinetix 5100 throughput (20 m/s^2) */
 #endif
 #if defined(CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
 #define AXIS_X_POSITION_TOLERANCE_MM       ((float)CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
@@ -404,17 +404,17 @@
 #if defined(CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
 #define GANTRY_PATH_MAX_SPEED_MM_PER_S         ((uint32_t)CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
 #else
-#define GANTRY_PATH_MAX_SPEED_MM_PER_S         2000u
+#define GANTRY_PATH_MAX_SPEED_MM_PER_S         3333u
 #endif
 #if defined(CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
 #define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
 #else
-#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        3000u
+#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        40000u
 #endif
 #if defined(CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
 #define GANTRY_PATH_MAX_DECEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
 #else
-#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        3000u
+#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        40000u
 #endif
 
 /* ---------------------------------------------------------------------------

@@ -181,6 +181,10 @@ public:
     bool isMotionActive() const override { return busy; }
 
     bool isAlarmActive() const override { return alarm; }
+    bool online = true;
+    bool isLinkOnline() const override { return online; }
+    bool servo_active = true;
+    bool isServoActive() const override { return servo_active; }
     bool clearAlarm() override {
         alarm = false;
         return true;
@@ -279,6 +283,10 @@ public:
     bool isMotionActive() const override { return busy; }
 
     bool isAlarmActive() const override { return alarm; }
+    bool online = true;
+    bool isLinkOnline() const override { return online; }
+    bool servo_active = true;
+    bool isServoActive() const override { return servo_active; }
     bool clearAlarm() override {
         alarm = false;
         return true;

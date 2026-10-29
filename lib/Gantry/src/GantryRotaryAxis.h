@@ -36,6 +36,10 @@ public:
 
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// Cyclic drive link up. While false, angle reads are not live.
+    virtual bool isLinkOnline() const  = 0;
+    /// Drive reports its servo on (in operation). False after a trip until 'enable'.
+    virtual bool isServoActive() const = 0;
     /// EIP: fill buf with HCS01 diag summary. Default false / empty.
     virtual bool getDriveAlarmSummary(char* buf, size_t n) const {
         if (buf != nullptr && n > 0) {

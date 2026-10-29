@@ -34,7 +34,11 @@ namespace Constants {
     // Home / calibrate / bring-up seek, park, and SAFE_Z return. Independent
     // of console speed/accel. Creep toward switch-clear stays slower.
     constexpr float EIP_HOME_CAL_SPEED_MM_S = 50.0f;
-    constexpr float EIP_HOME_THETA_SPEED_DEG_S = 15.0f;
+    constexpr float EIP_HOME_THETA_SPEED_DEG_S = 30.0f;
+    // Theta pose (mod 360) held during the Z+ stroke measurement in bring-up.
+    constexpr float BRINGUP_THETA_ORIENT_DEG = 90.0f;
+    // Theta home / bring-up orient counts as arrived within this of target.
+    constexpr float EIP_THETA_SETTLED_TOL_DEG = 0.1f;
     constexpr float EIP_HOME_CAL_ACCEL_MM_S2 = 2000.0f;
     constexpr float EIP_CREEP_SPEED_MM_S = 1.0f;
 } // namespace Constants

@@ -326,6 +326,24 @@ static void test_theta_window_no_divide_by_zero(void) {
   TEST_ASSERT_FALSE(neg.runnable);
 }
 
+// Regression (bench log 2026-10-13): bring-up commanded -357.79 -> 90 deg
+// (447.8 deg of travel) on the continuous axis; the equivalent -270 deg is
+// only 87.8 deg away.
+static void test_theta_nearest_equivalent_takes_short_way(void) {
+  using Gantry::ThetaOrigin::nearestEquivalentDeg;
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, -270.0f, nearestEquivalentDeg(-357.79f, 90.0f));
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, nearestEquivalentDeg(0.0f, 90.0f));
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 450.0f, nearestEquivalentDeg(400.0f, 90.0f));
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, -270.0f, nearestEquivalentDeg(-200.0f, 90.0f));
+  // Result is always within half a turn of the start and equals target mod 360.
+  const float starts[] = {-720.5f, -181.0f, -179.0f, 0.0f, 179.0f, 181.0f, 1000.0f};
+  for (float s : starts) {
+    const float r = nearestEquivalentDeg(s, 90.0f);
+    TEST_ASSERT_TRUE(std::fabs(r - s) <= 180.0f + 1e-3f);
+    TEST_ASSERT_FLOAT_WITHIN(1e-2f, 0.0f, std::remainder(r - 90.0f, 360.0f));
+  }
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_decompose_pure_x);
@@ -354,5 +372,6 @@ int main(void) {
   RUN_TEST(test_theta_origin_aligned_uses_drive_identity);
   RUN_TEST(test_theta_origin_unaligned_shrinks_positive_travel);
   RUN_TEST(test_theta_window_no_divide_by_zero);
+  RUN_TEST(test_theta_nearest_equivalent_takes_short_way);
   return UNITY_END();
 }

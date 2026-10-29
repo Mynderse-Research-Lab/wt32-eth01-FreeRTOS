@@ -4,7 +4,9 @@
 #include "unity.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "CipMessageRouter.h"
@@ -337,6 +339,61 @@ static void test_linear_held_start_waits_for_release(void) {
   TEST_ASSERT_FALSE(axis.isStartHeld());
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
+}
+
+static int32_t cmdPositionPuu(const Bytes& cmd) {
+  int32_t v = 0;
+  std::memcpy(&v, &cmd[16], sizeof(v));  // Position reference, bytes 16..19 LE
+  return v;
+}
+
+static void test_linear_queued_move_waits_for_run_and_edge(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipLinearAxisConfig cfg;
+  cfg.puu_per_mm = 1000.0;
+  cfg.speed_ref_per_mm_s = 15.0;
+  Gantry::GantryEipLinearAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  armAxisForMove(axis, image, 0);
+  // Nothing in flight: nothing to queue behind.
+  TEST_ASSERT_FALSE(axis.queueHeldMm(2.0f, 40.0f, 0.0f, 0.0f));
+
+  TEST_ASSERT_TRUE(axis.moveToMmHeld(12.5f, 50.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.releaseStartMotion());
+  TEST_ASSERT_TRUE(axis.queueHeldMm(2.0f, 40.0f, 0.0f, 0.0f));
+  TEST_ASSERT_TRUE(axis.isStartHeld());
+  TEST_ASSERT_FALSE(axis.queueHeldMm(3.0f, 40.0f, 0.0f, 0.0f));
+
+  // The plunge edge is still high: the queued target is not on the wire yet.
+  Bytes cmd;
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
+  TEST_ASSERT_EQUAL_INT32(12500, cmdPositionPuu(cmd));
+
+  // Moving toward 12.5 mm; once kStart ends the queued target goes out with SM=0.
+  Bytes fb = makeK5100Input154(5000, false, false, false);
+  fb[9] |= 0x04 | 0x08;
+  for (int i = 0; i < 8; ++i) {
+    image.setFeedback(fb);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) == 0);
+  TEST_ASSERT_EQUAL_INT32(2000, cmdPositionPuu(cmd));
+  TEST_ASSERT_TRUE(axis.isStartHeld());
+  TEST_ASSERT_TRUE(axis.isBusy());
+
+  // The edge waits until the target has been on the wire for 3 RPI.
+  TEST_ASSERT_FALSE(axis.releaseStartMotion());
+  std::this_thread::sleep_for(std::chrono::milliseconds(7));
+  TEST_ASSERT_TRUE(axis.releaseStartMotion());
+  TEST_ASSERT_FALSE(axis.isStartHeld());
+  TEST_ASSERT_TRUE(image.getCommand(cmd));
+  TEST_ASSERT_TRUE((cmd[1] & 0x10) != 0);
+  TEST_ASSERT_EQUAL_INT32(2000, cmdPositionPuu(cmd));
+  TEST_ASSERT_TRUE(axis.isBusy());
 }
 
 static void test_linear_offline_aborts_move(void) {
@@ -1337,9 +1394,93 @@ static void test_rotary_set_puu_per_deg(void) {
   Bytes cmd;
   TEST_ASSERT_TRUE(image.getCommand(cmd));
   TEST_ASSERT_EQUAL_INT32(2000, readLeI32(cmd, 2));
-  TEST_ASSERT_EQUAL_INT32(60000, readLeI32(cmd, 6));
+  // 5 deg/s; velocity does not scale with PUU/deg (S-0-0259 is 0.0001 rpm).
+  TEST_ASSERT_EQUAL_INT32(8333, readLeI32(cmd, 6));
   TEST_ASSERT_EQUAL_INT32(349, readLeI32(cmd, 10));
   TEST_ASSERT_EQUAL_INT32(524, readLeI32(cmd, 14));
+}
+
+static void test_hcs01_units_match_drive_scaling(void) {
+    // S-0-0259 per the drive export (S-0-0044 = 2, S-0-0046 = -4): 0.0001 rpm.
+    // 15 deg/s = 2.5 rpm. The old 0.0001 deg/min reading sent 9,000,000
+    // (900 rpm, past the 600 rpm motor max: E2049, speed ignored).
+    TEST_ASSERT_EQUAL_INT32(25000, Gantry::hcs01VelocityUnits(15.0));
+    TEST_ASSERT_EQUAL_INT32(100000, Gantry::hcs01VelocityUnits(60.0));
+    // Capped at S-0-0113, 600 rpm = 3600 deg/s.
+    TEST_ASSERT_EQUAL_INT32(6000000, Gantry::hcs01VelocityUnits(3600.0));
+    TEST_ASSERT_EQUAL_INT32(6000000, Gantry::hcs01VelocityUnits(10000.0));
+    TEST_ASSERT_EQUAL_INT32(0, Gantry::hcs01VelocityUnits(-5.0));
+    // S-0-0260 / S-0-0359: 0.001 rad/s2, no PUU factor.
+    TEST_ASSERT_EQUAL_INT32(31416, Gantry::hcs01AccelUnits(1800.0));
+    TEST_ASSERT_EQUAL_INT32(314159, Gantry::hcs01AccelUnits(18000.0));
+    TEST_ASSERT_EQUAL_INT32(1000000, Gantry::hcs01AccelUnits(1.0e6));
+}
+
+// Home / bring-up orient pass accel 0 and fall back to the config defaults.
+// Those must reach the drive in the same units as an explicit accel
+// (was AXIS_THETA_ACCEL * PUU/deg = 180,000,000: F2028 after ~40 deg).
+static void test_rotary_default_accel_matches_explicit_accel(void) {
+    constexpr double kPuuPerDeg = 10000.0;
+    constexpr float kAccelDegS2 = 18000.0f;
+    eip::EipProcessImage image;
+    image.setOnline(true);
+    // Same factory main.cpp uses for the live theta axis.
+    const Gantry::EipRotaryAxisConfig cfg =
+        Gantry::eipRotaryAxisConfigFromDeg(kPuuPerDeg, 3600.0, kAccelDegS2, kAccelDegS2);
+    Gantry::GantryEipRotaryAxis axis(image, cfg);
+    TEST_ASSERT_TRUE(axis.begin());
+    image.setFeedback(makeHcs01Input102(0, false, false));
+    TEST_ASSERT_TRUE(axis.enable());
+
+    Bytes cmd;
+    TEST_ASSERT_TRUE(axis.moveToDeg(90.0f, 15.0f, kAccelDegS2, kAccelDegS2));
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    const int32_t explicit_acc = readLeI32(cmd, 10);
+    const int32_t explicit_dec = readLeI32(cmd, 14);
+    TEST_ASSERT_TRUE(axis.stopMotion());
+
+    TEST_ASSERT_TRUE(axis.moveToDeg(90.0f, 15.0f, 0.0f, 0.0f));
+    TEST_ASSERT_TRUE(image.getCommand(cmd));
+    TEST_ASSERT_EQUAL_INT32(25000, readLeI32(cmd, 6));
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(explicit_acc, readLeI32(cmd, 10),
+                                    "default accel must use drive units");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(explicit_dec, readLeI32(cmd, 14),
+                                    "default decel must use drive units");
+}
+
+static void test_theta_move_timeout_scales_with_distance(void) {
+    TEST_ASSERT_EQUAL_UINT32(Gantry::kThetaMoveTimeoutMinUs,
+                             Gantry::thetaMoveTimeoutUs(10.0, 100.0));
+    TEST_ASSERT_EQUAL_UINT32(Gantry::kThetaMoveTimeoutMinUs,
+                             Gantry::thetaMoveTimeoutUs(300.0, 0.0));
+    // 300 deg at the 15 deg/s home speed takes 20 s; allow twice that.
+    TEST_ASSERT_EQUAL_UINT32(40000000u, Gantry::thetaMoveTimeoutUs(300.0, 15.0));
+    TEST_ASSERT_EQUAL_UINT32(40000000u, Gantry::thetaMoveTimeoutUs(-300.0, 15.0));
+}
+
+// A slow move longer than 15 s must not time out at 15 s (home t from far
+// away at 15 deg/s), but must still time out once it overruns.
+static void test_rotary_long_slow_move_outlives_fixed_timeout(void) {
+    eip::EipProcessImage image;
+    image.setOnline(true);
+    Gantry::EipRotaryAxisConfig cfg;
+    cfg.puu_per_deg = 100.0;
+    Gantry::GantryEipRotaryAxis axis(image, cfg);
+    TEST_ASSERT_TRUE(axis.begin());
+    image.setFeedback(makeHcs01Input102(0, false, false));
+    TEST_ASSERT_TRUE(axis.enable());
+    // 170 deg at 5 deg/s: 34 s expected, 68 s timeout. 100 Hz updates.
+    TEST_ASSERT_TRUE(axis.moveToDeg(170.0f, 5.0f, 0.0f, 0.0f));
+    for (int i = 0; i < 1700; ++i) {
+        image.setFeedback(makeHcs01Input102(1000, false, false));
+        axis.update();
+    }
+    TEST_ASSERT_TRUE_MESSAGE(axis.isBusy(), "17 s into a 34 s move must still be busy");
+    for (int i = 0; i < 5500; ++i) {
+        image.setFeedback(makeHcs01Input102(1000, false, false));
+        axis.update();
+    }
+    TEST_ASSERT_FALSE_MESSAGE(axis.isBusy(), "move must time out after 68 s");
 }
 
 static void test_rotary_halt_clears_start_bit(void) {
@@ -1473,6 +1614,7 @@ int main(void) {
   RUN_TEST(test_process_image_online);
   RUN_TEST(test_linear_x_belt_move_command);
   RUN_TEST(test_linear_held_start_waits_for_release);
+  RUN_TEST(test_linear_queued_move_waits_for_run_and_edge);
   RUN_TEST(test_linear_offline_aborts_move);
   RUN_TEST(test_linear_second_absolute_preloads_before_start_edge);
   RUN_TEST(test_linear_move_stays_busy_until_target);
@@ -1499,6 +1641,10 @@ int main(void) {
   RUN_TEST(test_rotary_enable_holds_feedback_and_keeps_halt);
   RUN_TEST(test_rotary_arst_while_disabled_stays_drive_off);
   RUN_TEST(test_rotary_move_and_feedback);
+  RUN_TEST(test_hcs01_units_match_drive_scaling);
+  RUN_TEST(test_rotary_default_accel_matches_explicit_accel);
+  RUN_TEST(test_theta_move_timeout_scales_with_distance);
+  RUN_TEST(test_rotary_long_slow_move_outlives_fixed_timeout);
   RUN_TEST(test_theta_ah_times_out_when_ready_stays_below_operation);
   RUN_TEST(test_rotary_offline_aborts_move);
   RUN_TEST(test_rotary_consecutive_move_ignores_stale_in_pos);

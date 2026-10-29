@@ -47,6 +47,16 @@ public:
     }
     virtual bool releaseStartMotion() { return false; }
     virtual bool isStartHeld() const { return false; }
+    /// Latch the next Absolute behind the move in flight, StartMotion held, so
+    /// releaseStartMotion() can queue it without stopping the current move.
+    virtual bool queueHeldMm(float target_mm, float speed_mm_per_s,
+                             float accel_mm_per_s2, float decel_mm_per_s2) {
+        (void)target_mm;
+        (void)speed_mm_per_s;
+        (void)accel_mm_per_s2;
+        (void)decel_mm_per_s2;
+        return false;
+    }
     virtual bool  moveRelativeMm(float delta_mm, float speed_mm_per_s,
                                  float accel_mm_per_s2, float decel_mm_per_s2) = 0;
     virtual bool  stopMotion()            = 0;
@@ -65,6 +75,10 @@ public:
     // ---------- Faults ----------
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// Cyclic drive link up. While false, position reads are not live (EIP: 0).
+    virtual bool isLinkOnline() const  = 0;
+    /// Drive reports its servo on (Active). False after a trip until 'enable'.
+    virtual bool isServoActive() const = 0;
     /// @brief EIP: fill buf with FAULT/WARN summary (e.g. "WARN A603 ...").
     ///        Pulse-motor backends return false / "n/a".
     virtual bool getDriveAlarmSummary(char* buf, size_t n) const {

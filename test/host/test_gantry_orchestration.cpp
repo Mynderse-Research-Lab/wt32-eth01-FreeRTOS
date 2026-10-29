@@ -599,6 +599,112 @@ static void test_bringup_full_sequence_with_theta_90_orient(void) {
     TEST_ASSERT_FALSE(h.g->eipBringUpInProgress());
 }
 
+// Drive bring-up through Z-, X home/cal and X park until the theta orient
+// to 90 deg has been commanded.
+static void runBringUpToThetaOrient(Harness& h) {
+    TEST_ASSERT_TRUE(h.g->startEipBringUp());
+    tick(*h.g);
+    h.z->a015 = true;
+    tick(*h.g);
+    h.z->a015 = false;
+    h.z->completeMove();
+    tick(*h.g);
+    tick(*h.g);
+    tick(*h.g);
+    h.x->a014 = true;
+    tick(*h.g);
+    h.x->a014 = false;
+    h.x->completeMove();
+    tick(*h.g);
+    tick(*h.g);
+    tick(*h.g);
+    h.x->a015 = true;
+    tick(*h.g);
+    h.x->a015 = false;
+    h.x->completeMove();
+    tick(*h.g);
+    tick(*h.g);
+    h.x->completeMove();
+    tick(*h.g);
+    TEST_ASSERT_TRUE(h.t->busy);
+    TEST_ASSERT_FLOAT_WITHIN(1e-2f, 90.0f, h.t->target_deg);
+}
+
+static void assertBringUpStoppedBeforeZPlus(Harness& h) {
+    for (int i = 0; i < 5; ++i) {
+        tick(*h.g);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(h.g->eipBringUpInProgress(), "bring-up must stop on a failed orient");
+    TEST_ASSERT_FALSE_MESSAGE(h.z->busy, "Z+ stroke must not start with theta off target");
+}
+
+// The drive faults mid-orient (F2028): theta goes idle short of 90 deg.
+static void test_bringup_fails_when_theta_orient_faults(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    runBringUpToThetaOrient(h);
+    h.t->deg = 38.0f;
+    h.t->busy = false;
+    h.t->alarm = true;
+    tick(*h.g);
+    assertBringUpStoppedBeforeZPlus(h);
+}
+
+// The axis times out and halts without an alarm: still not at 90 deg.
+static void test_bringup_fails_when_theta_orient_times_out(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    runBringUpToThetaOrient(h);
+    h.t->deg = 40.0f;
+    h.t->busy = false;
+    tick(*h.g);
+    assertBringUpStoppedBeforeZPlus(h);
+}
+
+// Any one dropped drive link (2026-10-20: all three during a Z retract) makes
+// the gantry not online; it is online again once every link is back.
+static void test_drives_online_requires_every_link(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_TRUE(h.g->drivesOnline());
+    h.x->online = false;
+    TEST_ASSERT_FALSE(h.g->drivesOnline());
+    h.x->online = true;
+    h.z->online = false;
+    TEST_ASSERT_FALSE(h.g->drivesOnline());
+    h.z->online = true;
+    h.t->online = false;
+    TEST_ASSERT_FALSE(h.g->drivesOnline());
+    h.t->online = true;
+    TEST_ASSERT_TRUE(h.g->drivesOnline());
+}
+
+// After an E602 trip and alarmreset the X servo stays off (2026-10-20 15:35):
+// the first axis without its servo on is reported so picks hold.
+static void test_inactive_servo_axis_reports_first_off_servo(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_NULL(h.g->inactiveServoAxis());
+    h.x->servo_active = false;
+    TEST_ASSERT_EQUAL_STRING("X", h.g->inactiveServoAxis());
+    h.x->servo_active = true;
+    h.t->servo_active = false;
+    TEST_ASSERT_EQUAL_STRING("theta", h.g->inactiveServoAxis());
+    h.z->servo_active = false;
+    TEST_ASSERT_EQUAL_STRING("Z", h.g->inactiveServoAxis());
+    h.z->servo_active = true;
+    h.t->servo_active = true;
+    TEST_ASSERT_NULL(h.g->inactiveServoAxis());
+}
+
+static void test_theta_settled_at_requires_idle_no_alarm_and_position(void) {
+    Harness h = makeHarness(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT_TRUE(h.g->thetaSettledAt(0.0f));
+    TEST_ASSERT_TRUE(h.g->thetaSettledAt(0.05f));
+    TEST_ASSERT_FALSE(h.g->thetaSettledAt(1.0f));
+    h.t->alarm = true;
+    TEST_ASSERT_FALSE(h.g->thetaSettledAt(0.0f));
+    h.t->alarm = false;
+    h.t->busy = true;
+    TEST_ASSERT_FALSE(h.g->thetaSettledAt(0.0f));
+}
+
 #if CONFIG_GANTRY_THETA_SEQUENTIAL
 
 static void test_sequential_theta_after_in_band_path(void) {
@@ -689,6 +795,21 @@ static void test_grip_reports_write_failure(void) {
     TEST_ASSERT_FALSE(h.g->isGripperActive());
 }
 
+// A latched-up MCP23S17 reads every register as 0x00 while SPI writes still
+// "succeed" (2026-10-20): the latch read-back must turn that into a failure.
+static void test_grip_fails_when_latch_does_not_confirm(void) {
+    Harness h = makeHarness();
+    h.g->setEndEffectorPin(3, true);
+    HostTest::gpio_expander_latch_override = 0;
+    TEST_ASSERT_FALSE(h.g->grip(true));
+    TEST_ASSERT_FALSE(h.g->isGripperActive());
+    TEST_ASSERT_TRUE(h.g->grip(false));  // latch 0 matches an open command
+    HostTest::gpio_expander_latch_override = -1;
+    TEST_ASSERT_TRUE(h.g->grip(true));
+    TEST_ASSERT_TRUE(h.g->isGripperActive());
+    TEST_ASSERT_TRUE(h.g->grip(false));
+}
+
 static void test_cross_axis_fault_stops_orchestrator(void) {
     Harness h = makeHarness();
     TEST_ASSERT_EQUAL(GantryError::OK, go(h, 100.0f, 10.0f, 0.0f));
@@ -748,6 +869,11 @@ int main(void) {
     RUN_TEST(test_bringup_z_minus_then_timeout);
     RUN_TEST(test_bringup_phase_order_to_x_home);
     RUN_TEST(test_bringup_full_sequence_with_theta_90_orient);
+    RUN_TEST(test_bringup_fails_when_theta_orient_faults);
+    RUN_TEST(test_bringup_fails_when_theta_orient_times_out);
+    RUN_TEST(test_theta_settled_at_requires_idle_no_alarm_and_position);
+    RUN_TEST(test_drives_online_requires_every_link);
+    RUN_TEST(test_inactive_servo_axis_reports_first_off_servo);
 #if CONFIG_GANTRY_THETA_SEQUENTIAL
     RUN_TEST(test_sequential_theta_after_in_band_path);
     RUN_TEST(test_sequential_theta_gated_when_path_ends_deep);
@@ -757,6 +883,7 @@ int main(void) {
     RUN_TEST(test_retract_to_safe_z_while_theta_alarmed);
     RUN_TEST(test_retract_stops_a_move_in_progress);
     RUN_TEST(test_grip_reports_write_failure);
+    RUN_TEST(test_grip_fails_when_latch_does_not_confirm);
     RUN_TEST(test_cross_axis_fault_stops_orchestrator);
     return UNITY_END();
 }

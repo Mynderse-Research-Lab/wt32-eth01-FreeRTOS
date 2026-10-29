@@ -3,6 +3,7 @@
  */
 
 #include "GantryEipRotaryAxis.h"
+#include "GantryControlPeriod.h"
 
 #include "axis_drivetrain_params.h"
 #include "GantryRotaryPhases.h"
@@ -32,7 +33,6 @@ constexpr uint8_t kMoveStartTicks = RotaryPhase::kStartAckTicks;
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
 constexpr uint16_t kWaitAfTicks = 100;       // 1 s @ 100 Hz
 constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at target
-constexpr uint16_t kMoveTimeoutTicks = 1500; // 15 s @ 100 Hz
 // Theta positioning tolerance: 0.01 deg
 constexpr float kArrivalEpsDeg = 0.01f;
 
@@ -67,8 +67,8 @@ GantryEipRotaryAxis::GantryEipRotaryAxis(eip::EipProcessImage& image,
       last_axislog_us_(0),
       move_phase_(MovePhase::kIdle),
       arm_phase_(ArmPhase::kIdle),
-      move_phase_ticks_(0),
-      arm_phase_ticks_(0),
+      move_phase_us_(0),
+      arm_phase_us_(0),
       cmd_pos_puu_(0),
       cmd_vel_puu_(0),
       cmd_acc_puu_(0),
@@ -76,8 +76,8 @@ GantryEipRotaryAxis::GantryEipRotaryAxis(eip::EipProcessImage& image,
       stuck_log_div_(0),
       start_deg_(0.0f),
       in_pos_armed_(false),
-      arrival_stable_ticks_(0),
-      run_ticks_(0) {}
+      arrival_stable_us_(0),
+      run_us_(0) {}
 
 const char* GantryEipRotaryAxis::tag() const {
   return (log_tag_ != nullptr && log_tag_[0] != '\0') ? log_tag_ : "Theta";
@@ -96,14 +96,14 @@ bool GantryEipRotaryAxis::enable() {
   stop_requested_ = false;
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
+  move_phase_us_ = 0;
   in_pos_armed_ = false;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
+  arrival_stable_us_ = 0;
+  run_us_ = 0;
   // F4009 latches when bits 13/14/15 fall together. Pulse C0500 (bit5)
   // before Drive ON. Armed idle is AH (ready=3 + Drive Halt), not AF.
   arm_phase_ = ArmPhase::kClearFaults;
-  arm_phase_ticks_ = kClearFaultTicks;
+  arm_phase_us_ = legacyTicksUs(kClearFaultTicks);
   return publishClearFaults();
 }
 
@@ -113,10 +113,10 @@ bool GantryEipRotaryAxis::disable() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
   in_pos_armed_ = false;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
+  arrival_stable_us_ = 0;
+  run_us_ = 0;
   arm_phase_ = ArmPhase::kIdle;
-  arm_phase_ticks_ = 0;
+  arm_phase_us_ = 0;
   eip::hcs01::Hcs01PositioningCommand cmd;
   cmd.control = eip::hcs01::Hcs01ControlWord::makeDriveOff();
   cmd.control.command_value_accept = command_accept_level_;
@@ -130,6 +130,12 @@ bool GantryEipRotaryAxis::disable() {
 }
 
 bool GantryEipRotaryAxis::isEnabled() const { return enabled_; }
+
+bool GantryEipRotaryAxis::isServoActive() const {
+    eip::hcs01::Hcs01PositioningActual fb;
+    return image_.isOnline() && readFeedback(fb) &&
+           fb.status.ready == eip::hcs01::ReadyForOperation::kInOperation;
+}
 
 int32_t GantryEipRotaryAxis::degToPuu(float deg) const {
   return static_cast<int32_t>(llround(static_cast<double>(deg) * config_.puu_per_deg));
@@ -218,77 +224,73 @@ bool GantryEipRotaryAxis::publishMove(bool start_edge) {
 void GantryEipRotaryAxis::finishMoveHold() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
+  arrival_stable_us_ = 0;
+  run_us_ = 0;
   (void)publishHold();
 }
 
 bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
                                     float accel_deg_per_s2,
                                     float decel_deg_per_s2) {
-  if (!initialized_ || !enabled_ || config_.puu_per_deg <= 0.0) return false;
-  if (!image_.isOnline()) return false;
-
-  if (target_deg < min_deg_) target_deg = min_deg_;
-  if (target_deg > max_deg_) target_deg = max_deg_;
-  target_deg_ = target_deg;
-  start_deg_ = getCurrentDeg();
-  stop_requested_ = false;
-  stuck_log_div_ = 0;
-  in_pos_armed_ = false;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
-  arm_phase_ = ArmPhase::kHolding;
-  arm_phase_ticks_ = 0;
-
-  cmd_pos_puu_ = degToPuu(target_deg);
-  if (speed_deg_per_s > 0.0f) {
-    double v = speed_deg_per_s * 60.0 * config_.puu_per_deg;
-    if (v > 360000000.0) v = 360000000.0;
-    cmd_vel_puu_ = static_cast<int32_t>(llround(v));
-  } else {
-    cmd_vel_puu_ = config_.default_velocity_puu;
-  }
-  if (accel_deg_per_s2 > 0.0f) {
-    // S-0-0260 is 0.001 rad/s^2 (10^-3 rad/s^2). 1 deg/s^2 = (pi/180) * 1000 units.
-    double a = accel_deg_per_s2 * (1000.0 * 3.141592653589793 / 180.0);
-    if (a > 1000000.0) a = 1000000.0;
-    cmd_acc_puu_ = static_cast<int32_t>(llround(a));
-  } else {
-    cmd_acc_puu_ = config_.default_accel_puu;
-  }
-  if (decel_deg_per_s2 > 0.0f) {
-    // S-0-0359 is 0.001 rad/s^2 (10^-3 rad/s^2). 1 deg/s^2 = (pi/180) * 1000 units.
-    double d = decel_deg_per_s2 * (1000.0 * 3.141592653589793 / 180.0);
-    if (d > 1000000.0) d = 1000000.0;
-    cmd_dec_puu_ = static_cast<int32_t>(llround(d));
-  } else {
-    cmd_dec_puu_ = config_.default_decel_puu;
-  }
-
-  // Preload S-0-0282 while AH (Drive Halt). Next ticks: halt 0→1 (AF),
-  // then bit0 toggle. Combining those edges dropped the drive to Ab.
-  // Phase before motion_active so a concurrent update cannot see kIdle+active
-  // and treat sticky command_value_reached as arrival at the previous pose.
-  move_phase_ = MovePhase::kPreload;
-  move_phase_ticks_ = kMovePreloadTicks;
-  motion_active_ = true;
-  ESP_LOGI(tag(),
-           "[THETA] START current=%.2f target=%.2f cmd_puu=%ld vel=%ld "
-           "(scale=%.1f PUU/deg)",
-           static_cast<double>(start_deg_), static_cast<double>(target_deg),
-           static_cast<long>(cmd_pos_puu_), static_cast<long>(cmd_vel_puu_),
-           config_.puu_per_deg);
-  eip::hcs01::Hcs01PositioningActual fb;
-  if (readFeedback(fb)) {
-    logAfStatus("move-start", fb);
-    if (fb.status.ready != eip::hcs01::ReadyForOperation::kInOperation) {
-      ESP_LOGW(tag(),
-               "[THETA] not AH/AF (ready=%u, want 3) — Drive ON not accepted",
-               static_cast<unsigned>(fb.status.ready));
+    if (!initialized_ || !enabled_ || config_.puu_per_deg <= 0.0) {
+        return false;
     }
-  }
-  return publishMove(/*start_edge=*/false);
+    if (!image_.isOnline()) {
+        return false;
+    }
+
+    if (target_deg < min_deg_) {
+        target_deg = min_deg_;
+    }
+    if (target_deg > max_deg_) {
+        target_deg = max_deg_;
+    }
+    target_deg_ = target_deg;
+    start_deg_ = getCurrentDeg();
+    stop_requested_ = false;
+    stuck_log_div_ = 0;
+    in_pos_armed_ = false;
+    arrival_stable_us_ = 0;
+    run_us_ = 0;
+    arm_phase_ = ArmPhase::kHolding;
+    arm_phase_us_ = 0;
+
+    cmd_pos_puu_ = degToPuu(target_deg);
+    cmd_vel_puu_ = speed_deg_per_s > 0.0f
+                       ? hcs01VelocityUnits(speed_deg_per_s)
+                       : config_.default_velocity_puu;
+    cmd_acc_puu_ = accel_deg_per_s2 > 0.0f ? hcs01AccelUnits(accel_deg_per_s2)
+                                           : config_.default_accel_puu;
+    cmd_dec_puu_ = decel_deg_per_s2 > 0.0f ? hcs01AccelUnits(decel_deg_per_s2)
+                                           : config_.default_decel_puu;
+    const double eff_speed_deg_s =
+        static_cast<double>(cmd_vel_puu_) / kHcs01VelocityUnitsPerDegS;
+    move_timeout_us_ = thetaMoveTimeoutUs(target_deg - start_deg_, eff_speed_deg_s);
+
+    // Preload S-0-0282 while AH (Drive Halt). Next ticks: halt 0→1 (AF),
+    // then bit0 toggle. Combining those edges dropped the drive to Ab.
+    // Phase before motion_active so a concurrent update cannot see kIdle+active
+    // and treat sticky command_value_reached as arrival at the previous pose.
+    move_phase_ = MovePhase::kPreload;
+    move_phase_us_ = legacyTicksUs(kMovePreloadTicks);
+    motion_active_ = true;
+    ESP_LOGI(tag(),
+             "[THETA] START current=%.2f target=%.2f cmd_puu=%ld vel=%ld acc=%ld dec=%ld "
+             "timeout=%lu ms (scale=%.1f PUU/deg)",
+             static_cast<double>(start_deg_), static_cast<double>(target_deg),
+             static_cast<long>(cmd_pos_puu_), static_cast<long>(cmd_vel_puu_),
+             static_cast<long>(cmd_acc_puu_), static_cast<long>(cmd_dec_puu_),
+             static_cast<unsigned long>(move_timeout_us_ / 1000u), config_.puu_per_deg);
+    eip::hcs01::Hcs01PositioningActual fb;
+    if (readFeedback(fb)) {
+        logAfStatus("move-start", fb);
+        if (fb.status.ready != eip::hcs01::ReadyForOperation::kInOperation) {
+            ESP_LOGW(tag(),
+                     "[THETA] not AH/AF (ready=%u, want 3) — Drive ON not accepted",
+                     static_cast<unsigned>(fb.status.ready));
+        }
+    }
+    return publishMove(/*start_edge=*/false);
 }
 
 bool GantryEipRotaryAxis::stopMotion() {
@@ -336,12 +338,12 @@ bool GantryEipRotaryAxis::isAlarmActive() const {
 bool GantryEipRotaryAxis::clearAlarm() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
+  move_phase_us_ = 0;
   in_pos_armed_ = false;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
+  arrival_stable_us_ = 0;
+  run_us_ = 0;
   arm_phase_ = ArmPhase::kClearFaults;
-  arm_phase_ticks_ = kClearFaultTicks;
+  arm_phase_us_ = legacyTicksUs(kClearFaultTicks);
   return publishClearFaults();
 }
 
@@ -359,6 +361,7 @@ bool GantryEipRotaryAxis::getDriveAlarmSummary(char* buf, size_t n) const {
   else if (code == 0x4009u) name = " F4009";
   else if (code == 0x4005u) name = " E4005";
   else if (code == 0x2174u) name = " F2174";
+  else if (code == 0x2028u) name = " F2028";
   if (!fb.status.class1_error && name[0] == '\0' &&
       code != 0x4009u && code != 0x4005u) {
     std::snprintf(buf, n, "clear");
@@ -417,8 +420,8 @@ bool GantryEipRotaryAxis::captureSoftHome() {
   stop_requested_ = false;
   move_phase_ = MovePhase::kIdle;
   in_pos_armed_ = false;
-  arrival_stable_ticks_ = 0;
-  run_ticks_ = 0;
+  arrival_stable_us_ = 0;
+  run_us_ = 0;
   
   ESP_LOGI(tag(),
            "[THETA] origin ALIGNED (continuous slip-ring). drive_abs=%.3f joint_lim=%.2f..%.2f",
@@ -459,8 +462,8 @@ void GantryEipRotaryAxis::update() {
 
   if (arm_phase_ == ArmPhase::kClearFaults) {
     (void)publishClearFaults();
-    if (arm_phase_ticks_ > 0) --arm_phase_ticks_;
-    if (arm_phase_ticks_ == 0) {
+    if (arm_phase_us_ > 0) spendUs(arm_phase_us_);
+    if (arm_phase_us_ == 0) {
       if (!enabled_) {
         arm_phase_ = ArmPhase::kIdle;
         eip::hcs01::Hcs01PositioningCommand cmd;
@@ -475,7 +478,7 @@ void GantryEipRotaryAxis::update() {
         return;
       }
       arm_phase_ = ArmPhase::kWaitAf;
-      arm_phase_ticks_ = kWaitAfTicks;
+      arm_phase_us_ = legacyTicksUs(kWaitAfTicks);
       (void)publishHold();
     }
     return;
@@ -483,16 +486,16 @@ void GantryEipRotaryAxis::update() {
 
   if (arm_phase_ == ArmPhase::kWaitAf) {
     (void)publishHold();
-    if (arm_phase_ticks_ > 0) --arm_phase_ticks_;
+    if (arm_phase_us_ > 0) spendUs(arm_phase_us_);
     eip::hcs01::Hcs01PositioningActual fb;
     const bool have_fb = readFeedback(fb);
     if (have_fb && fb.status.ready == eip::hcs01::ReadyForOperation::kInOperation) {
       logAfStatus("Servo arm complete", fb);
       arm_phase_ = ArmPhase::kHolding;
-      arm_phase_ticks_ = 0;
+      arm_phase_us_ = 0;
       return;
     }
-    if (arm_phase_ticks_ == 0) {
+    if (arm_phase_us_ == 0) {
       if (have_fb) {
         logAfStatus("AH timeout — still not ready=3", fb);
       } else {
@@ -504,11 +507,11 @@ void GantryEipRotaryAxis::update() {
   }
 
   if (move_phase_ == MovePhase::kPreload) {
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
+    if (move_phase_us_ > 0) spendUs(move_phase_us_);
     (void)publishMove(/*start_edge=*/false);
-    if (move_phase_ticks_ == 0) {
+    if (move_phase_us_ == 0) {
       move_phase_ = MovePhase::kReleaseHalt;
-      move_phase_ticks_ = kMoveReleaseHaltTicks;
+      move_phase_us_ = legacyTicksUs(kMoveReleaseHaltTicks);
       (void)publishMove(/*start_edge=*/true);
     }
     return;
@@ -516,19 +519,19 @@ void GantryEipRotaryAxis::update() {
 
   if (move_phase_ == MovePhase::kReleaseHalt) {
     (void)publishMove(/*start_edge=*/true);
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
+    if (move_phase_us_ > 0) spendUs(move_phase_us_);
     bool following = false;
     eip::hcs01::Hcs01PositioningActual fb;
     if (readFeedback(fb)) {
       following = !fb.status.not_following_command &&
                   fb.status.ready == eip::hcs01::ReadyForOperation::kInOperation;
     }
-    if (following || move_phase_ticks_ == 0) {
+    if (following || move_phase_us_ == 0) {
       if (!following) {
         ESP_LOGW(tag(), "[THETA] release-halt timeout waiting for AF");
       }
       move_phase_ = MovePhase::kStart;
-      move_phase_ticks_ = kMoveStartTicks;
+      move_phase_us_ = legacyTicksUs(kMoveStartTicks);
       command_accept_level_ = !command_accept_level_;
       (void)publishMove(/*start_edge=*/true);
     }
@@ -537,16 +540,16 @@ void GantryEipRotaryAxis::update() {
 
   if (move_phase_ == MovePhase::kStart) {
     (void)publishMove(/*start_edge=*/true);
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
+    if (move_phase_us_ > 0) spendUs(move_phase_us_);
     bool acked = false;
     eip::hcs01::Hcs01PositioningActual fb;
     if (readFeedback(fb)) {
       acked = (fb.status.command_value_ack == command_accept_level_);
     }
-    if (acked || move_phase_ticks_ == 0) {
+    if (acked || move_phase_us_ == 0) {
       move_phase_ = MovePhase::kRun;
-      run_ticks_ = 0;
-      arrival_stable_ticks_ = 0;
+      run_us_ = 0;
+      arrival_stable_us_ = 0;
     }
     return;
   }
@@ -580,18 +583,18 @@ void GantryEipRotaryAxis::update() {
                          (fb.status.command_value_reached ||
                           fb.status.in_standstill);
   if (in_pos_armed_ && at_target) {
-    if (arrival_stable_ticks_ < 255) ++arrival_stable_ticks_;
-    if (arrival_stable_ticks_ >= kArrivalStableTicks) {
+    accrueUs(arrival_stable_us_, legacyTicksUs(kArrivalStableTicks));
+    if (arrival_stable_us_ >= legacyTicksUs(kArrivalStableTicks)) {
       ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
       finishMoveHold();
       return;
     }
   } else {
-    arrival_stable_ticks_ = 0;
+    arrival_stable_us_ = 0;
   }
 
-  if (run_ticks_ < 0xFFFF) ++run_ticks_;
-  if (run_ticks_ >= kMoveTimeoutTicks) {
+  accrueUs(run_us_, move_timeout_us_);
+  if (run_us_ >= move_timeout_us_) {
     ESP_LOGW(tag(),
              "[THETA] move timeout (current=%.3f target=%.3f) — halt",
              static_cast<double>(now_deg), static_cast<double>(target_deg_));

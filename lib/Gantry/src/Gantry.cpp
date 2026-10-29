@@ -5,6 +5,9 @@
  */
 
 #include "Gantry.h"
+
+#include "GantryThetaOrigin.h"
+
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -559,6 +562,57 @@ GantryError Gantry::retractToSafeZ(uint32_t speed_mm_per_s,
     return GantryError::OK;
 }
 
+GantryError Gantry::queueRetractToSafeZ(uint32_t speed_mm_per_s,
+                                        uint32_t acceleration_mm_per_s2,
+                                        uint32_t deceleration_mm_per_s2) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
+    GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
+    if (!axisZ_) {
+        return GantryError::NOT_INITIALIZED;
+    }
+    if (axisZ_->isAlarmActive() ||
+        axisZ_->getDrivePositionRef() == DrivePositionRef::kLost) {
+        return GantryError::TIMEOUT;
+    }
+    // Only behind the released plunge (Z-only descent, edge already sent).
+    if (motionState_ != MotionState::Z_DESCENDING || !axisZ_->isBusy() ||
+        axisZ_->isStartHeld()) {
+        return GantryError::INVALID_PARAMETER;
+    }
+
+    const float x = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
+    const float z_from = targetZ_mm_;  // the plunge depth the retract starts from
+    const float ceiling = traverseClearanceZMm();
+    const float speed = Path::zCappedPathSpeed(
+        static_cast<float>(speed_mm_per_s), 0.0f, ceiling - z_from,
+        static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S));
+    if (!axisZ_->queueHeldMm(ceiling, speed, static_cast<float>(acceleration_mm_per_s2),
+                             static_cast<float>(deceleration_mm_per_s2))) {
+        return GantryError::TIMEOUT;
+    }
+
+    // The path now ends at the ceiling: busy until the queued retract arrives.
+    targetX_mm_ = x;
+    targetZ_mm_ = ceiling;
+    speed_mm_per_s_ = static_cast<uint32_t>(speed);
+    acceleration_mm_per_s2_ = acceleration_mm_per_s2;
+    deceleration_mm_per_s2_ = deceleration_mm_per_s2;
+    thetaPending_ = false;
+    pathSegments_[0] = Path::PathSegment{x, ceiling, false, true};
+    pathSegmentCount_ = 1;
+    pathSegmentIndex_ = 0;
+    pathSegStartX_mm_ = x;
+    pathSegStartZ_mm_ = z_from;
+    pathSegXArmed_ = false;
+    pathSegZArmed_ = true;
+    retractOnly_ = true;
+    motionState_ = MotionState::Z_RETRACTING;
+    ESP_LOGI(TAG, "[RETRACT] queued Z %.2f -> %.2f mm behind the plunge (held)", z_from,
+             ceiling);
+    return GantryError::OK;
+}
+
 GantryError Gantry::moveTo(const EndEffectorPose& pose,
                            uint32_t speed_mm_per_s,
                            uint32_t speed_deg_per_s,
@@ -761,6 +815,14 @@ bool Gantry::homeTheta() {
     return true;
 }
 
+bool Gantry::thetaSettledAt(float target_deg) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!axisTheta_ || axisTheta_->isBusy() || axisTheta_->isAlarmActive()) {
+        return false;
+    }
+    return std::fabs(axisTheta_->getCurrentDeg() - target_deg) <= EIP_THETA_SETTLED_TOL_DEG;
+}
+
 void Gantry::softHomeJointDatum() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (axisX_) {
@@ -776,6 +838,12 @@ void Gantry::softHomeJointDatum() {
 int Gantry::calibrate() {
     return calibrateX();
 }
+
+// advanceEipLimitSequence() limits each of the six precision home/cal phases
+// to TRAVEL_MEASUREMENT_TIMEOUT_MS; the callers' wait only backstops the whole
+// run. One phase budget for the total timed out a 500 mm X calibration at the
+// 50 mm/s seek speed (~24 s, 2026-10-27).
+constexpr unsigned long kEipCalTotalTimeoutMs = 6 * TRAVEL_MEASUREMENT_TIMEOUT_MS;
 
 int Gantry::calibrateZ() {
     {
@@ -808,7 +876,7 @@ int Gantry::calibrateZ() {
         {
             std::lock_guard<std::recursive_mutex> lock(mutex_);
             if (!calibrationInProgress_ ||
-                (gantry_millis() - start_ms) >= TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+                (gantry_millis() - start_ms) >= kEipCalTotalTimeoutMs) {
                 break;
             }
             if (abortRequested_) {
@@ -908,7 +976,7 @@ int Gantry::calibrateX() {
             {
                 std::lock_guard<std::recursive_mutex> lock(mutex_);
                 if (!calibrationInProgress_ ||
-                    (gantry_millis() - start_ms) >= TRAVEL_MEASUREMENT_TIMEOUT_MS) {
+                    (gantry_millis() - start_ms) >= kEipCalTotalTimeoutMs) {
                     break;
                 }
                 if (abortRequested_) {
@@ -1136,6 +1204,15 @@ float Gantry::getZEncoderMm() const {
     return axisZ_ ? axisZ_->getCurrentMm() : (float)currentZ_;
 }
 
+bool Gantry::sampleZFeedbackMm(float& mm) const {
+    // axisZ_ is set by the constructor and never reseated.
+    if (!axisZ_ || !axisZ_->isLinkOnline()) {
+        return false;
+    }
+    mm = axisZ_->getCurrentMm();
+    return true;
+}
+
 int32_t Gantry::getZEncoderPulses() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisZ_) return 0;
@@ -1225,6 +1302,23 @@ bool Gantry::isAlarmActive() const {
     const bool zAlarm = axisZ_     && axisZ_->isAlarmActive();
     const bool tAlarm = axisTheta_ && axisTheta_->isAlarmActive();
     return xAlarm || zAlarm || tAlarm;
+}
+
+bool Gantry::drivesOnline() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!initialized_) return false;
+    const bool xOk = !axisX_     || axisX_->isLinkOnline();
+    const bool zOk = !axisZ_     || axisZ_->isLinkOnline();
+    const bool tOk = !axisTheta_ || axisTheta_->isLinkOnline();
+    return xOk && zOk && tOk;
+}
+
+const char* Gantry::inactiveServoAxis() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (axisX_ && !axisX_->isServoActive()) return "X";
+    if (axisZ_ && !axisZ_->isServoActive()) return "Z";
+    if (axisTheta_ && !axisTheta_->isServoActive()) return "theta";
+    return nullptr;
 }
 
 bool Gantry::clearAlarm() {
@@ -2243,9 +2337,17 @@ void Gantry::advanceEipBringUp() {
                 currentX_mm_ = x->getCurrentMm();
                 ESP_LOGI(TAG, "[BRINGUP] at X=%.3f (parked)", currentX_mm_);
                 if (axisTheta_ && axisTheta_->hasLiveFeedback()) {
-                    ESP_LOGI(TAG, "[BRINGUP] Orienting Theta to 90.0 deg before Z+ calibration...");
                     axisTheta_->captureSoftHome();
-                    axisTheta_->moveToDeg(90.0f, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+                    // Continuous slip-ring axis: take the equivalent of 90 deg
+                    // nearest the current pose (<= 180 deg of travel).
+                    const float orient_deg = ThetaOrigin::nearestEquivalentDeg(
+                        axisTheta_->getCurrentDeg(), Constants::BRINGUP_THETA_ORIENT_DEG);
+                    ESP_LOGI(TAG, "[BRINGUP] Orienting Theta to %.1f deg (== %.1f mod 360) "
+                             "before Z+ calibration...",
+                             static_cast<double>(orient_deg),
+                             static_cast<double>(Constants::BRINGUP_THETA_ORIENT_DEG));
+                    axisTheta_->moveToDeg(orient_deg, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+                    thetaOrientDeg_ = orient_deg;
                     bringUpPhase_ = BringUpPhase::kThetaOrient;
                     eipLimitSawBusy_ = true;
                     eipLimitPhaseStartMs_ = gantry_millis();
@@ -2268,6 +2370,15 @@ void Gantry::advanceEipBringUp() {
             if (!axisTheta_) { failEipBringUp("no Theta"); return; }
             if (!axisTheta_->isBusy()) {
                 currentTheta_ = static_cast<int32_t>(axisTheta_->getCurrentDeg());
+                // A faulted or timed-out orient also goes idle. Do not run the
+                // Z+ stroke with theta at the wrong angle.
+                if (!thetaSettledAt(thetaOrientDeg_)) {
+                    ESP_LOGE(TAG, "[BRINGUP] Theta orient missed: at %.3f deg, target %.3f deg, alarm=%d",
+                             (double)axisTheta_->getCurrentDeg(), (double)thetaOrientDeg_,
+                             axisTheta_->isAlarmActive() ? 1 : 0);
+                    failEipBringUp("theta orient did not arrive (clear the theta alarm, then rerun)");
+                    return;
+                }
                 ESP_LOGI(TAG, "[BRINGUP] Theta oriented at %.1f deg; seek +Z A014 for stroke",
                          (double)axisTheta_->getCurrentDeg());
                 eipLimitAxis_ = EipLimitAxisRole::kZ;

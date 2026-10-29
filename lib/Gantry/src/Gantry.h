@@ -159,8 +159,9 @@ public:
     bool zInTraverseBand() const;
 
     /// Workspace envelope is valid. Latched true after X+Z stroke (bring-up
-    /// or both axis cals). Cleared only when a live drive reports lost
+    /// or both axis cals). Cleared when a live drive reports lost
     /// position-ref (24 V / encoder), not on disable/stop/Class 1 gaps.
+    /// Not kept across an ESP reboot: the X/Z joint zero is RAM-only.
     bool isWorkspaceCalibrated() const;
     void setWorkspaceCalibrated(bool on);
 
@@ -184,6 +185,10 @@ public:
     void homeX();
     void homeZ();
     bool homeTheta();
+    /// True when theta is idle, not alarmed, and within
+    /// EIP_THETA_SETTLED_TOL_DEG of target_deg. homeTheta() only starts the
+    /// return to 0; use this once isBusy() clears to see whether it arrived.
+    bool thetaSettledAt(float target_deg) const;
     int  calibrateX();
     int  calibrateZ();
     int  calibrateTheta();
@@ -237,6 +242,13 @@ public:
                                uint32_t acceleration_mm_per_s2,
                                uint32_t deceleration_mm_per_s2);
 
+    /// Zero-dwell strike retract: queue the SAFE_Z ceiling behind the released
+    /// Z plunge, StartMotion held. releasePreloadedMotion() fires its edge and
+    /// the drive starts it as the plunge completes. No stop, no preload ticks.
+    GantryError queueRetractToSafeZ(uint32_t speed_mm_per_s,
+                                    uint32_t acceleration_mm_per_s2,
+                                    uint32_t deceleration_mm_per_s2);
+
     bool isBusy() const;
     bool isEnabled() const;
     void update();
@@ -255,6 +267,9 @@ public:
     int     getCurrentZ() const;
     float   getZCommandedMm() const;
     float   getZEncoderMm() const;
+    // Z feedback without the gantry mutex (process-image lock only), for the
+    // 1 kHz strike trace. False when the Z link is offline.
+    bool    sampleZFeedbackMm(float& mm) const;
     int32_t getZEncoderPulses() const;
     float   getZPulsesPerMm() const;
     int     getCurrentTheta() const;
@@ -269,6 +284,13 @@ public:
 
     // ---------- Diagnostics ----------
     bool isAlarmActive() const;
+    /// Every configured drive's cyclic link is up. While false, positions
+    /// read 0 and the SAFE_Z band test is meaningless: plan nothing.
+    bool drivesOnline() const;
+    /// First configured axis whose servo is not on ("X", "Z", "theta"), or
+    /// nullptr when every servo is on. A drive trip (e.g. E602) drops the servo
+    /// and alarmreset alone does not bring it back: 'enable' does.
+    const char* inactiveServoAxis() const;
     bool clearAlarm();
     /// @brief Print X/Z/theta EIP fault/warning summaries (no-op if no codes).
     void logDriveAlarmSummaries() const;
@@ -422,6 +444,7 @@ private:
     };
     BringUpPhase bringUpPhase_ = BringUpPhase::kIdle;
     float calXParkMm_ = GANTRY_CAL_X_PARK_MM;
+    float thetaOrientDeg_ = 0.0f;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;

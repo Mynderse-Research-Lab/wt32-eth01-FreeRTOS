@@ -8,6 +8,7 @@
 #include "GantryEipLinearAxis.h"
 
 #include "EipClass1TimingStats.h"
+#include "GantryControlPeriod.h"
 #include "GantryUtils.h"
 #include "Kinetix5100Assembly.h"
 #include "KinetixFaultCodes.h"
@@ -39,6 +40,9 @@ constexpr uint16_t kHomeWaitTicks = 50;   // 0.5 s @ 100 Hz
 // (Z 130→30 sat until the 60 s timeout; retry after StopMotion ran).
 constexpr uint8_t kMovePreloadTicks = 4;
 constexpr uint8_t kMoveStartMotionTicks = 5;
+// A queued Absolute stays on the wire with StartMotion=0 at least this long
+// (3 RPI) before its edge, for the same reason as kMovePreloadTicks.
+constexpr int64_t kQueueToEdgeUs = 6000;
 constexpr uint8_t kStopPulseTicks = 5;
 constexpr uint8_t kStopStableTicks = 20;   // 200 ms @ 100 Hz
 constexpr uint16_t kStopTimeoutTicks = 100;  // 1 s @ 100 Hz — outlasts a powered decel
@@ -71,19 +75,19 @@ GantryEipLinearAxis::GantryEipLinearAxis(eip::EipProcessImage& image,
       last_warning_code_(0),
       motion_commanded_(false),
       arm_phase_(ArmPhase::kIdle),
-      arm_phase_ticks_(0),
+      arm_phase_us_(0),
       a603_clear_attempts_(0),
-      home_wait_ticks_(0),
+      home_wait_us_(0),
       move_phase_(MovePhase::kIdle),
-      move_phase_ticks_(0),
-      fault_reset_pulse_ticks_(0),
+      move_phase_us_(0),
+      fault_reset_pulse_us_(0),
       last_speed_mm_s_(50.0f),
       last_accel_mm_s2_(0.0f),
       last_decel_mm_s2_(0.0f),
       move_speed_ref_(0),
-      run_ticks_(0),
-      stop_stable_ticks_(0),
-      arrival_stable_ticks_(0),
+      run_us_(0),
+      stop_stable_us_(0),
+      arrival_stable_us_(0),
       last_stop_sample_puu_(0),
       stop_sample_valid_(false),
       limit_min_sw_(nullptr),
@@ -106,7 +110,7 @@ bool GantryEipLinearAxis::enable() {
   stop_requested_ = false;
   motion_commanded_ = false;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
+  move_phase_us_ = 0;
 
   eip::k5100::InputAssembly154 fb;
   if (readFeedback(fb)) {
@@ -115,7 +119,7 @@ bool GantryEipLinearAxis::enable() {
   }
 
   arm_phase_ = ArmPhase::kServoLow;
-  arm_phase_ticks_ = kArmServoLowTicks;
+  arm_phase_us_ = Gantry::legacyTicksUs(kArmServoLowTicks);
   a603_clear_attempts_ = 0;
   return publishCommand(buildSettleCommand(/*servo_on=*/false));
 }
@@ -125,9 +129,9 @@ bool GantryEipLinearAxis::disable() {
   stop_requested_ = false;
   motion_commanded_ = false;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
+  move_phase_us_ = 0;
   arm_phase_ = ArmPhase::kIdle;
-  arm_phase_ticks_ = 0;
+  arm_phase_us_ = 0;
   eip::k5100::OutputAssembly104 cmd;
   cmd.servo_off = true;
   cmd.travel_mode = 10;
@@ -136,6 +140,11 @@ bool GantryEipLinearAxis::disable() {
 }
 
 bool GantryEipLinearAxis::isEnabled() const { return enabled_; }
+
+bool GantryEipLinearAxis::isServoActive() const {
+    eip::k5100::InputAssembly154 fb;
+    return image_.isOnline() && readFeedback(fb) && fb.active;
+}
 
 int32_t GantryEipLinearAxis::mmToPuu(float mm) const {
   return static_cast<int32_t>(
@@ -275,11 +284,12 @@ bool GantryEipLinearAxis::inPositionBand(
 void GantryEipLinearAxis::finishMoveHold() {
   motion_commanded_ = false;
   stop_requested_ = false;
+  queued_ = QueuedMove::kNone;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
-  run_ticks_ = 0;
-  stop_stable_ticks_ = 0;
-  arrival_stable_ticks_ = 0;
+  move_phase_us_ = 0;
+  run_us_ = 0;
+  stop_stable_us_ = 0;
+  arrival_stable_us_ = 0;
   stop_sample_valid_ = false;
   // Keep command_position at the Absolute target (do not snap — preserves
   // puuinfo target vs actual for calibration).
@@ -288,9 +298,9 @@ void GantryEipLinearAxis::finishMoveHold() {
 
 void GantryEipLinearAxis::enterAbortStop() {
   move_phase_ = MovePhase::kStopping;
-  move_phase_ticks_ = kStopPulseTicks;
-  run_ticks_ = 0;  // stop-elapsed timeout counter while Stopping
-  stop_stable_ticks_ = 0;
+  move_phase_us_ = Gantry::legacyTicksUs(kStopPulseTicks);
+  run_us_ = 0;  // stop-elapsed timeout counter while Stopping
+  stop_stable_us_ = 0;
   stop_sample_valid_ = false;
   (void)publishCommand(buildStopCommand(true));
 }
@@ -318,32 +328,32 @@ void GantryEipLinearAxis::advanceArmPhase() {
     ++a603_clear_attempts_;
     eip::k5100::OutputAssembly104 clr = buildSettleCommand(true);
     clr.fault_reset = true;
-    fault_reset_pulse_ticks_ = 3;
+    fault_reset_pulse_us_ = Gantry::legacyTicksUs(3);
     (void)publishCommand(clr);
     return;
   }
 
-  if (arm_phase_ticks_ > 0) {
-    --arm_phase_ticks_;
+  if (arm_phase_us_ > 0) {
+    Gantry::spendUs(arm_phase_us_);
   }
 
   if (arm_phase_ == ArmPhase::kServoLow) {
-    if (arm_phase_ticks_ > 0) return;
+    if (arm_phase_us_ > 0) return;
     arm_phase_ = ArmPhase::kServoSettle;
-    arm_phase_ticks_ = kArmServoSettleTicks;
+    arm_phase_us_ = Gantry::legacyTicksUs(kArmServoSettleTicks);
     (void)publishCommand(buildSettleCommand(/*servo_on=*/true));
     return;
   }
 
   if (arm_phase_ == ArmPhase::kServoSettle) {
-    if (fault_reset_pulse_ticks_ == 0) {
+    if (fault_reset_pulse_us_ == 0) {
       (void)publishCommand(buildSettleCommand(/*servo_on=*/true));
     }
     const bool active_ok =
         have_fb && fb.active && fb.ready && !fb.fault &&
         !fb.connection_faulted &&
         !(fb.warning_present && eip::k5100::isWarningA603(fb.warning_code));
-    if (active_ok || arm_phase_ticks_ == 0) {
+    if (active_ok || arm_phase_us_ == 0) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
       if (have_fb && fb.active) {
         ESP_LOGI(tag, "Servo arm complete: active=1 ready=%d pos=%ld PUU",
@@ -351,11 +361,11 @@ void GantryEipLinearAxis::advanceArmPhase() {
         command_position_puu_ = fb.actual_position;
         if (fb.homed_status) {
           arm_phase_ = ArmPhase::kHolding;
-          arm_phase_ticks_ = 0;
+          arm_phase_us_ = 0;
           (void)publishCommand(buildSettleCommand(true));
         } else {
           arm_phase_ = ArmPhase::kHomePreload;
-          arm_phase_ticks_ = kHomePreloadTicks;
+          arm_phase_us_ = Gantry::legacyTicksUs(kHomePreloadTicks);
           (void)publishCommand(buildHomeCommand(false));
         }
       } else if (have_fb) {
@@ -364,7 +374,7 @@ void GantryEipLinearAxis::advanceArmPhase() {
                  "A603 clears=%u",
                  (int)fb.ready, (unsigned)a603_clear_attempts_);
         arm_phase_ = ArmPhase::kHolding;
-        arm_phase_ticks_ = 0;
+        arm_phase_us_ = 0;
         (void)publishCommand(buildSettleCommand(true));
       }
     }
@@ -373,19 +383,19 @@ void GantryEipLinearAxis::advanceArmPhase() {
 
   if (arm_phase_ == ArmPhase::kHomePreload) {
     (void)publishCommand(buildHomeCommand(false));
-    if (arm_phase_ticks_ == 0) {
+    if (arm_phase_us_ == 0) {
       arm_phase_ = ArmPhase::kHomeStart;
-      arm_phase_ticks_ = kHomeStartTicks;
+      arm_phase_us_ = Gantry::legacyTicksUs(kHomeStartTicks);
       (void)publishCommand(buildHomeCommand(true));
     }
     return;
   }
 
   if (arm_phase_ == ArmPhase::kHomeStart) {
-    (void)publishCommand(buildHomeCommand(arm_phase_ticks_ > 0));
-    if (arm_phase_ticks_ == 0) {
+    (void)publishCommand(buildHomeCommand(arm_phase_us_ > 0));
+    if (arm_phase_us_ == 0) {
       arm_phase_ = ArmPhase::kHomeWait;
-      home_wait_ticks_ = kHomeWaitTicks;
+      home_wait_us_ = Gantry::legacyTicksUs(kHomeWaitTicks);
       (void)publishCommand(buildHomeCommand(false));
     }
     return;
@@ -393,7 +403,7 @@ void GantryEipLinearAxis::advanceArmPhase() {
 
   if (arm_phase_ == ArmPhase::kHomeWait) {
     (void)publishCommand(buildHomeCommand(false));
-    if (home_wait_ticks_ > 0) --home_wait_ticks_;
+    if (home_wait_us_ > 0) Gantry::spendUs(home_wait_us_);
     if (have_fb && fb.homed_status) {
       // Method 34 may redefine drive origin — resync joint zero to current.
       zero_puu_ = fb.actual_position;
@@ -404,7 +414,7 @@ void GantryEipLinearAxis::advanceArmPhase() {
                (long)fb.actual_position);
       arm_phase_ = ArmPhase::kHolding;
       (void)publishCommand(buildSettleCommand(true));
-    } else if (home_wait_ticks_ == 0) {
+    } else if (home_wait_us_ == 0) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
       ESP_LOGW(tag, "Home34 timeout — Absolute moves may raise E237");
       arm_phase_ = ArmPhase::kHolding;
@@ -423,23 +433,23 @@ void GantryEipLinearAxis::advanceMovePhase(
     if (!stop_sample_valid_) {
       last_stop_sample_puu_ = fb.actual_position;
       stop_sample_valid_ = true;
-      stop_stable_ticks_ = 0;
+      stop_stable_us_ = 0;
     } else {
       const int32_t d = fb.actual_position - last_stop_sample_puu_;
       last_stop_sample_puu_ = fb.actual_position;
       if (d <= lim && d >= -lim) {
-        if (stop_stable_ticks_ < 255) ++stop_stable_ticks_;
+        Gantry::accrueUs(stop_stable_us_, Gantry::legacyTicksUs(kStopStableTicks));
       } else {
-        stop_stable_ticks_ = 0;
+        stop_stable_us_ = 0;
       }
     }
-    if (move_phase_ticks_ > 0) --move_phase_ticks_;
-    if (run_ticks_ < 0xFFFF) ++run_ticks_;
+    if (move_phase_us_ > 0) Gantry::spendUs(move_phase_us_);
+    Gantry::accrueUs(run_us_, Gantry::legacyTicksUs(kStopTimeoutTicks));
     // Pulse StopMotion for kStopPulseTicks, then keep settle; do NOT finish
     // when the pulse ends — early Hold while Absolute still coasts drifts the
     // axis with firmware busy=0 (seen after clear-edge home).
-    (void)publishCommand(buildStopCommand(move_phase_ticks_ > 0));
-    const bool position_stable = (stop_stable_ticks_ >= kStopStableTicks);
+    (void)publishCommand(buildStopCommand(move_phase_us_ > 0));
+    const bool position_stable = (stop_stable_us_ >= Gantry::legacyTicksUs(kStopStableTicks));
     const bool speed_low =
         fb.isMotionStopped() ||
         (fb.actual_speed <= kNearStopSpeedRef &&
@@ -450,7 +460,7 @@ void GantryEipLinearAxis::advanceMovePhase(
       finishMoveHold();
       return;
     }
-    if (run_ticks_ >= kStopTimeoutTicks) {
+    if (run_us_ >= Gantry::legacyTicksUs(kStopTimeoutTicks)) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
       ESP_LOGW(tag, "StopMotion timeout — forcing hold (pos still moving?)");
       command_position_puu_ = fb.actual_position;
@@ -465,13 +475,13 @@ void GantryEipLinearAxis::advanceMovePhase(
     return;
   }
 
-  if (move_phase_ticks_ > 0) --move_phase_ticks_;
+  if (move_phase_us_ > 0) Gantry::spendUs(move_phase_us_);
 
   if (move_phase_ == MovePhase::kPreload) {
     republishMoveCommand(/*start_motion_edge=*/false);
-    if (move_phase_ticks_ == 0) {
+    if (move_phase_us_ == 0) {
       move_phase_ = MovePhase::kStart;
-      move_phase_ticks_ = kMoveStartMotionTicks;
+      move_phase_us_ = Gantry::legacyTicksUs(kMoveStartMotionTicks);
       eip::class1TimingStats().noteAbsoluteStartMotionPublished(
           eip::class1NowUs());
       republishMoveCommand(/*start_motion_edge=*/true);
@@ -480,11 +490,15 @@ void GantryEipLinearAxis::advanceMovePhase(
   }
 
   if (move_phase_ == MovePhase::kStart) {
-    republishMoveCommand(/*start_motion_edge=*/move_phase_ticks_ > 0);
-    if (move_phase_ticks_ == 0) {
+    republishMoveCommand(/*start_motion_edge=*/move_phase_us_ > 0);
+    if (move_phase_us_ == 0) {
       move_phase_ = MovePhase::kRun;
-      run_ticks_ = 0;
-      republishMoveCommand(/*start_motion_edge=*/false);
+      run_us_ = 0;
+      if (queued_ == QueuedMove::kPending) {
+        applyQueuedMove();
+      } else {
+        republishMoveCommand(/*start_motion_edge=*/false);
+      }
     }
     return;
   }
@@ -507,7 +521,7 @@ void GantryEipLinearAxis::advanceMovePhase(
       enterAbortStop();
       return;
     }
-    if (run_ticks_ < 0xFFFF) ++run_ticks_;
+    Gantry::accrueUs(run_us_, Gantry::legacyTicksUs(kMoveTimeoutTicks));
     republishMoveCommand(/*start_motion_edge=*/false);
 
     const bool at_ref = fb.at_reference && inPositionBand(fb);
@@ -517,15 +531,15 @@ void GantryEipLinearAxis::advanceMovePhase(
          (fb.actual_speed <= kNearStopSpeedRef &&
           fb.actual_speed >= -kNearStopSpeedRef));
     if (at_ref || band_stopped) {
-      if (arrival_stable_ticks_ < 255) ++arrival_stable_ticks_;
-      if (arrival_stable_ticks_ >= kArrivalStableTicks) {
+      Gantry::accrueUs(arrival_stable_us_, Gantry::legacyTicksUs(kArrivalStableTicks));
+      if (arrival_stable_us_ >= Gantry::legacyTicksUs(kArrivalStableTicks)) {
         finishMoveHold();
         return;
       }
     } else {
-      arrival_stable_ticks_ = 0;
+      arrival_stable_us_ = 0;
     }
-    if (run_ticks_ >= kMoveTimeoutTicks) {
+    if (run_us_ >= Gantry::legacyTicksUs(kMoveTimeoutTicks)) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
       ESP_LOGW(tag, "Absolute move timeout — aborting with StopMotion");
       enterAbortStop();
@@ -546,18 +560,67 @@ bool GantryEipLinearAxis::moveToMmHeld(float target_mm, float speed_mm_per_s,
 }
 
 bool GantryEipLinearAxis::releaseStartMotion() {
-  if (move_phase_ != MovePhase::kPreloadHold) {
+  if (move_phase_ == MovePhase::kRun && queued_ == QueuedMove::kReady) {
+    // Edge for the queued Absolute. Override and overlap stay 0, so the drive
+    // runs it after the move in flight completes (2198-UM004D, Consecutive
+    // Position Commands) instead of replacing or blending it.
+    if (eip::class1NowUs() - queued_at_us_ < kQueueToEdgeUs) {
+      return false;
+    }
+    queued_ = QueuedMove::kNone;
+  } else if (move_phase_ != MovePhase::kPreloadHold) {
     return false;
   }
   move_phase_ = MovePhase::kStart;
-  move_phase_ticks_ = kMoveStartMotionTicks;
+  move_phase_us_ = Gantry::legacyTicksUs(kMoveStartMotionTicks);
   eip::class1TimingStats().noteAbsoluteStartMotionPublished(eip::class1NowUs());
   republishMoveCommand(/*start_motion_edge=*/true);
   return true;
 }
 
 bool GantryEipLinearAxis::isStartHeld() const {
-  return move_phase_ == MovePhase::kPreloadHold;
+  if (move_phase_ == MovePhase::kPreloadHold) {
+    return true;
+  }
+  return queued_ != QueuedMove::kNone &&
+         (move_phase_ == MovePhase::kStart || move_phase_ == MovePhase::kRun);
+}
+
+bool GantryEipLinearAxis::queueHeldMm(float target_mm, float speed_mm_per_s,
+                                      float accel_mm_per_s2, float decel_mm_per_s2) {
+  if (!enabled_ || stop_requested_ || queued_ != QueuedMove::kNone ||
+      absPuuPerMm() <= 0.0) {
+    return false;
+  }
+  if (move_phase_ != MovePhase::kStart && move_phase_ != MovePhase::kRun) {
+    return false;
+  }
+  queued_target_mm_ = target_mm;
+  queued_speed_mm_s_ = speed_mm_per_s > 0.0f ? speed_mm_per_s : 50.0f;
+  queued_accel_mm_s2_ = accel_mm_per_s2;
+  queued_decel_mm_s2_ = decel_mm_per_s2 > 0.0f ? decel_mm_per_s2 : accel_mm_per_s2;
+  queued_ = QueuedMove::kPending;
+  // During kStart the current edge is still high; the swap waits for kRun.
+  if (move_phase_ == MovePhase::kRun) {
+    applyQueuedMove();
+  }
+  return true;
+}
+
+void GantryEipLinearAxis::applyQueuedMove() {
+  target_mm_ = queued_target_mm_;
+  command_position_puu_ = toAbsPuu(mmToPuu(queued_target_mm_));
+  last_speed_mm_s_ = queued_speed_mm_s_;
+  last_accel_mm_s2_ = queued_accel_mm_s2_;
+  last_decel_mm_s2_ = queued_decel_mm_s2_;
+  move_speed_ref_ = static_cast<int32_t>(llround(
+      static_cast<double>(last_speed_mm_s_) * config_.speed_ref_per_mm_s));
+  if (move_speed_ref_ < 1) move_speed_ref_ = 1;
+  // Arrival now means the queued target; the move in flight runs on in the drive.
+  arrival_stable_us_ = 0;
+  queued_ = QueuedMove::kReady;
+  queued_at_us_ = eip::class1NowUs();
+  republishMoveCommand(/*start_motion_edge=*/false);
 }
 
 bool GantryEipLinearAxis::startAbsoluteMm(float target_mm, float speed_mm_per_s,
@@ -609,13 +672,14 @@ bool GantryEipLinearAxis::startAbsoluteMm(float target_mm, float speed_mm_per_s,
   }
 
   motion_commanded_ = true;
+  queued_ = QueuedMove::kNone;
   // Preload the new Absolute with StartMotion=0; the rising edge is kStart.
   // kPreloadHold waits for releaseStartMotion() so a strike can fire that edge
   // on a timer instead of after a fixed tick count.
   move_phase_ = hold_start ? MovePhase::kPreloadHold : MovePhase::kPreload;
-  move_phase_ticks_ = hold_start ? 0 : kMovePreloadTicks;
-  run_ticks_ = 0;
-  arrival_stable_ticks_ = 0;
+  move_phase_us_ = hold_start ? 0 : Gantry::legacyTicksUs(kMovePreloadTicks);
+  run_us_ = 0;
+  arrival_stable_us_ = 0;
   return publishCommand(buildMoveCommand(/*start_motion_edge=*/false));
 }
 
@@ -696,7 +760,7 @@ bool GantryEipLinearAxis::isAlarmActive() const {
 bool GantryEipLinearAxis::clearAlarm() {
   motion_commanded_ = false;
   move_phase_ = MovePhase::kIdle;
-  move_phase_ticks_ = 0;
+  move_phase_us_ = 0;
 
   eip::k5100::InputAssembly154 fb;
   if (readFeedback(fb)) {
@@ -706,7 +770,7 @@ bool GantryEipLinearAxis::clearAlarm() {
 
   eip::k5100::OutputAssembly104 cmd = buildSettleCommand(enabled_);
   cmd.fault_reset = true;
-  fault_reset_pulse_ticks_ = 3;
+  fault_reset_pulse_us_ = Gantry::legacyTicksUs(3);
   return publishCommand(cmd);
 }
 
@@ -831,9 +895,9 @@ void GantryEipLinearAxis::update() {
 
   advanceArmPhase();
 
-  if (fault_reset_pulse_ticks_ > 0) {
-    --fault_reset_pulse_ticks_;
-    if (fault_reset_pulse_ticks_ == 0) {
+  if (fault_reset_pulse_us_ > 0) {
+    Gantry::spendUs(fault_reset_pulse_us_);
+    if (fault_reset_pulse_us_ == 0) {
       eip::k5100::OutputAssembly104 cmd = buildSettleCommand(enabled_);
       cmd.fault_reset = false;
       (void)publishCommand(cmd);
