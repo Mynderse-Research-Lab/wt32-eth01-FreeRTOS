@@ -116,27 +116,34 @@ struct L2VisionDetectPayload {
   float x_across_mm;             // 4  centroid across the belt
   float y_bat_mm;                // 8  camera-relative, +Y downstream
   float theta_deg;               // 12 long axis: 0° along +Y, + toward −X
-  uint8_t battery_class;         // 16 label only; does not override size
-  uint8_t reserved[3];           // 17 bit0: capture_displacement_m is valid
-  float capture_displacement_m;  // 20 metres; ignored unless the flag is set
-  float width_mm;                // 24 jaws close across this; 0 = not sent
-  float length_mm;               // 28 in-plane long axis; 0 = not sent
-  float height_from_belt_mm;     // 32 belt surface to the top; grasp at half; 0 = not sent
+  uint8_t battery_class;         // 16 1–10 pick, 11–13 pack occupant
+  uint8_t reserved[3];           // 17 bit0 required: capture_displacement_m is valid
+  float capture_displacement_m;  // 20 metres at exposure; the bit must be set
+  float width_mm;                // 24 jaws close across this; required, (0, 80]
+  float length_mm;               // 28 in-plane long axis; required
+  float height_from_belt_mm;     // 32 belt surface to the top; required
 };
 ```
 
 `y_bat_mm` is measured from the camera center at the capture instant; the gantry adds
 `cv_cam_y_mm` to get world Y (+Y downstream). `theta_deg` is the cell long axis: 0° is
-parallel to +Y and positive rotation about +Z runs from +Y toward −X. The gantry folds it
-to ±90° and grips the width faces (jaw perpendicular to the long axis). `length_mm` is that
-long-axis size in the belt plane. `width_mm` must be in (0, 80] when sent; 80 mm is the
-open end-effector. The grasp joint Z is the belt surface (`col_z_min_mm`, 115) minus
-`height_from_belt_mm / 2`. A zero width, length, or height-from-belt means that field was
-not sent. The frame is 58 bytes, so a 60-byte padded frame still parses and the class size
-fills any field left at zero. The gantry takes
-the receipt time minus `cv_vis_ms` as the capture time, anchored to the belt clock with the
-min-delay `offset_us`. Detections are handed to the pick task through a queue, so the
-Ethernet receive task never runs the planner.
+parallel to +Y and positive rotation about +Z runs from +Y toward −X, in `[-180°, 180°)`.
+The gantry folds it to ±90° and grips the width faces. The theta joint matches that long axis: 0° holds the pads parallel to +Y, and open/close is perpendicular to the pads.
+`item_id` is nonzero and stays the same across repeated observations of one object in a
+conveyor epoch. `battery_class` `1`–`10` is a pick: AAA, AA, D, C, 9V, CR123A, 18650,
+21700, 26650, 32650. `11`–`13` is a pack occupant that is tracked and not picked: laptop,
+Li-ion pack, power-tool. It selects the tunable jaw-time slot for a pick class and does
+not supply a size. `width_mm`, `length_mm`,
+and `height_from_belt_mm` are all required. Width is in `(0, 80]` mm. `reserved[0]` bit 0
+must be set and `capture_displacement_m` is the conveyor displacement at exposure. A missing
+field is rejected. Pick envelopes, length × width × height above the belt: AAA
+`44.5 × 10.5 × 10.5`, AA `50.5 × 14.5 × 14.5`, D `61.5 × 34.2 × 34.2`, C `50 × 26.2 × 26.2`,
+9V `48.5 × 17.5 × 26.5`, CR123A `34.5 × 17 × 17`, 18650 `65 × 18.3 × 18.3`, 21700
+`70 × 21.2 × 21.2`, 26650 `65 × 26.5 × 26.5`, 32650 `65 × 32 × 32`. Packs kept in view:
+laptop `205 × 50 × 22`, Li-ion pack `114 × 66 × 25`, power-tool `120 × 75 × 80`. Grasp height is \(\min(h/2, 25.4\,\mathrm{mm})\)
+down from the object top. The frame is 58 bytes, so a 60-byte padded frame still parses.
+Detections are handed to the pick task through a queue, so the Ethernet receive task never
+runs the planner.
 
 #### 3. Conveyor Telemetry (`MsgType::CONVEYOR_SPEED = 0x02`, Total Size: 34 Bytes)
 ```cpp
@@ -146,6 +153,8 @@ struct L2ConveyorSpeedPayload {
   int32_t raw_encoder_cnt; // 500-PPR hardware pulse counter value
 };
 ```
+
+`displacement_m` is the belt position. `speed_mm_s` only projects that sample until the next report. The two fields and the frame timestamp are one sample. The grasp deadlines are target travels on that anchor.
 
 #### 4. Gantry Status (`MsgType::GANTRY_STATUS = 0x03`, Total Size: 40 Bytes)
 ```cpp
@@ -406,7 +415,7 @@ int main() {
         float x_across_mm = 120.5f;
         float y_along_mm = 0.0f;
         float theta_deg = 45.0f;
-        uint8_t battery_class = 2; // 21700
+        uint8_t battery_class = 8; // 21700
 
         node.sendVisionDetect(item_counter++, x_across_mm, y_along_mm, theta_deg, battery_class);
         std::cout << "Broadcast detection: Item #" << (item_counter - 1) << std::endl;

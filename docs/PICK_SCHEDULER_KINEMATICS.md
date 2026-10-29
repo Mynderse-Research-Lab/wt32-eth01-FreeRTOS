@@ -31,7 +31,7 @@ Vision pose is camera-relative. World position of the object top at capture:
 \mathbf{p}_c = \big(x_{\mathrm{off}} + x,\ \ y_{\mathrm{cam}} + y_{\mathrm{bat}},\ \ z_b - h\big)
 \]
 
-\(h =\) `height_from_belt_mm` is the top above the belt. `length_mm` is the extent along \(\mathbf{u}\) and is not a height. A zero vision field was not sent.
+\(h =\) `height_from_belt_mm` is the top above the belt. `length_mm` is the extent along \(\mathbf{u}\) and is not a height. A detection without a finite positive width, length, and height is rejected. `cv_belt_w_mm` stores the belt width, default 300 mm, and the intercept does not read it. Gantry X is \(x_{\mathrm{off}} + x\), with `cv_x_off_mm` default 245: the collision edge `col_x_min_mm` (95) plus half of that width. Changing the width does not change the offset. Both settings apply without a reboot.
 
 ---
 
@@ -46,10 +46,12 @@ The object is an axis-aligned box in its own frame, then rotated by \(\theta\):
 The jaw axis is perpendicular to the long axis:
 
 \[
-\theta_j = \mathrm{fold}(\theta) + 90^\circ + \theta_{\mathrm{offset}}
+\theta_j = \mathrm{fold}(\theta) + \theta_{\mathrm{offset}}
 \]
 
-Open jaws are two rectangles of thickness and finger width, centered \(\pm(w_{\mathrm{open}} + t)/2\) along the jaw axis. \(w_{\mathrm{open}} = 80\,\mathrm{mm}\). A sent width must satisfy \(0 < w \le 80\). Jaw travel to the width faces:
+Theta \(0^\circ\) holds the pad faces parallel to \(+Y\). Open/close is perpendicular to the pads, along \(\pm X\). The finger rectangles use that close axis, \(\theta_j + 90^\circ\).
+
+Open jaws are two rectangles of thickness and finger width, centered \(\pm(w_{\mathrm{open}} + t)/2\) along the jaw axis. \(w_{\mathrm{open}} = 80\,\mathrm{mm}\). A sent width must satisfy \(0 < w \le 80\). Length and height-from-belt must also be finite and positive. The class id does not fill a missing size. Supported pick classes, length × width × height above the belt: AAA \(44.5 \times 10.5 \times 10.5\), AA \(50.5 \times 14.5 \times 14.5\), D \(61.5 \times 34.2 \times 34.2\), C \(50 \times 26.2 \times 26.2\), 18650 \(65 \times 18.3 \times 18.3\), 21700 \(70 \times 21.2 \times 21.2\), 9V flatface \(48 \times 27 \times 17\) (lying flat on larger face), 9V shortface \(48 \times 17 \times 27\) (resting on narrower flank), 9V bottomface \(27 \times 17 \times 48\) (upright on base), pack \(114 \times 68 \times 26\) (flat multi-cell), pack shortface \(114 \times 26 \times 68\) (on edge), laptop \(208 \times 50 \times 21\) (long pack), and power-tool \(112 \times 75 \times 80\) (brick pack). All cylindrical cells lie on their side with longitudinal axis along \(\mathbf{u}(\theta)\) (\(\theta = 0^\circ \iff\) parallel to \(+Y\)). Jaw travel to the width faces:
 
 \[
 g = \tfrac12 (w_{\mathrm{open}} - w) \ge 0
@@ -57,21 +59,34 @@ g = \tfrac12 (w_{\mathrm{open}} - w) \ge 0
 
 At \(w = 80\), \(g = 0\): the object fills the opening. That is still a pick only when the clearance test in §4 allows the fingers to be at depth. With the jaw perpendicular to the cell and `cv_jaw_deg = 0`, the along-jaw gap equals \(g\).
 
-Grasp height is measured down from the object top (its max height), not up from the belt. It is half the object height and never more than 25.4 mm (1 in) below that top:
+### Grasp Height & Elevation Rules
 
+Grasp height is governed by two complementary regimes depending on the physical height \(h\) of the battery above the belt datum \(z_b\):
+
+1. **Short Cell Rule (\(h < 30\,\mathrm{mm}\))**:
+   For any battery height strictly smaller than 30 mm, the grasp depth is fixed at **\(3.0\,\mathrm{mm}\) above the conveyor belt**:
+   \[
+   z_g = z_b - 3.0\,\mathrm{mm}
+   \]
+   With simulation datum \(z_b = 105.5\,\mathrm{mm}\), this evaluates to \(z_g = 102.50\,\mathrm{mm}\) (or \(112.0\,\mathrm{mm}\) with bench datum \(z_b = 115.0\,\mathrm{mm}\)). This applies to AAA, AA, 18650, 21700, C, 9V flatface (\(h=17\)), 9V shortface (\(h=27\)), pack (\(h=26\)), and laptop (\(h=21\)).
+
+2. **Tall Cell Rule (\(h \ge 30\,\mathrm{mm}\))**:
+   For batteries with height \(h \ge 30\,\mathrm{mm}\), grasp depth is measured down from the object top surface, targeting half the height capped at a maximum insertion depth of 25.4 mm (1.0 inch):
+   \[
+   h_g = \min(h/2,\ 25.4\,\mathrm{mm}), \qquad z_g = (z_b - h) + h_g
+   \]
+   This applies to 9V bottomface (\(h=48\), \(z_g = 81.50\)), pack shortface (\(h=68\), \(z_g = 62.90\)), power-tool (\(h=80\), \(z_g = 50.90\)), and D-cell (\(h=34.2\), \(z_g = 103.40\)).
+
+Length does not enter \(z_g\). Staging ceiling \(z_{\mathrm{stage}}\) is dynamically calculated to clear the top surface of tall batteries with at least 6.0 mm overhead margin:
 \[
-h_g = \min(h/2,\ 25.4\,\mathrm{mm}), \qquad z_g = (z_b - h) + h_g
+z_{\mathrm{stage}} = \min(Z_{\mathrm{safe}},\ \max(15.0,\ z_{\mathrm{top}} - 6.0\,\mathrm{mm}))
 \]
-
-A 40 mm object is grasped at its center (joint Z 95). An 80 mm object is grasped 25.4 mm below its top (top at joint Z 35, grasp at 60.4). When \(h/2 \le 25.4\,\mathrm{mm}\) this is the same point as half the height above the belt. Length does not enter \(z_g\). Skip the pick if \(z_g\) is outside the measured stroke or \(z_g > z_b\).
-
-Belt \(z_b = 115\) and the live Z stroke is about 106 mm, so an 18.3 mm cell is at \(z_g = 105.85\).
 
 ---
 
 ## 3. Belt
 
-The belt is a scalar odometer \(s\) (mm). Speed \(v\) is piecewise constant between conveyor frames. Position at gantry time \(t\) uses the minimum-delay clock offset, not receipt time:
+The belt is a scalar odometer \(s\) (mm). Speed \(v\) is piecewise constant between conveyor frames. Position at gantry time \(t\) uses the conveyor timestamp plus the smallest of the last eight receipt delays, not the receipt time of the latest frame:
 
 \[
 s(t) = s_k + v_k\,(t - t_k)
@@ -91,60 +106,142 @@ s_a = s_{\mathrm{capture}} + y_p - (y_{\mathrm{cam}} + y_{\mathrm{bat}})
 t_a - t = (s_a - s(t)) / v \quad (v > 0)
 \]
 
-A restart (sequence reset, or time or displacement backward) increments an epoch. A part is valid only in the epoch it was stamped in. Three flat displacement samples while \(v > 0\) switch that piece to speed integration. Two missed frames (500 ms) make the clock stale; armed picks abort.
+A repeated sequence number is ignored and does not refresh `last_frame_gantry_us`. `noteConveyor` increments the epoch when the sequence jumps by more than 32, raw displacement steps backward by more than 5 mm, or the conveyor timestamp steps backward by more than 0.500 s. A part is valid only in the epoch it was stamped in. Three displacement samples unchanged to \(10^{-6}\) mm, while both the previous and the new speed are positive, switch that piece to speed integration; each step is the previous speed times the conveyor-timestamp gap. `beltStale` is gantry receipt age greater than `kStaleAfterUs`, which is `2 * kConveyorPeriodUs`. That period is the configured 250 ms, so the window is 500 ms. It is not the measured gap between conveyor timestamps. Armed picks abort when the age is exceeded.
 
 ---
 
-## 4. Clearance
+## 4. Coordinated grasp
 
-At time \(t\) the object center is \((x,\ y(t))\). A configuration is clear when the object rectangle does not intersect either finger rectangle (separating-axis test).
+The close axis is \(\theta_j = \theta + 90^\circ\). The belt's share along that axis is \(|\sin\theta|\). The older line \(f = |\cos\theta_j|\) is the same number, because \(\cos(\theta+90^\circ) = -\sin\theta\).
 
-The share of belt speed along the jaw is
-
-\[
-f = |\cos\theta_j|
-\]
-
-The jaw is perpendicular to the long axis, so \(|\mathbf{u}\cdot\mathbf{e}_j| = 0\) and is not the belt component. The time the along-jaw opening is swept by the belt is
+Time is zero at center arrival. With finger width \(T = 10\,\mathrm{mm}\) (close axis) and finger length \(F = 50\,\mathrm{mm}\) (along the pads):
 
 \[
-W = \frac{2g}{v f}\quad(g > 0,\ f > 0),\qquad W = \infty\quad(g > 0,\ f = 0),\qquad W = 0\quad(g = 0)
+\xi = v t \cos\theta,\qquad \eta = v t \sin\theta,\qquad a(t) = 40 - q(t)
 \]
 
-Two consequences:
+The cell occupies \([\xi \pm L/2]\) by \([\eta \pm w/2]\). Each pad occupies \([a,\ a+T]\) or \([-a-T,\ -a]\) on the close axis and \([-F/2,\ F/2]\) along the pads. Those intervals are the contact test. A world-X overlap is the full-pass lane hazard. It is not a second collision test.
 
-- **Fingers down early** if and only if the object's across-belt span misses both finger X-intervals by `kLaneMarginMm` (4 mm) for the whole pass. The fingers may already be at \(z_g\) when the object arrives. \(g = 0\) does not override this test: an 80 mm object whose X-projection meets a finger is not an early descent.
-- **Fingers down late** otherwise, and only while `pk_dropin` is on (off until the bench enables it). Otherwise the pick is skipped. The fingers stay at hover until the object has cleared the upstream finger, then drop.
+Jaw motion starts \(8\,\mathrm{ms}\) after the close command. Then \(q\) runs \(40\,\mathrm{mm}\) in \(190\,\mathrm{ms}\) at 6 bar (\(210.5\,\mathrm{mm/s}\)) until the pads meet. Valve-off \(17\,\mathrm{ms}\) is the later open command.
 
-Hover, with +Z down, is never more retracted than the SAFE_Z ceiling:
+Hover and grasp, with +Z down:
 
 \[
-z_{\mathrm{hover}} = \max\big(z_{\mathrm{safe}},\ z_b - h_{\mathrm{tallest}} - 3\,\mathrm{mm}\big)
+z_{\mathrm{hover}} = \max(35.7,\ z_b - h - 3),\qquad
+z_{\mathrm{top}} = z_b - h
 \]
-
-**Grasp height at contact.** The fingertips are at \(z_g\) when the jaws meet the faces, for every pick:
-
 \[
-t_{z,\mathrm{done}} \le t_a - t_{\mathrm{guard}}
+z_g = \begin{cases}
+z_b - 3.0\,\mathrm{mm} & \text{if } h < 30\,\mathrm{mm} \\
+z_{\mathrm{top}} + \min(h/2,\ 25.4\,\mathrm{mm}) & \text{if } h \ge 30\,\mathrm{mm}
+\end{cases}
 \]
 
-Late Z must also pass the object top only after the upstream finger is clear. With the descent released so it finishes one guard before arrival, that holds when
+Z uses symmetric constant speed \(v_{\mathrm{plunge}} = v_{\mathrm{retract}} = 800\,\mathrm{mm/s}\) and acceleration \(a_z = 20{,}000\,\mathrm{mm/s^2}\) (Kinetix 5100 drive rating \(20\,\mathrm{m/s^2} = 2.04\,g\)). All short cells (\(h < 30\,\mathrm{mm}\)) now grasp at \(99.0\,\mathrm{mm}\) (\(3.0\,\mathrm{mm}\) above belt datum \(102.0\,\mathrm{mm}\)), safely within the \(105.5\,\mathrm{mm}\) stroke limit.
 
-\[
-W \ge 2\,(t_{\mathrm{tail}} - t_{\mathrm{top}} + t_{\mathrm{guard}})
-\]
+The solver picks the close-command time and the Z-release time together. Lowering too soon meets a pad before grasp depth. Lowering too late misses the alongside window. A late close command meets the cell on a pad that has not yet reached the width face. Among schedules that avoid those three, the close trigger is synchronized so that the gripper is never held wide open at grasp depth. Both fingers are in tight proximity to the battery flanks ($W_{\mathrm{jaw}} = w + 1.8\,\mathrm{mm}$ upon Z arrival). At first contact with the downstream finger, the upstream finger clearance is strictly required to be less than $3.0\,\mathrm{mm}$ (calibrated invariant: $d_{\mathrm{up}} = 1.80\,\mathrm{mm}$ across all speeds $200 - 1500\,\mathrm{mm/s}$ and angles $0 - 90^\circ$). The finger material is 3D-printed PLA plastic ($\mu = 0.28$) contacting deep-drawn stainless steel / nickel-plated battery casings ($\mu = 0.35$).
 
-If the tail cannot meet both bounds, the pick is skipped. \(t_{\mathrm{guard}}\) is `pk_guard_ms` (15 ms).
+### Zero-Dwell Ascent Clamping Dynamics
+- **Zero dwell at grasp depth ($t_{\mathrm{retract}} = t_{\mathrm{z\_done}}$, $\mathrm{dwell\_s} = 0.0$):**
+  Z does not dwell at conveyor level. As soon as Z reaches grasp depth $z_g$, it reverses instantly into upward retract at constant speed $v_{\mathrm{retract}} = v_{\mathrm{plunge}} = 800\,\mathrm{mm/s}$ and $a_z = 20{,}000\,\mathrm{mm/s^2}$.
+- **Tiny Gap Precondition ($F_N = 0.0\,\mathrm{N}$ at bottom):**
+  During the plunge, the grip close command is fired at $t_{\mathrm{close}} = t_{\mathrm{z\_done}} - \tau_{\mathrm{close}}$ such that when Z reaches grasp depth $z_g$, the battery is already between the closing fingers, with each finger having a tiny clearance $\delta_{\mathrm{clear}} = 0.9\,\mathrm{mm}$ ($W_{\mathrm{jaw}} = w + 1.8\,\mathrm{mm}$). Because clearance is non-zero, normal force into the battery flank at bottom is strictly zero ($F_N = 0.0\,\mathrm{N}$) and downward collision into the top is eliminated.
+- **Immediate Grip Completion on Ascent:**
+  As soon as Z reaches $z_g$, Z retract begins immediately. The pneumatic stroke continues integrating without interruption during the initial upward ascent. Full grasp ($W_{\mathrm{jaw}} = w$) is attained immediately after (and only after) Z retract has started.
+- **Strict Firing Sequence Invariant ($\mathrm{START\_PLUNGE} \longrightarrow \mathrm{START\_GRIP} \longrightarrow \mathrm{START\_RETRACT}$):**
+  The physical motion execution and control triggers strictly adhere to the causal order under all conditions and across all offset tuning combinations:
+  \[
+  t_z < t_{\mathrm{close}} < t_{\mathrm{retract}}
+  \]
+  1. $\mathrm{START\_PLUNGE}$ occurs first at $t_z$: the Z axis begins descent from staging ceiling $z_h$ toward grasp depth $z_g$.
+  2. $\mathrm{START\_GRIP}$ fires second at $t_{\mathrm{close}}$: the pneumatic valve energizes while Z is descending, closing fingers toward the battery flanks.
+  3. $\mathrm{START\_RETRACT}$ occurs third at $t_{\mathrm{retract}}$: Z reaches grasp depth $z_g$ after completing the full physical stroke duration $\tau_{\mathrm{plunge}} = \mathrm{trapezoid\_duration}(z_h, z_g, v_{z,\mathrm{crit}}, a_z)$ and immediately reverses with zero dwell.
+  Zero premature reversal or mid-air abort is permitted ($t_{\mathrm{retract}} \ge t_z + \tau_{\mathrm{plunge}}$).
+- **Constant Retract Delay Invariant ($t_{\mathrm{retract}} - t_{\mathrm{close}} \equiv \mathrm{constant}$):**
+  Z retract is directly slaved to the pneumatic grip close trigger with a strictly constant delay:
+  \[
+  t_{\mathrm{retract}} = t_{\mathrm{close}} + \Delta t_{\mathrm{retract\_from\_close}}
+  \]
+  where $\Delta t_{\mathrm{retract\_from\_close,nominal}} = \tau_{\mathrm{full\_close}} - \Delta t_{\mathrm{lead}}$, and $\tau_{\mathrm{full\_close}} = t_{\mathrm{delay,valve}} + t'_{\mathrm{pneumatic}}(w)$ is the total duration from valve energization to full grasp contact on the battery flank ($W_{\mathrm{jaw}} = w$).
+  By enforcing $\Delta t_{\mathrm{lead}} = 8\,\mathrm{ms}$ ($8\,\mathrm{ticks}$), **nominal Z retract begins exactly $8\,\mathrm{ms}$ before the gripper is fully closed**.
+  - **Invariance & Operator Retract Tuning:**
+    Across all operator tuning states $(\Delta N_{z,\mathrm{offset\_ticks}}, \Delta N_{\mathrm{offset\_ticks}}, \Delta N_{\mathrm{retract\_ticks}})$, the delay between Z retract start and grip close trigger is defined by:
+    \[
+    \Delta t_{\mathrm{retract\_from\_close}} = t_{\mathrm{retract}} - t_{\mathrm{close}} = \Delta t_{\mathrm{retract\_from\_close,nominal}} + \Delta N_{\mathrm{retract\_ticks}} \cdot T_{\mathrm{tick}}
+    \]
+    When $\Delta N_{\mathrm{retract\_ticks}} = 0$, this delay is strictly constant ($\Delta t_{\mathrm{retract\_from\_close,nominal}}$), completely independent of how $\Delta N_z$ or $\Delta N_{\mathrm{close}}$ are tuned. When $\Delta N_{\mathrm{retract\_ticks}} \neq 0$, the operator directly trims the retract trigger relative to grip close.
+    \[
+    t_{\mathrm{retract}} = t_{\mathrm{retract,nominal}} + (\Delta N_{z,\mathrm{offset\_ticks}} + \Delta N_{\mathrm{offset\_ticks}} + \Delta N_{\mathrm{retract\_ticks}}) \cdot T_{\mathrm{tick}}
+    \]
+    \[
+    t_z = t_{\mathrm{retract}} - \tau_{\mathrm{plunge}}, \qquad t_{\mathrm{close}} = t_{\mathrm{retract}} - \Delta t_{\mathrm{retract\_from\_close}}
+    \]
+    guaranteeing that the plunge always completes the full stroke $\tau_{\mathrm{plunge}}$ down to $z_g$ before retracting.
+  - **Negative Delay Relative to Full Close:**
+    Relative to the instant of complete grasp contact $t_{\mathrm{full\_close}} = t_{\mathrm{close}} + \tau_{\mathrm{full\_close}}$, the nominal delay is a constant negative offset:
+    \[
+    \Delta t_{\mathrm{retract\_full,nominal}} = t_{\mathrm{retract,nominal}} - t_{\mathrm{full\_close,nominal}} = -\Delta t_{\mathrm{lead}} = -8.0\,\mathrm{ms}
+    \]
+    guaranteeing that upward Z acceleration begins just a couple of ticks prior to full squeeze, seamlessly lifting the cell during the first millimeter of vertical travel.
+- **Velocity Feedforward (VFF) Lead Compensation:**
+  To eliminate servo following error $\Delta z = \frac{k_v}{k_p} \dot{q}$ and prevent velocity spikes during high-speed turn-around at $z_g$, the drive position command executes 100% velocity feedforward:
+  \[
+  z_{\mathrm{cmd}}(t) = z(t) + \tau_{\mathrm{vff}} \dot{z}(t), \qquad \tau_{\mathrm{vff}} = \frac{k_v}{k_p} = \frac{14{,}000}{2{,}000{,}000} = 0.007\,\mathrm{s} = 7.0\,\mathrm{ms}
+  \]
+  In the MuJoCo/Kinetix actuator model, this feedforward exacts $F = k_p (z_{\mathrm{traj}} - q) + k_v (v_{\mathrm{traj}} - \dot{q})$, guaranteeing smooth, monotonic reversal from $+800\,\mathrm{mm/s}$ down to $-800\,\mathrm{mm/s}$ upward retract with zero transient spike.
+- **Discrete FreeRTOS Three-Parameter Tick Scheduling ($1\,\mathrm{tick} = 1\,\mathrm{ms}$):**
+  Firmware executes on FreeRTOS with `CONFIG_FREERTOS_HZ = 1000` ($T_{\mathrm{tick}} = 1.0\,\mathrm{ms}$). Actuators and triggers are scheduled in discrete integer ticks across three independent tuning sliders:
+  \[
+  t_z = t_{z,\mathrm{nominal}} + \Delta N_{z,\mathrm{offset\_ticks}} \cdot T_{\mathrm{tick}}, \qquad N_{z,\mathrm{plunge\_ticks}} = \mathrm{round}\left(\frac{t_{z}}{T_{\mathrm{tick}}}\right)
+  \]
+  \[
+  N_{\mathrm{close\_ticks}} = \mathrm{round}\left(\frac{t_{\mathrm{close}} - t_z}{T_{\mathrm{tick}}}\right)
+  \]
+  \[
+  N_{\mathrm{retract\_ticks}} = \mathrm{round}\left(\frac{t_{\mathrm{retract}}}{T_{\mathrm{tick}}}\right)
+  \]
+  where $\Delta N_{z,\mathrm{offset\_ticks}} \in [-100, +100]$, $\Delta N_{\mathrm{offset\_ticks}} \in [-100, +100]$, and $\Delta N_{\mathrm{retract\_ticks}} \in [-100, +100]$ are tunable tick offsets exposed in the simulation control panel.
+  - Shifting $\Delta N_{z,\mathrm{offset\_ticks}}$ adjusts the physical instant of vertical descent start in millisecond increments along the belt travel trajectory.
+  - Shifting $\Delta N_{\mathrm{offset\_ticks}}$ alters the valve energization instant.
+  - Shifting $\Delta N_{\mathrm{retract\_ticks}}$ adjusts the vertical extraction retract trigger relative to grip close.
+- **Firing Time in Ticks Since Assigned Battery Detection ($y_{\mathrm{cam}} = -771\,\mathrm{mm}$):**
+  When a battery is sighted and assigned by the upstream optical station ($y_{\mathrm{cam}} = -771.0\,\mathrm{mm}$), nominal conveyor transit flight time to the gantry center line ($y = 0.0\,\mathrm{mm}$) is:
+  \[
+  \tau_{\mathrm{transit}} = \frac{|y_{\mathrm{cam}}|}{v_{\mathrm{belt}}} = \frac{771.0\,\mathrm{mm}}{v_{\mathrm{belt}}}
+  \]
+  The scheduled countdown firing times in discrete FreeRTOS ticks since assigned battery detection are:
+  \[
+  N_{z,\mathrm{detect}} = \mathrm{round}\left(\frac{\tau_{\mathrm{transit}} + t_z}{T_{\mathrm{tick}}}\right)
+  \]
+  \[
+  N_{\mathrm{close,detect}} = \mathrm{round}\left(\frac{\tau_{\mathrm{transit}} + t_{\mathrm{close}}}{T_{\mathrm{tick}}}\right)
+  \]
+  \[
+  N_{\mathrm{retract,detect}} = \mathrm{round}\left(\frac{\tau_{\mathrm{transit}} + t_{\mathrm{retract}}}{T_{\mathrm{tick}}}\right)
+  \]
+  Because $t_z < t_{\mathrm{close}} < t_{\mathrm{retract}}$, the countdown ticks strictly follow $N_{z,\mathrm{detect}} < N_{\mathrm{close,detect}} < N_{\mathrm{retract,detect}}$, and all three metrics are displayed dynamically in real time alongside their respective slider tuning cards in the simulation control panel.
 
-Grip command, both cases. Contact is at \(t_a\). Jaw speed \(v_j\), valve delay \(t_v\):
+Dual-Z architecture enforces two safe elevations:
+- **\(z_{\mathrm{traverse}} = 35.7\,\mathrm{mm}\):** High machine traverse clearance over bin walls, gantry frame, and peripheral obstacles during transfer and return.
+- **\(z_{\mathrm{safe}} = 65.0\,\mathrm{mm}\):** Conveyor pick staging ceiling, clearing the tallest cell (D-cell height \(34.2\,\mathrm{mm}\) at belt datum \(105.5\,\mathrm{mm}\)) with \(6.3\,\mathrm{mm}\) overhead margin.
 
-\[
-t_{\mathrm{grip}} = t_a - t_v - \min\Big(\frac{g}{v_j},\ \frac{g}{v f}\Big)
-\]
+At \(\theta = 0\), \(\eta = 0\), both pads meet when \(q = (80-w)/2\), and the drag is 0. Z-release uncertainty is \(5\,\mathrm{ms}\) (dispatch, the \(2\,\mathrm{ms}\) RPI, and a drive allowance). The \(10\,\mathrm{ms}\) Gantry loop is not on that edge. Close-command uncertainty is \(2\,\mathrm{ms}\). A non-positive window left after those allowances is `outside-current-limit`.
 
-At \(g = 0\) the grip command is the valve delay only. `cv_jawN_ms` > 0 replaces \(g / v_j\) with a measured close time.
+If the free path cannot capture both pads without the first pad shoving the cell, the row is `contact-assisted`. It stays in the grid for the bench. Neighbors, including packs 11–13, block a pick whose Z-down interval meets them. `pk_dropin` is not this coordinator. The grid and the counts are in [PICK_COORDINATED_GRASP_VALIDATION.md](PICK_COORDINATED_GRASP_VALIDATION.md). The bench ladder is in [PICK_BENCH_RAMP.md](PICK_BENCH_RAMP.md).
 
-Other tracked cells are the same separating-axis test in the belt plane (`fingersFreeFromS`). The part tracker keeps the epoch, dedupe, and the short list of cells already taken.
+`fingersFreeFromS` is still the neighbor test in the belt plane. The part tracker keeps the epoch, dedupe, and the short list of cells already taken.
+
+### Firmware port (2026-10-13)
+
+The firmware strike is now `compute_strike_plan()` from `tools/sim/gantry_twin.py`, ported to [`include/strike_plan.h`](../include/strike_plan.h) and host-tested against the sim's own output (`test/host/test_strike_plan.cpp`, within 2 µs). It replaces the `CoordinatedGrasp` / early-Z / drop-in strike selection in `src/pick_scheduler.cpp` for every pick.
+
+- **Geometry and limits come from the firmware config, not the sim constants.** Belt Z is `col_z_min_mm`, the hover ceiling is the SAFE_Z band (`z_min + gantry_safe_z_height_mm`), the jaw opening is `fin_open_mm`, Z speed is the critical-speed cap, Z accel is `pk_acc_mm_s2`, the valve delay is `pk_von_ms`, and the grasp depth is the §2 rule from the vision height. Only the pneumatic jaw model keeps the sim's values (450 mm/s, \(\tau = 15\) ms).
+- **Belt and stroke (bench, 2026-10-13):** the Z+ limit switch is set so the gripper stops less than 1 mm above the belt. The belt is therefore at the measured Z stroke, about joint Z 109.1, so `col_z_min_mm` = 109.1 rather than the older 115. The pick stroke is the Z stroke measured in this session (`Gantry::zAxisLengthMm()`), not the old 105.5 mm `kMeasuredStrokeMm`, which is only used before calibration.
+- **Hover:** \(z_h = \max(z_{\min}, \min(z_{\mathrm{ceiling}}, z_{\mathrm{top}} - 6))\). The pre-position goes straight to the hover, which is inside the SAFE_Z band, so X and theta finish there.
+- **Execution:** Z is preloaded and held at the hover. Three esp_timer events fire at fixed offsets from the arrival time: release the plunge, fire the grip, and the zero-dwell `retractToSafeZ`. Every conveyor frame moves the arrival, and all three follow it (`retimeArrival`).
+- **Feasibility:** a pick is late when the plunge would start before the pre-position, preload and settle are done. Wider than the jaws, a non-positive size, or a grasp above the hover is permanent.
+- **Operator offsets:** `pk_off_plunge`, `pk_off_close`, `pk_off_retract` (whole ms, −100…+100, live, kept in NVS; toolbox page Profile & Units → *Pick strike offsets*). Unlike the sim's sliders, **each moves only its own event**. The firmware then enforces a full plunge (\(t_{\mathrm{retract}} \ge t_z + \tau_{\mathrm{plunge}}\)) and \(t_z + 2\,\mathrm{ms} \le t_{\mathrm{close}} \le t_{\mathrm{retract}} - 2\,\mathrm{ms}\). A plan limited by those rules logs `clamped`.
+- **Logs:** each pick logs the plan (`sim z/close/retract … ms nom …`), then `pick actual` with each event's firing error, the Z depth reached when the retract fired, and the offsets in use. `pk_tr_grp` and `cv_valve_ms` no longer affect the strike.
 
 ---
 
@@ -154,23 +251,23 @@ A linear move of length \(D\) at speed \(V\) and accel/decel \(A, B\) is the tra
 
 Once a vision pose is accepted the jaws stay open and the move uses two speeds.
 
-**Approach.** At SAFE_Z, X and theta move to the pick pose. Two discrete pairs, and no command outside them:
+**Approach.** At SAFE_Z, X and theta move to the pick pose. The part being picked uses the slow pair. The fast pair is that part's own approach, chosen earlier from the post-bin pose, and only when the slow pair would miss it:
 
-- Slow, the normal command: **500 mm/s** and **60 deg/s**.
-- Fast, only when another tracked part would be missed: **2000 mm/s** and **180 deg/s**.
+- Slow: **500 mm/s** and **60 deg/s**.
+- Fast: **2000 mm/s** and **180 deg/s**.
 
-The fast pair is used when this cycle at the slow pair (approach, Z stroke, grip, retract to SAFE_Z) plus that later part's own slow approach finishes after the later part's \(t_a\). The cell in hand is not sped up to catch itself. A stored `pk_spd_mm_s` of 2000 or `pk_th_spd` of 360 is the old single profile and is not the approach command. Accel stays `pk_acc_mm_s2` and `pk_th_acc`.
+The time from second-pad contact until the next approach can start is the retract to SAFE_Z, slow transfer to the bin, bin descent, open dwell, and retract back to SAFE_Z. A following part is skipped when neither pair reaches it from that pose. Close timing uses the 8 ms valve-on (`pk_von_ms`), the 190 ms full close, and the signed trims, all defaulting so the paper profile is unchanged. `pk_dropin` does not select this schedule. A stored `pk_spd_mm_s` of 2000 or `pk_th_spd` of 360 is the old single profile and is not the approach command. Accel stays `pk_acc_mm_s2` and `pk_th_acc`.
 
 Pre-position time is the later of the X trapezoid and the theta move (one tick plus the rotary preload, release-halt, and ack in `GantryRotaryPhases.h`), plus arrival settle.
 
-**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the ballscrew critical speed, not at the approach speed:
+**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the Z pick-stroke limit \(v_z = 800\,\mathrm{mm/s}\) (`PickIntercept::kZCriticalMmS`), not at the approach speed. It sits below the ballscrew whip ceiling:
 
 \[
-v_z = 3000\,\mathrm{rpm} \times 20\,\mathrm{mm/rev} / 60 = 1000\,\mathrm{mm/s}
+v_{z,\mathrm{whip}} = 3000\,\mathrm{rpm} \times 20\,\mathrm{mm/rev} / 60 = 1000\,\mathrm{mm/s} \;>\; v_z = 800\,\mathrm{mm/s}
 \]
 
 `3000 rpm` is the SCHUNK Beta 80-SRS whip ceiling (`AXIS_Z_CRITICAL_RPM`), not a motor nameplate. The pick stroke is Z-only, so it is commanded at \(v_z\). `retractToSafeZ` is called with \(v_z\). Do not raise the whip ceiling. If the live Kinetix velocity limit is below 1000 mm/s, raise that drive limit up to \(v_z\) and no further.
 
-The pick is feasible at time \(t\) when the chosen approach, plus the Z schedule from §4, finishes by its deadline relative to \(t_a(t)\). After X and theta are committed, re-timing is only \(t_a\), \(t_{\mathrm{grip}}\), and \(t_z\) from the new \(s(t), v\) with the jaw and the current Z frozen (`retimePick`). It is not a new approach from the staging pose.
+The pick is feasible at time \(t\) when the approach finishes and the §4 pair still has a positive robust window relative to \(t_a(t)\). After X and theta are committed, a new conveyor sample recomputes that pair from the new travel and speed. It is not a new approach from the staging pose.
 
 On belt stop, stale frames, restart, a refined angle that changes the clearance, a grip-write failure, or a missed deadline, the scheduler calls `Gantry::retractToSafeZ()` at \(v_z\).

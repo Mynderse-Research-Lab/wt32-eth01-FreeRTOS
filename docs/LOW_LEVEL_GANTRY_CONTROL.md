@@ -699,7 +699,7 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `enable` / `disable` | Arms / ServoOff via Gantry |
 | `home` | Drive-managed: seek joint min per axis (`home x` A014; `home z` A015; `all` = Z then X); else soft-home |
 | `calibrate` | Drive-managed: seek joint max (`calibrate x` A015; `calibrate z` A014); **`calibrate all`** = bring-up Z−→band→X→Z+→band; else SCHUNK hard envelope (X soft-cal) |
-| `calibrated` | Query workspace calibrated latch. **Yes** after X+Z stroke; **No** only when a live drive reports lost position-ref (Kinetix `homed_status` / HCS01 `in_reference`). Survives disable/stop/ESP reboot (NVS). Printed on `status` |
+| `calibrated` | Query workspace calibrated latch. **Yes** after X+Z stroke; **No** only when a live drive reports lost position-ref (Kinetix `homed_status` / HCS01 `in_reference`). Survives disable/stop. **Does not survive an ESP reboot** (OTA, power cycle): the X/Z joint zero is held in RAM, so after a reboot the axes read raw drive position and the latch starts **No** until `calibrate all`. Boot erases the older `gantry_cfg/ws_cal` NVS key that used to restore it. Printed on `status` |
 | `test_cycle` | Enable + bring-up (home/cal) + path legs A–F at live `speed`/`accel`, then theta G–I at `thetalim` min/max using kinematic speed/accel caps; `stop` aborts |
 | `test_theta_path` | Combined in-band X+Z+theta (25–75% window) with live thetalim-safe dθ; enable + bring-up first |
 | `move` | Requires **workspace calibrated**. Per-axis session home/cal still apply. Latch does **not** clear on `stop` |
@@ -709,8 +709,8 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `puuinfo` / `puucal` / `puu t` | Scale / suggest PUU/mm; theta PUU/deg is live-settable |
 | `speed` / `accel` | Path mm/s and mm/s²; optional theta deg/s and deg/s² |
 | `thetalim` | Software theta joint min/max (deg) |
-| `picksim <x> <y> <theta> [w len h]` | Queue a simulated class-1 detection (needs Start). `y` is camera-relative (`picksim 0 0 0` = cell at the camera center). 0° is the long axis along +Y. Omitted width, length, and height-from-belt use the class-1 cell (65 mm long, 18.3 mm across and above the belt) |
-| `pickplan <x> <y> <theta> [w len h]` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and skip reason. Grasp Z is the belt surface minus height-from-belt/2 |
+| `picksim <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Queue a detection (needs Start). `y` is camera-relative. Class 1–10 is a pick (AAA, AA, D, C, 9V, CR123A, 18650, 21700, 26650, 32650). Class 11–13 is a pack occupant and is not picked. All three sizes are required. The command stamps the live belt displacement as the capture sample |
+| `pickplan <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and the rejection reason |
 | `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° along +Y) at the current belt speed: `P` pick, `S` skip |
 | `pickcal valve \| jaw \| jawoff \| cam` | Valve delay, per-class jaw time (`0` = derived from jaw travel), jaw offset, camera mark/apply |
 
@@ -726,8 +726,16 @@ removed; do not rely on them.
 - Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
 - `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t c m`.
 - **Absolute Encoder Tracking & Zero-Offset Architecture**: `GantryEipRotaryAxis` operates in pure absolute frame without software offsets (`zero_puu_` eliminated). `getCurrentDeg()` directly reflects the HIPERFACE absolute encoder position (`S-0-0051`). Because end-effector cabling and pneumatics are routed over pass-through slip-rings, continuous multi-turn rotation is supported for any number of revolutions.
-- **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`). Command velocity is clamped to $360^\circ/\text{s}$ ($60\text{ RPM}$ = $360,000,000\text{ PUU}$) and acceleration/deceleration to $1800^\circ/\text{s}^2$ ($31.416\text{ rad}/\text{s}^2 = 31416\text{ units}$) to eliminate signed 32-bit integer overflow risks.
-- **Home & Bring-up**: `home t` captures the absolute encoder datum and commands Theta to return directly to physical zero ($0.000^\circ$). Bring-up synchronizes until Theta reaches $\le 0.01^\circ$ error before opening subsequent path stages.
+- **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`).
+- **Profile units** (`hcs01VelocityUnits` / `hcs01AccelUnits` in `GantryEipRotaryAxis.h`), from the drive export `tools/Parameter_default_1.par` (2026-10-13):
+  - S-0-0259 velocity: S-0-0044 = `0b0010`, S-0-0045 = 1, S-0-0046 = −4 → **0.0001 rpm**, motor side (ERD04 direct drive, so = theta rpm). 1 deg/s = 1666.67 units; no PUU factor. Capped at S-0-0113 = 600 rpm (6,000,000 = 3600 deg/s).
+  - S-0-0260 / S-0-0359: S-0-0160 = `0b0010`, S-0-0162 = −3 → **0.001 rad/s²**, no PUU factor (1800 deg/s² = 31416). Capped at S-0-0138 = 1000 rad/s².
+  - Position: S-0-0076 = `0b0010`, S-0-0079 = 3,600,000 → 0.0001 deg (10000 PUU/deg).
+  - The config defaults used when a move passes accel/decel 0 (`home t`, bring-up orient) are built by `eipRotaryAxisConfigFromDeg()` in the same units.
+  - History (2026-10-13): `main.cpp` sent accel × PUU/deg (180,000,000), tripping F2028 about 40° into every home/orient (P-0-0098 max deviation 101.9° vs S-0-0159 window 100°). Velocity was sent as 0.0001 deg/min, 360× too large: 15 deg/s became 900 rpm, past the 600 rpm motor max (E2049), so the commanded speed was ignored.
+  - S-0-0159 following-error window is **100°** on this drive, which is very loose; review it in IndraWorks.
+- **Move timeout**: `thetaMoveTimeoutUs()` = max(15 s, 2 × distance / speed), so a long return at the 15 deg/s home speed is not cut off at 15 s.
+- **Home & Bring-up**: `home t` captures the absolute encoder datum and starts the return to physical zero ($0.000^\circ$). It counts as homed only once theta is idle, alarm-free and within `EIP_THETA_SETTLED_TOL_DEG` (0.1°) of 0 (`Gantry::thetaSettledAt`); the console then logs `OK Theta home complete`, or `ERROR: Theta home did not reach 0 deg`. `calibrate t` and theta moves stay blocked until then. Bring-up fails (`theta orient did not arrive`) instead of running the Z+ stroke when the 90° orient faults or times out.
 - **Embedded Autotuning**: Console `autotune` is **disabled for this version**
   (`GANTRY_CONSOLE_AUTOTUNE=0`). Use IndraWorks / KNX5100C / `tools/hcs01_eng.py`
   for drive tuning. Re-enable with `-DGANTRY_CONSOLE_AUTOTUNE=1` to restore:
@@ -746,28 +754,40 @@ detection and its receipt time. A separate `PickStrike` task fires the Z release
 from `esp_timer` one-shots, re-timed from the newest belt state on every conveyor frame.
 
 - **Side grip only.** Cell angle 0° is the long axis along +Y; positive rotation about +Z
-  runs from +Y toward −X. Jaw joint = fold(θ) + 90° + `cv_jaw_deg`; of the two equivalent
+  runs from +Y toward −X. The theta joint equals fold(θ) + `cv_jaw_deg`: 0° holds the pads parallel to +Y and the open/close motion along ±X. Of the two equivalent
   angles the one with less linear theta travel inside `thetalim` is used, else skip
   `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
   to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.
-- **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm (about ±29° of
-  along-belt for an 18650): Z goes to the grasp right after the pre-position, and only the
-  grip is timed. Grasp height is \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top. A sent
-  width of 80 mm has zero jaw travel; it is still a pick only when that across-belt strip
-  misses the fingers. Width above 80 mm is skipped.
+- **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm: Z goes to the
+  grasp right after the pre-position, and only the grip is timed. Grasp height is
+  \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top. Width, length, and
+  height-from-belt are required on every detection. A width of 80 mm has zero jaw travel;
+  it is still a pick only when that across-belt strip misses the fingers. Width above 80 mm
+  is skipped. A successful grip write is a commanded close; possession is unverified until
+  a part sensor exists.
 - **Late Z** otherwise, if `pk_dropin` is on (default off): hover above the tallest tracked
-  cell, then a Z descent that is at grasp height one guard before contact. With `pk_dropin`
-  off that case is skipped (`late Z off`).
+  cell, then a Z descent that is at grasp height one guard before the earliest jaw/object
+  contact. The 4 mm lane margin, 3 mm hover, 15 ms guard, and flat-rectangle contact model
+  are provisional and need bench replacement. With `pk_dropin` off that case is skipped
+  (`late Z off`).
+- **Bench pair.** `pk_bench` (default off) arms Z release and the close command from the coordinated
+  grasp in `coordinated_grasp.h`. Fingers are 10 mm wide and 50 mm long. Valve-on for that path is
+  `pk_von_ms` (8). `pk_dropin` is not the switch. The update task period is `GANTRY_UPDATE_PERIOD_MS`
+  (10). The strike edge does not wait on that task.
 - **Failures** (belt stop, stale frames, conveyor restart, refined angle out of the frozen
   jaw's clearance, grip write failure, missed deadline) abort the pick and call
-  `retractToSafeZ()` at the ballscrew cap. A cell-in-jaws flag sends a held cell to the bin
-  before any new pick.
-- After the drop the gantry goes straight from the bin to the next tracked cell, or waits
+  `retractToSafeZ()` at the ballscrew cap. A commanded close blocks another pick until the
+  bin sequence succeeds. The object is marked taken only after the grip command fires.
+- After the drop the gantry retracts at the bin, then goes to the next tracked cell, or waits
   at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0). `pk_drop_any_th` skips the turn
   to `geom_cal_th_deg` at the bin.
-- Approach, jaws open: 500 mm/s and 60 deg/s, or 2000 mm/s and 180 deg/s when a later
-  tracked part would be missed. Z descend, grip, and retract use the ballscrew cap
-  (1000 mm/s). Accel stays `pk_acc_mm_s2` 3000 and `pk_th_acc` 1800.
+- Belt clock: gantry X is vision \(x\) plus `cv_x_off_mm` (default 245, the 95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is not read by the intercept, so changing the width does not move the camera. A repeated conveyor sequence is ignored. The epoch restarts on a sequence jump above 32, a displacement step backward of more than 5 mm, or a conveyor-time step backward of more than 500 ms. Three unchanged displacement samples while speed stays positive integrate the previous speed. Stale is gantry receipt age above `kStaleAfterUs` (500 ms, two configured 250 ms periods), not the live gap between conveyor timestamps.
+- The active approach stays at 500 mm/s and 60 deg/s. Transfer to the bin uses that same slow pair. A following part uses 2000 mm/s and
+  180 deg/s only when its own approach from the post-bin pose misses at the slow pair and
+  still arrives at the fast pair; otherwise that follower is skipped. Z descend, grip, and
+  retract use the ballscrew cap (1000 mm/s). `cv_valve_ms` and `cv_jaw_aaa_ms`…`cv_jaw_32650_ms`
+  (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable. Accel stays
+  `pk_acc_mm_s2` 3000 and `pk_th_acc` 1800.
 
 For real-time protocol specs, see
 [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
@@ -865,10 +885,10 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
    ```powershell
    idf.py -C idf build
    ```
-2. **Execute OTA update** (motors disabled; firmware rejects START if ENABLED or BUSY):
+2. **Execute OTA update**. On START the firmware disables enabled-but-idle motors itself, and again just before the reboot in case a supervisor START re-enabled them mid-upload. It still replies `ERR SAFETY` while a move, home or pick is running. Re-enable after the reboot:
    - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
    - CLI, PC on the cell switch: `py tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin`
    - CLI, no switch cable: `py tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin` (`PI_USER` / `PI_PASS`).
 3. **Console commands:**
-   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, and rollback status.
+   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, rollback status, and `Last Reset` (`esp_reset_reason`: `SW` after an OTA/restart, `PANIC` / `*_WDT` after a crash, `BROWNOUT` on a supply dip) with uptime. `status` prints the same reset reason and uptime, so an unexpected reboot is visible over the LAN console without the UART boot log.
 
