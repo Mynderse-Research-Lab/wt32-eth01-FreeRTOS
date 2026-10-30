@@ -427,12 +427,6 @@ void AppConfig::loadDefaults() {
     data_.conveyor_frame_far_x_mm = 500.0f;
     data_.test_battery_x_mm = 382.5f;
 
-#if defined(CONFIG_CONVEYOR_Z_PICK_JOINT_MM)
-    data_.conveyor_z_pick_joint_mm = (float)CONFIG_CONVEYOR_Z_PICK_JOINT_MM;
-#else
-    data_.conveyor_z_pick_joint_mm = 105.4f;
-#endif
-
 #if defined(CONFIG_PICK_DEFAULT_BELT_SPEED_MM_S)
     data_.pick_default_belt_speed_mm_s = (float)CONFIG_PICK_DEFAULT_BELT_SPEED_MM_S;
 #else
@@ -493,10 +487,6 @@ void AppConfig::loadDefaults() {
     data_.pick_dropin_enable = false;
     data_.pick_drop_any_theta = false;
     data_.pick_stage_x_mm = 320.0f;
-    data_.pick_speed_mm_s = 2000;
-    data_.pick_accel_mm_s2 = 3000;
-    data_.pick_theta_speed_deg_s = 360.0f;
-    data_.pick_theta_accel_deg_s2 = 1800.0f;
 
     // 7. Homing & Calibration
 #if defined(CONFIG_EIP_HOME_CAL_SPEED_MM_S)
@@ -862,7 +852,6 @@ bool AppConfig::load() {
     storage_->getFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
     storage_->getFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
     storage_->getFloat("batt_x", data_.test_battery_x_mm);
-    storage_->getFloat("cv_z_pick_mm", data_.conveyor_z_pick_joint_mm);
     storage_->getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->getInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->getInt32("cv_tau_max_us", data_.tau_max_us);
@@ -904,10 +893,6 @@ bool AppConfig::load() {
     storage_->getBool("pk_dropin", data_.pick_dropin_enable);
     storage_->getBool("pk_drop_any_th", data_.pick_drop_any_theta);
     storage_->getFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
-    storage_->getInt32("pk_spd_mm_s", data_.pick_speed_mm_s);
-    storage_->getInt32("pk_acc_mm_s2", data_.pick_accel_mm_s2);
-    storage_->getFloat("pk_th_spd", data_.pick_theta_speed_deg_s);
-    storage_->getFloat("pk_th_acc", data_.pick_theta_accel_deg_s2);
 
     storage_->getFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
     storage_->getFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
@@ -1038,7 +1023,6 @@ bool AppConfig::save() {
     storage_->setFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
     storage_->setFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
     storage_->setFloat("batt_x", data_.test_battery_x_mm);
-    storage_->setFloat("cv_z_pick_mm", data_.conveyor_z_pick_joint_mm);
     storage_->setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     storage_->setInt32("cv_tau_min_us", data_.tau_min_us);
     storage_->setInt32("cv_tau_max_us", data_.tau_max_us);
@@ -1080,10 +1064,6 @@ bool AppConfig::save() {
     storage_->setBool("pk_dropin", data_.pick_dropin_enable);
     storage_->setBool("pk_drop_any_th", data_.pick_drop_any_theta);
     storage_->setFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
-    storage_->setInt32("pk_spd_mm_s", data_.pick_speed_mm_s);
-    storage_->setInt32("pk_acc_mm_s2", data_.pick_accel_mm_s2);
-    storage_->setFloat("pk_th_spd", data_.pick_theta_speed_deg_s);
-    storage_->setFloat("pk_th_acc", data_.pick_theta_accel_deg_s2);
 
     storage_->setFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
     storage_->setFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
@@ -1217,8 +1197,6 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "eip_scope_gpio") == 0) out_val = data_.eip_scope_gpio;
     else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) out_val = data_.pick_jaw_ms[jaw];
     else if (std::strcmp(key, "pk_guard_ms") == 0) out_val = data_.pick_guard_ms;
-    else if (std::strcmp(key, "pk_spd_mm_s") == 0) out_val = data_.pick_speed_mm_s;
-    else if (std::strcmp(key, "pk_acc_mm_s2") == 0) out_val = data_.pick_accel_mm_s2;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) out_val = data_.gantry_calibration_timeout_ms;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) out_val = data_.gantry_travel_measurement_timeout_ms;
     else if (std::strcmp(key, "eth_timeout_ms") == 0) out_val = data_.eth_ip_wait_timeout_ms;
@@ -1291,8 +1269,6 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "eip_scope_gpio") == 0) data_.eip_scope_gpio = val;
     else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) data_.pick_jaw_ms[jaw] = val;
     else if (std::strcmp(key, "pk_guard_ms") == 0) data_.pick_guard_ms = val;
-    else if (std::strcmp(key, "pk_spd_mm_s") == 0) data_.pick_speed_mm_s = val;
-    else if (std::strcmp(key, "pk_acc_mm_s2") == 0) data_.pick_accel_mm_s2 = val;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) data_.gantry_calibration_timeout_ms = val;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) data_.gantry_travel_measurement_timeout_ms = val;
     else if (std::strcmp(key, "eth_timeout_ms") == 0) data_.eth_ip_wait_timeout_ms = val;
@@ -1366,7 +1342,6 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "cv_cnv_near_mm") == 0) out_val = data_.conveyor_frame_near_x_mm;
     else if (std::strcmp(key, "cv_cnv_far_mm") == 0) out_val = data_.conveyor_frame_far_x_mm;
     else if (std::strcmp(key, "batt_x") == 0) out_val = data_.test_battery_x_mm;
-    else if (std::strcmp(key, "cv_z_pick_mm") == 0) out_val = data_.conveyor_z_pick_joint_mm;
     else if (std::strcmp(key, "cv_belt_spd") == 0) out_val = data_.pick_default_belt_speed_mm_s;
     else if (std::strcmp(key, "cv_jaw_deg") == 0) out_val = data_.pick_jaw_offset_deg;
     else if (std::strcmp(key, "cv_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
@@ -1377,8 +1352,6 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "fin_len_mm") == 0) out_val = data_.pick_finger_width_mm;
     else if (std::strcmp(key, "fin_spd_mm_s") == 0) out_val = data_.pick_jaw_speed_mm_s;
     else if (std::strcmp(key, "pk_stage_x_mm") == 0) out_val = data_.pick_stage_x_mm;
-    else if (std::strcmp(key, "pk_th_spd") == 0) out_val = data_.pick_theta_speed_deg_s;
-    else if (std::strcmp(key, "pk_th_acc") == 0) out_val = data_.pick_theta_accel_deg_s2;
     else if (std::strcmp(key, "cal_spd_mm_s") == 0) out_val = data_.eip_home_cal_speed_mm_s;
     else if (std::strcmp(key, "cal_th_spd_deg") == 0) out_val = data_.eip_home_theta_speed_deg_s;
     else if (std::strcmp(key, "cal_acc_mm_s2") == 0) out_val = data_.eip_home_cal_accel_mm_s2;
@@ -1445,7 +1418,6 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_cnv_near_mm") == 0) data_.conveyor_frame_near_x_mm = val;
     else if (std::strcmp(key, "cv_cnv_far_mm") == 0) data_.conveyor_frame_far_x_mm = val;
     else if (std::strcmp(key, "batt_x") == 0) data_.test_battery_x_mm = val;
-    else if (std::strcmp(key, "cv_z_pick_mm") == 0) data_.conveyor_z_pick_joint_mm = val;
     else if (std::strcmp(key, "cv_belt_spd") == 0) data_.pick_default_belt_speed_mm_s = val;
     else if (std::strcmp(key, "cv_jaw_deg") == 0) data_.pick_jaw_offset_deg = val;
     else if (std::strcmp(key, "cv_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
@@ -1456,8 +1428,6 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "fin_len_mm") == 0) data_.pick_finger_width_mm = val;
     else if (std::strcmp(key, "fin_spd_mm_s") == 0) data_.pick_jaw_speed_mm_s = val;
     else if (std::strcmp(key, "pk_stage_x_mm") == 0) data_.pick_stage_x_mm = val;
-    else if (std::strcmp(key, "pk_th_spd") == 0) data_.pick_theta_speed_deg_s = val;
-    else if (std::strcmp(key, "pk_th_acc") == 0) data_.pick_theta_accel_deg_s2 = val;
     else if (std::strcmp(key, "cal_spd_mm_s") == 0) data_.eip_home_cal_speed_mm_s = val;
     else if (std::strcmp(key, "cal_th_spd_deg") == 0) data_.eip_home_theta_speed_deg_s = val;
     else if (std::strcmp(key, "cal_acc_mm_s2") == 0) data_.eip_home_cal_accel_mm_s2 = val;

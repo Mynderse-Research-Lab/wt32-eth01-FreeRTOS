@@ -87,7 +87,6 @@ struct AppConfigData {
     float conveyor_frame_far_x_mm = 500.0f;
     // Test battery position, joint X (beltcal batt).
     float test_battery_x_mm = 382.5f;
-    float conveyor_z_pick_joint_mm = 105.4f;
     int32_t pick_vision_latency_ms = 40;
     int32_t pick_valve_ms = 30;
     int32_t pick_valve_on_ms = 8;
@@ -131,10 +130,6 @@ struct AppConfigData {
     bool pick_dropin_enable = false;
     bool pick_drop_any_theta = false;
     float pick_stage_x_mm = 320.0f;
-    int32_t pick_speed_mm_s = 2000;
-    int32_t pick_accel_mm_s2 = 3000;
-    float pick_theta_speed_deg_s = 360.0f;
-    float pick_theta_accel_deg_s2 = 1800.0f;
     int32_t tau_min_us = 100000;
     int32_t tau_max_us = 5000000;
 

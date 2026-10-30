@@ -354,9 +354,6 @@ menu "Gantry kinematics"
             help
                 Width of the belt along gantry X. Runtime key cv_belt_w_mm,
                 no reboot.
-        config CONVEYOR_Z_PICK_JOINT_MM
-            float "Joint Z pick height (mm)"
-            default 140.0
         config PICK_DEFAULT_BELT_SPEED_MM_S
             float "Default belt speed (mm/s)"
             default 1524.0

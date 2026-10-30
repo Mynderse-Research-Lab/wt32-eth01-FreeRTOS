@@ -92,7 +92,6 @@ static const std::vector<ParamSchema> s_schemas = {
     {"cv_cnv_near_mm","Conveyor Near X",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {}},
     {"cv_cnv_far_mm", "Conveyor Far X",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {}},
     {"batt_x",        "Test Battery X",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {}},
-    {"cv_z_pick_mm",  "Z Pick Joint Pos",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 150.0f, 1.0f, "mm", {}},
     {"cv_belt_spd",   "Default Belt Spd",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 10.0f, "mm/s", {}},
     {"cv_tau_min_us", "Tau Min",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 10000000.0f, 10000.0f, "us", {}},
     {"cv_tau_max_us", "Tau Max",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 30000000.0f, 50000.0f, "us", {}},
@@ -156,10 +155,6 @@ static const std::vector<ParamSchema> s_schemas = {
     {"pk_dropin",     "Drop-in Strike",    "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
     {"pk_drop_any_th","Bin Any Theta",     "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
     {"pk_stage_x_mm", "Staging X",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {}},
-    {"pk_spd_mm_s",   "Pick Path Speed",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 2000.0f, 10.0f, "mm/s", {}},
-    {"pk_acc_mm_s2",  "Pick Path Accel",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
-    {"pk_th_spd",     "Pick Theta Speed",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 3600.0f, 10.0f, "deg/s", {}},
-    {"pk_th_acc",     "Pick Theta Accel",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 18000.0f, 100.0f, "deg/s2", {}},
 
     // ========================================================================
     // 7. Homing & Calibration (End-User)
