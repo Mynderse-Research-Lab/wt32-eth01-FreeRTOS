@@ -4,6 +4,7 @@
 #include "ConfigSchema.h"
 #include "gantry_runtime_params.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <set>
 #include <string>
@@ -445,6 +446,26 @@ static void test_gantry_runtime_params_follow_the_stored_values(void) {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 550.0f, p.x_hard_span_mm);
 }
 
+// The parameter file reloads through applyParamText, so each exported value
+// has to be accepted back.
+static void test_every_value_reloads_from_its_text(void) {
+    TEST_ASSERT_TRUE(AppConfig::instance().unlockDeveloperMode("DEV_2026"));
+    for (const auto& schema : getParamSchemas()) {
+        char text[40];
+        TEST_ASSERT_TRUE_MESSAGE(AppConfig::instance().formatParamValue(schema.key, text, sizeof(text)),
+                                 schema.key);
+        // Host defaults can sit outside a schema range; the gantry rejects those.
+        const bool numeric = schema.type == ParamType::INT || schema.type == ParamType::FLOAT;
+        if (text[0] == '\0' ||
+            (numeric && (std::atof(text) < schema.min_val || std::atof(text) > schema.max_val))) {
+            continue;
+        }
+        bool reboot = false;
+        TEST_ASSERT_TRUE_MESSAGE(AppConfig::instance().applyParamText(schema.key, text, reboot),
+                                 schema.key);
+    }
+}
+
 static void test_schema_lookup(void) {
     const auto& schemas = getParamSchemas();
     TEST_ASSERT_TRUE(schemas.size() > 50);
@@ -493,6 +514,7 @@ int main(void) {
     RUN_TEST(test_factory_reset_replaces_the_set_at_the_next_boot);
     RUN_TEST(test_change_after_factory_reset_lands_on_the_defaults);
     RUN_TEST(test_gantry_runtime_params_follow_the_stored_values);
+    RUN_TEST(test_every_value_reloads_from_its_text);
     RUN_TEST(test_schema_lookup);
     return UNITY_END();
 }

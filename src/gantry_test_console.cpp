@@ -2581,8 +2581,13 @@ static void printConfigExport() {
         strcmp(schema.key, "dev_pw") == 0) {
       continue;
     }
+    // The display format rounds to two decimals; a file has to reload exactly.
     char value[40];
-    if (config.formatParamValue(schema.key, value, sizeof(value))) {
+    float number = 0.0f;
+    if (schema.type == Config::ParamType::FLOAT && config.getParamFloat(schema.key, number)) {
+      snprintf(value, sizeof(value), "%.7g", static_cast<double>(number));
+      ESP_LOGI(TAG, "PARAM %s=%s", schema.key, value);
+    } else if (config.formatParamValue(schema.key, value, sizeof(value))) {
       ESP_LOGI(TAG, "PARAM %s=%s", schema.key, value);
     }
   }

@@ -922,7 +922,7 @@ An image from before this format reads only the per-key store, so it starts from
 | `cfg factory` | The only way back to compile-time defaults. Applies them now, and they replace the stored set at the next boot. Download the file first. |
 | `cfg time` | Shows the clock and the NTP server. |
 
-The toolbox page has a **Download parameters** button that saves `cfg export` as a text file. To reload one, send each line as `cfg <key> <value>`, then reboot to merge it.
+The toolbox page has **Download parameters**, which saves `cfg export` as a text file, and **Upload parameters**, which reloads one. Upload compares the file with the gantry and sends only the values that differ, as `cfg <key> <value>`, because each write can erase a flash sector; disable the motors first. A key the gantry does not show, such as a developer key while locked, is skipped and listed. The changes merge into the set at the next boot.
 
 Boot never erases NVS or replaces a damaged set. If NVS cannot be read, or the set fails its hash, the firmware logs an error and runs on compile-time defaults. `cfg factory` is what erases unreadable NVS or replaces a damaged set.
 
