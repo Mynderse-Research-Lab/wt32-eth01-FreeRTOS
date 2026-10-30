@@ -321,7 +321,7 @@ Static web files take effect without a restart. Build the service with `scripts/
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| S-1 | **Live source has no git repository on the Pi.** `D:\Projects\ADSB-PI-base` is an old copy | Confirmed | Create a repo and push it |
+| S-1 | **Live source has no git repository on the Pi.** `D:\Projects\ADSB-PI-base` is an old copy | Confirmed | Give it its own repository; it must stay separate from this one |
 | S-2 | `docs/INTEGRATION_WT32.md` says the scheduler does not consume `CELL_COMMAND`, but it does | Confirmed: `applyCellCommand` | Update the doc |
 | S-3 | A console password appears in `cell.env.example` and in firmware defaults | Confirmed | Remove from the example, rotate it, and use the env file only |
 
