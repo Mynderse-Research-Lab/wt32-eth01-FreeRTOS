@@ -123,8 +123,13 @@ void UiManager::dispatchEvent(UiEvent evt, const DashboardTelemetry& telem,
                     state_ = UiScreenState::EDITOR;
                     editor_.startPasswordChange();
                     editor_.render();
+                } else if (action == MenuItemType::ACTION_SAVE_PARAMS) {
+                    Config::AppConfig::instance().requestSave();
+                    menu_.invalidate();
+                    menu_.render();
                 } else if (action == MenuItemType::ACTION_FACTORY_RESET) {
                     Config::AppConfig::instance().factoryReset();
+                    Config::AppConfig::instance().requestSave();
                     state_ = UiScreenState::REBOOT_PROMPT;
                     reboot_prompt_.show();
                 } else if (action == MenuItemType::ACTION_ABOUT) {

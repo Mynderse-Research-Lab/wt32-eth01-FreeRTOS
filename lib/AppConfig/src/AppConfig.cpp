@@ -54,11 +54,10 @@ namespace Config {
 
 namespace {
 
-// The set lives in NVS under this key. A change made at runtime stays a plain
-// per-key write until the next boot merges it into the set.
+// The set lives in NVS under this key, and only saveSet() and boot write it.
 constexpr char kSetKey[] = "cfg_set";
-// Present when the next boot starts from compile-time defaults.
-constexpr char kRevertKey[] = "cfg_revert";
+// Left by firmware that wrote each change to NVS; cleaned up at boot.
+constexpr char kOldRevertKey[] = "cfg_revert";
 constexpr char kChangedAtKey[] = "cfg_chg_unix";
 // Anything earlier means nobody has set the clock since power-up.
 constexpr std::time_t kClockValidAfter = 1700000000;
@@ -1187,14 +1186,13 @@ bool AppConfig::load() {
     size_t len = blob.size();
     const bool stored = storage_->getBlob(kSetKey, blob.data(), len);
     set_valid_ = stored && parseConfigSet(blob.data(), len, set_);
-    int32_t revert = 0;
-    storage_->getInt32(kRevertKey, revert);
-    set_damaged_ = stored && !set_valid_ && revert == 0;
-    if (set_valid_ && revert == 0) {
+    set_damaged_ = stored && !set_valid_;
+    if (set_valid_) {
         ConfigSetReader reader(blob.data() + sizeof(ConfigSetHeader), set_.payload_len);
         readParams(reader);
     }
 
+    // Only firmware from before saveSet() left per-key values behind.
     FoundKeys found(*storage_);
     readParams(found);
     int32_t changed_at = 0;
@@ -1203,6 +1201,7 @@ bool AppConfig::load() {
         std::lock_guard<std::mutex> lock(change_mutex_);
         merged_ = found.take();
         changed_.clear();
+        defaults_unsaved_ = false;
     }
     if (set_damaged_) {
         set_saved_ = false;
@@ -1240,6 +1239,7 @@ bool AppConfig::writeSet(const std::vector<uint8_t>& payload, uint16_t param_cou
     }
     set_ = header;
     set_valid_ = true;
+    set_damaged_ = false;
     return true;
 }
 
@@ -1250,47 +1250,43 @@ void AppConfig::commitPending() {
         storage_->eraseKey(key.c_str());
     }
     merged_.clear();
-    storage_->eraseKey(kRevertKey);
-    if (changed_.empty()) {
-        storage_->eraseKey(kChangedAtKey);
-    }
+    storage_->eraseKey(kChangedAtKey);
+    storage_->eraseKey(kOldRevertKey);
     storage_->commit();
 }
 
 void AppConfig::recordChange(const char* key) {
-    merged_.erase(std::remove(merged_.begin(), merged_.end(), key), merged_.end());
+    std::lock_guard<std::mutex> lock(change_mutex_);
     if (std::find(changed_.begin(), changed_.end(), key) == changed_.end()) {
         changed_.emplace_back(key);
     }
-    const uint32_t now = clockUnixSeconds();
-    if (now != 0) {
-        storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
+}
+
+bool AppConfig::saveSet() {
+    if (!storage_) return false;
+    ConfigSetWriter writer;
+    writeParams(writer);
+    const std::vector<uint8_t>& payload = writer.payload();
+    const bool unchanged = set_valid_ && set_.payload_len == payload.size() &&
+                           set_.payload_hash == configHash(payload.data(), payload.size());
+    if (!unchanged && !writeSet(payload, writer.count(), clockUnixSeconds())) {
+        return false;
     }
-    storage_->commit();
+    std::lock_guard<std::mutex> lock(change_mutex_);
+    changed_.clear();
+    defaults_unsaved_ = false;
+    set_saved_ = true;
+    return true;
+}
+
+bool AppConfig::requestSave() {
+    return save_handler_ ? save_handler_() : false;
 }
 
 bool AppConfig::factoryReset() {
-    if (!storage_) return false;
-    {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        for (const std::string& key : merged_) {
-            storage_->eraseKey(key.c_str());
-        }
-        for (const std::string& key : changed_) {
-            storage_->eraseKey(key.c_str());
-        }
-        merged_.clear();
-        changed_.clear();
-        storage_->eraseKey(kChangedAtKey);
-        const uint32_t now = clockUnixSeconds();
-        if (now != 0) {
-            storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
-        }
-        if (!storage_->setInt32(kRevertKey, 1) || !storage_->commit()) {
-            return false;
-        }
-    }
     loadDefaults();
+    std::lock_guard<std::mutex> lock(change_mutex_);
+    defaults_unsaved_ = true;
     return true;
 }
 
@@ -1308,7 +1304,7 @@ ConfigSetInfo AppConfig::activeSet() const {
 
 int AppConfig::pendingChanges() const {
     std::lock_guard<std::mutex> lock(change_mutex_);
-    return static_cast<int>(changed_.size());
+    return static_cast<int>(changed_.size()) + (defaults_unsaved_ ? 1 : 0);
 }
 
 bool AppConfig::unlockDeveloperMode(const char* password) {
@@ -1326,11 +1322,7 @@ bool AppConfig::changeDeveloperPassword(const char* old_pw, const char* new_pw) 
 
     std::strncpy(data_.dev_mode_password, new_pw, sizeof(data_.dev_mode_password) - 1);
     data_.dev_mode_password[sizeof(data_.dev_mode_password) - 1] = '\0';
-    if (storage_) {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        storage_->setString("dev_pw", data_.dev_mode_password);
-        recordChange("dev_pw");
-    }
+    recordChange("dev_pw");
     return true;
 }
 
@@ -1471,11 +1463,7 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "eip_endstop_src") == 0) data_.eip_endstop_source = val;
     else return false;
 
-    if (storage_) {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        storage_->setInt32(key, val);
-        recordChange(key);
-    }
+    recordChange(key);
     return true;
 }
 
@@ -1624,11 +1612,7 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "th_abs_max_deg") == 0) data_.axis_theta_drive_abs_max_deg = val;
     else return false;
 
-    if (storage_) {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        storage_->setFloat(key, val);
-        recordChange(key);
-    }
+    recordChange(key);
     return true;
 }
 
@@ -1677,11 +1661,7 @@ bool AppConfig::setParamBool(const char* key, bool val, bool& out_reboot_require
     else if (std::strcmp(key, "pk_drop_any_th") == 0) data_.pick_drop_any_theta = val;
     else return false;
 
-    if (storage_) {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        storage_->setBool(key, val);
-        recordChange(key);
-    }
+    recordChange(key);
     return true;
 }
 
@@ -1734,11 +1714,7 @@ bool AppConfig::setParamString(const char* key, const char* val, bool& out_reboo
     std::strncpy(dst, val, cap - 1);
     dst[cap - 1] = '\0';
 
-    if (storage_) {
-        std::lock_guard<std::mutex> lock(change_mutex_);
-        storage_->setString(key, dst);
-        recordChange(key);
-    }
+    recordChange(key);
     return true;
 }
 

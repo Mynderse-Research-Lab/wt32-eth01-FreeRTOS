@@ -50,6 +50,7 @@ void UiMenu::buildMenuTree() {
         {"Display Settings",     MenuItemType::SUBMENU, "", 9, Config::AccessLevel::END_USER},
         {"Developer Options",    MenuItemType::SUBMENU, "", 10, Config::AccessLevel::DEVELOPER},
         {"Unlock Developer Mode",MenuItemType::ACTION_UNLOCK_DEV, "", -1, Config::AccessLevel::END_USER},
+        {"Save Parameters",      MenuItemType::ACTION_SAVE_PARAMS, "", -1, Config::AccessLevel::END_USER},
         {"Factory Reset",        MenuItemType::ACTION_FACTORY_RESET, "", -1, Config::AccessLevel::END_USER},
         {"About Gantry",         MenuItemType::ACTION_ABOUT, "", -1, Config::AccessLevel::END_USER},
     };

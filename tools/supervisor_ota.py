@@ -90,7 +90,7 @@ def slot_and_uptime(tb: Toolbox) -> tuple[str | None, int | None]:
     return (slot.split()[0] if slot else None), (int(m.group(1)) if m else None)
 
 
-def preflight(tb: Toolbox) -> None:
+def preflight(tb: Toolbox, discard_unsaved: bool) -> None:
     """stop, then status: motors must be disabled and nothing busy."""
     print("> stop")
     print("  " + (re.search(r"OK[^\r\n]*|ERROR[^\r\n]*", tb.console("stop")) or [""])[0])
@@ -101,6 +101,10 @@ def preflight(tb: Toolbox) -> None:
     print(f"> status\n  Motor Enabled: {enabled} | Busy: {busy} | Alarm: {field(status, 'Alarm')}")
     if enabled != "No" or busy != "No":
         raise SystemExit("[ERROR] refusing to flash: motors enabled or gantry busy")
+    unsaved = field(status, "Unsaved parameters")
+    if unsaved not in (None, "0") and not discard_unsaved:
+        raise SystemExit(f"[ERROR] {unsaved} unsaved parameter(s) would be lost: "
+                         "run 'cfg save', or pass --discard-unsaved")
 
 
 def main() -> int:
@@ -109,6 +113,8 @@ def main() -> int:
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--prompt", action="store_true",
                     help=f"ask for the toolbox password when {PASSWORD_ENV} is not set")
+    ap.add_argument("--discard-unsaved", action="store_true",
+                    help="flash even though parameters changed since the last 'cfg save'")
     args = ap.parse_args()
 
     with open(args.binary, "rb") as f:
@@ -129,7 +135,7 @@ def main() -> int:
     del password
     print(f"logged in to {tb.base}/dev")
 
-    preflight(tb)
+    preflight(tb, args.discard_unsaved)
     old_slot, old_up = slot_and_uptime(tb)
     print(f"running slot {old_slot}, uptime {old_up} s")
 

@@ -20,7 +20,10 @@ public:
     explicit SharedStorage(MemoryStorage& mem) : mem_(mem) {}
     bool init() override { return true; }
     bool getInt32(const char* k, int32_t& v) override { return mem_.getInt32(k, v); }
-    bool setInt32(const char* k, int32_t v) override { return mem_.setInt32(k, v); }
+    bool setInt32(const char* k, int32_t v) override {
+        ++flash_writes;
+        return mem_.setInt32(k, v);
+    }
     bool getFloat(const char* k, float& v) override { return mem_.getFloat(k, v); }
     bool setFloat(const char* k, float v) override { return mem_.setFloat(k, v); }
     bool getBool(const char* k, bool& v) override { return mem_.getBool(k, v); }
@@ -29,18 +32,24 @@ public:
     bool setString(const char* k, const char* v) override { return mem_.setString(k, v); }
     bool getBlob(const char* k, void* b, size_t& n) override { return mem_.getBlob(k, b, n); }
     bool setBlob(const char* k, const void* d, size_t n) override {
-        return !fail_blobs && mem_.setBlob(k, d, n);
+        if (fail_blobs) {
+            return false;
+        }
+        ++flash_writes;
+        return mem_.setBlob(k, d, n);
     }
     bool eraseKey(const char* k) override { return mem_.eraseKey(k); }
     bool commit() override { return true; }
 
     static bool fail_blobs;
+    static uint32_t flash_writes;
 
 private:
     MemoryStorage& mem_;
 };
 
 bool SharedStorage::fail_blobs = false;
+uint32_t SharedStorage::flash_writes = 0;
 MemoryStorage* s_nvs = nullptr;
 
 void powerOn() {
@@ -77,6 +86,7 @@ uint32_t activeSeq() {
 void setUp(void) {
     powerOn();
     boot();
+    SharedStorage::flash_writes = 0;
     AppConfig::instance().lockDeveloperMode();
 }
 
@@ -248,6 +258,7 @@ static void test_strike_offsets_apply_live_and_persist(void) {
     TEST_ASSERT_EQUAL_STRING("-12", shown);
 
     // Saved values come back after a reload from the same storage.
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
     TEST_ASSERT_TRUE(AppConfig::instance().load());
     TEST_ASSERT_EQUAL_INT32(-12, d.pick_offset_plunge_ms);
     TEST_ASSERT_EQUAL_INT32(7, d.pick_offset_close_ms);
@@ -284,49 +295,49 @@ static void test_set_fits_and_key_hashes_are_unique(void) {
     TEST_ASSERT_EQUAL_size_t(schema_keys, seen.size());
 }
 
-static void test_boot_merges_changes_into_a_new_set(void) {
+static void test_change_stays_in_ram_until_saved(void) {
     set("spd_mm_s", 750);
+    TEST_ASSERT_EQUAL_INT(750, speed());
     TEST_ASSERT_EQUAL_INT(1, AppConfig::instance().pendingChanges());
-    TEST_ASSERT_EQUAL_UINT32(1, activeSeq());
+    TEST_ASSERT_EQUAL_UINT32(0, SharedStorage::flash_writes);
 
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
+    TEST_ASSERT_EQUAL_INT(0, AppConfig::instance().pendingChanges());
+    TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
+    TEST_ASSERT_EQUAL_UINT32(1, SharedStorage::flash_writes);
     boot();
     TEST_ASSERT_EQUAL_INT(750, speed());
-    TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
-    TEST_ASSERT_EQUAL_INT(0, AppConfig::instance().pendingChanges());
-    int32_t raw = 0;
-    TEST_ASSERT_FALSE(s_nvs->getInt32("spd_mm_s", raw));
 }
 
-static void test_unchanged_boot_keeps_the_sets(void) {
+static void test_reboot_discards_unsaved_changes(void) {
+    set("spd_mm_s", 750);
+    boot();
+    TEST_ASSERT_EQUAL_INT(50, speed());
+    TEST_ASSERT_EQUAL_INT(0, AppConfig::instance().pendingChanges());
+}
+
+static void test_no_flash_write_without_a_real_change(void) {
     boot();
     boot();
     TEST_ASSERT_EQUAL_UINT32(1, activeSeq());
 
-    // A change that lands back on the stored value is not a new set either.
     const int before = speed();
     set("spd_mm_s", before + 10);
     set("spd_mm_s", before);
-    boot();
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
     TEST_ASSERT_EQUAL_UINT32(1, activeSeq());
+    TEST_ASSERT_EQUAL_UINT32(0, SharedStorage::flash_writes);
 }
 
-static void test_set_records_when_it_changed(void) {
+static void test_save_stamps_the_set(void) {
     set("spd_mm_s", 321);
-    int32_t stamped = 0;
-    TEST_ASSERT_TRUE(s_nvs->getInt32("cfg_chg_unix", stamped));
-    TEST_ASSERT_TRUE(stamped > 1700000000);
-
-    // The set carries the time of the change, not of the boot that merged it.
-    TEST_ASSERT_TRUE(s_nvs->setInt32("cfg_chg_unix", 1750000000));
-    boot();
-    TEST_ASSERT_EQUAL_UINT32(1750000000u, AppConfig::instance().activeSet().unix_s);
-    TEST_ASSERT_FALSE(s_nvs->getInt32("cfg_chg_unix", stamped));
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
+    TEST_ASSERT_TRUE(AppConfig::instance().activeSet().unix_s > 1700000000u);
 }
 
-// Only an operator command may replace it, so its contents stay recoverable.
-static void test_damaged_set_is_kept_until_an_operator_acts(void) {
+static void test_damaged_set_is_kept_until_an_operator_saves(void) {
     set("spd_mm_s", 111);
-    boot();
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
     size_t len = kConfigSetMaxBytes;
     std::vector<uint8_t> blob(len);
     TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", blob.data(), len));
@@ -341,31 +352,29 @@ static void test_damaged_set_is_kept_until_an_operator_acts(void) {
     TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", after.data(), after_len));
     TEST_ASSERT_EQUAL_MEMORY(blob.data(), after.data(), len);
 
-    // A reloaded parameter file stays in keys until the set is replaced.
     set("spd_mm_s", 222);
-    boot();
-    TEST_ASSERT_EQUAL_INT(222, speed());
-
-    TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
     boot();
     TEST_ASSERT_FALSE(AppConfig::instance().activeSet().damaged);
-    TEST_ASSERT_TRUE(AppConfig::instance().activeSet().valid);
-    TEST_ASSERT_EQUAL_INT(50, speed());
+    TEST_ASSERT_EQUAL_INT(222, speed());
 }
 
 static void test_older_keys_move_into_the_first_set(void) {
     powerOn();
     s_nvs->setInt32("spd_mm_s", 200);
     s_nvs->setFloat("geom_safe_z_mm", 48.4f);
+    s_nvs->setInt32("cfg_chg_unix", 1750000000);
     bootOnly();
     TEST_ASSERT_EQUAL_INT(200, speed());
     TEST_ASSERT_EQUAL_UINT32(1, activeSeq());
+    TEST_ASSERT_EQUAL_UINT32(1750000000u, AppConfig::instance().activeSet().unix_s);
 
     // Still there for a rollback until the boot is confirmed.
     int32_t raw = 0;
     TEST_ASSERT_TRUE(s_nvs->getInt32("spd_mm_s", raw));
     AppConfig::instance().commitPending();
     TEST_ASSERT_FALSE(s_nvs->getInt32("spd_mm_s", raw));
+    TEST_ASSERT_FALSE(s_nvs->getInt32("cfg_chg_unix", raw));
 
     boot();
     TEST_ASSERT_EQUAL_INT(200, speed());
@@ -373,7 +382,7 @@ static void test_older_keys_move_into_the_first_set(void) {
 }
 
 static void test_crash_before_confirmation_loses_nothing(void) {
-    set("spd_mm_s", 640);
+    s_nvs->setInt32("spd_mm_s", 640);
     bootOnly();
     TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
     boot();
@@ -381,53 +390,44 @@ static void test_crash_before_confirmation_loses_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
 }
 
-static void test_change_before_confirmation_survives_it(void) {
-    set("spd_mm_s", 640);
-    bootOnly();
-    set("spd_mm_s", 650);
-    AppConfig::instance().commitPending();
-    int32_t raw = 0;
-    TEST_ASSERT_TRUE(s_nvs->getInt32("spd_mm_s", raw));
-    TEST_ASSERT_EQUAL_INT32(650, raw);
-    boot();
-    TEST_ASSERT_EQUAL_INT(650, speed());
-}
-
-static void test_failed_set_write_keeps_the_changed_keys(void) {
+static void test_failed_save_keeps_the_changes_in_ram(void) {
     set("spd_mm_s", 640);
     SharedStorage::fail_blobs = true;
-    boot();
+    TEST_ASSERT_FALSE(AppConfig::instance().saveSet());
     TEST_ASSERT_EQUAL_INT(640, speed());
-    int32_t raw = 0;
-    TEST_ASSERT_TRUE(s_nvs->getInt32("spd_mm_s", raw));
+    TEST_ASSERT_EQUAL_INT(1, AppConfig::instance().pendingChanges());
 
     SharedStorage::fail_blobs = false;
-    boot();
-    TEST_ASSERT_EQUAL_INT(640, speed());
-    TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
+    TEST_ASSERT_EQUAL_INT(0, AppConfig::instance().pendingChanges());
 }
 
-static void test_factory_reset_replaces_the_set_at_the_next_boot(void) {
+static void test_factory_reset_only_replaces_the_set_when_saved(void) {
     set("spd_mm_s", 750);
-    boot();
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
+
     TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
     TEST_ASSERT_EQUAL_INT(50, speed());
+    TEST_ASSERT_EQUAL_INT(1, AppConfig::instance().pendingChanges());
+    boot();
+    TEST_ASSERT_EQUAL_INT(750, speed());
 
+    TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
     boot();
     TEST_ASSERT_EQUAL_INT(50, speed());
-    boot();
-    TEST_ASSERT_EQUAL_INT(50, speed());
-    TEST_ASSERT_EQUAL_UINT32(3, activeSeq());
 }
 
-static void test_change_after_factory_reset_lands_on_the_defaults(void) {
-    set("spd_mm_s", 750);
-    boot();
-    TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
-    set("acc_mm_s2", 4000);
-    boot();
-    TEST_ASSERT_EQUAL_INT(50, speed());
-    TEST_ASSERT_EQUAL_INT(4000, AppConfig::instance().data().gantry_default_accel_mm_per_s2);
+static void test_save_request_goes_through_the_handler(void) {
+    TEST_ASSERT_FALSE(AppConfig::instance().requestSave());
+    int calls = 0;
+    AppConfig::instance().setSaveHandler([&calls]() {
+        ++calls;
+        return true;
+    });
+    TEST_ASSERT_TRUE(AppConfig::instance().requestSave());
+    TEST_ASSERT_EQUAL_INT(1, calls);
+    AppConfig::instance().setSaveHandler(nullptr);
 }
 
 static void test_gantry_runtime_params_follow_the_stored_values(void) {
@@ -503,16 +503,16 @@ int main(void) {
     RUN_TEST(test_strike_offsets_apply_live_and_persist);
     RUN_TEST(test_first_boot_stores_a_full_set);
     RUN_TEST(test_set_fits_and_key_hashes_are_unique);
-    RUN_TEST(test_boot_merges_changes_into_a_new_set);
-    RUN_TEST(test_unchanged_boot_keeps_the_sets);
-    RUN_TEST(test_set_records_when_it_changed);
-    RUN_TEST(test_damaged_set_is_kept_until_an_operator_acts);
+    RUN_TEST(test_change_stays_in_ram_until_saved);
+    RUN_TEST(test_reboot_discards_unsaved_changes);
+    RUN_TEST(test_no_flash_write_without_a_real_change);
+    RUN_TEST(test_save_stamps_the_set);
+    RUN_TEST(test_damaged_set_is_kept_until_an_operator_saves);
     RUN_TEST(test_older_keys_move_into_the_first_set);
     RUN_TEST(test_crash_before_confirmation_loses_nothing);
-    RUN_TEST(test_change_before_confirmation_survives_it);
-    RUN_TEST(test_failed_set_write_keeps_the_changed_keys);
-    RUN_TEST(test_factory_reset_replaces_the_set_at_the_next_boot);
-    RUN_TEST(test_change_after_factory_reset_lands_on_the_defaults);
+    RUN_TEST(test_failed_save_keeps_the_changes_in_ram);
+    RUN_TEST(test_factory_reset_only_replaces_the_set_when_saved);
+    RUN_TEST(test_save_request_goes_through_the_handler);
     RUN_TEST(test_gantry_runtime_params_follow_the_stored_values);
     RUN_TEST(test_every_value_reloads_from_its_text);
     RUN_TEST(test_schema_lookup);

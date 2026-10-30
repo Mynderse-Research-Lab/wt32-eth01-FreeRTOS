@@ -5,6 +5,7 @@
 #include "ConfigSchema.h"
 #include "ConfigSet.h"
 #include "ConfigStorage.h"
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,13 +38,10 @@ public:
     void loadDefaults();
 
     /**
-     * @brief Load the stored set, overlay the keys changed since, and store the
-     * result when it differs. Compile-time defaults only fill keys the set does
-     * not hold, or apply after factoryReset(). A damaged set is left in place
-     * and the firmware runs on defaults until an operator reverts or reloads.
-     *
-     * Sets are written here, at boot, because a set write can erase a flash
-     * sector, and that stall can outlast the 32 ms Class 1 timeout.
+     * @brief Load the stored set and overlay any per-key values older firmware
+     * left in NVS, storing the result if it differs. Compile-time defaults only
+     * fill keys the set does not hold. A damaged set is left in place and the
+     * firmware runs on defaults until an operator saves over it.
      */
     bool load();
 
@@ -54,8 +52,23 @@ public:
     void commitPending();
 
     /**
-     * @brief Revert to compile-time defaults now. They replace the stored set at
-     * the next boot; download the parameter file first to keep the old values.
+     * @brief Write the running values to NVS as the stored set.
+     *
+     * Parameter changes stay in RAM until this runs: a flash write can erase a
+     * sector, and that stall outlasts the 32 ms Class 1 timeout. Callers close
+     * Class 1 first; requestSave() goes through the handler that does.
+     */
+    bool saveSet();
+
+    /**
+     * @brief Run the registered save, which makes the write safe for Class 1.
+     */
+    bool requestSave();
+    void setSaveHandler(std::function<bool()> handler) { save_handler_ = std::move(handler); }
+
+    /**
+     * @brief Revert the running values to compile-time defaults. The stored set
+     * is untouched until saveSet().
      */
     bool factoryReset();
 
@@ -70,7 +83,7 @@ public:
     ConfigSetInfo activeSet() const;
 
     /**
-     * @brief Keys changed since the stored set. They merge at the next boot.
+     * @brief Changes not yet in the stored set. A reboot discards them.
      */
     int pendingChanges() const;
 
@@ -140,10 +153,12 @@ private:
     ConfigSetHeader set_{};
     bool set_valid_{false};
     bool set_damaged_{false};
-    bool set_saved_{false};              // the running values are in a stored set
-    mutable std::mutex change_mutex_;    // change lists and the key writes behind them
-    std::vector<std::string> merged_;    // keys already in the stored set
-    std::vector<std::string> changed_;   // keys changed since boot
+    bool set_saved_{false};              // the boot found or wrote a good set
+    bool defaults_unsaved_{false};       // factoryReset() has not been saved yet
+    mutable std::mutex change_mutex_;    // the change lists below
+    std::vector<std::string> merged_;    // per-key values merged into the set at boot
+    std::vector<std::string> changed_;   // keys changed since the last save
+    std::function<bool()> save_handler_;
 };
 
 } // namespace Config

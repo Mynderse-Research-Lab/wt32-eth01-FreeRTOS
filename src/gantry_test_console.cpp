@@ -239,6 +239,8 @@ static uint32_t g_axisLogFrequencyHz = 0;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
 
+static constexpr uint32_t kParamSavePauseTimeoutMs = 5000;
+
 static const Config::AppConfigData &stored() {
   return Config::AppConfig::instance().data();
 }
@@ -620,6 +622,7 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Theta: %.2f deg%s", gantry->getCurrentThetaDeg(),
            gantry->hasThetaAxis() ? "" : " (axis not compiled in)");
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
+  ESP_LOGI(TAG, "Unsaved parameters: %d", Config::AppConfig::instance().pendingChanges());
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
   ESP_LOGI(TAG, "Workspace calibrated: %s",
@@ -2601,6 +2604,39 @@ static void printClock() {
   ESP_LOGI(TAG, "Clock %s (NTP %s)", when, stored().ntp_server);
 }
 
+// A flash write can stall both CPUs past the Class 1 timeout, so Class 1 closes
+// around it and the motors must already be off.
+static bool saveParameters(const GantryTestConsoleConfig *cfg) {
+  auto &config = Config::AppConfig::instance();
+  if (cfg != nullptr && cfg->gantry != nullptr &&
+      (cfg->gantry->isEnabled() || cfg->gantry->isBusy())) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: run 'stop' first, motors must be off");
+    return false;
+  }
+  if (!config.hasStorage()) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: NVS is unavailable ('cfg factory' erases it)");
+    return false;
+  }
+  if (config.pendingChanges() == 0 && config.activeSet().valid) {
+    ESP_LOGI(TAG, "OK nothing to save, set #%lu is current",
+             static_cast<unsigned long>(config.activeSet().seq));
+    return true;
+  }
+  if (!eip::pauseClass1(kParamSavePauseTimeoutMs)) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: Class 1 did not close");
+    return false;
+  }
+  const bool saved = config.saveSet();
+  eip::resumeClass1();
+  if (!saved) {
+    ESP_LOGE(TAG, "ERROR: NVS write failed; values stay in RAM only");
+    return false;
+  }
+  ESP_LOGI(TAG, "OK saved set #%lu. Class 1 is reopening; wait for it, then 'enable'",
+           static_cast<unsigned long>(config.activeSet().seq));
+  return true;
+}
+
 // A stored value is the only one in force, so a change reaches the Gantry now.
 // Reboot-only keys still wait for the boot that applies them.
 static void applyStoredToMotion(const GantryTestConsoleConfig *cfg, const char *key) {
@@ -2639,8 +2675,8 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                schema.units, schema.reboot_required ? "  (reboot)" : "");
     }
     ESP_LOGI(TAG, "cfg <key> [value] | cfg unlock <pw> | cfg lock | "
-                  "cfg passwd <old> <new> | cfg export | cfg time | "
-                  "cfg factory | cfg reboot");
+                  "cfg passwd <old> <new> | cfg save | cfg export | cfg time | "
+                  "cfg factory | cfg reboot [discard]");
     return;
   }
 
@@ -2663,7 +2699,12 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     *p = static_cast<char>(tolower(static_cast<unsigned char>(*p)));
   }
 
-  if (cmdTokenIs(token, "reboot") && *rest == '\0') {
+  if (cmdTokenIs(token, "reboot") && (*rest == '\0' || strcmp(rest, "discard") == 0)) {
+    if (*rest == '\0' && config.pendingChanges() > 0) {
+      ESP_LOGE(TAG, "ERROR: %d unsaved change(s). 'cfg save' first, or 'cfg reboot discard'",
+               config.pendingChanges());
+      return;
+    }
     ESP_LOGI(TAG, "Rebooting");
     esp_restart();
     return;
@@ -2671,6 +2712,10 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (cmdTokenIs(token, "lock") && *rest == '\0') {
     config.lockDeveloperMode();
     ESP_LOGI(TAG, "OK developer mode locked");
+    return;
+  }
+  if (cmdTokenIs(token, "save") && *rest == '\0') {
+    saveParameters(cfg);
     return;
   }
   if (cmdTokenIs(token, "export") && *rest == '\0') {
@@ -2696,8 +2741,8 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     applyStoredToMotion(cfg, nullptr);
-    ESP_LOGI(TAG, "OK compile-time defaults applied; they replace the stored set at the next "
-                  "boot. Settings that need a restart take effect after 'cfg reboot'");
+    ESP_LOGI(TAG, "OK compile-time defaults in RAM, not saved. 'cfg save' stores them over the "
+                  "set; download the parameter file first to keep the old values");
     return;
   }
   if (cmdTokenIs(token, "unlock")) {
@@ -2773,7 +2818,7 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     shown = rest;
   }
   ESP_LOGI(TAG, "OK %s = %s %s%s", token, shown, schema->units,
-           reboot ? "  (reboot required; 'cfg reboot')" : "");
+           reboot ? "  (reboot required; 'cfg save', then 'cfg reboot')" : "  (not saved)");
 }
 
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
@@ -3548,6 +3593,7 @@ void gantryTestConsoleTask(void *param) {
   char inputLine[256];
   size_t inputIndex = 0;
 
+  Config::AppConfig::instance().setSaveHandler([cfg]() { return saveParameters(cfg); });
   ESP_LOGI(TAG, "Serial task started");
   ESP_LOGI(TAG, "Type 'help' for commands");
   startWorkspaceUncalibrated(cfg->gantry);
