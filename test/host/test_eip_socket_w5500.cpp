@@ -238,6 +238,22 @@ static void test_tcp_connect_failure_closes_socket(void) {
   TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(hal.countNotClosed()));
 }
 
+// The drive ends the session on its own, with no call on the client.
+static void test_tcp_is_connected_follows_the_chip(void) {
+  CountingHal hal;
+  eip::EipSocketW5500Tcp tcp(hal);
+  TEST_ASSERT_FALSE(tcp.isConnected());
+  TEST_ASSERT_TRUE(tcp.connect("192.168.1.20", 44818));
+  TEST_ASSERT_TRUE(tcp.isConnected());
+
+  for (uint8_t s = 0; s < 8; ++s) {
+    if (hal.sn_sr[s] == SOCK_ESTABLISHED) {
+      hal.sn_sr[s] = SOCK_CLOSE_WAIT;
+    }
+  }
+  TEST_ASSERT_FALSE(tcp.isConnected());
+}
+
 static void test_sendto_zero_dest_guard(void) {
   CountingHal hal;
   eip::EipSocketW5500Udp udp(hal);
@@ -272,6 +288,7 @@ int main(void) {
   RUN_TEST(test_udp_multicast_split_bind);
   RUN_TEST(test_tcp_connect_fails_when_no_free_socket);
   RUN_TEST(test_tcp_connect_failure_closes_socket);
+  RUN_TEST(test_tcp_is_connected_follows_the_chip);
   RUN_TEST(test_sendto_zero_dest_guard);
   RUN_TEST(test_recvfrom_nonblocking_vs_blocking);
   return UNITY_END();

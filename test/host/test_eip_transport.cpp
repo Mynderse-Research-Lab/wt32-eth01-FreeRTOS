@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -49,16 +50,21 @@ class FakeTcpClient : public eip::ITcpClient {
 
   // The peer sends FIN: the socket stops being usable until reconnected.
   void dropByPeer() { connected_ = false; }
+  // The socket still reads connected, but nothing can be sent on it.
+  void failSendsUntilReconnect() { fail_sends_ = true; }
   void failConnect() { fail_connect_ = true; }
+  void onSend(std::function<void()> hook) { on_send_ = std::move(hook); }
   size_t connects() const { return connects_; }
 
   bool connect(const char*, uint16_t) override {
     ++connects_;
     connected_ = !fail_connect_;
+    fail_sends_ = false;
     return connected_;
   }
   ssize_t send(const uint8_t* data, size_t len) override {
-    if (!connected_) return -1;
+    if (!connected_ || fail_sends_) return -1;
+    if (on_send_) on_send_();
     last_sent_.assign(data, data + len);
     all_sent_.push_back(last_sent_);
     return static_cast<ssize_t>(len);
@@ -80,6 +86,8 @@ class FakeTcpClient : public eip::ITcpClient {
   std::vector<Bytes> all_sent_;
   bool connected_ = true;
   bool fail_connect_ = false;
+  bool fail_sends_ = false;
+  std::function<void()> on_send_;
   size_t connects_ = 0;
 };
 
@@ -585,6 +593,38 @@ static void test_graceful_close_rebuilds_a_dropped_session(void) {
   TEST_ASSERT_EQUAL_HEX8(0x00, close_frame[5]);
   TEST_ASSERT_EQUAL_HEX8(0x22, close_frame[6]);
   TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+// The live failure: the socket still looked connected when the send failed.
+static void test_graceful_close_retries_on_a_new_session_when_the_send_fails(void) {
+  ClosableAxis ax;
+  ax.tcp.failSendsUntilReconnect();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(2, ax.tcp.connects());
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+// Connected through the close, or the keepalive helper would stop its O->T.
+static void test_graceful_close_keeps_the_axis_connected_until_closed(void) {
+  ClosableAxis ax;
+  ax.tcp.dropByPeer();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+  size_t sends = 0;
+  size_t while_connected = 0;
+  eip::EipMultiScanner* scanner = ax.scanner.get();
+  ax.tcp.onSend([&]() {
+    ++sends;
+    if (scanner->axisConnected(0)) ++while_connected;
+  });
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  // RegisterSession and ForwardClose; UnRegisterSession follows the close.
+  TEST_ASSERT_TRUE(sends >= 2);
+  TEST_ASSERT_EQUAL_UINT32(sends - 1, while_connected);
 }
 
 static void test_graceful_close_reports_a_failed_reconnect(void) {
@@ -1701,6 +1741,8 @@ int main(void) {
   RUN_TEST(test_cip_sequence_number_wraparound);
   RUN_TEST(test_graceful_close_uses_a_live_session);
   RUN_TEST(test_graceful_close_rebuilds_a_dropped_session);
+  RUN_TEST(test_graceful_close_retries_on_a_new_session_when_the_send_fails);
+  RUN_TEST(test_graceful_close_keeps_the_axis_connected_until_closed);
   RUN_TEST(test_graceful_close_reports_a_failed_reconnect);
   RUN_TEST(test_graceful_close_ignores_a_closed_axis);
   return UNITY_END();

@@ -631,13 +631,11 @@ size_t EipMultiScanner::flushDeferredLogs() {
   return flushed;
 }
 
-// A Kinetix sends FIN on its explicit session while Class 1 carries on over UDP
-// (W5500 Sn_SR reads CLOSE_WAIT), so that session may be gone by the time a
-// ForwardClose needs it.
-bool EipMultiScanner::restoreExplicitSession(size_t i) {
+// A Kinetix ends its explicit session while Class 1 carries on over UDP, so that
+// session may be gone by the time a ForwardClose needs it.
+bool EipMultiScanner::reconnectExplicitSession(size_t i) {
   AxisRuntime& ax = axes_[i];
   if (ax.tcp == nullptr || ax.session == nullptr) return false;
-  if (ax.session->isRegistered() && ax.tcp->isConnected()) return true;
   ax.tcp->close();
   if (!ax.tcp->connect(ax.config.target_ip, EipSession::kDefaultPort)) return false;
   return ax.session->registerSession();
@@ -645,19 +643,26 @@ bool EipMultiScanner::restoreExplicitSession(size_t i) {
 
 bool EipMultiScanner::gracefulCloseAxis(size_t i) {
   if (i >= axis_count_ || axes_[i].state != AxisState::kConnected) return false;
-  const bool session_ok = restoreExplicitSession(i);
-  // closeAxis stops this axis's O->T, so the ForwardClose has to follow at once.
-  const bool closed = closeAxis(i);
-  return session_ok && closed;
+  AxisRuntime& ax = axes_[i];
+  // Still kConnected here: the keepalive helper keeps this axis's O->T running
+  // through a retry, so the connection cannot time out while it is rebuilt.
+  bool closed = ax.tcp != nullptr && ax.tcp->isConnected() && forwardCloseAxis(i);
+  if (!closed) {
+    closed = reconnectExplicitSession(i) && forwardCloseAxis(i);
+  }
+  closeAxis(i, false);
+  return closed;
 }
 
-bool EipMultiScanner::closeAxis(size_t i) {
+void EipMultiScanner::closeAxis(size_t i, bool forward_close) {
   AxisRuntime& ax = axes_[i];
   const bool had_connection = (ax.state == AxisState::kConnected) ||
                               (ax.open_reply.ot_connection_id != 0);
   // kIdle first so any concurrent keepalive/drain stops touching this axis.
   ax.state = AxisState::kIdle;
-  const bool closed = !had_connection || forwardCloseAxis(i);
+  if (had_connection && forward_close) {
+    (void)forwardCloseAxis(i);
+  }
   if (ax.session && ax.session->isRegistered()) {
     (void)ax.session->unregisterSession();
   }
@@ -671,7 +676,6 @@ bool EipMultiScanner::closeAxis(size_t i) {
   ax.first_to_logged = false;
   ax.ot_cmd_scratch.clear();
   ax.ot_frame_scratch.clear();
-  return closed;
 }
 
 void EipMultiScanner::prepareAxisReopen(size_t i) {

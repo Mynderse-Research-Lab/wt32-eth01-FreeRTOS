@@ -78,10 +78,10 @@ class EipMultiScanner {
 
   void disconnect();
 
-  /// Close one axis in order, for a planned stop. Rebuilds a dropped explicit
-  /// session first, while the axis is still connected so a keepalive helper
-  /// keeps its O->T running. False when the ForwardClose was not accepted; the
-  /// axis ends up closed either way.
+  /// Close one axis in order, for a planned stop. The ForwardClose goes out with
+  /// the axis still connected, so a keepalive helper keeps its O->T running, and
+  /// a dropped explicit session is rebuilt for it. False when it was not
+  /// accepted; the axis ends up closed either way.
   bool gracefulCloseAxis(size_t i);
 
   size_t axisCount() const { return axis_count_; }
@@ -169,10 +169,9 @@ class EipMultiScanner {
   bool forwardOpenAxis(size_t i);
   bool forwardCloseAxis(size_t i);
   // Tear down one axis (FC if connected, unregister, close TCP, reset fields).
-  // Does not touch the shared UDP socket or other axes. False when a
-  // ForwardClose was due and not accepted.
-  bool closeAxis(size_t i);
-  bool restoreExplicitSession(size_t i);
+  // Does not touch the shared UDP socket or other axes.
+  void closeAxis(size_t i, bool forward_close = true);
+  bool reconnectExplicitSession(size_t i);
   bool sendAxisOutput(size_t i);
   bool applyFeedback(size_t i, const uint8_t* assembly, size_t len);
   size_t matchAxisByConnectionId(uint32_t connection_id) const;

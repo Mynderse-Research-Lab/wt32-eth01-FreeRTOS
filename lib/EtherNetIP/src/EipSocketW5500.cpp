@@ -84,7 +84,9 @@ ssize_t EipSocketW5500Tcp::recv(uint8_t* buf, size_t max_len, uint32_t timeout_m
 }
 
 bool EipSocketW5500Tcp::isConnected() const {
-    return (sock_ >= 0) && connected_;
+    // Sn_SR, not the flag: a peer's FIN arrives with no call on this object.
+    return (sock_ >= 0) && connected_ &&
+           w5500::socketIsConnected(hal_, static_cast<uint8_t>(sock_));
 }
 
 // ==========================================================================

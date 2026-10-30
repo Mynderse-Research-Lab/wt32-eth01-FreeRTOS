@@ -931,7 +931,7 @@ Key motion and pick parameters stored in `AppConfig`:
 
 Saving is an explicit step because of the Class 1 timeout, 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`). A flash sector erase stalls both CPUs for its whole duration. On 2026-10-30, two of 151 per-key `cfg` writes took 81–82 ms instead of about 8 ms, one with a measured 63.9 ms Class 1 gap, and both dropped the link. The erase is inferred from the timing and the NVS entry count, not observed directly.
 
-The close runs one axis at a time, with a helper keeping O→T running to the axes still open, because each drive needs its ForwardClose before its connection times out. A Kinetix drops its explicit TCP session while Class 1 carries on over UDP (W5500 `Sn_SR` reads `CLOSE_WAIT`), so the close rebuilds that session first. Why the drive drops it has not been established. A log line `Class 1 close not clean` names any axis that refused.
+The close runs one axis at a time, with a helper keeping O→T running to the axes still open, because each drive needs its ForwardClose before its connection times out. A Kinetix drops its explicit TCP session while Class 1 carries on over UDP (W5500 `Sn_SR` reads `CLOSE_WAIT`), so the ForwardClose goes out with the axis still connected and, if the session is gone or the send fails, is retried on a rebuilt session. Why the drive drops it has not been established. A log line `Class 1 close not clean` names any axis that refused.
 
 Per-key values left by older firmware merge into the set at boot, before Class 1 opens, and are erased after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
 
