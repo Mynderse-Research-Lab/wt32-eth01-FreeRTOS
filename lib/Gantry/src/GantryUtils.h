@@ -43,6 +43,29 @@ namespace Constants {
     constexpr float EIP_CREEP_SPEED_MM_S = 1.0f;
 } // namespace Constants
 
+/**
+ * @struct RuntimeParams
+ * @brief Stored parameters the library applies. gantryRuntimeParams() fills this
+ * from AppConfig; these member defaults only serve builds with no parameter store.
+ */
+struct RuntimeParams {
+    float z_speed_cap_mm_s = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    float theta_max_speed_deg_s = AXIS_THETA_MAX_SPEED_DEG_PER_S;
+    float theta_accel_deg_s2 = AXIS_THETA_ACCEL_DEG_PER_S2;
+    float theta_decel_deg_s2 = AXIS_THETA_DECEL_DEG_PER_S2;
+    uint32_t gripper_open_ms = GANTRY_GRIPPER_OPEN_TIME_MS;
+    uint32_t gripper_close_ms = GANTRY_GRIPPER_CLOSE_TIME_MS;
+    float x_hard_span_mm = AXIS_X_HARD_LIMIT_MAX_MM - AXIS_X_HARD_LIMIT_MIN_MM;
+    float home_speed_mm_s = Constants::EIP_HOME_CAL_SPEED_MM_S;
+    float home_accel_mm_s2 = Constants::EIP_HOME_CAL_ACCEL_MM_S2;
+    float home_theta_speed_deg_s = Constants::EIP_HOME_THETA_SPEED_DEG_S;
+    float creep_speed_mm_s = Constants::EIP_CREEP_SPEED_MM_S;
+    float z_axis_y_offset_mm = GANTRY_Z_AXIS_Y_OFFSET_MM;
+    float theta_x_offset_mm = GANTRY_THETA_X_OFFSET_MM;
+    float gripper_x_offset_mm = GANTRY_GRIPPER_X_OFFSET_MM;
+    float gripper_z_offset_mm = GANTRY_GRIPPER_Z_OFFSET_MM;
+};
+
 // ============================================================================
 // HELPER MACROS
 // ============================================================================

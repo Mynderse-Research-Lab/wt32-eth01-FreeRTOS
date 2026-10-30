@@ -661,7 +661,7 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   }
   p.limits.theta_accel = static_cast<float>(c.gantry_default_accel_deg_per_s2);
   p.limits.theta_decel = static_cast<float>(c.gantry_default_decel_deg_per_s2);
-  p.limits.z_cap = static_cast<float>(AXIS_Z_PICK_SPEED_MM_PER_S);
+  p.limits.z_cap = AXIS_Z_PICK_SPEED_FRACTION * s_gantry->zSpeedCapMmS();
   p.limits.theta_start_frac = 0.0f;
   p.valve_s = static_cast<float>(c.pick_valve_ms) * 0.001f;
   p.guard_s = static_cast<float>(c.pick_guard_ms) * 0.001f;

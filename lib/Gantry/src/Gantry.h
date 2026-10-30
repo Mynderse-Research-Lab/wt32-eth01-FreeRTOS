@@ -151,6 +151,10 @@ public:
     JointLimits getJointLimits() const { return config_.limits; }
     void setEndEffectorPin(int pin, bool activeHigh = true);
     void setSafeZHeight(float safeHeight_mm);
+    /// Apply the stored motion, timing and geometry parameters.
+    void setRuntimeParams(const RuntimeParams& params);
+    /// Ballscrew speed cap in force (mm/s), from the stored critical RPM and lead.
+    float zSpeedCapMmS() const;
     /// Absolute joint-Z band ceiling for X traverse / coordinated X+Z
     /// (= z_min + Z− margin).
     float traverseClearanceZMm() const;
@@ -349,6 +353,7 @@ private:
 
     GantryConfig         config_;
     KinematicParameters  kinematicParams_;
+    RuntimeParams        runtime_;
     float                stepsPerRev_;
 
     // Sequential / path motion state machine. +Z = down (toward belt):

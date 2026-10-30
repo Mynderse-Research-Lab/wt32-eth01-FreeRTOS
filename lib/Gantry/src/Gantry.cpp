@@ -319,6 +319,20 @@ void Gantry::setSafeZHeight(float safeHeight_mm) {
     safeZMarginFromMaxMm_ = safeHeight_mm;
 }
 
+void Gantry::setRuntimeParams(const RuntimeParams& params) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    runtime_ = params;
+    kinematicParams_.z_axis_y_offset_mm = params.z_axis_y_offset_mm;
+    kinematicParams_.theta_x_offset_mm = params.theta_x_offset_mm;
+    kinematicParams_.gripper_x_offset_mm = params.gripper_x_offset_mm;
+    kinematicParams_.gripper_z_offset_mm = params.gripper_z_offset_mm;
+}
+
+float Gantry::zSpeedCapMmS() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return runtime_.z_speed_cap_mm_s;
+}
+
 float Gantry::traverseClearanceZMm() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     // Bottom-band ceiling: coordinated X+Z only while Z <= z_min + margin.
@@ -538,7 +552,7 @@ GantryError Gantry::retractToSafeZ(uint32_t speed_mm_per_s,
     targetTheta_deg_ = axisTheta_ ? axisTheta_->getCurrentDeg() : static_cast<float>(currentTheta_);
     speed_mm_per_s_ = static_cast<uint32_t>(Path::zCappedPathSpeed(
         static_cast<float>(speed_mm_per_s), 0.0f, ceiling - z,
-        static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S)));
+        runtime_.z_speed_cap_mm_s));
     speed_deg_per_s_ = 0;
     acceleration_mm_per_s2_ = acceleration_mm_per_s2;
     deceleration_mm_per_s2_ = deceleration_mm_per_s2;
@@ -592,7 +606,7 @@ GantryError Gantry::queueRetractToSafeZ(uint32_t speed_mm_per_s,
     const float ceiling = traverseClearanceZMm();
     const float speed = Path::zCappedPathSpeed(
         static_cast<float>(speed_mm_per_s), 0.0f, ceiling - z_from,
-        static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S));
+        runtime_.z_speed_cap_mm_s);
     if (!axisZ_->queueHeldMm(ceiling, speed, static_cast<float>(acceleration_mm_per_s2),
                              static_cast<float>(deceleration_mm_per_s2))) {
         return GantryError::TIMEOUT;
@@ -816,7 +830,7 @@ bool Gantry::homeTheta() {
              static_cast<double>(axisTheta_->getMaxDeg()));
 
     ESP_LOGI(TAG, "[HOME] Rotating Theta back to physical zero...");
-    axisTheta_->moveToDeg(0.0f, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+    axisTheta_->moveToDeg(0.0f, runtime_.home_theta_speed_deg_s, 0.0f, 0.0f);
 
     return true;
 }
@@ -1117,7 +1131,7 @@ int Gantry::calibrateX() {
     // Re-anchor X scaling to the known physical hard-travel envelope.
     // This keeps dead-reckoning travel accurate even if commanded pulses/rev
     // in the drive do not match the compile-time drivetrain constants yet.
-    const double hardSpanMm = (double)AXIS_X_HARD_LIMIT_MAX_MM - (double)AXIS_X_HARD_LIMIT_MIN_MM;
+    const double hardSpanMm = (double)runtime_.x_hard_span_mm;
     const double derivedLengthMm = commandedPulses / basePpm;
     if (hardSpanMm > 1.0 && commandedPulses > 0.0) {
         xPulsesPerMmOverride_ = (float)(commandedPulses / hardSpanMm);
@@ -1657,19 +1671,19 @@ bool Gantry::eipMaxWarningActive() const {
 }
 
 float Gantry::eipSeekSpeedMmS() const {
-    return EIP_HOME_CAL_SPEED_MM_S;
+    return runtime_.home_speed_mm_s;
 }
 
 float Gantry::eipCreepSpeedMmS() const {
-    return EIP_CREEP_SPEED_MM_S;
+    return runtime_.creep_speed_mm_s;
 }
 
 float Gantry::eipCalSeekSpeedMmS() const {
-    return EIP_HOME_CAL_SPEED_MM_S;
+    return runtime_.home_speed_mm_s;
 }
 
 float Gantry::eipHomeCalAccelMmS2() const {
-    return EIP_HOME_CAL_ACCEL_MM_S2;
+    return runtime_.home_accel_mm_s2;
 }
 
 bool Gantry::eipStartMoveDelta(float delta_mm, float speed_mm_s) {
@@ -2352,7 +2366,7 @@ void Gantry::advanceEipBringUp() {
                              "before Z+ calibration...",
                              static_cast<double>(orient_deg),
                              static_cast<double>(Constants::BRINGUP_THETA_ORIENT_DEG));
-                    axisTheta_->moveToDeg(orient_deg, Constants::EIP_HOME_THETA_SPEED_DEG_S, 0.0f, 0.0f);
+                    axisTheta_->moveToDeg(orient_deg, runtime_.home_theta_speed_deg_s, 0.0f, 0.0f);
                     thetaOrientDeg_ = orient_deg;
                     bringUpPhase_ = BringUpPhase::kThetaOrient;
                     eipLimitSawBusy_ = true;
@@ -2551,7 +2565,7 @@ bool Gantry::armCurrentPathSegment() {
     const Path::PathProfile profile{
         Path::zCappedPathSpeed(static_cast<float>(speed_mm_per_s_),
                                together ? dx : 0.0f, seg.move_z ? dz : 0.0f,
-                               static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S)),
+                               runtime_.z_speed_cap_mm_s),
         static_cast<float>(acceleration_mm_per_s2_),
         static_cast<float>(deceleration_mm_per_s2_),
     };
@@ -2637,14 +2651,14 @@ float Gantry::thetaAccelDegPerS2() const {
     if (acceleration_deg_per_s2_ > 0) {
         return static_cast<float>(acceleration_deg_per_s2_);
     }
-    return AXIS_THETA_ACCEL_DEG_PER_S2;
+    return runtime_.theta_accel_deg_s2;
 }
 
 float Gantry::thetaDecelDegPerS2() const {
     if (deceleration_deg_per_s2_ > 0) {
         return static_cast<float>(deceleration_deg_per_s2_);
     }
-    return AXIS_THETA_DECEL_DEG_PER_S2;
+    return runtime_.theta_decel_deg_s2;
 }
 
 bool Gantry::commandThetaMove(float speed_deg_s) {
@@ -2747,14 +2761,14 @@ void Gantry::scheduleThetaForPath() {
         if (requireThetaTraverseInterlock("path theta") && pickMove) {
             const float spd = speed_deg_per_s_ > 0
                                   ? static_cast<float>(speed_deg_per_s_)
-                                  : AXIS_THETA_MAX_SPEED_DEG_PER_S;
+                                  : runtime_.theta_max_speed_deg_s;
             (void)commandThetaMove(spd);
         }
         return;
     }
 
     float start_frac = Path::kThetaStartFrac;
-    float cap = AXIS_THETA_MAX_SPEED_DEG_PER_S;
+    float cap = runtime_.theta_max_speed_deg_s;
     if (thetaStartFrac_ >= 0.0f) {
         start_frac = thetaStartFrac_;
         if (speed_deg_per_s_ > 0 && static_cast<float>(speed_deg_per_s_) < cap) {
@@ -2771,7 +2785,7 @@ void Gantry::scheduleThetaForPath() {
         if (pickMove && requireThetaTraverseInterlock("path theta")) {
             const float spd = speed_deg_per_s_ > 0
                                   ? static_cast<float>(speed_deg_per_s_)
-                                  : AXIS_THETA_MAX_SPEED_DEG_PER_S;
+                                  : runtime_.theta_max_speed_deg_s;
             (void)commandThetaMove(spd);
         }
         return;
@@ -2930,8 +2944,8 @@ void Gantry::startSequentialMotion() {
     // Retracting (toward A015) = placing (grip open).
     gripperTargetState_ = (targetZ_mm_ > currentZ);
     gripperActuateDurationMs_ = gripperTargetState_
-        ? GANTRY_GRIPPER_CLOSE_TIME_MS
-        : GANTRY_GRIPPER_OPEN_TIME_MS;
+        ? runtime_.gripper_close_ms
+        : runtime_.gripper_open_ms;
 
     pathDoGripperAfter_ = false;
 
