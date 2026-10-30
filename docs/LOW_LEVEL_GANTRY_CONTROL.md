@@ -902,29 +902,30 @@ At runtime the stored parameters are the only source. `main.cpp` and the console
 
 ### 14.1 Stored set
 
-NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time of its newest change, and a hash. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
+NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time it was saved, and a hash. Boot loads it. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
 
 | Step | What happens |
 |------|--------------|
-| `cfg <key> <value>` | Applies now and writes that one key to NVS. |
-| Next boot | Loads the set, overlays the changed keys, and stores the result if it differs. This runs before Class 1 opens. |
-| Boot confirmed | The merged keys are erased, after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. |
+| `cfg <key> <value>` | Applies now, in RAM only. Nothing touches flash, so this cannot affect Class 1. |
+| `cfg save` | Refused unless the motors are off. Closes Class 1, writes the set, and reopens Class 1. Run `enable` afterwards. |
+| Reboot or power loss | Changes not saved are gone. `cfg reboot` refuses while any are unsaved (`cfg reboot discard` overrides), and `tools/supervisor_ota.py` refuses to flash (`--discard-unsaved` overrides). `status` shows the count. |
 
-The set is written at boot and not on every `cfg` change because of the Class 1 timeout. It is 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`), and a set write fills nearly half an NVS page, so roughly one write in two erases a flash sector. Both CPUs stall for the whole erase. The erase time on this module has not been measured; 4 kB sector erases on SPI NOR flash are typically tens of milliseconds, so treat that as a likely link drop until it is measured.
+Saving is an explicit step because of the Class 1 timeout, 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`). A flash sector erase stalls both CPUs for its whole duration. On 2026-10-30, two of 151 per-key `cfg` writes took 81–82 ms instead of about 8 ms, one with a measured 63.9 ms Class 1 gap, and both dropped the link. The erase is inferred from the timing and the NVS entry count, not observed directly.
 
-An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
+Per-key values left by older firmware merge into the set at boot, before Class 1 opens, and are erased after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
 
 ### 14.2 Commands and the parameter file
 
 | Command | Effect |
 |---------|--------|
+| `cfg save` | Stores the running values, as above. The toolbox **Save to NVS** button and the TFT **Save Parameters** item do the same. |
 | `cfg export` | Prints every visible parameter as `PARAM key=value`. Passwords are left out. |
-| `cfg factory` | The only way back to compile-time defaults. Applies them now, and they replace the stored set at the next boot. Download the file first. |
+| `cfg factory` | Puts compile-time defaults in RAM. `cfg save` stores them over the set, so download the file first. A reboot without saving brings the stored set back. |
 | `cfg time` | Shows the clock and the NTP server. |
 
-The toolbox page has **Download parameters**, which saves `cfg export` as a text file, and **Upload parameters**, which reloads one. Upload compares the file with the gantry and sends only the values that differ, as `cfg <key> <value>`, because each write can erase a flash sector; disable the motors first. A key the gantry does not show, such as a developer key while locked, is skipped and listed. The changes merge into the set at the next boot.
+The toolbox page has **Download parameters**, which saves `cfg export` as a text file, and **Upload parameters**, which reloads one. Upload compares the file with the gantry and sends only the values that differ, as `cfg <key> <value>`, so the changes are in RAM until saved. A key the gantry does not show, such as a developer key while locked, is skipped and listed.
 
-Boot never erases NVS or replaces a damaged set. If NVS cannot be read, or the set fails its hash, the firmware logs an error and runs on compile-time defaults. `cfg factory` is what erases unreadable NVS or replaces a damaged set.
+Boot never erases NVS or replaces a damaged set. If NVS cannot be read, or the set fails its hash, the firmware logs an error and runs on compile-time defaults. `cfg save` replaces a damaged set, and `cfg factory` erases unreadable NVS.
 
 ### 14.3 Time
 
