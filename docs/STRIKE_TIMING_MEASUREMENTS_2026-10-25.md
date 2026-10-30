@@ -153,6 +153,11 @@ Depth accuracy under 1 mm is enough for now. The queued retract runs with zero d
 compensation and no command dwell. Revisit if the requirement tightens; the options
 are commanding the plunge deeper by the measured lag, or drive tuning.
 
+The offsets stay independent; the planner does not force zero dwell. Since `f861a8f`
+each strike warns when the offsets ask for any (`pk_off_retract − pk_off_plunge` ≠ 0):
+a positive dwell is applied, and a negative one is not, because the queued retract
+waits for the plunge end. `pickplan` and the pick log show `dwell N ms`.
+
 ## Grip command electrical timing
 
 **Setup**
@@ -214,8 +219,10 @@ are commanding the plunge deeper by the measured lag, or drive tuning.
 
 ## Trigger sensor to gantry latency (2026-10-29)
 
-Until the vision ML model is ready, a 1D trigger stands in for the camera. A Sharp IR
-distance sensor at Y = −825 mm feeds an Arduino Uno on the vision PC. The Arduino
+Until the vision ML model is ready, a 1D trigger stands in for the camera. A Sharp
+GP2Y0A21YK0F IR distance sensor feeds an Arduino Uno on the vision PC. It sits 130 mm
+upstream of the camera optical centre, at Y ≈ −841 mm (measured on the rig 2026-10-30;
+−825 mm was the earlier estimate). The Arduino
 prints `BATTERY_IN` on USB serial, and `~/vision_sim/simulate-vision-output.py`
 (mode 2) then sends one fixed VISION_DETECT frame. The frame carries no capture
 displacement, so the gantry back-dates the capture from receipt by `cv_vis_ms`.
@@ -247,19 +254,52 @@ not available), so the table gives the latency for each candidate threshold:
 - **The threshold is between about 2.55 and 2.65 V.** At 2.70 V, five receipts came
   before the signal crossed, which cannot happen if 2.70 V were the trigger level.
   Below 2.55 V the resting noise would trigger.
-- **`cv_vis_ms` set to 17 ms** (was 40). It fits any threshold in that band within
-  ±3 ms, about ±1 mm at 300 mm/s. The old 40 ms back-dated each trigger by about 23 ms,
-  about 7 mm of belt.
+- **`cv_vis_ms` was set to 17 ms here; superseded by 36 ms (2026-10-30, below).** 17 ms
+  covers only the sensor's output rise to receipt. It leaves out the sensor's own
+  measurement delay.
 - **Jitter:** sd 10–14 ms and p90 33–44 ms, so trigger-to-trigger scatter is about
   ±3–4 mm at 300 mm/s and up to about 15 mm for the worst trip. Not separated yet: the
   Python loop (plotting was on) and the sensor's update steps are the likely sources.
 - **Queue wait:** GPIO17 high time (receipt to `acceptDetect`) was 0.2–49.7 ms, mean
   23.3 ms, which matches the scheduler's 50 ms idle loop. The arrival is computed from
   `receipt_us`, so the wait does not shift it.
-- **Open:**
-  - A working probe on Uno pin D1 would give the exact decision moment.
-  - The battery's position at `BATTERY_IN` (the leading-edge offset for the −114 mm
-    Y override) still needs a static hand-push measurement.
+- **Open:** a working probe on Uno pin D1 would give the exact decision moment.
+
+### Sensor delay, second capture and the Y override (2026-10-30)
+
+**The sensor's own delay belongs in `cv_vis_ms`.** The firmware back-dates from receipt
+to the moment the cell was at the trigger point. The GP2Y0A21YK0F output lags the cell:
+each distance measurement takes 38.3 ± 9.6 ms, and the output updates at most 5.0 ms
+after a measurement ends (datasheet E4-A00201EN, Fig. 1 Timing chart). Trips are not
+synchronised to the sensor, so the delay is spread over about 0–43 ms, mean about
+22 ms. This cancels out of the trigger-to-centre interval below, because entry, exit
+and trigger are all seen through the same delay.
+
+**Second capture:** 91 triggers over 214 s on the `d3f75f4` build (`vismark`), the
+belt speed logged from the supervisor's `/api/state` during the capture
+(304 ± 8 mm/s, 286–323). The battery kept the same pose for every pass.
+
+| Quantity | Median | Mean ± sd | p10 .. p90 | Range |
+|---|---|---|---|---|
+| 2.60 V crossing to receipt | 10.3 ms | 14.3 ± 10.1 ms | 8.0 .. 28.7 | 5.8 .. 64.9 |
+| Signal away from rest (entry to exit) | 206 ms | 198 ± 30 ms | 166 .. 228 | 126 .. 285 |
+| Entry to 2.60 V trigger | 84 ms | 80 ± 22 ms | 46 .. 93 | 5 .. 124 |
+| Trigger to cell centre under the sensor | 20.8 ms | 19.2 ± 15.6 ms | 1.3 .. 37.5 | −15 .. 68 |
+
+- **`cv_vis_ms` = 36 ms** (set on the gantry 2026-10-30): about 14 ms of chain plus
+  about 22 ms of sensor delay. A first capture (57 triggers, belt speed not logged) gave
+  17.4 ± 12.7 ms of chain, consistent with this.
+- **Centre offset: 6.3 mm.** The cell centre passes the sensor, at the midpoint of the
+  entry-to-exit interval, a median 20.8 ms after the trigger, which is 6.3 mm at
+  304 mm/s. A static hand-push test is not possible on the rig. The first capture gave
+  20 ms, about 6 mm at an assumed 300 mm/s. The offset depends on the battery's pose.
+- **Y override `y_bat` = −130 − 6 = −136 mm** for `vis_batt_x` frames (`85861e3`,
+  `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` in `src/pick_scheduler.cpp`).
+  It was −114 mm. The frame's own y is a fixed placeholder from the vision script.
+- **Scatter:** the chain's sd (about 10 ms) and the sensor's update steps together
+  give about 15–18 ms sd, about ±5 mm at 300 mm/s. An offset cannot remove it.
+- **Still inferred:** the 2.60 V trigger level comes from the data, not from the
+  Arduino sketch. A lower threshold adds a few ms.
 
 ## Incidents during the run
 
