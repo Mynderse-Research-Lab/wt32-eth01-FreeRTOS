@@ -405,31 +405,32 @@ static void test_separating_axis_matches_a_known_overlap(void) {
 }
 
 static void test_slow_approach_unless_a_later_part_is_at_risk(void) {
-  const auto slow = PickIntercept::approachPair(false);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 750.0f, slow.x_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, slow.theta_deg_s);
-  TEST_ASSERT_FALSE(slow.fast);
-  const auto fast = PickIntercept::approachPair(true);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 2000.0f, fast.x_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 270.0f, fast.theta_deg_s);
-  TEST_ASSERT_TRUE(fast.fast);
   TEST_ASSERT_TRUE(PickIntercept::laterPartNeedsFastApproach(1.0f, 1.2f, 0.5f));
   TEST_ASSERT_FALSE(PickIntercept::laterPartNeedsFastApproach(1.0f, 2.0f, 0.5f));
   TEST_ASSERT_FALSE(PickIntercept::laterPartNeedsFastApproach(1.0f, -0.1f, 0.5f));
 
-  auto m = limits(PickIntercept::kApproachSlowMmS, 3000.0f, PickIntercept::kZCriticalMmS);
-  m.theta_cap = PickIntercept::kApproachSlowDegS;
+  const float slow_mm_s = 750.0f;
+  const float z_cap_mm_s = 950.0f;
+  auto m = limits(slow_mm_s, 3000.0f, z_cap_mm_s);
+  m.theta_cap = 90.0f;
   const auto budget =
       PickIntercept::budgetPick(0.0f, 35.7f, 0.0f, 200.0f, 35.7f, 35.7f, 105.4f, 0.0f, m);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 750.0f, budget.approach_speed_mm_s);
-  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 950.0f, budget.descend_speed_mm_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, slow_mm_s, budget.approach_speed_mm_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, z_cap_mm_s, budget.descend_speed_mm_s);
   TEST_ASSERT_FLOAT_WITHIN(
-      1e-3f, PickIntercept::profileSeconds(105.4f - 35.7f, PickIntercept::kZCriticalMmS, m.accel, m.decel),
+      1e-3f, PickIntercept::profileSeconds(105.4f - 35.7f, z_cap_mm_s, m.accel, m.decel),
       budget.z_motion_s);
-  const float at_cap = PickIntercept::profileSeconds(200.0f, PickIntercept::kZCriticalMmS, m.accel, m.decel);
-  const float at_approach =
-      PickIntercept::profileSeconds(200.0f, PickIntercept::kApproachSlowMmS, m.accel, m.decel);
+  const float at_cap = PickIntercept::profileSeconds(200.0f, z_cap_mm_s, m.accel, m.decel);
+  const float at_approach = PickIntercept::profileSeconds(200.0f, slow_mm_s, m.accel, m.decel);
   TEST_ASSERT_TRUE(at_cap < at_approach);
+}
+
+static void test_arrival_uses_the_gantry_settle_tolerances(void) {
+  // Theta inside the drive's settled deadband (0.1 deg) has arrived.
+  TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.08f));
+  TEST_ASSERT_FALSE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.2f));
+  TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.9f, 20.0f, 90.0f, 10.0f, 20.0f, 90.0f));
+  TEST_ASSERT_FALSE(PickIntercept::jointsArrived(11.1f, 20.0f, 90.0f, 10.0f, 20.0f, 90.0f));
 }
 
 static void test_collision_envelope_blocks_deep_z_over_the_conveyor(void) {
@@ -795,10 +796,11 @@ static void test_development_profiles_grasp_from_the_object_top(void) {
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 114.0f, PickIntercept::devProfile(12)->length_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 25.0f, PickIntercept::devProfile(12)->height_from_belt_mm);
   TEST_ASSERT_EQUAL_STRING("powertool", PickIntercept::devProfile(13)->name);
-  TEST_ASSERT_TRUE(PickIntercept::devProfile(1)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
-  TEST_ASSERT_TRUE(PickIntercept::devProfile(2)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
-  TEST_ASSERT_TRUE(PickIntercept::devProfile(6)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
-  TEST_ASSERT_TRUE(PickIntercept::devProfile(7)->grasp_joint_z_mm > PickIntercept::kMeasuredStrokeMm);
+  const float bench_stroke_mm = 105.5f;
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(1)->grasp_joint_z_mm > bench_stroke_mm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(2)->grasp_joint_z_mm > bench_stroke_mm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(6)->grasp_joint_z_mm > bench_stroke_mm);
+  TEST_ASSERT_TRUE(PickIntercept::devProfile(7)->grasp_joint_z_mm > bench_stroke_mm);
   TEST_ASSERT_NULL(PickIntercept::devProfile(0));
   TEST_ASSERT_NULL(PickIntercept::devProfile(14));
   TEST_ASSERT_EQUAL_STRING("class", PickIntercept::classPickReject(14));
@@ -851,8 +853,7 @@ static void test_vision_contract_rejects_each_missing_field(void) {
 
 static void test_follower_pace_uses_the_post_bin_pose(void) {
   const auto cycle = PickIntercept::postBinCycle(100.0f, 200.0f, 90.0f, 10.0f, 35.7f, 90.8f, 90.0f,
-                                                 0.19f, 0.19f, 1000.0f, 3000.0f, 3000.0f, 1800.0f,
-                                                 1800.0f);
+                                                 0.19f, 0.19f, limits(750.0f));
   TEST_ASSERT_FLOAT_WITHIN(1e-3f,
                            cycle.grip_dwell_s + cycle.retract_s + cycle.transfer_s +
                                cycle.descend_s + cycle.open_dwell_s + cycle.bin_retract_s,
@@ -939,6 +940,7 @@ int main(void) {
   RUN_TEST(test_dropin_timeline_never_overlaps_a_finger_before_crossing);
   RUN_TEST(test_separating_axis_matches_a_known_overlap);
   RUN_TEST(test_slow_approach_unless_a_later_part_is_at_risk);
+  RUN_TEST(test_arrival_uses_the_gantry_settle_tolerances);
   RUN_TEST(test_collision_envelope_blocks_deep_z_over_the_conveyor);
   RUN_TEST(test_profile_end_matches_time_along);
   RUN_TEST(test_in_band_budget_matches_path_segment);

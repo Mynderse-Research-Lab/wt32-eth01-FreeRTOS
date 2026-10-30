@@ -94,7 +94,6 @@ struct PickConfig {
   float col_x_min = 0.0f;
   float z_belt = 0.0f;
   float z_safe = 0.0f;
-  float z_pick1 = 0.0f;
   float stroke = 0.0f;
   float jaw_offset = 0.0f;
   float x_off = 0.0f;
@@ -118,7 +117,7 @@ struct PickEval {
   Gantry::JointConfig pick;
   ZPlan z;
   float jaw_world_deg = 0.0f;
-  float approach_deg_s = PickIntercept::kApproachSlowDegS;
+  float approach_deg_s = 0.0f;
   double s_arrive_mm = 0.0;
   bool permanent = false;
   StrikePlan::Plan sim{};
@@ -205,7 +204,6 @@ static void visMark(uint32_t level) {
 
 static double s_cam_mark_mm = 0.0;
 static bool s_cam_marked = false;
-static float s_clamped_pick_z = -1.0f;
 
 // Dev belt clock (beltsim): synthetic conveyor frames at a fixed speed and the
 // real conveyor cadence. Real frames are ignored while it runs.
@@ -639,23 +637,6 @@ static uint32_t u32(float v) {
   return static_cast<uint32_t>(v + 0.5f);
 }
 
-static float clampPickZ(float configured, float stroke) {
-  if (configured <= stroke) {
-    return configured;
-  }
-  float z = PickIntercept::kBenchPickZMm;
-  if (z > stroke) {
-    z = stroke;
-  }
-  if (s_clamped_pick_z != configured) {
-    s_clamped_pick_z = configured;
-    ESP_LOGW(TAG, "cv_z_pick_mm %.1f is past the %.1f mm stroke; using %.1f",
-             static_cast<double>(configured), static_cast<double>(stroke),
-             static_cast<double>(z));
-  }
-  return z;
-}
-
 static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   const auto& c = Config::AppConfig::instance().data();
   PickConfig p;
@@ -666,26 +647,21 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   for (int i = 0; i < PickIntercept::kClassCount; ++i) {
     p.jaw_override_s[i] = static_cast<float>(c.pick_jaw_ms[i]) * 0.001f;
   }
-  // The X approach is the slow pair unless evaluate() raises it for a later
-  // part. Pick theta speed is pk_th_spd (live), capped by the axis maximum.
-  const auto slow = PickIntercept::approachPair(false);
-  p.limits.speed = slow.x_mm_s;
-  p.limits.accel = static_cast<float>(c.pick_accel_mm_s2 < 1 ? 1 : c.pick_accel_mm_s2);
-  p.limits.decel = p.limits.accel;
-  p.limits.theta_cap = c.pick_theta_speed_deg_s > 0.0f ? c.pick_theta_speed_deg_s : slow.theta_deg_s;
+  // Picks run on the global gantry motion profile (live). The X approach uses
+  // the default speed unless a later part needs the speed ceiling; theta is
+  // capped by the axis maximum.
+  p.limits.speed = static_cast<float>(c.gantry_default_speed_mm_per_s);
+  p.limits.fast_speed = static_cast<float>(c.gantry_path_max_speed_mm_per_s);
+  p.limits.accel = static_cast<float>(c.gantry_default_accel_mm_per_s2);
+  p.limits.decel = static_cast<float>(c.gantry_default_decel_mm_per_s2);
+  p.limits.theta_cap = static_cast<float>(c.gantry_default_speed_deg_per_s);
   if (c.axis_theta_max_speed_deg_per_s > 0.0f &&
       c.axis_theta_max_speed_deg_per_s < p.limits.theta_cap) {
     p.limits.theta_cap = c.axis_theta_max_speed_deg_per_s;
   }
-  p.limits.theta_accel = c.pick_theta_accel_deg_s2;
-  p.limits.theta_decel = c.pick_theta_accel_deg_s2;
-  // Pick Z runs at kZCriticalMmS, kept below the ballscrew whip ceiling; the
-  // whip ceiling itself only applies if it is ever configured lower.
-  p.limits.z_cap = PickIntercept::kZCriticalMmS;
-  const float z_whip = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
-  if (z_whip >= 1.0f && z_whip < p.limits.z_cap) {
-    p.limits.z_cap = z_whip;
-  }
+  p.limits.theta_accel = static_cast<float>(c.gantry_default_accel_deg_per_s2);
+  p.limits.theta_decel = static_cast<float>(c.gantry_default_decel_deg_per_s2);
+  p.limits.z_cap = static_cast<float>(AXIS_Z_PICK_SPEED_MM_PER_S);
   p.limits.theta_start_frac = 0.0f;
   p.valve_s = static_cast<float>(c.pick_valve_ms) * 0.001f;
   p.guard_s = static_cast<float>(c.pick_guard_ms) * 0.001f;
@@ -697,16 +673,15 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   p.dropin = c.pick_dropin_enable;
   p.col_x_min = c.gantry_conveyor_collision_x_min_mm;
   p.z_belt = c.gantry_conveyor_collision_z_min_mm;
-  p.z_safe = c.gantry_safe_z_height_mm;
+  p.z_safe = s_gantry->traverseClearanceZMm();
   // Z stroke measured by this session's calibration (switch-limited, so the
   // gripper just reaches the belt). Before calibration, picks are blocked
-  // anyway; the old bench measurement is the fallback.
-  const int32_t z_len_mm = s_gantry != nullptr ? s_gantry->zAxisLengthMm() : 0;
-  p.stroke = z_len_mm > 0 ? static_cast<float>(z_len_mm) : PickIntercept::kMeasuredStrokeMm;
+  // anyway; the joint limit is the fallback.
+  const int32_t z_len_mm = s_gantry->zAxisLengthMm();
+  p.stroke = z_len_mm > 0 ? static_cast<float>(z_len_mm) : lim.z_max;
   if (lim.z_max > 1.0f && lim.z_max < p.stroke) {
       p.stroke = lim.z_max;
   }
-  p.z_pick1 = clampPickZ(c.conveyor_z_pick_joint_mm, p.stroke);
   p.jaw_offset = c.pick_jaw_offset_deg;
   p.x_off = c.conveyor_x_across_to_gantry_x_offset_mm;
   p.cam_y = c.conveyor_y_cam_mm;
@@ -752,12 +727,13 @@ static StrikePlan::Plan strikePlan(const PickConfig& p, const Gantry::JointLimit
     in.theta_deg = theta_deg;
     in.belt_mm_s = belt_mm_s;
     in.z_belt_mm = p.z_belt;
-    in.z_ceiling_mm = lim.z_min + p.z_safe;
+    in.z_ceiling_mm = p.z_safe;
     in.z_min_mm = lim.z_min;
     in.z_grasp_mm = z_grasp_mm;
     in.pad_half_open_mm = 0.5 * p.fingers.open_mm;
     in.vz_mm_s = p.limits.z_cap;
     in.az_mm_s2 = p.limits.accel;
+    in.dz_mm_s2 = p.limits.decel;
     in.valve_delay_s = p.valve_on_s;
     // fin_spd_mm_s: 210 mm/s = SCHUNK KGG 100-80 datasheet, 40 mm per jaw in
     // 0.19 s at 6 bar (movement only; valve and hose time are not included).
@@ -922,8 +898,7 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
   const float joint_x = s_gantry != nullptr
                             ? s_gantry->inverseKinematics(Gantry::EndEffectorPose(tcp_x, 0.0f, 0.0f, 0.0f)).x
                             : tcp_x;
-  eval.pick = Gantry::JointConfig(
-      joint_x, eval.z.grip + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint);
+  eval.pick = Gantry::JointConfig(joint_x, eval.z.grip, jaw_joint);
 
   // Lane and side gap are kept for the log and the neighbour test.
   const PickIntercept::GripGeometry grip = PickIntercept::classifyClearance(
@@ -934,22 +909,13 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
   // The pre-position is the hover itself, inside the SAFE_Z band.
   eval.sim = strikePlan(p, lim, PickIntercept::beltCrossMm(cell), cell.height_mm, axes.theta_deg,
                         belt.speed_mm_s, eval.z.grip);
-  const float hover_z = eval.sim.ok ? static_cast<float>(eval.sim.z_hover_mm) : lim.z_min + p.z_safe;
-  eval.hover = Gantry::JointConfig(
-      joint_x, hover_z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM, jaw_joint);
+  const float hover_z = eval.sim.ok ? static_cast<float>(eval.sim.z_hover_mm) : p.z_safe;
+  eval.hover = Gantry::JointConfig(joint_x, hover_z, jaw_joint);
   eval.approach = eval.hover;
 
   PickIntercept::MotionLimits motion = p.limits;
   if (part.approach_fast && frozen_joint == nullptr) {
-      const auto fast = PickIntercept::approachPair(true);
-      motion.speed = fast.x_mm_s;
-      if (fast.theta_deg_s > motion.theta_cap) {
-          motion.theta_cap = fast.theta_deg_s;
-      }
-      const float axis_th = Config::AppConfig::instance().data().axis_theta_max_speed_deg_per_s;
-      if (axis_th > 0.0f && axis_th < motion.theta_cap) {
-          motion.theta_cap = axis_th;
-      }
+      motion.speed = motion.fast_speed;
   }
   const PickIntercept::MotionBudget budget =
       frozen_joint != nullptr
@@ -1111,8 +1077,7 @@ static void classifyFollowers(const PickConfig& p, const Gantry::JointLimits& li
   const PickIntercept::PostBinCycle cycle = PickIntercept::postBinCycle(
       eval.pick.z, eval.pick.x, eval.pick.theta, c.gantry_cal_x_park_mm, p.z_safe,
       c.gantry_cal_z_park_mm, bin_theta, p.close_s,
-      static_cast<float>(c.gantry_gripper_open_time_ms) * 0.001f, p.limits.z_cap, p.limits.accel,
-      p.limits.decel, p.limits.theta_accel, p.limits.theta_decel);
+      static_cast<float>(c.gantry_gripper_open_time_ms) * 0.001f, p.limits);
   const double s_now = PickIntercept::beltPositionMm(belt, now_us);
   const float ready_s = eval.strike.arrive_s + cycle.total_s;
   uint32_t drop_tokens[PickIntercept::kTrackerCap];
@@ -1130,10 +1095,10 @@ static void classifyFollowers(const PickConfig& p, const Gantry::JointLimits& li
     const float dth = jaw.ok ? jaw.joint_deg - bin_theta : 180.0f;
     const float dx = (p.x_off + other.x_across_mm) - c.gantry_cal_x_park_mm;
     const float slow_s = PickIntercept::approachSeconds(
-        dx, dth, PickIntercept::kApproachSlowMmS, PickIntercept::kApproachSlowDegS, p.limits.accel,
+        dx, dth, p.limits.speed, p.limits.theta_cap, p.limits.accel,
         p.limits.decel, p.limits.theta_accel, p.limits.theta_decel);
     const float fast_s = PickIntercept::approachSeconds(
-        dx, dth, PickIntercept::kApproachFastMmS, PickIntercept::kApproachFastDegS, p.limits.accel,
+        dx, dth, p.limits.fast_speed, p.limits.theta_cap, p.limits.accel,
         p.limits.decel, p.limits.theta_accel, p.limits.theta_decel);
     const PickIntercept::FollowerPace pace =
         PickIntercept::followerPace(ready_s, other_arrive, slow_s, fast_s);
@@ -1655,7 +1620,7 @@ static bool dropHeld(PickSchedulerTaskConfig* cfg, const PickConfig& p, float ap
   const auto& c = Config::AppConfig::instance().data();
   const Gantry::JointConfig here = cfg->gantry->getCurrentJointConfig();
   const float theta = c.pick_drop_any_theta ? here.theta : c.gantry_cal_theta_park_deg;
-  const Gantry::JointConfig drop_safe(c.gantry_cal_x_park_mm, c.gantry_safe_z_height_mm, theta);
+  const Gantry::JointConfig drop_safe(c.gantry_cal_x_park_mm, p.z_safe, theta);
   const Gantry::JointConfig drop(c.gantry_cal_x_park_mm, c.gantry_cal_z_park_mm, theta);
   if (PickIntercept::inConveyorCollision(drop.x, drop.z, c.gantry_conveyor_collision_x_min_mm,
                                          c.gantry_conveyor_collision_z_min_mm)) {
@@ -1955,8 +1920,9 @@ static void applyCellCommand(PickSchedulerTaskConfig *cfg, const CellCmd &cmd) {
       break;
     case kCmdPark: {
       const auto &cdata = Config::AppConfig::instance().data();
-      const Gantry::JointConfig park(cdata.gantry_cal_x_park_mm, cdata.gantry_safe_z_height_mm,
-                                    cdata.gantry_cal_theta_park_deg);
+      const Gantry::JointConfig park(cdata.gantry_cal_x_park_mm,
+                                     cfg->gantry->traverseClearanceZMm(),
+                                     cdata.gantry_cal_theta_park_deg);
       const float speed = static_cast<float>(cdata.gantry_default_speed_mm_per_s);
       const float accel = static_cast<float>(cdata.gantry_path_max_accel_mm_per_s2);
       const float decel = static_cast<float>(cdata.gantry_path_max_decel_mm_per_s2);
@@ -2009,7 +1975,7 @@ static void goToStaging(PickSchedulerTaskConfig* cfg) {
   } else if (theta > lim.theta_max) {
     theta = lim.theta_max;
   }
-  const Gantry::JointConfig stage(c.pick_stage_x_mm, c.gantry_safe_z_height_mm, theta);
+  const Gantry::JointConfig stage(c.pick_stage_x_mm, cfg->gantry->traverseClearanceZMm(), theta);
   const Gantry::JointConfig here = cfg->gantry->getCurrentJointConfig();
   if (PickIntercept::jointsArrived(here.x, here.z, here.theta, stage.x, stage.z, stage.theta)) {
     return;

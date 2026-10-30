@@ -13,8 +13,11 @@
 #ifndef PICK_INTERCEPT_H
 #define PICK_INTERCEPT_H
 
+#include "GantryControlPeriod.h"
+#include "GantryLinearPhases.h"
 #include "GantryPathProfile.h"
 #include "GantryRotaryPhases.h"
+#include "GantryUtils.h"
 
 #include <cmath>
 #include <cstdint>
@@ -26,36 +29,22 @@ namespace PickIntercept {
 // ---------------------------------------------------------------------------
 
 constexpr float kWaitS = 1.0e6f;
-constexpr float kTickS = 0.010f;
-constexpr int kPreloadTicks = 4;
-constexpr int kSettleTicks = 3;
-constexpr float kPreloadS = static_cast<float>(kPreloadTicks) * kTickS;
-constexpr float kSettleS = static_cast<float>(kSettleTicks) * kTickS;
+// Motion timing and tolerances belong to the Gantry; these only name them.
+constexpr float kTickS = Gantry::kLegacyTickS;
+constexpr float kPreloadS = Gantry::LinearPhase::kPreloadS;
+constexpr float kSettleS = Gantry::LinearPhase::kArrivalSettleS;
 constexpr float kThetaStartS = Gantry::RotaryPhase::kStartMaxS;
+constexpr float kArriveEpsMm = Gantry::Path::kArriveEpsMm;
+constexpr float kArriveEpsDeg = Gantry::Constants::EIP_THETA_SETTLED_TOL_DEG;
 constexpr int64_t kConveyorPeriodUs = 250000;
 constexpr int64_t kStaleAfterUs = 2 * kConveyorPeriodUs;
 constexpr int kFlatFramesForFallback = 3;
-// Z pick-stroke speed limit. Deliberately below the 1000 mm/s ballscrew whip
-// ceiling (AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S).
-constexpr float kZCriticalMmS = 950.0f;
 constexpr float kGraspHeightMaxMm = 25.4f;
-// Approach pairs. The slow pair is the normal command. The fast pair is used
-// only when a later tracked part would be missed. Z does not use these.
-// 2026-10-21: slow X and both theta speeds raised 1.5x (500/60/180 before);
-// fast X stays at the 2000 mm/s X clamp.
-constexpr float kApproachSlowMmS = 750.0f;
-constexpr float kApproachFastMmS = 2000.0f;
-constexpr float kApproachSlowDegS = 90.0f;
-constexpr float kApproachFastDegS = 270.0f;
-constexpr float kMeasuredStrokeMm = 105.5f;
-constexpr float kBenchPickZMm = 105.4f;
 constexpr float kLaneMarginMm = 4.0f;
 constexpr float kHoverClearanceMm = 3.0f;
 constexpr float kMinThetaSpanDeg = 180.0f;
 constexpr float kUpstreamMm = 1500.0f;
 constexpr float kDownstreamMm = 25.0f;
-constexpr float kArriveEpsMm = 1.0f;
-constexpr float kArriveEpsDeg = 0.05f;
 constexpr float kDegToRad = 0.0174532925f;
 constexpr int kClassCount = 10;
 constexpr int kUnusedPackCount = 3;
@@ -849,32 +838,20 @@ inline GripGeometry classifyClearance(float cell_deg, float jaw_deg, const CellG
   return g;
 }
 
+// Filled from the global gantry settings (pickConfig in pick_scheduler.cpp).
+// `speed` is the normal approach; `fast_speed` is used only when a later
+// tracked part would otherwise be missed. Z does not use either.
 struct MotionLimits {
-  float speed = 2000.0f;
-  float accel = 3000.0f;
-  float decel = 3000.0f;
-  float theta_cap = 360.0f;
-  float theta_accel = 1800.0f;
-  float theta_decel = 1800.0f;
-  float z_cap = kZCriticalMmS;
+  float speed = 0.0f;
+  float fast_speed = 0.0f;
+  float accel = 0.0f;
+  float decel = 0.0f;
+  float theta_cap = 0.0f;
+  float theta_accel = 0.0f;
+  float theta_decel = 0.0f;
+  float z_cap = 0.0f;
   float theta_start_frac = 0.0f;
 };
-
-struct ApproachPair {
-  float x_mm_s = kApproachSlowMmS;
-  float theta_deg_s = kApproachSlowDegS;
-  bool fast = false;
-};
-
-inline ApproachPair approachPair(bool later_part_at_risk) {
-  ApproachPair a;
-  if (later_part_at_risk) {
-    a.x_mm_s = kApproachFastMmS;
-    a.theta_deg_s = kApproachFastDegS;
-    a.fast = true;
-  }
-  return a;
-}
 
 // True when finishing this cycle at `free_after_slow_s` and then the later
 // part's own slow approach would pass that part's arrival.
@@ -901,14 +878,8 @@ inline float approachSeconds(float distance_mm, float delta_theta_deg, float x_m
   return t_x > t_th ? t_x : t_th;
 }
 
-inline float slowApproachSeconds(float distance_mm, float delta_theta_deg, float accel,
-                                 float decel, float theta_accel, float theta_decel) {
-  return approachSeconds(distance_mm, delta_theta_deg, kApproachSlowMmS, kApproachSlowDegS, accel,
-                         decel, theta_accel, theta_decel);
-}
-
 // Time from contact until the fingers are back in the SAFE_Z band at the bin,
-// ready for the next approach. Transfer uses the slow pair.
+// ready for the next approach. Transfer runs at the normal approach speed.
 struct PostBinCycle {
   float grip_dwell_s = 0.0f;
   float retract_s = 0.0f;
@@ -922,15 +893,16 @@ struct PostBinCycle {
 inline PostBinCycle postBinCycle(float pick_z_mm, float pick_x_mm, float pick_theta_deg,
                                  float bin_x_mm, float z_safe_mm, float bin_z_mm,
                                  float bin_theta_deg, float grip_dwell_s, float open_dwell_s,
-                                 float z_cap, float accel, float decel, float theta_accel,
-                                 float theta_decel) {
+                                 const MotionLimits& m) {
+  const float z_cap = m.z_cap;
+  const float accel = m.accel;
+  const float decel = m.decel;
   PostBinCycle cycle;
   cycle.grip_dwell_s = grip_dwell_s;
   cycle.retract_s = profileSeconds(std::fabs(pick_z_mm - z_safe_mm), z_cap, accel, decel) +
                     kPreloadS + kSettleS;
-  cycle.transfer_s = approachSeconds(bin_x_mm - pick_x_mm, bin_theta_deg - pick_theta_deg,
-                                     kApproachSlowMmS, kApproachSlowDegS, accel, decel, theta_accel,
-                                     theta_decel);
+  cycle.transfer_s = approachSeconds(bin_x_mm - pick_x_mm, bin_theta_deg - pick_theta_deg, m.speed,
+                                     m.theta_cap, accel, decel, m.theta_accel, m.theta_decel);
   cycle.descend_s = profileSeconds(std::fabs(bin_z_mm - z_safe_mm), z_cap, accel, decel) +
                     kPreloadS + kSettleS;
   cycle.open_dwell_s = open_dwell_s;
