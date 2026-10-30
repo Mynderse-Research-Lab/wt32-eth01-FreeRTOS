@@ -179,9 +179,19 @@ static std::atomic<int64_t> s_retract_done_us{0};
 // low once the MCP write returns. Logic analyser: GPIO17 vs MCP PA0 (DOUT0)
 // vs the valve coil gives SPI and relay delay. Off restores the backlight PWM.
 static std::atomic<bool> s_grip_mark{false};
+// Vision receipt marker (vismark), same pin: high when the CellNetL2 callback
+// stamps receipt_us, low when acceptDetect() takes the item. A Saleae on the
+// trigger sensor and GPIO17 gives sensor-to-receipt latency (cv_vis_ms).
+static std::atomic<bool> s_vis_mark{false};
 
 static void gripMark(uint32_t level) {
     if (s_grip_mark.load(std::memory_order_relaxed)) {
+        gpio_set_level(static_cast<gpio_num_t>(TFT_BLK_GPIO), level);
+    }
+}
+
+static void visMark(uint32_t level) {
+    if (s_vis_mark.load(std::memory_order_relaxed)) {
         gpio_set_level(static_cast<gpio_num_t>(TFT_BLK_GPIO), level);
     }
 }
@@ -1139,6 +1149,7 @@ static void classifyFollowers(const PickConfig& p, const Gantry::JointLimits& li
 }
 
 static void acceptDetect(const VisionItem& item) {
+  visMark(0);
   if (s_gantry == nullptr) {
     return;
   }
@@ -2084,6 +2095,7 @@ void pickSchedulerTask(void *param) {
       VisionItem item = {};
       item.detect = payload;
       item.receipt_us = esp_timer_get_time();
+      visMark(1);
       item.latency_us = -1;
       item.epoch = beltEpoch();
       item.capture_valid = (payload.reserved[0] & kVisionCaptureDispValid) != 0;
@@ -2379,14 +2391,17 @@ bool pickSchedulerTrace(const char* args, char* out, size_t out_len) {
     return true;
 }
 
-bool pickSchedulerGripMark(bool on, char* out, size_t out_len) {
+// gripmark and vismark share GPIO17 (the TFT backlight). The pin leaves the
+// backlight PWM when the first marker turns on and returns when both are off.
+static bool setMarker(std::atomic<bool>& flag, const std::atomic<bool>& other, bool on,
+                      const char* name, const char* meaning, char* out, size_t out_len) {
     if (out == nullptr || out_len == 0) {
         return false;
     }
     const gpio_num_t pin = static_cast<gpio_num_t>(TFT_BLK_GPIO);
     if (on) {
         // Routing the pin to plain GPIO detaches the backlight PWM; the UI's
-        // duty updates then go nowhere until gripmark off.
+        // duty updates then go nowhere until both markers are off.
         gpio_config_t io = {};
         io.pin_bit_mask = 1ULL << TFT_BLK_GPIO;
         io.mode = GPIO_MODE_OUTPUT;
@@ -2395,20 +2410,35 @@ bool pickSchedulerGripMark(bool on, char* out, size_t out_len) {
             return false;
         }
         gpio_set_level(pin, 0);
-        s_grip_mark.store(true, std::memory_order_release);
-        snprintf(out, out_len,
-                 "grip marker on GPIO%d (TFT backlight off): high from grip fire to MCP write done",
+        flag.store(true, std::memory_order_release);
+        snprintf(out, out_len, "%s marker on GPIO%d (TFT backlight off): %s%s", name,
+                 TFT_BLK_GPIO, meaning,
+                 other.load(std::memory_order_acquire) ? " (other marker also on)" : "");
+        return true;
+    }
+    flag.store(false, std::memory_order_release);
+    gpio_set_level(pin, 0);
+    if (other.load(std::memory_order_acquire)) {
+        snprintf(out, out_len, "%s marker off; GPIO%d stays a marker for the other one", name,
                  TFT_BLK_GPIO);
         return true;
     }
-    s_grip_mark.store(false, std::memory_order_release);
-    gpio_set_level(pin, 0);
     if (ledc_set_pin(TFT_BLK_GPIO, LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0) != ESP_OK) {
         snprintf(out, out_len, "marker off; backlight PWM not restored (reboot restores it)");
         return false;
     }
-    snprintf(out, out_len, "grip marker off; backlight PWM restored on GPIO%d", TFT_BLK_GPIO);
+    snprintf(out, out_len, "%s marker off; backlight PWM restored on GPIO%d", name, TFT_BLK_GPIO);
     return true;
+}
+
+bool pickSchedulerGripMark(bool on, char* out, size_t out_len) {
+    return setMarker(s_grip_mark, s_vis_mark, on, "grip",
+                     "high from grip fire to MCP write done", out, out_len);
+}
+
+bool pickSchedulerVisMark(bool on, char* out, size_t out_len) {
+    return setMarker(s_vis_mark, s_grip_mark, on, "vision",
+                     "high from frame receipt to acceptDetect", out, out_len);
 }
 
 // Belt locator (beltcal): after bring-up the operator jogs (`move`) to each belt

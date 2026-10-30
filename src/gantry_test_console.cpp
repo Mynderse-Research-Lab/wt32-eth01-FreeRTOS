@@ -3122,6 +3122,18 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
     }
+  } else if (strncmp(cmdLower, "vismark", 7) == 0) {
+    const char* arg = cmdLower + 7;
+    while (*arg == ' ') {
+      ++arg;
+    }
+    char line[160];
+    const bool on = strcmp(arg, "on") == 0;
+    if ((!on && strcmp(arg, "off") != 0) || !pickSchedulerVisMark(on, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", (on || strcmp(arg, "off") == 0) ? line : "usage: vismark on|off");
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strncmp(cmdLower, "gripmark", 8) == 0) {
     // Ahead of "grip", whose prefix test would also take "gripmark".
     const char* arg = cmdLower + 8;
@@ -3404,6 +3416,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  ztrace [raw <start> <count>]  - last strike's 1 kHz Z trace");
   ESP_LOGI(TAG, "  netcon                        - TCP console send counters");
   ESP_LOGI(TAG, "  gripmark on|off               - grip timing marker on GPIO17 (TFT backlight off)");
+  ESP_LOGI(TAG, "  vismark on|off                - vision frame receipt marker on GPIO17 (TFT backlight off)");
   ESP_LOGI(TAG, "  beltcal [near|far|cnvyr near|cnvyr far|batt|z|apply [center]] - belt/conveyor/battery X");
   ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 deg along +Y)");
   ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");

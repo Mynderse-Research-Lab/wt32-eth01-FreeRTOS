@@ -46,6 +46,10 @@ bool pickSchedulerTrace(const char* args, char* out, size_t out_len);
 // Grip timing marker on GPIO17 (borrows the TFT backlight): high from the
 // strike's grip fire until the MCP write returns. Off restores the backlight.
 bool pickSchedulerGripMark(bool on, char* out, size_t out_len);
+// Vision receipt marker on the same pin: high when a CellNetL2 vision frame is
+// stamped (receipt_us), low when the scheduler takes it. Off restores the
+// backlight unless gripmark is still on.
+bool pickSchedulerVisMark(bool on, char* out, size_t out_len);
 // Belt locator after bring-up, all in joint X (the `move` frame): "near" / "far"
 // save each belt edge (cv_belt_near_mm / cv_belt_far_mm), "cnvyr near" / "cnvyr
 // far" the conveyor frame edges (cv_cnv_near_mm / cv_cnv_far_mm), "batt" the
