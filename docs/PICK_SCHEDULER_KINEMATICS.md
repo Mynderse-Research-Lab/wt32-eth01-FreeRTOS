@@ -235,7 +235,7 @@ If the free path cannot capture both pads without the first pad shoving the cell
 
 The firmware strike is now `compute_strike_plan()` from `tools/sim/gantry_twin.py`, ported to [`include/strike_plan.h`](../include/strike_plan.h) and host-tested against the sim's own output (`test/host/test_strike_plan.cpp`, within 2 µs). It replaces the `CoordinatedGrasp` / early-Z / drop-in strike selection in `src/pick_scheduler.cpp` for every pick.
 
-- **Geometry and limits come from the firmware config, not the sim constants.** Belt Z is `col_z_min_mm`, the hover ceiling is the SAFE_Z band (`Gantry::traverseClearanceZMm()`), the jaw opening is `fin_open_mm`, Z speed is `AXIS_Z_PICK_SPEED_MM_PER_S`, Z accel and decel are `acc_mm_s2` and `dec_mm_s2`, the valve delay is `pk_von_ms`, and the grasp depth is the §2 rule from the vision height. Only the pneumatic jaw model keeps the sim's values (450 mm/s, \(\tau = 15\) ms).
+- **Geometry and limits come from the firmware config, not the sim constants.** Belt Z is `col_z_min_mm`, the hover ceiling is the SAFE_Z band (`Gantry::traverseClearanceZMm()`), the jaw opening is `fin_open_mm`, Z speed is `AXIS_Z_PICK_SPEED_FRACTION` of the stored ballscrew cap, Z accel and decel are `acc_mm_s2` and `dec_mm_s2`, the valve delay is `pk_von_ms`, and the grasp depth is the §2 rule from the vision height. Only the pneumatic jaw model keeps the sim's values (450 mm/s, \(\tau = 15\) ms).
 - **Belt and stroke (bench, 2026-10-13):** the Z+ limit switch is set so the gripper stops less than 1 mm above the belt. The belt is therefore at the measured Z stroke, about joint Z 109.1, so `col_z_min_mm` = 109.1 rather than the older 115. The pick stroke is the Z stroke measured in this session (`Gantry::zAxisLengthMm()`). Before calibration the Z joint limit is the fallback.
 - **Hover:** \(z_h = \max(z_{\min}, \min(z_{\mathrm{ceiling}}, z_{\mathrm{top}} - 6))\). The pre-position goes straight to the hover, which is inside the SAFE_Z band, so X and theta finish there.
 - **Execution:** Z is preloaded and held at the hover. Three esp_timer events fire at fixed offsets from the arrival time: release the plunge, fire the grip, and the zero-dwell `retractToSafeZ`. Every conveyor frame moves the arrival, and all three follow it (`retimeArrival`).
@@ -261,7 +261,7 @@ The time from second-pad contact until the next approach can start is the retrac
 
 Pre-position time is the later of the X trapezoid and the theta move (one tick plus the rotary preload, release-halt, and ack in `GantryRotaryPhases.h`), plus arrival settle.
 
-**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the Z pick-stroke limit \(v_z = 950\,\mathrm{mm/s}\) (`AXIS_Z_PICK_SPEED_MM_PER_S`), not at the approach speed. It sits below the ballscrew whip ceiling:
+**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the Z pick-stroke limit \(v_z = 950\,\mathrm{mm/s}\) (`AXIS_Z_PICK_SPEED_FRACTION` of the stored ballscrew cap), not at the approach speed. It sits below the ballscrew whip ceiling:
 
 \[
 v_{z,\mathrm{whip}} = 3000\,\mathrm{rpm} \times 20\,\mathrm{mm/rev} / 60 = 1000\,\mathrm{mm/s} \;>\; v_z = 950\,\mathrm{mm/s}

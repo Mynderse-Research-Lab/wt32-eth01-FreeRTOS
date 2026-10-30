@@ -787,7 +787,7 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   `acc_mm_s2`, `dec_mm_s2`, `th_acc_deg_s2`, and `th_dec_deg_s2`. A following part uses the speed
   ceiling `ceil_spd_mm_s` only when its own approach from the post-bin pose misses at the default
   speed and still arrives at the ceiling; otherwise that follower is skipped. Z descend, grip, and
-  retract use `AXIS_Z_PICK_SPEED_MM_PER_S` (950 mm/s, 95 % of the ballscrew cap). Safe Z comes from
+  retract use `AXIS_Z_PICK_SPEED_FRACTION` of the stored ballscrew cap (950 mm/s from `z_crit_rpm` and `z_lead_mm`). Safe Z comes from
   `Gantry::traverseClearanceZMm()`; tick, preload, settle, and arrival values come from
   `GantryControlPeriod.h`, `GantryLinearPhases.h`, `GantryRotaryPhases.h`, and
   `GantryPathProfile.h`. `cv_valve_ms` and `cv_jaw_aaa_ms`…`cv_jaw_32650_ms`
@@ -896,3 +896,33 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
 3. **Console commands:**
    - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, rollback status, and `Last Reset` (`esp_reset_reason`: `SW` after an OTA/restart, `PANIC` / `*_WDT` after a crash, `BROWNOUT` on a supply dip) with uptime. `status` prints the same reset reason and uptime, so an unexpected reboot is visible over the LAN console without the UART boot log.
 
+## 14. Runtime parameters
+
+At runtime the stored parameters are the only source. `main.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key no stored set holds, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
+
+### 14.1 Stored sets
+
+NVS keeps the last three modified parameter sets in rotating slots (`cfg_set_0`, `cfg_set_1`, `cfg_set_2`). Each set holds every parameter, a sequence number, the time of its newest change, and a hash. Boot loads the newest set that passes its hash, so a damaged set falls back to the one before it. Every parameter is frozen in a set, so flashing a build with different defaults does not move a stored value.
+
+| Step | What happens |
+|------|--------------|
+| `cfg <key> <value>` | Applies now and writes that one key to NVS. |
+| Next boot | Loads the newest set, overlays the changed keys, and writes the result as a new set if it differs. This runs before Class 1 opens. |
+| Boot confirmed | The merged keys are erased, after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. |
+
+A set is written at boot and not on every `cfg` change because of the Class 1 timeout. It is 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`), and a set write fills nearly half an NVS page, so roughly one write in two erases a flash sector. Both CPUs stall for the whole erase. The erase time on this module has not been measured; 4 kB sector erases on SPI NOR flash are typically tens of milliseconds, so treat that as a likely link drop until it is measured.
+
+An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
+
+### 14.2 Commands
+
+| Command | Effect |
+|---------|--------|
+| `cfg history` | Lists the sets, newest first, and the changes waiting for the next boot. |
+| `cfg restore <set>` | Loads that set at the next boot as a new set, and drops changes made since. |
+| `cfg factory` | The only way back to compile-time defaults. Applies them now, and they become a new set at the next boot. Older sets stay, so `cfg restore` can undo it. |
+| `cfg time [unix_s]` | Sets or shows the clock used to stamp sets. |
+
+The firmware has no time source of its own. Until `cfg time` sets the clock since power-up, a set records `no clock`. Sets are still ordered by sequence number.
+
+Boot never erases NVS. If NVS cannot be read, the firmware logs an error and runs on compile-time defaults without persisting, and `cfg factory` is then what erases NVS and starts a new set.
