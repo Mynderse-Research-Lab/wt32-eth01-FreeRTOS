@@ -264,7 +264,7 @@ static void test_first_boot_stores_a_full_set(void) {
 static void test_set_fits_and_key_hashes_are_unique(void) {
     size_t len = kConfigSetMaxBytes;
     std::vector<uint8_t> blob(len);
-    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set_0", blob.data(), len));
+    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", blob.data(), len));
     TEST_ASSERT_TRUE(len < 1900);
 
     ConfigSetHeader header;
@@ -309,19 +309,6 @@ static void test_unchanged_boot_keeps_the_sets(void) {
     TEST_ASSERT_EQUAL_UINT32(1, activeSeq());
 }
 
-static void test_three_sets_rotate_out_the_oldest(void) {
-    for (int value = 100; value <= 400; value += 100) {
-        set("spd_mm_s", value);
-        boot();
-    }
-    ConfigSetInfo sets[kConfigSetSlots];
-    TEST_ASSERT_EQUAL_INT(3, AppConfig::instance().configSets(sets));
-    TEST_ASSERT_EQUAL_UINT32(5, sets[0].seq);
-    TEST_ASSERT_EQUAL_UINT32(4, sets[1].seq);
-    TEST_ASSERT_EQUAL_UINT32(3, sets[2].seq);
-    TEST_ASSERT_EQUAL_INT(400, speed());
-}
-
 static void test_set_records_when_it_changed(void) {
     set("spd_mm_s", 321);
     int32_t stamped = 0;
@@ -335,25 +322,36 @@ static void test_set_records_when_it_changed(void) {
     TEST_ASSERT_FALSE(s_nvs->getInt32("cfg_chg_unix", stamped));
 }
 
-static void test_damaged_newest_set_falls_back(void) {
+// Only an operator command may replace it, so its contents stay recoverable.
+static void test_damaged_set_is_kept_until_an_operator_acts(void) {
     set("spd_mm_s", 111);
     boot();
-    set("spd_mm_s", 222);
-    boot();
-    TEST_ASSERT_EQUAL_UINT32(3, activeSeq());
-
-    // The newest set sits in slot 2 after three boots.
     size_t len = kConfigSetMaxBytes;
     std::vector<uint8_t> blob(len);
-    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set_2", blob.data(), len));
+    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", blob.data(), len));
     blob[len - 1] ^= 0xFF;
-    TEST_ASSERT_TRUE(s_nvs->setBlob("cfg_set_2", blob.data(), len));
+    TEST_ASSERT_TRUE(s_nvs->setBlob("cfg_set", blob.data(), len));
 
     boot();
-    TEST_ASSERT_EQUAL_INT(111, speed());
+    TEST_ASSERT_TRUE(AppConfig::instance().activeSet().damaged);
+    TEST_ASSERT_EQUAL_INT(50, speed());
+    std::vector<uint8_t> after(kConfigSetMaxBytes);
+    size_t after_len = after.size();
+    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", after.data(), after_len));
+    TEST_ASSERT_EQUAL_MEMORY(blob.data(), after.data(), len);
+
+    // A reloaded parameter file stays in keys until the set is replaced.
+    set("spd_mm_s", 222);
+    boot();
+    TEST_ASSERT_EQUAL_INT(222, speed());
+
+    TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
+    boot();
+    TEST_ASSERT_FALSE(AppConfig::instance().activeSet().damaged);
+    TEST_ASSERT_TRUE(AppConfig::instance().activeSet().valid);
+    TEST_ASSERT_EQUAL_INT(50, speed());
 }
 
-// Never compile-time defaults while any set is readable.
 static void test_older_keys_move_into_the_first_set(void) {
     powerOn();
     s_nvs->setInt32("spd_mm_s", 200);
@@ -408,31 +406,7 @@ static void test_failed_set_write_keeps_the_changed_keys(void) {
     TEST_ASSERT_EQUAL_UINT32(2, activeSeq());
 }
 
-static void test_restore_loads_the_requested_set_at_the_next_boot(void) {
-    set("spd_mm_s", 111);
-    boot();
-    set("spd_mm_s", 222);
-    boot();
-    set("spd_mm_s", 333);
-
-    TEST_ASSERT_FALSE(AppConfig::instance().restoreSet(0));
-    TEST_ASSERT_FALSE(AppConfig::instance().restoreSet(99));
-    TEST_ASSERT_TRUE(AppConfig::instance().restoreSet(2));
-    TEST_ASSERT_EQUAL_INT(333, speed());
-    TEST_ASSERT_EQUAL_INT(0, AppConfig::instance().pendingChanges());
-
-    boot();
-    TEST_ASSERT_EQUAL_INT(111, speed());
-    const ConfigSetInfo set_info = AppConfig::instance().activeSet();
-    TEST_ASSERT_EQUAL_UINT32(4, set_info.seq);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(ConfigSetSource::Restored),
-                          static_cast<int>(set_info.source));
-    boot();
-    TEST_ASSERT_EQUAL_INT(111, speed());
-    TEST_ASSERT_EQUAL_UINT32(4, activeSeq());
-}
-
-static void test_factory_reset_keeps_the_older_sets(void) {
+static void test_factory_reset_replaces_the_set_at_the_next_boot(void) {
     set("spd_mm_s", 750);
     boot();
     TEST_ASSERT_TRUE(AppConfig::instance().factoryReset());
@@ -440,15 +414,9 @@ static void test_factory_reset_keeps_the_older_sets(void) {
 
     boot();
     TEST_ASSERT_EQUAL_INT(50, speed());
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(ConfigSetSource::Defaults),
-                          static_cast<int>(AppConfig::instance().activeSet().source));
-    ConfigSetInfo sets[kConfigSetSlots];
-    TEST_ASSERT_EQUAL_INT(3, AppConfig::instance().configSets(sets));
-
-    // The set from before the reset can still come back.
-    TEST_ASSERT_TRUE(AppConfig::instance().restoreSet(2));
     boot();
-    TEST_ASSERT_EQUAL_INT(750, speed());
+    TEST_ASSERT_EQUAL_INT(50, speed());
+    TEST_ASSERT_EQUAL_UINT32(3, activeSeq());
 }
 
 static void test_change_after_factory_reset_lands_on_the_defaults(void) {
@@ -516,15 +484,13 @@ int main(void) {
     RUN_TEST(test_set_fits_and_key_hashes_are_unique);
     RUN_TEST(test_boot_merges_changes_into_a_new_set);
     RUN_TEST(test_unchanged_boot_keeps_the_sets);
-    RUN_TEST(test_three_sets_rotate_out_the_oldest);
     RUN_TEST(test_set_records_when_it_changed);
-    RUN_TEST(test_damaged_newest_set_falls_back);
+    RUN_TEST(test_damaged_set_is_kept_until_an_operator_acts);
     RUN_TEST(test_older_keys_move_into_the_first_set);
     RUN_TEST(test_crash_before_confirmation_loses_nothing);
     RUN_TEST(test_change_before_confirmation_survives_it);
     RUN_TEST(test_failed_set_write_keeps_the_changed_keys);
-    RUN_TEST(test_restore_loads_the_requested_set_at_the_next_boot);
-    RUN_TEST(test_factory_reset_keeps_the_older_sets);
+    RUN_TEST(test_factory_reset_replaces_the_set_at_the_next_boot);
     RUN_TEST(test_change_after_factory_reset_lands_on_the_defaults);
     RUN_TEST(test_gantry_runtime_params_follow_the_stored_values);
     RUN_TEST(test_schema_lookup);

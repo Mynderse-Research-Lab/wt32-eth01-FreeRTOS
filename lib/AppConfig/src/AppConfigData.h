@@ -145,6 +145,7 @@ struct AppConfigData {
     bool eth_use_static_ip = true;
     char eth_static_ip[32] = "192.168.1.100";
     char eth_static_gateway[32] = "192.168.1.5";
+    char ntp_server[32] = "10.42.0.1";
     char eth_static_netmask[32] = "255.255.255.0";
     int32_t eth_ip_wait_timeout_ms = 1500;
 

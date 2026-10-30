@@ -172,6 +172,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"eth_static",    "Use Static IP",     "Network",        ParamType::BOOL,   AccessLevel::END_USER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"eth_ip",        "Static IP",         "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
     {"eth_gw",        "Static Gateway",    "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
+    {"ntp_server",    "NTP Server",        "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
     {"eth_netmask",   "Static Netmask",    "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
     {"eth_timeout_ms","Link Timeout",      "Network",        ParamType::INT,    AccessLevel::END_USER, true,  100.0f, 60000.0f, 500.0f, "ms", {}},
 

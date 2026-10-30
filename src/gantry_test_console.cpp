@@ -56,7 +56,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
 
 extern "C" int getchar(void);
@@ -2556,17 +2555,6 @@ static const char *skipCmdSpace(const char *s) {
   return s;
 }
 
-static const char *setSourceLabel(Config::ConfigSetSource source) {
-  switch (source) {
-    case Config::ConfigSetSource::Restored:
-      return "restored";
-    case Config::ConfigSetSource::Defaults:
-      return "defaults";
-    default:
-      return "edited";
-  }
-}
-
 static void formatSetTime(uint32_t unix_s, char *out, size_t out_len) {
   if (unix_s == 0) {
     snprintf(out, out_len, "no clock");
@@ -2578,39 +2566,34 @@ static void formatSetTime(uint32_t unix_s, char *out, size_t out_len) {
   strftime(out, out_len, "%Y-%m-%dT%H:%M:%SZ", &utc);
 }
 
-static void printConfigHistory() {
+// One 'PARAM key=value' line per visible parameter, replayable as 'cfg key value'.
+// The toolbox page turns this into the downloadable parameter file. Passwords
+// stay out of it.
+static void printConfigExport() {
   auto &config = Config::AppConfig::instance();
-  Config::ConfigSetInfo sets[Config::kConfigSetSlots];
-  const int count = config.configSets(sets);
-  if (count == 0) {
-    ESP_LOGW(TAG, "No stored parameter sets");
+  const Config::ConfigSetInfo set = config.activeSet();
+  char when[24];
+  formatSetTime(set.unix_s, when, sizeof(when));
+  ESP_LOGI(TAG, "PARAM # gantry parameters, set #%lu, stored %s, %d change(s) since",
+           static_cast<unsigned long>(set.seq), when, config.pendingChanges());
+  for (const auto &schema : Config::getParamSchemas()) {
+    if (!config.isParamVisible(schema.key) || strcmp(schema.key, "con_pw") == 0 ||
+        strcmp(schema.key, "dev_pw") == 0) {
+      continue;
+    }
+    char value[40];
+    if (config.formatParamValue(schema.key, value, sizeof(value))) {
+      ESP_LOGI(TAG, "PARAM %s=%s", schema.key, value);
+    }
   }
-  for (int i = 0; i < count; ++i) {
-    char when[24];
-    formatSetTime(sets[i].unix_s, when, sizeof(when));
-    ESP_LOGI(TAG, "  set #%-6lu %-20s %-8s %u params%s",
-             static_cast<unsigned long>(sets[i].seq), when, setSourceLabel(sets[i].source),
-             static_cast<unsigned>(sets[i].param_count), i == 0 ? "  (loaded at boot)" : "");
-  }
-  ESP_LOGI(TAG, "%d change(s) since then; they merge into a new set at the next boot",
-           config.pendingChanges());
+  ESP_LOGI(TAG, "OK parameter export done");
 }
 
-static void runCfgTime(const char *rest) {
-  if (*rest != '\0') {
-    char *end = nullptr;
-    const unsigned long long unix_s = strtoull(rest, &end, 10);
-    if (end == rest || *end != '\0' || unix_s < 1700000000ull) {
-      ESP_LOGE(TAG, "Usage: cfg time <unix seconds>");
-      return;
-    }
-    const timeval now = {static_cast<time_t>(unix_s), 0};
-    settimeofday(&now, nullptr);
-  }
+static void printClock() {
   char when[24];
   const time_t now = time(nullptr);
   formatSetTime(now > 1700000000 ? static_cast<uint32_t>(now) : 0, when, sizeof(when));
-  ESP_LOGI(TAG, "OK clock %s", when);
+  ESP_LOGI(TAG, "Clock %s (NTP %s)", when, stored().ntp_server);
 }
 
 // A stored value is the only one in force, so a change reaches the Gantry now.
@@ -2651,8 +2634,8 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
                schema.units, schema.reboot_required ? "  (reboot)" : "");
     }
     ESP_LOGI(TAG, "cfg <key> [value] | cfg unlock <pw> | cfg lock | "
-                  "cfg passwd <old> <new> | cfg history | cfg restore <set> | "
-                  "cfg time [unix_s] | cfg factory | cfg reboot");
+                  "cfg passwd <old> <new> | cfg export | cfg time | "
+                  "cfg factory | cfg reboot");
     return;
   }
 
@@ -2685,22 +2668,12 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     ESP_LOGI(TAG, "OK developer mode locked");
     return;
   }
-  if (cmdTokenIs(token, "history") && *rest == '\0') {
-    printConfigHistory();
+  if (cmdTokenIs(token, "export") && *rest == '\0') {
+    printConfigExport();
     return;
   }
-  if (cmdTokenIs(token, "time")) {
-    runCfgTime(rest);
-    return;
-  }
-  if (cmdTokenIs(token, "restore")) {
-    char *end = nullptr;
-    const unsigned long seq = strtoul(rest, &end, 10);
-    if (end == rest || *end != '\0' || !config.restoreSet(static_cast<uint32_t>(seq))) {
-      ESP_LOGE(TAG, "Usage: cfg restore <set>, with a set from 'cfg history'");
-      return;
-    }
-    ESP_LOGI(TAG, "OK set #%lu loads at the next boot. Run 'cfg reboot'", seq);
+  if (cmdTokenIs(token, "time") && *rest == '\0') {
+    printClock();
     return;
   }
   if (cmdTokenIs(token, "factory") && *rest == '\0') {
@@ -2718,8 +2691,8 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     applyStoredToMotion(cfg, nullptr);
-    ESP_LOGI(TAG, "OK compile-time defaults applied; older sets kept ('cfg history'). "
-                  "Settings that need a restart take effect after 'cfg reboot'");
+    ESP_LOGI(TAG, "OK compile-time defaults applied; they replace the stored set at the next "
+                  "boot. Settings that need a restart take effect after 'cfg reboot'");
     return;
   }
   if (cmdTokenIs(token, "unlock")) {

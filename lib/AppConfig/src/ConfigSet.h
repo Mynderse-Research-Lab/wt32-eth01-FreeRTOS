@@ -1,9 +1,9 @@
 #ifndef APP_CONFIG_SET_H
 #define APP_CONFIG_SET_H
 
-// One complete parameter set as it sits in storage: a header, then one record
-// per parameter. A key is a 32-bit hash so a set stays near 1.7 kB; three of
-// them have to fit the 16 kB NVS partition. test_app_config rejects a hash
+// The complete parameter set as it sits in storage: a header, then one record
+// per parameter. A key is a 32-bit hash, which keeps the set near 1.7 kB in the
+// 16 kB NVS partition. test_app_config rejects a hash
 // collision. A key the firmware no longer has is skipped on read, and a key the
 // set lacks keeps its compile-time default.
 
@@ -14,22 +14,19 @@
 
 namespace Config {
 
-constexpr int kConfigSetSlots = 3;
 constexpr uint32_t kConfigSetMagic = 0x47434647u;
 constexpr uint8_t kConfigSetFormat = 1;
 constexpr size_t kConfigSetMaxBytes = 2048;
 
-enum class ConfigSetSource : uint8_t { Edited = 0, Restored = 1, Defaults = 2 };
-
 struct ConfigSetHeader {
     uint32_t magic = kConfigSetMagic;
-    uint32_t seq = 0;           // higher is newer
+    uint32_t seq = 0;           // counts the writes of this set
     uint32_t unix_s = 0;        // newest change in the set, 0 = clock was not set
     uint32_t payload_hash = 0;
     uint16_t payload_len = 0;
     uint16_t param_count = 0;
     uint8_t format = kConfigSetFormat;
-    uint8_t source = 0;
+    uint8_t reserved8 = 0;
     uint16_t reserved = 0;
 };
 

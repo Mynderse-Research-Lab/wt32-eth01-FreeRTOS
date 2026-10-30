@@ -39,6 +39,7 @@
 #include "CellNetL2.h"
 #include "EspEthL2Transport.h"
 #include "EthernetLink.h"
+#include "esp_netif_sntp.h"
 #include "pick_scheduler.h"
 #include "boot_log_ring.h"
 #include "Spi3Bus.h"
@@ -191,12 +192,15 @@ extern "C" void app_main(void) {
         Config::AppConfig::instance().init();
     }
     const Config::ConfigSetInfo active_set = Config::AppConfig::instance().activeSet();
-    if (active_set.valid) {
+    if (active_set.damaged) {
+        ESP_LOGE(TAG, "Stored parameter set is damaged: running on compile-time defaults. "
+                      "It is kept until 'cfg factory' or a parameter file reload");
+    } else if (active_set.valid) {
         ESP_LOGI(TAG, "Parameter set #%lu loaded (%u parameters)",
                  static_cast<unsigned long>(active_set.seq),
                  static_cast<unsigned>(active_set.param_count));
     } else {
-        ESP_LOGE(TAG, "No stored parameter set (NVS %s): running on compile-time defaults, "
+        ESP_LOGE(TAG, "Parameter set not stored (NVS %s): running on compile-time defaults, "
                       "nothing persists. 'cfg factory' erases NVS and starts over",
                  esp_err_to_name(nvs_err));
     }
@@ -576,6 +580,14 @@ extern "C" void app_main(void) {
 #else
         ESP_LOGW(TAG, "LAN8720 not up — net console skipped (no UART fallback)");
 #endif
+    }
+
+    if (ethUp) {
+        esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG(
+            Config::AppConfig::instance().data().ntp_server);
+        if (esp_netif_sntp_init(&sntp) != ESP_OK) {
+            ESP_LOGW(TAG, "NTP client did not start; stored sets will show no clock");
+        }
     }
 
     ESP_LOGI(TAG, "All tasks created successfully (ETH %s, L2 %s)",

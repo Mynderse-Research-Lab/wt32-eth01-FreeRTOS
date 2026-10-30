@@ -54,12 +54,11 @@ namespace Config {
 
 namespace {
 
-// Sets live in NVS under these keys. A change made at runtime stays a plain
-// per-key write until the next boot merges it into a set, so these keys never
-// collide with parameter keys.
-const char* const kSetKeys[kConfigSetSlots] = {"cfg_set_0", "cfg_set_1", "cfg_set_2"};
-// Set to load instead of the newest at the next boot; 0 = compile-time defaults.
-constexpr char kBaseRequestKey[] = "cfg_base_req";
+// The set lives in NVS under this key. A change made at runtime stays a plain
+// per-key write until the next boot merges it into the set.
+constexpr char kSetKey[] = "cfg_set";
+// Present when the next boot starts from compile-time defaults.
+constexpr char kRevertKey[] = "cfg_revert";
 constexpr char kChangedAtKey[] = "cfg_chg_unix";
 // Anything earlier means nobody has set the clock since power-up.
 constexpr std::time_t kClockValidAfter = 1700000000;
@@ -603,6 +602,12 @@ void AppConfig::loadDefaults() {
     std::strncpy(data_.eth_static_gateway, "192.168.1.5", sizeof(data_.eth_static_gateway) - 1);
 #endif
 
+#if defined(CONFIG_NTP_SERVER)
+    std::strncpy(data_.ntp_server, CONFIG_NTP_SERVER, sizeof(data_.ntp_server) - 1);
+#else
+    std::strncpy(data_.ntp_server, "10.42.0.1", sizeof(data_.ntp_server) - 1);
+#endif
+
 #if defined(CONFIG_ETH_STATIC_NETMASK)
     std::strncpy(data_.eth_static_netmask, CONFIG_ETH_STATIC_NETMASK, sizeof(data_.eth_static_netmask) - 1);
 #else
@@ -961,6 +966,7 @@ void AppConfig::readParams(IParamIo& io) {
     io.getBool("eth_static", data_.eth_use_static_ip);
     io.getString("eth_ip", data_.eth_static_ip, sizeof(data_.eth_static_ip));
     io.getString("eth_gw", data_.eth_static_gateway, sizeof(data_.eth_static_gateway));
+    io.getString("ntp_server", data_.ntp_server, sizeof(data_.ntp_server));
     io.getString("eth_netmask", data_.eth_static_netmask, sizeof(data_.eth_static_netmask));
     io.getInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
 
@@ -1128,6 +1134,7 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setBool("eth_static", data_.eth_use_static_ip);
     io.setString("eth_ip", data_.eth_static_ip);
     io.setString("eth_gw", data_.eth_static_gateway);
+    io.setString("ntp_server", data_.ntp_server);
     io.setString("eth_netmask", data_.eth_static_netmask);
     io.setInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
 
@@ -1176,44 +1183,15 @@ bool AppConfig::load() {
     if (!storage_) return false;
     loadDefaults();
 
-    // Newest first, so a damaged set falls back to the one before it.
-    std::vector<uint8_t> blobs[kConfigSetSlots];
-    int order[kConfigSetSlots];
-    int valid = 0;
-    for (int slot = 0; slot < kConfigSetSlots; ++slot) {
-        set_valid_[slot] = false;
-        blobs[slot].resize(kConfigSetMaxBytes);
-        size_t len = blobs[slot].size();
-        if (storage_->getBlob(kSetKeys[slot], blobs[slot].data(), len) &&
-            parseConfigSet(blobs[slot].data(), len, sets_[slot])) {
-            set_valid_[slot] = true;
-            int at = valid++;
-            while (at > 0 && sets_[order[at - 1]].seq < sets_[slot].seq) {
-                order[at] = order[at - 1];
-                --at;
-            }
-            order[at] = slot;
-        }
-    }
-
-    int32_t requested = -1;
-    const bool revert = storage_->getInt32(kBaseRequestKey, requested);
-    ConfigSetSource source = ConfigSetSource::Edited;
-    int base = valid > 0 ? order[0] : -1;
-    if (revert && requested == 0) {
-        base = -1;
-        source = ConfigSetSource::Defaults;
-    } else if (revert) {
-        for (int i = 0; i < valid; ++i) {
-            if (sets_[order[i]].seq == static_cast<uint32_t>(requested)) {
-                base = order[i];
-                source = ConfigSetSource::Restored;
-            }
-        }
-    }
-    if (base >= 0) {
-        ConfigSetReader reader(blobs[base].data() + sizeof(ConfigSetHeader),
-                               sets_[base].payload_len);
+    std::vector<uint8_t> blob(kConfigSetMaxBytes);
+    size_t len = blob.size();
+    const bool stored = storage_->getBlob(kSetKey, blob.data(), len);
+    set_valid_ = stored && parseConfigSet(blob.data(), len, set_);
+    int32_t revert = 0;
+    storage_->getInt32(kRevertKey, revert);
+    set_damaged_ = stored && !set_valid_ && revert == 0;
+    if (set_valid_ && revert == 0) {
+        ConfigSetReader reader(blob.data() + sizeof(ConfigSetHeader), set_.payload_len);
         readParams(reader);
     }
 
@@ -1226,57 +1204,42 @@ bool AppConfig::load() {
         merged_ = found.take();
         changed_.clear();
     }
+    if (set_damaged_) {
+        set_saved_ = false;
+        return true;
+    }
 
     ConfigSetWriter writer;
     writeParams(writer);
     const std::vector<uint8_t>& payload = writer.payload();
     const bool unchanged =
-        valid > 0 && sets_[order[0]].payload_len == payload.size() &&
-        std::memcmp(blobs[order[0]].data() + sizeof(ConfigSetHeader), payload.data(),
-                    payload.size()) == 0;
+        set_valid_ && set_.payload_len == payload.size() &&
+        std::memcmp(blob.data() + sizeof(ConfigSetHeader), payload.data(), payload.size()) == 0;
     const uint32_t stamp = changed_at != 0 ? static_cast<uint32_t>(changed_at) : clockUnixSeconds();
-    set_saved_ = unchanged || writeSet(payload, writer.count(), source, stamp);
+    set_saved_ = unchanged || writeSet(payload, writer.count(), stamp);
     return true;
 }
 
 bool AppConfig::writeSet(const std::vector<uint8_t>& payload, uint16_t param_count,
-                         ConfigSetSource source, uint32_t unix_s) {
+                         uint32_t unix_s) {
     if (sizeof(ConfigSetHeader) + payload.size() > kConfigSetMaxBytes) {
         return false;
     }
-    // An empty or damaged slot first, then the oldest set.
-    int slot = -1;
-    uint32_t newest = 0;
-    for (int i = 0; i < kConfigSetSlots; ++i) {
-        if (!set_valid_[i]) {
-            if (slot < 0 || set_valid_[slot]) {
-                slot = i;
-            }
-            continue;
-        }
-        if (sets_[i].seq > newest) {
-            newest = sets_[i].seq;
-        }
-        if (slot < 0 || (set_valid_[slot] && sets_[i].seq < sets_[slot].seq)) {
-            slot = i;
-        }
-    }
     ConfigSetHeader header;
-    header.seq = newest + 1;
+    header.seq = set_valid_ ? set_.seq + 1 : 1;
     header.unix_s = unix_s;
     header.payload_len = static_cast<uint16_t>(payload.size());
     header.payload_hash = configHash(payload.data(), payload.size());
     header.param_count = param_count;
-    header.source = static_cast<uint8_t>(source);
 
     std::vector<uint8_t> blob(sizeof(header) + payload.size());
     std::memcpy(blob.data(), &header, sizeof(header));
     std::memcpy(blob.data() + sizeof(header), payload.data(), payload.size());
-    if (!storage_->setBlob(kSetKeys[slot], blob.data(), blob.size()) || !storage_->commit()) {
+    if (!storage_->setBlob(kSetKey, blob.data(), blob.size()) || !storage_->commit()) {
         return false;
     }
-    sets_[slot] = header;
-    set_valid_[slot] = true;
+    set_ = header;
+    set_valid_ = true;
     return true;
 }
 
@@ -1287,7 +1250,7 @@ void AppConfig::commitPending() {
         storage_->eraseKey(key.c_str());
     }
     merged_.clear();
-    storage_->eraseKey(kBaseRequestKey);
+    storage_->eraseKey(kRevertKey);
     if (changed_.empty()) {
         storage_->eraseKey(kChangedAtKey);
     }
@@ -1306,66 +1269,41 @@ void AppConfig::recordChange(const char* key) {
     storage_->commit();
 }
 
-bool AppConfig::requestBase(uint32_t seq) {
-    if (!storage_) return false;
-    std::lock_guard<std::mutex> lock(change_mutex_);
-    for (const std::string& key : merged_) {
-        storage_->eraseKey(key.c_str());
-    }
-    for (const std::string& key : changed_) {
-        storage_->eraseKey(key.c_str());
-    }
-    merged_.clear();
-    changed_.clear();
-    storage_->eraseKey(kChangedAtKey);
-    const uint32_t now = clockUnixSeconds();
-    if (now != 0) {
-        storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
-    }
-    return storage_->setInt32(kBaseRequestKey, static_cast<int32_t>(seq)) && storage_->commit();
-}
-
 bool AppConfig::factoryReset() {
-    if (!requestBase(0)) return false;
+    if (!storage_) return false;
+    {
+        std::lock_guard<std::mutex> lock(change_mutex_);
+        for (const std::string& key : merged_) {
+            storage_->eraseKey(key.c_str());
+        }
+        for (const std::string& key : changed_) {
+            storage_->eraseKey(key.c_str());
+        }
+        merged_.clear();
+        changed_.clear();
+        storage_->eraseKey(kChangedAtKey);
+        const uint32_t now = clockUnixSeconds();
+        if (now != 0) {
+            storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
+        }
+        if (!storage_->setInt32(kRevertKey, 1) || !storage_->commit()) {
+            return false;
+        }
+    }
     loadDefaults();
     return true;
 }
 
-bool AppConfig::restoreSet(uint32_t seq) {
-    if (seq == 0) return false;
-    for (int i = 0; i < kConfigSetSlots; ++i) {
-        if (set_valid_[i] && sets_[i].seq == seq) {
-            return requestBase(seq);
-        }
-    }
-    return false;
-}
-
-int AppConfig::configSets(ConfigSetInfo out[kConfigSetSlots]) const {
-    int count = 0;
-    for (int slot = 0; slot < kConfigSetSlots; ++slot) {
-        if (!set_valid_[slot]) {
-            continue;
-        }
-        ConfigSetInfo info;
-        info.valid = true;
-        info.seq = sets_[slot].seq;
-        info.unix_s = sets_[slot].unix_s;
-        info.param_count = sets_[slot].param_count;
-        info.source = static_cast<ConfigSetSource>(sets_[slot].source);
-        int at = count++;
-        while (at > 0 && out[at - 1].seq < info.seq) {
-            out[at] = out[at - 1];
-            --at;
-        }
-        out[at] = info;
-    }
-    return count;
-}
-
 ConfigSetInfo AppConfig::activeSet() const {
-    ConfigSetInfo sets[kConfigSetSlots];
-    return configSets(sets) > 0 ? sets[0] : ConfigSetInfo{};
+    ConfigSetInfo info;
+    info.valid = set_valid_;
+    info.damaged = set_damaged_;
+    if (set_valid_) {
+        info.seq = set_.seq;
+        info.unix_s = set_.unix_s;
+        info.param_count = set_.param_count;
+    }
+    return info;
 }
 
 int AppConfig::pendingChanges() const {
@@ -1754,6 +1692,7 @@ bool AppConfig::getParamString(const char* key, char* out_buf, size_t max_len) c
     const char* src = nullptr;
     if (std::strcmp(key, "eth_ip") == 0) src = data_.eth_static_ip;
     else if (std::strcmp(key, "eth_gw") == 0) src = data_.eth_static_gateway;
+    else if (std::strcmp(key, "ntp_server") == 0) src = data_.ntp_server;
     else if (std::strcmp(key, "eth_netmask") == 0) src = data_.eth_static_netmask;
     else if (std::strcmp(key, "con_pw") == 0) src = data_.console_tcp_password;
     else if (std::strcmp(key, "eip_ip_x") == 0) src = data_.eip_target_ip_x;
@@ -1780,6 +1719,7 @@ bool AppConfig::setParamString(const char* key, const char* val, bool& out_reboo
     size_t cap = 0;
     if (std::strcmp(key, "eth_ip") == 0) { dst = data_.eth_static_ip; cap = sizeof(data_.eth_static_ip); }
     else if (std::strcmp(key, "eth_gw") == 0) { dst = data_.eth_static_gateway; cap = sizeof(data_.eth_static_gateway); }
+    else if (std::strcmp(key, "ntp_server") == 0) { dst = data_.ntp_server; cap = sizeof(data_.ntp_server); }
     else if (std::strcmp(key, "eth_netmask") == 0) { dst = data_.eth_static_netmask; cap = sizeof(data_.eth_static_netmask); }
     else if (std::strcmp(key, "con_pw") == 0) { dst = data_.console_tcp_password; cap = sizeof(data_.console_tcp_password); }
     else if (std::strcmp(key, "eip_ip_x") == 0) { dst = data_.eip_target_ip_x; cap = sizeof(data_.eip_target_ip_x); }
