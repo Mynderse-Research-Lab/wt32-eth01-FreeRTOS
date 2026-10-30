@@ -50,6 +50,8 @@ constexpr int64_t kRetractDeadlineUs = 30000;
 constexpr int64_t kRetractDoneUs = 2000000;
 // Deepest Z reached this far short of the grasp depth is logged.
 constexpr float kDepthShortWarnMm = 0.3f;
+// Offsets are whole ms, so any bottom dwell they ask for is at least 1 ms.
+constexpr double kDwellWarnS = 0.0005;
 // A held cell (disabled / uncalibrated) repeats its reason at most this often.
 constexpr int64_t kHoldLogEveryUs = 5000000;
 // MCP23S17 health: the gripper and field I/O go through it, and a silent chip
@@ -987,7 +989,7 @@ static void formatEval(const PickEval& eval, char* out, size_t n) {
                 "%s jaw %.1f arrive %.3fs prepos %.3fs z_start %.3fs z_done %.3fs grip %.3fs "
                 "slack %.3fs window %.3fs xgap %.1fmm side %.1fmm contact %.0fmm/s vz %.0f "
                 "joint %.1f %.1f %.1f %s | sim z/close/retract %.1f/%.1f/%.1f ms "
-                "nom %.1f/%.1f/%.1f hover %.1f%s",
+                "dwell %.0f ms nom %.1f/%.1f/%.1f hover %.1f%s",
                 PickIntercept::clearanceName(eval.strike.mode),
                 static_cast<double>(eval.jaw_world_deg),
                 static_cast<double>(eval.strike.arrive_s),
@@ -1006,8 +1008,9 @@ static void formatEval(const PickEval& eval, char* out, size_t n) {
                 static_cast<double>(eval.pick.x), static_cast<double>(eval.pick.z),
                 static_cast<double>(eval.pick.theta), eval.reason,
                 eval.sim.t_z_s * 1000.0, eval.sim.t_close_s * 1000.0, eval.sim.t_retract_s * 1000.0,
-                eval.sim.t_z_nominal_s * 1000.0, eval.sim.t_close_nominal_s * 1000.0,
-                eval.sim.t_retract_nominal_s * 1000.0, eval.sim.z_hover_mm,
+                eval.sim.dwell_s * 1000.0, eval.sim.t_z_nominal_s * 1000.0,
+                eval.sim.t_close_nominal_s * 1000.0, eval.sim.t_retract_nominal_s * 1000.0,
+                eval.sim.z_hover_mm,
                 eval.sim.clamped ? " clamped" : "");
 }
 
@@ -1789,6 +1792,13 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
     char plan[512];
     formatEval(eval, plan, sizeof(plan));
     ESP_LOGI(TAG, "pick item=%lu %s", static_cast<unsigned long>(part.item_id), plan);
+    if (std::fabs(eval.sim.dwell_s) >= kDwellWarnS) {
+        ESP_LOGW(TAG, "pick item=%lu bottom dwell %+.0f ms (pk_off_retract %d - pk_off_plunge %d)%s",
+                 static_cast<unsigned long>(part.item_id), eval.sim.dwell_s * 1000.0,
+                 p.off_retract_ms, p.off_plunge_ms,
+                 eval.sim.dwell_s > 0.0 ? ": Z waits at depth"
+                                        : ": not applied, the retract waits for the plunge end");
+    }
     classifyFollowers(p, lim, part, eval, copyBelt(), esp_timer_get_time());
 
     if (!retract(cfg, p) ||

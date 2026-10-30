@@ -80,6 +80,7 @@ struct Plan {
     double t_z_s = 0.0;              // release the held Z plunge
     double t_close_s = 0.0;          // fire the grip valve
     double t_retract_s = 0.0;        // start the Z retract
+    double dwell_s = 0.0;            // bottom dwell the offsets ask for, signed
 };
 
 /// Time-optimal trapezoid/triangle duration (physics_engines.trapezoid_duration).
@@ -214,6 +215,9 @@ inline Plan plan(const Inputs& in) {
 
     // Full plunge (no mid-air reversal) and plunge < close < retract.
     const double retract_floor = p.t_z_s + p.tau_plunge_s;
+    // Retract minus plunge end as asked: retract offset minus plunge offset.
+    // A negative dwell is not applied; the floor below holds the retract.
+    p.dwell_s = p.t_retract_s - retract_floor;
     if (p.t_retract_s < retract_floor) {
         p.t_retract_s = retract_floor;
         clamped = true;

@@ -118,6 +118,28 @@ static void test_early_retract_is_clamped_to_full_plunge(void) {
     ASSERT_NEAR(kTolS, p.t_z_s + p.tau_plunge_s, p.t_retract_s);
 }
 
+// The plan reports the bottom dwell the offsets ask for, either sign.
+static void test_reports_requested_dwell(void) {
+    const StrikePlan::Inputs base = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
+    ASSERT_NEAR(kTolS, 0.0, StrikePlan::plan(base).dwell_s);
+
+    StrikePlan::Inputs in = base;
+    in.retract_offset_ms = 30;
+    ASSERT_NEAR(kTolS, 0.030, StrikePlan::plan(in).dwell_s);
+
+    // An earlier plunge with the retract unchanged leaves Z waiting at depth.
+    in = base;
+    in.plunge_offset_ms = -20;
+    ASSERT_NEAR(kTolS, 0.020, StrikePlan::plan(in).dwell_s);
+
+    // A later plunge asks for the retract first; it is held to the plunge end.
+    in = base;
+    in.plunge_offset_ms = 20;
+    const StrikePlan::Plan p = StrikePlan::plan(in);
+    ASSERT_NEAR(kTolS, -0.020, p.dwell_s);
+    ASSERT_NEAR(kTolS, p.t_z_s + p.tau_plunge_s, p.t_retract_s);
+}
+
 static void test_close_stays_between_plunge_and_retract(void) {
     StrikePlan::Inputs in = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
     in.close_offset_ms = -100;
@@ -172,6 +194,7 @@ int main(void) {
     RUN_TEST(test_matches_sim_power_tool_makita_1000_at_30);
     RUN_TEST(test_each_offset_moves_only_its_event);
     RUN_TEST(test_early_retract_is_clamped_to_full_plunge);
+    RUN_TEST(test_reports_requested_dwell);
     RUN_TEST(test_close_stays_between_plunge_and_retract);
     RUN_TEST(test_offsets_are_limited_to_100_ms);
     RUN_TEST(test_hover_clears_tall_object_and_respects_ceiling);
