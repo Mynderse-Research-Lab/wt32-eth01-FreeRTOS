@@ -898,31 +898,34 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
 
 ## 14. Runtime parameters
 
-At runtime the stored parameters are the only source. `main.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key no stored set holds, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
+At runtime the stored parameters are the only source. `main.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key the stored set does not hold, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
 
-### 14.1 Stored sets
+### 14.1 Stored set
 
-NVS keeps the last three modified parameter sets in rotating slots (`cfg_set_0`, `cfg_set_1`, `cfg_set_2`). Each set holds every parameter, a sequence number, the time of its newest change, and a hash. Boot loads the newest set that passes its hash, so a damaged set falls back to the one before it. Every parameter is frozen in a set, so flashing a build with different defaults does not move a stored value.
+NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time of its newest change, and a hash. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
 
 | Step | What happens |
 |------|--------------|
 | `cfg <key> <value>` | Applies now and writes that one key to NVS. |
-| Next boot | Loads the newest set, overlays the changed keys, and writes the result as a new set if it differs. This runs before Class 1 opens. |
+| Next boot | Loads the set, overlays the changed keys, and stores the result if it differs. This runs before Class 1 opens. |
 | Boot confirmed | The merged keys are erased, after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. |
 
-A set is written at boot and not on every `cfg` change because of the Class 1 timeout. It is 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`), and a set write fills nearly half an NVS page, so roughly one write in two erases a flash sector. Both CPUs stall for the whole erase. The erase time on this module has not been measured; 4 kB sector erases on SPI NOR flash are typically tens of milliseconds, so treat that as a likely link drop until it is measured.
+The set is written at boot and not on every `cfg` change because of the Class 1 timeout. It is 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`), and a set write fills nearly half an NVS page, so roughly one write in two erases a flash sector. Both CPUs stall for the whole erase. The erase time on this module has not been measured; 4 kB sector erases on SPI NOR flash are typically tens of milliseconds, so treat that as a likely link drop until it is measured.
 
 An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
 
-### 14.2 Commands
+### 14.2 Commands and the parameter file
 
 | Command | Effect |
 |---------|--------|
-| `cfg history` | Lists the sets, newest first, and the changes waiting for the next boot. |
-| `cfg restore <set>` | Loads that set at the next boot as a new set, and drops changes made since. |
-| `cfg factory` | The only way back to compile-time defaults. Applies them now, and they become a new set at the next boot. Older sets stay, so `cfg restore` can undo it. |
-| `cfg time [unix_s]` | Sets or shows the clock used to stamp sets. |
+| `cfg export` | Prints every visible parameter as `PARAM key=value`. Passwords are left out. |
+| `cfg factory` | The only way back to compile-time defaults. Applies them now, and they replace the stored set at the next boot. Download the file first. |
+| `cfg time` | Shows the clock and the NTP server. |
 
-The firmware has no time source of its own. Until `cfg time` sets the clock since power-up, a set records `no clock`. Sets are still ordered by sequence number.
+The toolbox page has a **Download parameters** button that saves `cfg export` as a text file. To reload one, send each line as `cfg <key> <value>`, then reboot to merge it.
 
-Boot never erases NVS. If NVS cannot be read, the firmware logs an error and runs on compile-time defaults without persisting, and `cfg factory` is then what erases NVS and starts a new set.
+Boot never erases NVS or replaces a damaged set. If NVS cannot be read, or the set fails its hash, the firmware logs an error and runs on compile-time defaults. `cfg factory` is what erases unreadable NVS or replaces a damaged set.
+
+### 14.3 Time
+
+The supervisor runs chrony and serves NTP on `10.42.0.1`. The gantry syncs from it through the `ntp_server` key (reboot to apply), and vision uses it too. Motion and picks run on `esp_timer`, so a clock step does not affect them; the clock only stamps the stored set.

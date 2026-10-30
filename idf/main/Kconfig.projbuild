@@ -402,6 +402,13 @@ menu "LAN8720 plant Ethernet"
         default "192.168.1.100"
         depends on ETH_USE_STATIC_IP
 
+    config NTP_SERVER
+        string "NTP server (supervisor)"
+        default "10.42.0.1"
+        help
+            Runtime key ntp_server, reboot to apply. The clock only stamps the
+            stored parameter set; motion runs on esp_timer.
+
     config ETH_STATIC_GATEWAY
         string "LAN8720 static gateway"
         default "192.168.1.5"
