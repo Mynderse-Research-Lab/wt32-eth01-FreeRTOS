@@ -782,12 +782,16 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0). `pk_drop_any_th` skips the turn
   to `geom_cal_th_deg` at the bin.
 - Belt clock: gantry X is vision \(x\) plus `cv_x_off_mm` (default 245, the 95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is not read by the intercept, so changing the width does not move the camera. A repeated conveyor sequence is ignored. The epoch restarts on a sequence jump above 32, a displacement step backward of more than 5 mm, or a conveyor-time step backward of more than 500 ms. Three unchanged displacement samples while speed stays positive integrate the previous speed. Stale is gantry receipt age above `kStaleAfterUs` (500 ms, two configured 250 ms periods), not the live gap between conveyor timestamps.
-- The active approach stays at 500 mm/s and 60 deg/s. Transfer to the bin uses that same slow pair. A following part uses 2000 mm/s and
-  180 deg/s only when its own approach from the post-bin pose misses at the slow pair and
-  still arrives at the fast pair; otherwise that follower is skipped. Z descend, grip, and
-  retract use the ballscrew cap (1000 mm/s). `cv_valve_ms` and `cv_jaw_aaa_ms`…`cv_jaw_32650_ms`
-  (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable. Accel stays
-  `pk_acc_mm_s2` 3000 and `pk_th_acc` 1800.
+- The pick scheduler has no motion parameters of its own. The active approach and the transfer
+  to the bin run on the global profile: `spd_mm_s`, `th_spd_deg_s` (capped by `th_spd_max`),
+  `acc_mm_s2`, `dec_mm_s2`, `th_acc_deg_s2`, and `th_dec_deg_s2`. A following part uses the speed
+  ceiling `ceil_spd_mm_s` only when its own approach from the post-bin pose misses at the default
+  speed and still arrives at the ceiling; otherwise that follower is skipped. Z descend, grip, and
+  retract use `AXIS_Z_PICK_SPEED_MM_PER_S` (950 mm/s, 95 % of the ballscrew cap). Safe Z comes from
+  `Gantry::traverseClearanceZMm()`; tick, preload, settle, and arrival values come from
+  `GantryControlPeriod.h`, `GantryLinearPhases.h`, `GantryRotaryPhases.h`, and
+  `GantryPathProfile.h`. `cv_valve_ms` and `cv_jaw_aaa_ms`…`cv_jaw_32650_ms`
+  (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable.
 
 For real-time protocol specs, see
 [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).

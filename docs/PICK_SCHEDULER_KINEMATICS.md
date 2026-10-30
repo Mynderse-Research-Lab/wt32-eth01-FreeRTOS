@@ -235,8 +235,8 @@ If the free path cannot capture both pads without the first pad shoving the cell
 
 The firmware strike is now `compute_strike_plan()` from `tools/sim/gantry_twin.py`, ported to [`include/strike_plan.h`](../include/strike_plan.h) and host-tested against the sim's own output (`test/host/test_strike_plan.cpp`, within 2 µs). It replaces the `CoordinatedGrasp` / early-Z / drop-in strike selection in `src/pick_scheduler.cpp` for every pick.
 
-- **Geometry and limits come from the firmware config, not the sim constants.** Belt Z is `col_z_min_mm`, the hover ceiling is the SAFE_Z band (`z_min + gantry_safe_z_height_mm`), the jaw opening is `fin_open_mm`, Z speed is the critical-speed cap, Z accel is `pk_acc_mm_s2`, the valve delay is `pk_von_ms`, and the grasp depth is the §2 rule from the vision height. Only the pneumatic jaw model keeps the sim's values (450 mm/s, \(\tau = 15\) ms).
-- **Belt and stroke (bench, 2026-10-13):** the Z+ limit switch is set so the gripper stops less than 1 mm above the belt. The belt is therefore at the measured Z stroke, about joint Z 109.1, so `col_z_min_mm` = 109.1 rather than the older 115. The pick stroke is the Z stroke measured in this session (`Gantry::zAxisLengthMm()`), not the old 105.5 mm `kMeasuredStrokeMm`, which is only used before calibration.
+- **Geometry and limits come from the firmware config, not the sim constants.** Belt Z is `col_z_min_mm`, the hover ceiling is the SAFE_Z band (`Gantry::traverseClearanceZMm()`), the jaw opening is `fin_open_mm`, Z speed is `AXIS_Z_PICK_SPEED_MM_PER_S`, Z accel and decel are `acc_mm_s2` and `dec_mm_s2`, the valve delay is `pk_von_ms`, and the grasp depth is the §2 rule from the vision height. Only the pneumatic jaw model keeps the sim's values (450 mm/s, \(\tau = 15\) ms).
+- **Belt and stroke (bench, 2026-10-13):** the Z+ limit switch is set so the gripper stops less than 1 mm above the belt. The belt is therefore at the measured Z stroke, about joint Z 109.1, so `col_z_min_mm` = 109.1 rather than the older 115. The pick stroke is the Z stroke measured in this session (`Gantry::zAxisLengthMm()`). Before calibration the Z joint limit is the fallback.
 - **Hover:** \(z_h = \max(z_{\min}, \min(z_{\mathrm{ceiling}}, z_{\mathrm{top}} - 6))\). The pre-position goes straight to the hover, which is inside the SAFE_Z band, so X and theta finish there.
 - **Execution:** Z is preloaded and held at the hover. Three esp_timer events fire at fixed offsets from the arrival time: release the plunge, fire the grip, and the zero-dwell `retractToSafeZ`. Every conveyor frame moves the arrival, and all three follow it (`retimeArrival`).
 - **Feasibility:** a pick is late when the plunge would start before the pre-position, preload and settle are done. Wider than the jaws, a non-positive size, or a grasp above the hover is permanent.
@@ -251,19 +251,20 @@ A linear move of length \(D\) at speed \(V\) and accel/decel \(A, B\) is the tra
 
 Once a vision pose is accepted the jaws stay open and the move uses two speeds.
 
-**Approach.** At SAFE_Z, X and theta move to the pick pose. The part being picked uses the slow pair. The fast pair is that part's own approach, chosen earlier from the post-bin pose, and only when the slow pair would miss it:
+**Approach.** At SAFE_Z, X and theta move to the pick pose on the global motion profile. The pick scheduler has no motion parameters of its own. The part being picked uses the default speed. The speed ceiling is that part's own approach, chosen earlier from the post-bin pose, and only when the default speed would miss it:
 
-- Slow: **500 mm/s** and **60 deg/s**.
-- Fast: **2000 mm/s** and **180 deg/s**.
+- Default: `spd_mm_s`.
+- Ceiling: `ceil_spd_mm_s`.
+- Both: theta at `th_spd_deg_s` (capped by `th_spd_max`), ramps from `acc_mm_s2`, `dec_mm_s2`, `th_acc_deg_s2` and `th_dec_deg_s2`.
 
-The time from second-pad contact until the next approach can start is the retract to SAFE_Z, slow transfer to the bin, bin descent, open dwell, and retract back to SAFE_Z. A following part is skipped when neither pair reaches it from that pose. Close timing uses the 8 ms valve-on (`pk_von_ms`), the 190 ms full close, and the signed trims, all defaulting so the paper profile is unchanged. `pk_dropin` does not select this schedule. A stored `pk_spd_mm_s` of 2000 or `pk_th_spd` of 360 is the old single profile and is not the approach command. Accel stays `pk_acc_mm_s2` and `pk_th_acc`.
+The time from second-pad contact until the next approach can start is the retract to SAFE_Z, the transfer to the bin at the default speed, bin descent, open dwell, and retract back to SAFE_Z. A following part is skipped when neither speed reaches it from that pose. Close timing uses the 8 ms valve-on (`pk_von_ms`), the 190 ms full close, and the signed trims, all defaulting so the paper profile is unchanged. `pk_dropin` does not select this schedule.
 
 Pre-position time is the later of the X trapezoid and the theta move (one tick plus the rotary preload, release-halt, and ack in `GantryRotaryPhases.h`), plus arrival settle.
 
-**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the Z pick-stroke limit \(v_z = 800\,\mathrm{mm/s}\) (`PickIntercept::kZCriticalMmS`), not at the approach speed. It sits below the ballscrew whip ceiling:
+**Z stroke.** Descend to \(z_g\), close, and retract to the SAFE_Z ceiling at the Z pick-stroke limit \(v_z = 950\,\mathrm{mm/s}\) (`AXIS_Z_PICK_SPEED_MM_PER_S`), not at the approach speed. It sits below the ballscrew whip ceiling:
 
 \[
-v_{z,\mathrm{whip}} = 3000\,\mathrm{rpm} \times 20\,\mathrm{mm/rev} / 60 = 1000\,\mathrm{mm/s} \;>\; v_z = 800\,\mathrm{mm/s}
+v_{z,\mathrm{whip}} = 3000\,\mathrm{rpm} \times 20\,\mathrm{mm/rev} / 60 = 1000\,\mathrm{mm/s} \;>\; v_z = 950\,\mathrm{mm/s}
 \]
 
 `3000 rpm` is the SCHUNK Beta 80-SRS whip ceiling (`AXIS_Z_CRITICAL_RPM`), not a motor nameplate. The pick stroke is Z-only, so it is commanded at \(v_z\). `retractToSafeZ` is called with \(v_z\). Do not raise the whip ceiling. If the live Kinetix velocity limit is below 1000 mm/s, raise that drive limit up to \(v_z\) and no further.
