@@ -52,6 +52,13 @@ constexpr int64_t kRetractDoneUs = 2000000;
 constexpr float kDepthShortWarnMm = 0.3f;
 // Offsets are whole ms, so any bottom dwell they ask for is at least 1 ms.
 constexpr double kDwellWarnS = 0.0005;
+// vis_batt_x trigger sensor (Sharp GP2Y0A21) along the belt from the camera
+// optical centre, measured on the rig 2026-10-30.
+constexpr float kTriggerSensorYFromCamMm = -130.0f;
+// The 9V centre is still this far upstream when the sensor fires: it passes
+// the sensor a median 20 ms after the trigger (Saleae, n = 55, belt ~300 mm/s
+// assumed). It depends on the battery's pose on the belt.
+constexpr float kTriggerCentreBehindMm = 6.0f;
 // A held cell (disabled / uncalibrated) repeats its reason at most this often.
 constexpr int64_t kHoldLogEveryUs = 5000000;
 // MCP23S17 health: the gripper and field I/O go through it, and a silent chip
@@ -1166,8 +1173,9 @@ static void acceptDetect(const VisionItem& item) {
     const float tcp_x =
         s_gantry->forwardKinematics(Gantry::JointConfig(c.test_battery_x_mm, 0.0f, 0.0f)).x;
     detect.x_across_mm = tcp_x - c.conveyor_x_across_to_gantry_x_offset_mm;
-    // Trigger sensor is 114 mm upstream of camera (-711 mm), so battery is at -114 mm relative to camera.
-    detect.y_bat_mm = -114.0f;
+    // The frame's own y is a fixed placeholder: the cell centre is just
+    // upstream of the trigger sensor when it fires.
+    detect.y_bat_mm = kTriggerSensorYFromCamMm - kTriggerCentreBehindMm;
   }
   const Gantry::JointLimits lim = s_gantry->getJointLimits();
   const PickConfig p = pickConfig(lim);
