@@ -212,6 +212,55 @@ are commanding the plunge deeper by the measured lag, or drive tuning.
   - Deepest point 118.30–118.31 mm at 364.5–368.2 ms; moving up again at 375.5–378.2 ms.
 - **Result: 5 of 5 picked** with `pk_off_close` = 0 (operator observation).
 
+## Trigger sensor to gantry latency (2026-10-29)
+
+Until the vision ML model is ready, a 1D trigger stands in for the camera. A Sharp IR
+distance sensor at Y = −825 mm feeds an Arduino Uno on the vision PC. The Arduino
+prints `BATTERY_IN` on USB serial, and `~/vision_sim/simulate-vision-output.py`
+(mode 2) then sends one fixed VISION_DETECT frame. The frame carries no capture
+displacement, so the gantry back-dates the capture from receipt by `cv_vis_ms`.
+
+**Setup**
+- Firmware `d3f75f4`: `vismark on` drives GPIO17 high when the CellNetL2 vision
+  callback stamps `receipt_us` and low when `acceptDetect()` takes the item.
+- Saleae on the same capture: `SHARP_A0` (the sensor's analog output at the Arduino,
+  1.5625 MS/s) and `Wt32_IO17`. `UNO_TX` stayed at 0 for the whole capture, so the
+  probe was not on a live TX line; the Arduino's decision moment is not in the data.
+- 58 triggers over 237 s, belt about 300 mm/s. Every frame reached the gantry
+  (58 GPIO17 pulses for 58 frames seen by the supervisor). Files: `scratch/digital.csv`,
+  `scratch/analog.csv`.
+
+**Sensor signal:** resting at 2.52 V (noise to 2.54 V). As a battery arrives it dips to
+about 2.25–2.35 V, beginning about 130 ms before receipt (the edge entering the beam),
+then rises to 2.85–2.90 V. The detection is on that rise.
+
+**Latency, sensor rise to receipt.** The Arduino's threshold is not known (the sketch is
+not available), so the table gives the latency for each candidate threshold:
+
+| Threshold | Crossed before receipt | Mean | Median | sd | p90 | Max |
+|---|---|---|---|---|---|---|
+| 2.55 V | 58/58 | 20.2 ms | 11.8 | 14.1 | 44.3 | 53.6 |
+| 2.60 V | 58/58 | 17.0 ms | 10.8 | 12.0 | 39.6 | 47.1 |
+| 2.65 V | 58/58 | 13.8 ms | 9.7 | 9.5 | 32.8 | 35.8 |
+| 2.70 V | 53/58 | 9.1 ms | 7.3 | 7.3 | 18.1 | 34.8 |
+
+- **The threshold is between about 2.55 and 2.65 V.** At 2.70 V, five receipts came
+  before the signal crossed, which cannot happen if 2.70 V were the trigger level.
+  Below 2.55 V the resting noise would trigger.
+- **`cv_vis_ms` set to 17 ms** (was 40). It fits any threshold in that band within
+  ±3 ms, about ±1 mm at 300 mm/s. The old 40 ms back-dated each trigger by about 23 ms,
+  about 7 mm of belt.
+- **Jitter:** sd 10–14 ms and p90 33–44 ms, so trigger-to-trigger scatter is about
+  ±3–4 mm at 300 mm/s and up to about 15 mm for the worst trip. Not separated yet: the
+  Python loop (plotting was on) and the sensor's update steps are the likely sources.
+- **Queue wait:** GPIO17 high time (receipt to `acceptDetect`) was 0.2–49.7 ms, mean
+  23.3 ms, which matches the scheduler's 50 ms idle loop. The arrival is computed from
+  `receipt_us`, so the wait does not shift it.
+- **Open:**
+  - A working probe on Uno pin D1 would give the exact decision moment.
+  - The battery's position at `BATTERY_IN` (the leading-edge offset for the −114 mm
+    Y override) still needs a static hand-push measurement.
+
 ## Incidents during the run
 
 1. **Console stall:** a 1 kHz sampler that ran through a 13 s hover wait stalled the
