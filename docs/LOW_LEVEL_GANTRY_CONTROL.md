@@ -228,6 +228,19 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 - **Pose:** `(x, y, z, theta)` with `pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`.
 - MQTT / pick planner owns belt **Y**; Gantry does not.
 
+### 2.1 Option-A World Frame vs Vision Frame vs Joint Angle
+- **Option-A World Frame:** Right-handed: +X across belt, +Y downstream, +Z down. Angle \(\theta_{\mathrm{world}} = 0^\circ\) is oriented along **New +X** (across belt); \(\theta_{\mathrm{world}} = +90^\circ\) is oriented along **+Y** (downstream).
+- **Vision Wire Frame (\(\theta_{\mathrm{vis}}\)):** Camera broadcasts orientation with \(0^\circ\) along downstream +Y, rotating positive toward \(-X\).
+- **Transformation to World Frame:**
+  \[
+  \theta_{\mathrm{world}} = \mathrm{halfTurnDeg}(90.0^\circ + \theta_{\mathrm{vis}})
+  \]
+- **Theta Joint Command (\(\theta_{\mathrm{joint}}\)):** Physical rotary joint \(0^\circ\) aligns finger pads with the gantry beam (+Y), requiring:
+  \[
+  \theta_{\mathrm{joint}} = 90.0^\circ - \theta_{\mathrm{world}} = -\theta_{\mathrm{vis}}
+  \]
+  Folded into \([-90^\circ, 90^\circ)\) to select the minimum linear rotary travel.
+
 **Two datums (do not conflate):**
 
 | Mechanism | Who sets it | Effect |
@@ -713,6 +726,7 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `pickplan <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and the rejection reason |
 | `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° along +Y) at the current belt speed: `P` pick, `S` skip |
 | `pickcal valve \| jaw \| jawoff \| cam` | Valve delay, per-class jaw time (`0` = derived from jaw travel), jaw offset, camera mark/apply |
+| `ztrace [raw <start> <count>]` | Inspect last strike's 1 kHz vertical Z trace. Summary prints timing, overshoot, settle. Raw dumps are throttled (20 ms pace) to prevent socket overflow |
 
 MCP diagnostic commands (`mcp_*`) are **legacy leftovers** — MCP hardware is
 removed; do not rely on them.
@@ -904,6 +918,11 @@ At runtime the stored parameters are the only source. `main.cpp` and the console
 
 NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time it was saved, and a hash. Boot loads it. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
 
+Key motion and pick parameters stored in `AppConfig`:
+- **Pick Approach Motion:** `pk_app_spd_mm_s` (default 750 mm/s) and `pk_app_th_deg_s` (default 90 °/s) are dedicated pick approach parameters decoupled from manual jog defaults (`spd_mm_s = 50`, `th_spd_deg_s = 30`).
+- **Conveyor & Trigger Geometry:** `cv_trig_y_mm` (default -130.0 mm upstream of camera) and `cv_trig_off_mm` (default 6.0 mm trigger center behind lead edge) replace hardcoded macros.
+- **EtherNet/IP Targets:** Drive IP addresses for X, Z, and Theta (`eip_x_ip`, `eip_z_ip`, `eip_th_ip`) are stored in NVS, allowing runtime network reconfiguration without re-flashing.
+
 | Step | What happens |
 |------|--------------|
 | `cfg <key> <value>` | Applies now, in RAM only. Nothing touches flash, so this cannot affect Class 1. |
@@ -911,6 +930,8 @@ NVS keeps one complete parameter set under `cfg_set`, with a write counter, the 
 | Reboot or power loss | Changes not saved are gone. `cfg reboot` refuses while any are unsaved (`cfg reboot discard` overrides), and `tools/supervisor_ota.py` refuses to flash (`--discard-unsaved` overrides). `status` shows the count. |
 
 Saving is an explicit step because of the Class 1 timeout, 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`). A flash sector erase stalls both CPUs for its whole duration. On 2026-10-30, two of 151 per-key `cfg` writes took 81–82 ms instead of about 8 ms, one with a measured 63.9 ms Class 1 gap, and both dropped the link. The erase is inferred from the timing and the NVS entry count, not observed directly.
+
+The close runs one axis at a time, with a helper keeping O→T running to the axes still open, because each drive needs its ForwardClose before its connection times out. A Kinetix drops its explicit TCP session while Class 1 carries on over UDP (W5500 `Sn_SR` reads `CLOSE_WAIT`), so the close rebuilds that session first. Why the drive drops it has not been established. A log line `Class 1 close not clean` names any axis that refused.
 
 Per-key values left by older firmware merge into the set at boot, before Class 1 opens, and are erased after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
 

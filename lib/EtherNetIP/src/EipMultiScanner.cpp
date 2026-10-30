@@ -631,15 +631,33 @@ size_t EipMultiScanner::flushDeferredLogs() {
   return flushed;
 }
 
-void EipMultiScanner::closeAxis(size_t i) {
+// A Kinetix sends FIN on its explicit session while Class 1 carries on over UDP
+// (W5500 Sn_SR reads CLOSE_WAIT), so that session may be gone by the time a
+// ForwardClose needs it.
+bool EipMultiScanner::restoreExplicitSession(size_t i) {
+  AxisRuntime& ax = axes_[i];
+  if (ax.tcp == nullptr || ax.session == nullptr) return false;
+  if (ax.session->isRegistered() && ax.tcp->isConnected()) return true;
+  ax.tcp->close();
+  if (!ax.tcp->connect(ax.config.target_ip, EipSession::kDefaultPort)) return false;
+  return ax.session->registerSession();
+}
+
+bool EipMultiScanner::gracefulCloseAxis(size_t i) {
+  if (i >= axis_count_ || axes_[i].state != AxisState::kConnected) return false;
+  const bool session_ok = restoreExplicitSession(i);
+  // closeAxis stops this axis's O->T, so the ForwardClose has to follow at once.
+  const bool closed = closeAxis(i);
+  return session_ok && closed;
+}
+
+bool EipMultiScanner::closeAxis(size_t i) {
   AxisRuntime& ax = axes_[i];
   const bool had_connection = (ax.state == AxisState::kConnected) ||
                               (ax.open_reply.ot_connection_id != 0);
   // kIdle first so any concurrent keepalive/drain stops touching this axis.
   ax.state = AxisState::kIdle;
-  if (had_connection) {
-    (void)forwardCloseAxis(i);
-  }
+  const bool closed = !had_connection || forwardCloseAxis(i);
   if (ax.session && ax.session->isRegistered()) {
     (void)ax.session->unregisterSession();
   }
@@ -653,6 +671,7 @@ void EipMultiScanner::closeAxis(size_t i) {
   ax.first_to_logged = false;
   ax.ot_cmd_scratch.clear();
   ax.ot_frame_scratch.clear();
+  return closed;
 }
 
 void EipMultiScanner::prepareAxisReopen(size_t i) {

@@ -668,6 +668,30 @@ ScannerConfig makeThetaConfig() {
 }
 #endif
 
+// Each axis must see its ForwardClose before its connection times out, so a
+// helper keeps O->T running to the axes still open while the others close.
+void closeClass1InOrder(EipMultiScanner& scanner) {
+  KeepaliveCtx ka{&scanner, true, false, kReopenKeepalivePeriodMs};
+  ka.drain = true;
+  TaskHandle_t handle = nullptr;
+  const bool helper = xTaskCreatePinnedToCore(keepaliveTask, "EipCloseKA", kKeepaliveStack, &ka,
+                                              kKeepalivePriority, &handle,
+                                              kScannerCore) == pdPASS;
+  uint32_t refused = 0;
+  for (size_t i = 0; i < scanner.axisCount(); ++i) {
+    if (!scanner.gracefulCloseAxis(i)) {
+      refused |= 1u << i;
+    }
+  }
+  if (helper) {
+    stopKeepalive(ka);
+  }
+  if (!helper || refused != 0) {
+    ESP_LOGW(TAG, "Class 1 close not clean (helper=%d, refused axis mask=0x%lX)", helper ? 1 : 0,
+             static_cast<unsigned long>(refused));
+  }
+}
+
 // Requested by pauseClass1(); the multi-axis task closes Class 1 and waits here.
 std::atomic<bool> g_class1_pause_request{false};
 std::atomic<bool> g_class1_paused{false};
@@ -955,6 +979,7 @@ void multiAxisTask(void* arg) {
 
     if (planned_close) {
       setLogScanner(nullptr);
+      closeClass1InOrder(scanner);
       (void)scanner.flushDeferredLogs();
       scanner.disconnect();
       continue;

@@ -47,8 +47,18 @@ class FakeTcpClient : public eip::ITcpClient {
     return false;
   }
 
-  bool connect(const char*, uint16_t) override { return true; }
+  // The peer sends FIN: the socket stops being usable until reconnected.
+  void dropByPeer() { connected_ = false; }
+  void failConnect() { fail_connect_ = true; }
+  size_t connects() const { return connects_; }
+
+  bool connect(const char*, uint16_t) override {
+    ++connects_;
+    connected_ = !fail_connect_;
+    return connected_;
+  }
   ssize_t send(const uint8_t* data, size_t len) override {
+    if (!connected_) return -1;
     last_sent_.assign(data, data + len);
     all_sent_.push_back(last_sent_);
     return static_cast<ssize_t>(len);
@@ -61,13 +71,16 @@ class FakeTcpClient : public eip::ITcpClient {
     return static_cast<ssize_t>(n);
   }
   void close() override {}
-  bool isConnected() const override { return true; }
+  bool isConnected() const override { return connected_; }
 
  private:
   std::vector<Bytes> responses_;
   size_t response_index_ = 0;
   Bytes last_sent_;
   std::vector<Bytes> all_sent_;
+  bool connected_ = true;
+  bool fail_connect_ = false;
+  size_t connects_ = 0;
 };
 
 class FakeUdpEndpoint : public eip::IUdpEndpoint {
@@ -522,6 +535,73 @@ static void test_parse_class1_input_cpf_view(void) {
   }
   TEST_ASSERT_FALSE(eip::parseClass1InputCpfView(
       addr_only.data(), addr_only.size(), cid_view, assy, assy_len, false));
+}
+
+// One axis opened through a fake drive, for the planned-close tests.
+struct ClosableAxis {
+  FakeTcpClient tcp;
+  FakeUdpEndpoint udp;
+  eip::EipProcessImage image;
+  std::unique_ptr<eip::EipMultiScanner> scanner;
+
+  ClosableAxis() {
+    const uint32_t handle = 0x11110001;
+    tcp.enqueueResponse(makeRegisterSessionReply(handle));
+    tcp.enqueueResponse(
+        makeSendRRDataEncapReply(handle, makeForwardOpenMrReply(makeSampleForwardOpenReply())));
+    eip::ScannerConfig cfg = makeTestScannerConfig();
+    cfg.target_ip = "192.168.1.20";
+    eip::MultiAxisSlot slots[1] = {{cfg, &image}};
+    eip::ITcpClient* tcps[1] = {&tcp};
+    scanner = std::make_unique<eip::EipMultiScanner>(tcps, 1, udp, slots);
+    TEST_ASSERT_TRUE(scanner->openAxis(0));
+    TEST_ASSERT_TRUE(scanner->bindSharedUdp());
+    TEST_ASSERT_TRUE(scanner->axisConnected(0));
+  }
+};
+
+static void test_graceful_close_uses_a_live_session(void) {
+  ClosableAxis ax;
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x11110001, makeForwardCloseMrReply()));
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(1, ax.tcp.connects());
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+static void test_graceful_close_rebuilds_a_dropped_session(void) {
+  ClosableAxis ax;
+  const size_t sent_before = ax.tcp.allSent().size();
+  ax.tcp.dropByPeer();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(2, ax.tcp.connects());
+  // The new session's RegisterSession, then the ForwardClose on it.
+  TEST_ASSERT_TRUE(ax.tcp.allSent().size() >= sent_before + 2);
+  const Bytes& close_frame = ax.tcp.allSent()[sent_before + 1];
+  TEST_ASSERT_EQUAL_HEX8(0x6F, close_frame[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x02, close_frame[4]);
+  TEST_ASSERT_EQUAL_HEX8(0x00, close_frame[5]);
+  TEST_ASSERT_EQUAL_HEX8(0x22, close_frame[6]);
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+static void test_graceful_close_reports_a_failed_reconnect(void) {
+  ClosableAxis ax;
+  ax.tcp.dropByPeer();
+  ax.tcp.failConnect();
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+  TEST_ASSERT_FALSE(ax.image.isOnline());
+}
+
+static void test_graceful_close_ignores_a_closed_axis(void) {
+  ClosableAxis ax;
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x11110001, makeForwardCloseMrReply()));
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(5));
 }
 
 static void test_multi_scanner_dual_demux(void) {
@@ -1619,5 +1699,9 @@ int main(void) {
   RUN_TEST(test_feedback_age_resets_on_fresh_data);
   RUN_TEST(test_exchange_reports_send_failure);
   RUN_TEST(test_cip_sequence_number_wraparound);
+  RUN_TEST(test_graceful_close_uses_a_live_session);
+  RUN_TEST(test_graceful_close_rebuilds_a_dropped_session);
+  RUN_TEST(test_graceful_close_reports_a_failed_reconnect);
+  RUN_TEST(test_graceful_close_ignores_a_closed_axis);
   return UNITY_END();
 }
