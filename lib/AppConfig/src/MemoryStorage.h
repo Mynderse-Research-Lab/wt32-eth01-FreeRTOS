@@ -4,6 +4,7 @@
 #include "ConfigStorage.h"
 #include <map>
 #include <string>
+#include <vector>
 #include <cstring>
 
 namespace Config {
@@ -69,12 +70,26 @@ public:
         return true;
     }
 
-    bool eraseAll() override {
-        ints_.clear();
-        floats_.clear();
-        bools_.clear();
-        strings_.clear();
+    bool getBlob(const char* key, void* out_buf, size_t& in_out_len) override {
+        auto it = blobs_.find(key);
+        if (it == blobs_.end() || it->second.size() > in_out_len) {
+            return false;
+        }
+        std::memcpy(out_buf, it->second.data(), it->second.size());
+        in_out_len = it->second.size();
         return true;
+    }
+
+    bool setBlob(const char* key, const void* data, size_t len) override {
+        const uint8_t* bytes = static_cast<const uint8_t*>(data);
+        blobs_[key].assign(bytes, bytes + len);
+        return true;
+    }
+
+    bool eraseKey(const char* key) override {
+        const size_t erased = ints_.erase(key) + floats_.erase(key) + bools_.erase(key) +
+                              strings_.erase(key) + blobs_.erase(key);
+        return erased > 0;
     }
 
     bool commit() override { return true; }
@@ -84,6 +99,7 @@ private:
     std::map<std::string, float> floats_;
     std::map<std::string, bool> bools_;
     std::map<std::string, std::string> strings_;
+    std::map<std::string, std::vector<uint8_t>> blobs_;
 };
 
 } // namespace Config

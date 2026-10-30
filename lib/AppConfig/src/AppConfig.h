@@ -3,11 +3,23 @@
 
 #include "AppConfigData.h"
 #include "ConfigSchema.h"
+#include "ConfigSet.h"
 #include "ConfigStorage.h"
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 namespace Config {
+
+// One stored parameter set, for 'cfg history'.
+struct ConfigSetInfo {
+    bool valid = false;
+    uint32_t seq = 0;
+    uint32_t unix_s = 0;        // newest change in the set, 0 = clock was not set
+    uint16_t param_count = 0;
+    ConfigSetSource source = ConfigSetSource::Edited;
+};
 
 class AppConfig {
 public:
@@ -25,19 +37,51 @@ public:
     void loadDefaults();
 
     /**
-     * @brief Load all settings from storage. Falls back to defaults for missing keys.
+     * @brief Load the newest valid set, overlay the keys changed since, and
+     * keep the result as a new set when it differs. Compile-time defaults only
+     * fill keys no set holds, or apply after factoryReset().
+     *
+     * Sets are written here, at boot, because a set write can erase a flash
+     * sector, and that stall can outlast the 32 ms Class 1 timeout.
      */
     bool load();
 
     /**
-     * @brief Save all current settings to storage.
+     * @brief Drop the keys merged at boot. Call once the boot is confirmed, so
+     * a rollback to an image that reads those keys still finds them.
      */
-    bool save();
+    void commitPending();
 
     /**
-     * @brief Erase storage and reset in-memory values to defaults.
+     * @brief Revert to compile-time defaults now. The stored sets stay, and the
+     * defaults become a new set at the next boot.
      */
     bool factoryReset();
+
+    /**
+     * @brief Load stored set seq at the next boot, dropping changes made since.
+     */
+    bool restoreSet(uint32_t seq);
+
+    /**
+     * @brief True while settings have persistent storage behind them.
+     */
+    bool hasStorage() const { return storage_ != nullptr; }
+
+    /**
+     * @brief Stored sets, newest first. Returns how many are valid.
+     */
+    int configSets(ConfigSetInfo out[kConfigSetSlots]) const;
+
+    /**
+     * @brief Newest stored set, the one the running values came from.
+     */
+    ConfigSetInfo activeSet() const;
+
+    /**
+     * @brief Keys changed since the active set. They merge at the next boot.
+     */
+    int pendingChanges() const;
 
     /**
      * @brief Read-only access to current active configuration data.
@@ -94,9 +138,22 @@ private:
     AppConfig(const AppConfig&) = delete;
     AppConfig& operator=(const AppConfig&) = delete;
 
+    void readParams(IParamIo& io);
+    void writeParams(IParamIo& io) const;
+    bool writeSet(const std::vector<uint8_t>& payload, uint16_t param_count,
+                  ConfigSetSource source, uint32_t unix_s);
+    void recordChange(const char* key);
+    bool requestBase(uint32_t seq);
+
     AppConfigData data_;
     std::unique_ptr<IConfigStorage> storage_;
     bool dev_unlocked_{false};
+    ConfigSetHeader sets_[kConfigSetSlots]{};
+    bool set_valid_[kConfigSetSlots]{};
+    bool set_saved_{false};              // the running values are in a stored set
+    mutable std::mutex change_mutex_;    // change lists and the key writes behind them
+    std::vector<std::string> merged_;    // keys already in the newest set
+    std::vector<std::string> changed_;   // keys changed since boot
 };
 
 } // namespace Config

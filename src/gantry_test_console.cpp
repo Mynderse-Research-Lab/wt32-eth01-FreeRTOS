@@ -33,6 +33,7 @@
 #include "pick_scheduler.h"
 #include "boot_log_ring.h"
 #include "AppConfig.h"
+#include "gantry_runtime_params.h"
 #include "ConfigSchema.h"
 #include "MCP23S17.h"
 #include "W5500Diag.h"
@@ -40,6 +41,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs.h"
+#include "nvs_flash.h"
 #include "driver/gpio.h"
 
 #ifndef MCP_DEBUG_CMDS
@@ -54,6 +56,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 extern "C" int getchar(void);
 
@@ -217,12 +221,14 @@ static bool g_wsCalEdgeLast = false;
 // Older images stored the workspace latch here and restored it at boot.
 static constexpr char kWsCalNvsNs[] = "gantry_cfg";
 static constexpr char kWsCalNvsKey[] = "ws_cal";
-static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
-static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
-static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
-static uint32_t g_moveDecelMmPerS2 = GANTRY_DEFAULT_DECEL_MM_PER_S2;
-static uint32_t g_moveAccelDegPerS2 = GANTRY_DEFAULT_ACCEL_DEG_PER_S2;
-static uint32_t g_moveDecelDegPerS2 = GANTRY_DEFAULT_DECEL_DEG_PER_S2;
+// Console move profile: the stored profile, until 'speed' or 'accel' changes it
+// for this session.
+static uint32_t g_moveSpeedMmPerS = 0;
+static uint32_t g_moveSpeedDegPerS = 0;
+static uint32_t g_moveAccelMmPerS2 = 0;
+static uint32_t g_moveDecelMmPerS2 = 0;
+static uint32_t g_moveAccelDegPerS2 = 0;
+static uint32_t g_moveDecelDegPerS2 = 0;
 static bool g_motionProfileRangeLimitEnabled = true;
 static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
 // LIVE POS periodic logger frequency control.
@@ -233,6 +239,10 @@ static uint32_t g_livePosFrequencyHz = 0;
 static uint32_t g_axisLogFrequencyHz = 0;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
+
+static const Config::AppConfigData &stored() {
+  return Config::AppConfig::instance().data();
+}
 
 bool limitsWired(const GantryTestConsoleConfig *cfg) {
   return cfg != nullptr && cfg->limit_switches_active &&
@@ -252,32 +262,32 @@ uint32_t maxLinearSpeedMmPerS() {
   // Effective path speed is operator-set and may exceed 1 m/s. The Z
   // ballscrew critical-RPM figure stays in the drivetrain header for
   // commissioning; it is not a hard ceiling on this setting.
-  return GANTRY_PATH_MAX_SPEED_MM_PER_S;
+  return static_cast<uint32_t>(stored().gantry_path_max_speed_mm_per_s);
 }
 
 uint32_t maxLinearAccelMmPerS2() {
-  return GANTRY_PATH_MAX_ACCEL_MM_PER_S2;
+  return static_cast<uint32_t>(stored().gantry_path_max_accel_mm_per_s2);
 }
 
 uint32_t maxThetaSpeedDegPerS() {
-  if (AXIS_THETA_MAX_SPEED_DEG_PER_S <= 0.0f) {
+  if (stored().axis_theta_max_speed_deg_per_s <= 0.0f) {
     return 3600u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_MAX_SPEED_DEG_PER_S);
+  return static_cast<uint32_t>(stored().axis_theta_max_speed_deg_per_s);
 }
 
 uint32_t maxThetaAccelDegPerS2() {
-  if (AXIS_THETA_ACCEL_DEG_PER_S2 <= 0.0f) {
+  if (stored().axis_theta_accel_deg_per_s2 <= 0.0f) {
     return 18000u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_ACCEL_DEG_PER_S2);
+  return static_cast<uint32_t>(stored().axis_theta_accel_deg_per_s2);
 }
 
 uint32_t maxThetaDecelDegPerS2() {
-  if (AXIS_THETA_DECEL_DEG_PER_S2 <= 0.0f) {
+  if (stored().axis_theta_decel_deg_per_s2 <= 0.0f) {
     return 18000u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_DECEL_DEG_PER_S2);
+  return static_cast<uint32_t>(stored().axis_theta_decel_deg_per_s2);
 }
 
 const char *getLinearUnitLabel() {
@@ -440,10 +450,11 @@ void calibrationTask(void *param) {
     const float zMax =
         cfg->gantry->zAxisLengthMm() > 0
             ? static_cast<float>(cfg->gantry->zAxisLengthMm())
-            : AXIS_Z_HARD_LIMIT_MAX_MM;
-    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)len,
-                                AXIS_Z_HARD_LIMIT_MIN_MM, zMax,
-                                AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+            : stored().axis_z_hard_limit_max_mm;
+    cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, (float)len,
+                                stored().axis_z_hard_limit_min_mm, zMax,
+                                stored().axis_theta_hard_limit_min_deg,
+                                stored().axis_theta_hard_limit_max_deg);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK X joint max updated from calibration: %.1f mm", (float)len);
@@ -701,10 +712,10 @@ void printPuuInfo(Gantry::Gantry *gantry) {
 
   ESP_LOGI(TAG, "=== PUU / mm scaling ===");
   ESP_LOGI(TAG, "X: scale=%.4f PUU/mm  actual=%.3f mm (%d PUU)  target=%.3f mm  lead=%.1f mm/rev",
-           xPpm, xMm, gantry->getXEncoderRaw(), target.x, AXIS_X_LEAD_MM_PER_REV);
+           xPpm, xMm, gantry->getXEncoderRaw(), target.x, stored().axis_x_lead_mm_per_rev);
   ESP_LOGI(TAG, "Z: scale=%.4f PUU/mm  actual=%.3f mm (%ld PUU)  target=%.3f mm  lead=%.1f mm/rev",
            zPpm, zMm, static_cast<long>(gantry->getZEncoderPulses()), target.z,
-           AXIS_Z_LEAD_MM_PER_REV);
+           stored().axis_z_lead_mm_per_rev);
   if (gantry->hasThetaAxis()) {
     const float tPpd = gantry->getThetaPulsesPerDeg();
     ESP_LOGI(TAG,
@@ -1522,16 +1533,17 @@ void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
 }
 
 void runSoftCalibrateX(const GantryTestConsoleConfig *cfg) {
-  const float xMax = AXIS_X_HARD_LIMIT_MAX_MM;
-  cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, xMax,
-                              AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
-                              AXIS_THETA_HARD_LIMIT_MIN_DEG,
-                              AXIS_THETA_HARD_LIMIT_MAX_DEG);
+  const float xMax = stored().axis_x_hard_limit_max_mm;
+  cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, xMax,
+                              stored().axis_z_hard_limit_min_mm,
+                              stored().axis_z_hard_limit_max_mm,
+                              stored().axis_theta_hard_limit_min_deg,
+                              stored().axis_theta_hard_limit_max_deg);
   g_calibratedThisSession = true;
   ESP_LOGI(TAG,
            "OK X soft-calibrate (no limit switches). Joint envelope X=%.1f..%.1f mm "
            "from SCHUNK datasheet. Run puucal after measured moves.",
-           AXIS_X_HARD_LIMIT_MIN_MM, xMax);
+           stored().axis_x_hard_limit_min_mm, xMax);
   maybeLatchWorkspaceCalibrated(cfg->gantry);
 }
 
@@ -1720,10 +1732,10 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
     g_homeZCompletedThisSession = true;
     g_calibratedThisSession = true;
     g_calibratedZThisSession = true;
-    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)xLen,
-                                AXIS_Z_HARD_LIMIT_MIN_MM, (float)zLen,
-                                AXIS_THETA_HARD_LIMIT_MIN_DEG,
-                                AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, (float)xLen,
+                                stored().axis_z_hard_limit_min_mm, (float)zLen,
+                                stored().axis_theta_hard_limit_min_deg,
+                                stored().axis_theta_hard_limit_max_deg);
     if (cfg->gantry->hasThetaAxis()) {
         bool thetaOk = cfg->gantry->homeTheta();
         if (thetaOk) {
@@ -1759,7 +1771,7 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
              "OK Bring-up complete: X stroke=%d mm, Z stroke=%d mm, "
              "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
              xLen, zLen, (double)cfg->gantry->traverseClearanceZMm(),
-             (double)GANTRY_SAFE_Z_HEIGHT_MM);
+             (double)stored().gantry_safe_z_height_mm);
     maybeLatchWorkspaceCalibrated(cfg->gantry);
     return true;
   }
@@ -1928,8 +1940,9 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
 bool testCycleGripAction(const GantryTestConsoleConfig *cfg, bool grip_closed) {
   ESP_LOGI(TAG, "[TEST_CYCLE] Gripper -> %s", grip_closed ? "CLOSED (GRIP)" : "OPEN (RELEASE)");
   cfg->gantry->grip(grip_closed);
-  const uint32_t wait_ms = grip_closed ? (GANTRY_GRIPPER_CLOSE_TIME_MS + 60u)
-                                       : (GANTRY_GRIPPER_OPEN_TIME_MS + 60u);
+  const uint32_t wait_ms =
+      static_cast<uint32_t>(grip_closed ? stored().gantry_gripper_close_time_ms
+                                        : stored().gantry_gripper_open_time_ms) + 60u;
   if (!testCycleWaitMs(cfg, wait_ms)) {
     ESP_LOGE(TAG, "ERROR: test_cycle aborted during gripper action");
     return false;
@@ -2543,7 +2556,80 @@ static const char *skipCmdSpace(const char *s) {
   return s;
 }
 
-static void runCfgCommand(const char *cmd) {
+static const char *setSourceLabel(Config::ConfigSetSource source) {
+  switch (source) {
+    case Config::ConfigSetSource::Restored:
+      return "restored";
+    case Config::ConfigSetSource::Defaults:
+      return "defaults";
+    default:
+      return "edited";
+  }
+}
+
+static void formatSetTime(uint32_t unix_s, char *out, size_t out_len) {
+  if (unix_s == 0) {
+    snprintf(out, out_len, "no clock");
+    return;
+  }
+  const time_t when = static_cast<time_t>(unix_s);
+  struct tm utc;
+  gmtime_r(&when, &utc);
+  strftime(out, out_len, "%Y-%m-%dT%H:%M:%SZ", &utc);
+}
+
+static void printConfigHistory() {
+  auto &config = Config::AppConfig::instance();
+  Config::ConfigSetInfo sets[Config::kConfigSetSlots];
+  const int count = config.configSets(sets);
+  if (count == 0) {
+    ESP_LOGW(TAG, "No stored parameter sets");
+  }
+  for (int i = 0; i < count; ++i) {
+    char when[24];
+    formatSetTime(sets[i].unix_s, when, sizeof(when));
+    ESP_LOGI(TAG, "  set #%-6lu %-20s %-8s %u params%s",
+             static_cast<unsigned long>(sets[i].seq), when, setSourceLabel(sets[i].source),
+             static_cast<unsigned>(sets[i].param_count), i == 0 ? "  (loaded at boot)" : "");
+  }
+  ESP_LOGI(TAG, "%d change(s) since then; they merge into a new set at the next boot",
+           config.pendingChanges());
+}
+
+static void runCfgTime(const char *rest) {
+  if (*rest != '\0') {
+    char *end = nullptr;
+    const unsigned long long unix_s = strtoull(rest, &end, 10);
+    if (end == rest || *end != '\0' || unix_s < 1700000000ull) {
+      ESP_LOGE(TAG, "Usage: cfg time <unix seconds>");
+      return;
+    }
+    const timeval now = {static_cast<time_t>(unix_s), 0};
+    settimeofday(&now, nullptr);
+  }
+  char when[24];
+  const time_t now = time(nullptr);
+  formatSetTime(now > 1700000000 ? static_cast<uint32_t>(now) : 0, when, sizeof(when));
+  ESP_LOGI(TAG, "OK clock %s", when);
+}
+
+// A stored value is the only one in force, so a change reaches the Gantry now.
+// Reboot-only keys still wait for the boot that applies them.
+static void applyStoredToMotion(const GantryTestConsoleConfig *cfg, const char *key) {
+  if (cfg != nullptr && cfg->gantry != nullptr) {
+    cfg->gantry->setRuntimeParams(gantryRuntimeParams(stored()));
+  }
+  static constexpr const char *kMoveProfileKeys[] = {
+      "spd_mm_s", "acc_mm_s2", "dec_mm_s2", "th_spd_deg_s", "th_acc_deg_s2", "th_dec_deg_s2"};
+  for (const char *profile_key : kMoveProfileKeys) {
+    if (key == nullptr || strcmp(key, profile_key) == 0) {
+      gantryConsoleLoadStoredProfile();
+      return;
+    }
+  }
+}
+
+static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   const char *args = skipCmdSpace(cmd + 3);
   auto &config = Config::AppConfig::instance();
 
@@ -2565,7 +2651,8 @@ static void runCfgCommand(const char *cmd) {
                schema.units, schema.reboot_required ? "  (reboot)" : "");
     }
     ESP_LOGI(TAG, "cfg <key> [value] | cfg unlock <pw> | cfg lock | "
-                  "cfg passwd <old> <new> | cfg factory | cfg reboot");
+                  "cfg passwd <old> <new> | cfg history | cfg restore <set> | "
+                  "cfg time [unix_s] | cfg factory | cfg reboot");
     return;
   }
 
@@ -2598,12 +2685,41 @@ static void runCfgCommand(const char *cmd) {
     ESP_LOGI(TAG, "OK developer mode locked");
     return;
   }
+  if (cmdTokenIs(token, "history") && *rest == '\0') {
+    printConfigHistory();
+    return;
+  }
+  if (cmdTokenIs(token, "time")) {
+    runCfgTime(rest);
+    return;
+  }
+  if (cmdTokenIs(token, "restore")) {
+    char *end = nullptr;
+    const unsigned long seq = strtoul(rest, &end, 10);
+    if (end == rest || *end != '\0' || !config.restoreSet(static_cast<uint32_t>(seq))) {
+      ESP_LOGE(TAG, "Usage: cfg restore <set>, with a set from 'cfg history'");
+      return;
+    }
+    ESP_LOGI(TAG, "OK set #%lu loads at the next boot. Run 'cfg reboot'", seq);
+    return;
+  }
   if (cmdTokenIs(token, "factory") && *rest == '\0') {
+    if (!config.hasStorage()) {
+      // NVS was unreadable at boot; this is the operator asking to start over.
+      if (nvs_flash_erase() != ESP_OK || nvs_flash_init() != ESP_OK || !config.init()) {
+        ESP_LOGE(TAG, "ERROR: NVS erase failed");
+        return;
+      }
+      ESP_LOGI(TAG, "OK NVS erased and a new set stored");
+      return;
+    }
     if (!config.factoryReset()) {
       ESP_LOGE(TAG, "ERROR: factory reset failed");
       return;
     }
-    ESP_LOGI(TAG, "OK factory reset. Settings that need a restart take effect after 'cfg reboot'");
+    applyStoredToMotion(cfg, nullptr);
+    ESP_LOGI(TAG, "OK compile-time defaults applied; older sets kept ('cfg history'). "
+                  "Settings that need a restart take effect after 'cfg reboot'");
     return;
   }
   if (cmdTokenIs(token, "unlock")) {
@@ -2672,6 +2788,7 @@ static void runCfgCommand(const char *cmd) {
     ESP_LOGE(TAG, "ERROR: rejected %s = %s", token, rest);
     return;
   }
+  applyStoredToMotion(cfg, token);
   char value[40];
   const char *shown = value;
   if (!config.formatParamValue(token, value, sizeof(value))) {
@@ -2703,7 +2820,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (strcmp(cmdLower, "help") == 0 || strcmp(cmdLower, "?") == 0) {
     gantryTestPrintHelp();
   } else if (cfg_cmd) {
-    runCfgCommand(cmd);
+    runCfgCommand(cfg, cmd);
   } else if (g_testCycleInProgress &&
              strcmp(cmdLower, "stop") != 0 &&
              strcmp(cmdLower, "status") != 0 &&
@@ -3436,6 +3553,15 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  selftest             - run basic math/config tests");
 #endif
   ESP_LOGI(TAG, "");
+}
+
+void gantryConsoleLoadStoredProfile() {
+  g_moveSpeedMmPerS = static_cast<uint32_t>(stored().gantry_default_speed_mm_per_s);
+  g_moveSpeedDegPerS = static_cast<uint32_t>(stored().gantry_default_speed_deg_per_s);
+  g_moveAccelMmPerS2 = static_cast<uint32_t>(stored().gantry_default_accel_mm_per_s2);
+  g_moveDecelMmPerS2 = static_cast<uint32_t>(stored().gantry_default_decel_mm_per_s2);
+  g_moveAccelDegPerS2 = static_cast<uint32_t>(stored().gantry_default_accel_deg_per_s2);
+  g_moveDecelDegPerS2 = static_cast<uint32_t>(stored().gantry_default_decel_deg_per_s2);
 }
 
 void gantryTestConsoleTask(void *param) {

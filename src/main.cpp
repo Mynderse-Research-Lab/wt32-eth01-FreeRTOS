@@ -45,6 +45,7 @@
 #include "SpiDisplay.h"
 #include "UiManager.h"
 #include "AppConfig.h"
+#include "gantry_runtime_params.h"
 #include "nvs_flash.h"
 #include "MCP23S17.h"
 #include "esp_timer.h"
@@ -183,13 +184,22 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "========================================\n");
 
     // Initialize NVS storage for runtime application parameters
-    esp_err_t nvs_err = nvs_flash_init();
-    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        nvs_err = nvs_flash_init();
+    // Stored parameters only revert on an operator command, so unreadable NVS
+    // is never erased here. 'cfg factory' erases it and starts a new set.
+    const esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_OK) {
+        Config::AppConfig::instance().init();
     }
-    ESP_ERROR_CHECK(nvs_err);
-    Config::AppConfig::instance().init();
+    const Config::ConfigSetInfo active_set = Config::AppConfig::instance().activeSet();
+    if (active_set.valid) {
+        ESP_LOGI(TAG, "Parameter set #%lu loaded (%u parameters)",
+                 static_cast<unsigned long>(active_set.seq),
+                 static_cast<unsigned>(active_set.param_count));
+    } else {
+        ESP_LOGE(TAG, "No stored parameter set (NVS %s): running on compile-time defaults, "
+                      "nothing persists. 'cfg factory' erases NVS and starts over",
+                 esp_err_to_name(nvs_err));
+    }
 
     // cfg log_uart_async (reboot): without a UART driver every log line
     // busy-waits on UART0 at 115200 (~22 ms per 250-char line) while holding
@@ -354,13 +364,14 @@ extern "C" void app_main(void) {
     // Linear mm/s -> motor RPM: rpm = mm_s * i / lead * 60;
     // ref = rpm * 10 = 600 * i * mm_s / lead.
 #if defined(CONFIG_EIP_AXIS_X)
+    const auto& params = Config::AppConfig::instance().data();
     const double xSpeedRefPerMmS =
-        600.0 * static_cast<double>(AXIS_X_MOTOR_REDUCER_RATIO) /
-        static_cast<double>(AXIS_X_LEAD_MM_PER_REV);
+        600.0 * static_cast<double>(params.axis_x_motor_reducer_ratio) /
+        static_cast<double>(params.axis_x_lead_mm_per_rev);
     auto xAxis = std::make_unique<Gantry::GantryEipLinearAxis>(
         eipImageX, Gantry::EipLinearAxisConfig{
             CONFIG_EIP_AXIS_X_PUU_PER_MM, xSpeedRefPerMmS, xSpeedRefPerMmS,
-            xSpeedRefPerMmS, AXIS_X_LEAD_MM_PER_REV});
+            xSpeedRefPerMmS, params.axis_x_lead_mm_per_rev});
     ESP_LOGI(TAG, "X axis over EIP (Kinetix 5100, %.1f PUU/mm, speed_ref/mm_s=%.3f), target %s",
              CONFIG_EIP_AXIS_X_PUU_PER_MM, xSpeedRefPerMmS, CONFIG_EIP_TARGET_IP_X);
 #else
@@ -369,12 +380,12 @@ extern "C" void app_main(void) {
 
 #if defined(CONFIG_EIP_AXIS_Z)
     const double zSpeedRefPerMmS =
-        600.0 * static_cast<double>(AXIS_Z_MOTOR_REDUCER_RATIO) /
-        static_cast<double>(AXIS_Z_LEAD_MM_PER_REV);
+        600.0 * static_cast<double>(params.axis_z_motor_reducer_ratio) /
+        static_cast<double>(params.axis_z_lead_mm_per_rev);
     auto zAxis = std::make_unique<Gantry::GantryEipLinearAxis>(
         eipImageZ, Gantry::EipLinearAxisConfig{
             CONFIG_EIP_AXIS_Z_PUU_PER_MM, zSpeedRefPerMmS, zSpeedRefPerMmS,
-            zSpeedRefPerMmS, AXIS_Z_LEAD_MM_PER_REV,
+            zSpeedRefPerMmS, params.axis_z_lead_mm_per_rev,
             /*invert_direction=*/true});
     ESP_LOGI(TAG,
              "Z axis over EIP (Kinetix 5100, %.1f PUU/mm, invert_dir=1, "
@@ -391,8 +402,8 @@ extern "C" void app_main(void) {
     const double thetaPuuPerDeg = CONFIG_EIP_AXIS_THETA_PUU_PER_DEG;
     auto thetaAxis = std::make_unique<Gantry::GantryEipRotaryAxis>(
         eipImageTheta, Gantry::eipRotaryAxisConfigFromDeg(
-            thetaPuuPerDeg, AXIS_THETA_MAX_SPEED_DEG_PER_S,
-            AXIS_THETA_ACCEL_DEG_PER_S2, AXIS_THETA_DECEL_DEG_PER_S2));
+            thetaPuuPerDeg, params.axis_theta_max_speed_deg_per_s,
+            params.axis_theta_accel_deg_per_s2, params.axis_theta_decel_deg_per_s2));
     ESP_LOGI(TAG,
              "Theta axis over EIP (HCS01 101/102, %.1f PUU/deg), CIP/FKM %s "
              "(eng HTTP is typically .22)",
@@ -405,14 +416,18 @@ extern "C" void app_main(void) {
         std::move(thetaAxis), PIN_GRIPPER);
 
     // Seed joint-limit envelope with mechanical hard limits.
-    gantry.setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM,     AXIS_X_HARD_LIMIT_MAX_MM,
-                          AXIS_Z_HARD_LIMIT_MIN_MM,     AXIS_Z_HARD_LIMIT_MAX_MM,
-                          AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
-    gantry.setZAxisLimits(AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM);
-    gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    gantry.setJointLimits(params.axis_x_hard_limit_min_mm, params.axis_x_hard_limit_max_mm,
+                          params.axis_z_hard_limit_min_mm, params.axis_z_hard_limit_max_mm,
+                          params.axis_theta_hard_limit_min_deg,
+                          params.axis_theta_hard_limit_max_deg);
+    gantry.setZAxisLimits(params.axis_z_hard_limit_min_mm, params.axis_z_hard_limit_max_mm);
+    gantry.setThetaLimits(params.axis_theta_hard_limit_min_deg,
+                          params.axis_theta_hard_limit_max_deg);
     // cfg geom_safe_z_mm (applied at boot): the pick scheduler's hover, staging
     // and bin poses use the same value, so they sit inside the traverse band.
-    gantry.setSafeZHeight(Config::AppConfig::instance().data().gantry_safe_z_height_mm);
+    gantry.setSafeZHeight(params.gantry_safe_z_height_mm);
+    gantry.setRuntimeParams(gantryRuntimeParams(params));
+    gantryConsoleLoadStoredProfile();
 
     ESP_LOGI(TAG, "Initializing gantry...");
     if (!gantry.begin()) {
@@ -568,6 +583,7 @@ extern "C" void app_main(void) {
 
     // Confirm healthy boot to cancel OTA rollback timer/watchdog
     gantryOtaConfirmBootValid();
+    Config::AppConfig::instance().commitPending();
 
 #if CONSOLE_UART_ENABLE
     ESP_LOGI(TAG, "System ready - type 'help' (UART and/or TCP %d)", CONSOLE_TCP_PORT);

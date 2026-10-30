@@ -1,10 +1,13 @@
 #include "AppConfig.h"
 #include "MemoryStorage.h"
 #include "NvsStorage.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <ctime>
+#include <utility>
 
 #if defined(ESP_PLATFORM)
 #include "sdkconfig.h"
@@ -48,6 +51,62 @@ int pickKeySlot(const char* key, int field) {
 }  // namespace
 
 namespace Config {
+
+namespace {
+
+// Sets live in NVS under these keys. A change made at runtime stays a plain
+// per-key write until the next boot merges it into a set, so these keys never
+// collide with parameter keys.
+const char* const kSetKeys[kConfigSetSlots] = {"cfg_set_0", "cfg_set_1", "cfg_set_2"};
+// Set to load instead of the newest at the next boot; 0 = compile-time defaults.
+constexpr char kBaseRequestKey[] = "cfg_base_req";
+constexpr char kChangedAtKey[] = "cfg_chg_unix";
+// Anything earlier means nobody has set the clock since power-up.
+constexpr std::time_t kClockValidAfter = 1700000000;
+
+uint32_t clockUnixSeconds() {
+    const std::time_t now = std::time(nullptr);
+    return now > kClockValidAfter ? static_cast<uint32_t>(now) : 0;
+}
+
+// Reads through to the store and remembers which keys it held.
+class FoundKeys : public IParamIo {
+public:
+    explicit FoundKeys(IParamIo& inner) : inner_(inner) {}
+
+    bool getInt32(const char* key, int32_t& out_val) override {
+        return note(key, inner_.getInt32(key, out_val));
+    }
+    bool getFloat(const char* key, float& out_val) override {
+        return note(key, inner_.getFloat(key, out_val));
+    }
+    bool getBool(const char* key, bool& out_val) override {
+        return note(key, inner_.getBool(key, out_val));
+    }
+    bool getString(const char* key, char* out_buf, size_t max_len) override {
+        return note(key, inner_.getString(key, out_buf, max_len));
+    }
+
+    bool setInt32(const char*, int32_t) override { return false; }
+    bool setFloat(const char*, float) override { return false; }
+    bool setBool(const char*, bool) override { return false; }
+    bool setString(const char*, const char*) override { return false; }
+
+    std::vector<std::string> take() { return std::move(keys_); }
+
+private:
+    bool note(const char* key, bool found) {
+        if (found) {
+            keys_.emplace_back(key);
+        }
+        return found;
+    }
+
+    IParamIo& inner_;
+    std::vector<std::string> keys_;
+};
+
+}  // namespace
 
 AppConfig& AppConfig::instance() {
     static AppConfig s_instance;
@@ -773,359 +832,545 @@ bool AppConfig::init(std::unique_ptr<IConfigStorage> storage) {
 #endif
     }
     if (!storage_->init()) {
+        storage_.reset();
         return false;
     }
     return load();
 }
 
+void AppConfig::readParams(IParamIo& io) {
+    io.getInt32("spd_mm_s", data_.gantry_default_speed_mm_per_s);
+    io.getInt32("acc_mm_s2", data_.gantry_default_accel_mm_per_s2);
+    io.getInt32("dec_mm_s2", data_.gantry_default_decel_mm_per_s2);
+    io.getInt32("th_spd_deg_s", data_.gantry_default_speed_deg_per_s);
+    io.getInt32("th_acc_deg_s2", data_.gantry_default_accel_deg_per_s2);
+    io.getInt32("th_dec_deg_s2", data_.gantry_default_decel_deg_per_s2);
+    io.getInt32("ceil_spd_mm_s", data_.gantry_path_max_speed_mm_per_s);
+    io.getInt32("ceil_acc_mm_s2", data_.gantry_path_max_accel_mm_per_s2);
+    io.getInt32("ceil_dec_mm_s2", data_.gantry_path_max_decel_mm_per_s2);
+    io.getInt32("eip_stop_dec", data_.gantry_eip_assumed_stop_decel_mm_s2);
+
+    io.getFloat("x_lead_mm", data_.axis_x_lead_mm_per_rev);
+    io.getFloat("x_lim_min_mm", data_.axis_x_hard_limit_min_mm);
+    io.getFloat("x_lim_max_mm", data_.axis_x_hard_limit_max_mm);
+    io.getFloat("x_max_spd_mm_s", data_.axis_x_max_speed_mm_per_s);
+    io.getFloat("x_acc_mm_s2", data_.axis_x_accel_mm_per_s2);
+    io.getFloat("x_dec_mm_s2", data_.axis_x_decel_mm_per_s2);
+    io.getFloat("x_tol_mm", data_.axis_x_position_tolerance_mm);
+    io.getInt32("x_enc_ppr", data_.axis_x_encoder_ppr);
+    io.getFloat("x_gear_ratio", data_.axis_x_motor_reducer_ratio);
+    io.getInt32("x_home_pps", data_.axis_x_homing_speed_pps);
+
+    io.getFloat("z_lead_mm", data_.axis_z_lead_mm_per_rev);
+    io.getInt32("z_crit_rpm", data_.axis_z_critical_rpm);
+    io.getFloat("z_lim_min_mm", data_.axis_z_hard_limit_min_mm);
+    io.getFloat("z_lim_max_mm", data_.axis_z_hard_limit_max_mm);
+    io.getFloat("z_max_spd_mm_s", data_.axis_z_max_speed_mm_per_s);
+    io.getFloat("z_acc_mm_s2", data_.axis_z_accel_mm_per_s2);
+    io.getFloat("z_dec_mm_s2", data_.axis_z_decel_mm_per_s2);
+    io.getFloat("z_tol_mm", data_.axis_z_position_tolerance_mm);
+    io.getInt32("z_enc_ppr", data_.axis_z_encoder_ppr);
+    io.getFloat("z_gear_ratio", data_.axis_z_motor_reducer_ratio);
+    io.getBool("z_has_brake", data_.axis_z_has_motor_brake);
+    io.getInt32("z_home_pps", data_.axis_z_homing_speed_pps);
+    io.getFloat("z_datum_mm", data_.gantry_z_datum_offset_above_bed_mm);
+
+    io.getFloat("th_gear_ratio", data_.axis_theta_output_gear_ratio);
+    io.getFloat("th_lim_min_deg", data_.axis_theta_hard_limit_min_deg);
+    io.getFloat("th_lim_max_deg", data_.axis_theta_hard_limit_max_deg);
+    io.getFloat("th_spd_max", data_.axis_theta_max_speed_deg_per_s);
+    io.getFloat("th_acc_deg", data_.axis_theta_accel_deg_per_s2);
+    io.getFloat("th_dec_deg", data_.axis_theta_decel_deg_per_s2);
+    io.getFloat("th_tol_deg", data_.axis_theta_position_tolerance_deg);
+    io.getInt32("th_enc_ppr", data_.axis_theta_encoder_ppr);
+    io.getFloat("th_reducer", data_.axis_theta_motor_reducer_ratio);
+    io.getInt32("th_home_pps", data_.axis_theta_homing_speed_pps);
+    io.getBool("th_sequential", data_.gantry_theta_sequential);
+
+    io.getFloat("geom_z_y_mm", data_.gantry_z_axis_y_offset_mm);
+    io.getFloat("geom_th_x_mm", data_.gantry_theta_x_offset_mm);
+    io.getFloat("geom_grp_x_mm", data_.gantry_gripper_x_offset_mm);
+    io.getFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
+    io.getFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
+    io.getFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
+    io.getFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
+    io.getFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
+    io.getFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
+    io.getFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
+    io.getInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
+    io.getInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
+
+    io.getFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
+    io.getFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
+    io.getFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    io.getFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
+    io.getFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
+    io.getFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
+    io.getFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
+    io.getFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
+    io.getFloat("batt_x", data_.test_battery_x_mm);
+    io.getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
+    io.getInt32("cv_tau_min_us", data_.tau_min_us);
+    io.getInt32("cv_tau_max_us", data_.tau_max_us);
+    io.getInt32("cv_vis_ms", data_.pick_vision_latency_ms);
+    io.getInt32("cv_valve_ms", data_.pick_valve_ms);
+    io.getInt32("pk_von_ms", data_.pick_valve_on_ms);
+    io.getInt32("pk_voff_ms", data_.pick_valve_off_ms);
+    io.getInt32("pk_tr_von", data_.pick_trim_von_ms);
+    io.getInt32("pk_tr_voff", data_.pick_trim_voff_ms);
+    io.getInt32("pk_tr_cls", data_.pick_trim_close_ms);
+    io.getInt32("pk_tr_z", data_.pick_trim_z_ms);
+    io.getInt32("pk_tr_grp", data_.pick_trim_grip_ms);
+    io.getInt32("pk_tr_hld", data_.pick_trim_hold_ms);
+    io.getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
+    io.getInt32("pk_off_close", data_.pick_offset_close_ms);
+    io.getInt32("vis_batt_x", data_.vision_x_from_batt);
+    io.getInt32("pk_off_retract", data_.pick_offset_retract_ms);
+    io.getInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
+    io.getInt32("disp_tft_en", data_.display_tft_enable);
+    io.getInt32("eip_txwr_split", data_.eip_txwr_split);
+    io.getInt32("eip_spi_dma", data_.eip_spi_dma);
+    io.getInt32("log_uart_async", data_.log_uart_async);
+    io.getInt32("eip_scope_gpio", data_.eip_scope_gpio);
+    io.getBool("pk_bench", data_.pick_bench_enable);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      io.getInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    }
+    io.getFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
+    io.getFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      io.getFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
+      io.getFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+    }
+    io.getFloat("fin_open_mm", data_.pick_finger_open_mm);
+    io.getFloat("fin_wid_mm", data_.pick_finger_thick_mm);
+    io.getFloat("fin_len_mm", data_.pick_finger_width_mm);
+    io.getFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
+    io.getInt32("pk_guard_ms", data_.pick_guard_ms);
+    io.getBool("pk_dropin", data_.pick_dropin_enable);
+    io.getBool("pk_drop_any_th", data_.pick_drop_any_theta);
+    io.getFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
+
+    io.getFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
+    io.getFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
+    io.getFloat("cal_acc_mm_s2", data_.eip_home_cal_accel_mm_s2);
+    io.getFloat("cal_creep_mm_s", data_.eip_creep_speed_mm_s);
+    io.getInt32("cal_timeout_ms", data_.gantry_calibration_timeout_ms);
+    io.getInt32("trv_timeout_ms", data_.gantry_travel_measurement_timeout_ms);
+
+    io.getBool("eth_static", data_.eth_use_static_ip);
+    io.getString("eth_ip", data_.eth_static_ip, sizeof(data_.eth_static_ip));
+    io.getString("eth_gw", data_.eth_static_gateway, sizeof(data_.eth_static_gateway));
+    io.getString("eth_netmask", data_.eth_static_netmask, sizeof(data_.eth_static_netmask));
+    io.getInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
+
+    io.getInt32("disp_orient", data_.display_orientation);
+    io.getInt32("disp_bright", data_.display_brightness);
+    io.getInt32("disp_bl_to_s", data_.display_backlight_timeout_s);
+
+    io.getBool("con_auth", data_.console_tcp_auth_enable);
+    io.getString("con_pw", data_.console_tcp_password, sizeof(data_.console_tcp_password));
+    io.getInt32("con_tries", data_.console_tcp_auth_max_tries);
+    io.getInt32("con_ttl_s", data_.console_tcp_auth_remember_s);
+    io.getInt32("con_max_peers", data_.console_tcp_auth_remember_max);
+
+    io.getBool("con_tcp_en", data_.console_tcp_enable);
+    io.getBool("con_uart_en", data_.console_uart_enable);
+    io.getInt32("con_port", data_.console_tcp_port);
+    io.getBool("con_log_en", data_.console_tcp_log_enable);
+    io.getInt32("con_log_lvl", data_.console_tcp_log_level);
+    io.getInt32("ota_port", data_.ota_server_port);
+
+    io.getBool("eip_en", data_.eip_scanner_enabled);
+    io.getBool("eip_x_en", data_.eip_axis_x);
+    io.getBool("eip_z_en", data_.eip_axis_z);
+    io.getBool("eip_th_en", data_.eip_axis_theta);
+    io.getString("eip_ip_x", data_.eip_target_ip_x, sizeof(data_.eip_target_ip_x));
+    io.getString("eip_ip_z", data_.eip_target_ip_z, sizeof(data_.eip_target_ip_z));
+    io.getString("eip_ip_th", data_.eip_target_ip_theta, sizeof(data_.eip_target_ip_theta));
+    io.getString("w5500_ip", data_.eip_w5500_ip, sizeof(data_.eip_w5500_ip));
+    io.getString("w5500_sub", data_.eip_w5500_subnet, sizeof(data_.eip_w5500_subnet));
+    io.getString("w5500_gw", data_.eip_w5500_gateway, sizeof(data_.eip_w5500_gateway));
+    io.getInt32("w5500_spi_hz", data_.eip_w5500_spi_hz);
+    io.getFloat("eip_x_puu_mm", data_.eip_axis_x_puu_per_mm);
+    io.getFloat("eip_z_puu_mm", data_.eip_axis_z_puu_per_mm);
+    io.getFloat("eip_th_puu_deg", data_.eip_axis_theta_puu_per_deg);
+    io.getInt32("eip_x_rpi_us", data_.eip_x_rpi_us);
+    io.getInt32("eip_th_rpi_us", data_.eip_theta_rpi_us);
+    io.getInt32("eip_endstop_src", data_.eip_endstop_source);
+    io.getFloat("th_abs_min_deg", data_.axis_theta_drive_abs_min_deg);
+    io.getFloat("th_abs_max_deg", data_.axis_theta_drive_abs_max_deg);
+    io.getString("hcs01_eng_ip", data_.hcs01_eng_ip, sizeof(data_.hcs01_eng_ip));
+
+    io.getString("dev_pw", data_.dev_mode_password, sizeof(data_.dev_mode_password));
+}
+
+void AppConfig::writeParams(IParamIo& io) const {
+    io.setInt32("spd_mm_s", data_.gantry_default_speed_mm_per_s);
+    io.setInt32("acc_mm_s2", data_.gantry_default_accel_mm_per_s2);
+    io.setInt32("dec_mm_s2", data_.gantry_default_decel_mm_per_s2);
+    io.setInt32("th_spd_deg_s", data_.gantry_default_speed_deg_per_s);
+    io.setInt32("th_acc_deg_s2", data_.gantry_default_accel_deg_per_s2);
+    io.setInt32("th_dec_deg_s2", data_.gantry_default_decel_deg_per_s2);
+    io.setInt32("ceil_spd_mm_s", data_.gantry_path_max_speed_mm_per_s);
+    io.setInt32("ceil_acc_mm_s2", data_.gantry_path_max_accel_mm_per_s2);
+    io.setInt32("ceil_dec_mm_s2", data_.gantry_path_max_decel_mm_per_s2);
+    io.setInt32("eip_stop_dec", data_.gantry_eip_assumed_stop_decel_mm_s2);
+
+    io.setFloat("x_lead_mm", data_.axis_x_lead_mm_per_rev);
+    io.setFloat("x_lim_min_mm", data_.axis_x_hard_limit_min_mm);
+    io.setFloat("x_lim_max_mm", data_.axis_x_hard_limit_max_mm);
+    io.setFloat("x_max_spd_mm_s", data_.axis_x_max_speed_mm_per_s);
+    io.setFloat("x_acc_mm_s2", data_.axis_x_accel_mm_per_s2);
+    io.setFloat("x_dec_mm_s2", data_.axis_x_decel_mm_per_s2);
+    io.setFloat("x_tol_mm", data_.axis_x_position_tolerance_mm);
+    io.setInt32("x_enc_ppr", data_.axis_x_encoder_ppr);
+    io.setFloat("x_gear_ratio", data_.axis_x_motor_reducer_ratio);
+    io.setInt32("x_home_pps", data_.axis_x_homing_speed_pps);
+
+    io.setFloat("z_lead_mm", data_.axis_z_lead_mm_per_rev);
+    io.setInt32("z_crit_rpm", data_.axis_z_critical_rpm);
+    io.setFloat("z_lim_min_mm", data_.axis_z_hard_limit_min_mm);
+    io.setFloat("z_lim_max_mm", data_.axis_z_hard_limit_max_mm);
+    io.setFloat("z_max_spd_mm_s", data_.axis_z_max_speed_mm_per_s);
+    io.setFloat("z_acc_mm_s2", data_.axis_z_accel_mm_per_s2);
+    io.setFloat("z_dec_mm_s2", data_.axis_z_decel_mm_per_s2);
+    io.setFloat("z_tol_mm", data_.axis_z_position_tolerance_mm);
+    io.setInt32("z_enc_ppr", data_.axis_z_encoder_ppr);
+    io.setFloat("z_gear_ratio", data_.axis_z_motor_reducer_ratio);
+    io.setBool("z_has_brake", data_.axis_z_has_motor_brake);
+    io.setInt32("z_home_pps", data_.axis_z_homing_speed_pps);
+    io.setFloat("z_datum_mm", data_.gantry_z_datum_offset_above_bed_mm);
+
+    io.setFloat("th_gear_ratio", data_.axis_theta_output_gear_ratio);
+    io.setFloat("th_lim_min_deg", data_.axis_theta_hard_limit_min_deg);
+    io.setFloat("th_lim_max_deg", data_.axis_theta_hard_limit_max_deg);
+    io.setFloat("th_spd_max", data_.axis_theta_max_speed_deg_per_s);
+    io.setFloat("th_acc_deg", data_.axis_theta_accel_deg_per_s2);
+    io.setFloat("th_dec_deg", data_.axis_theta_decel_deg_per_s2);
+    io.setFloat("th_tol_deg", data_.axis_theta_position_tolerance_deg);
+    io.setInt32("th_enc_ppr", data_.axis_theta_encoder_ppr);
+    io.setFloat("th_reducer", data_.axis_theta_motor_reducer_ratio);
+    io.setInt32("th_home_pps", data_.axis_theta_homing_speed_pps);
+    io.setBool("th_sequential", data_.gantry_theta_sequential);
+
+    io.setFloat("geom_z_y_mm", data_.gantry_z_axis_y_offset_mm);
+    io.setFloat("geom_th_x_mm", data_.gantry_theta_x_offset_mm);
+    io.setFloat("geom_grp_x_mm", data_.gantry_gripper_x_offset_mm);
+    io.setFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
+    io.setFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
+    io.setFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
+    io.setFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
+    io.setFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
+    io.setFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
+    io.setFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
+    io.setInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
+    io.setInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
+
+    io.setFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
+    io.setFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
+    io.setFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    io.setFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
+    io.setFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
+    io.setFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
+    io.setFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
+    io.setFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
+    io.setFloat("batt_x", data_.test_battery_x_mm);
+    io.setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
+    io.setInt32("cv_tau_min_us", data_.tau_min_us);
+    io.setInt32("cv_tau_max_us", data_.tau_max_us);
+    io.setInt32("cv_vis_ms", data_.pick_vision_latency_ms);
+    io.setInt32("cv_valve_ms", data_.pick_valve_ms);
+    io.setInt32("pk_von_ms", data_.pick_valve_on_ms);
+    io.setInt32("pk_voff_ms", data_.pick_valve_off_ms);
+    io.setInt32("pk_tr_von", data_.pick_trim_von_ms);
+    io.setInt32("pk_tr_voff", data_.pick_trim_voff_ms);
+    io.setInt32("pk_tr_cls", data_.pick_trim_close_ms);
+    io.setInt32("pk_tr_z", data_.pick_trim_z_ms);
+    io.setInt32("pk_tr_grp", data_.pick_trim_grip_ms);
+    io.setInt32("pk_tr_hld", data_.pick_trim_hold_ms);
+    io.setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
+    io.setInt32("pk_off_close", data_.pick_offset_close_ms);
+    io.setInt32("vis_batt_x", data_.vision_x_from_batt);
+    io.setInt32("pk_off_retract", data_.pick_offset_retract_ms);
+    io.setInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
+    io.setInt32("disp_tft_en", data_.display_tft_enable);
+    io.setInt32("eip_txwr_split", data_.eip_txwr_split);
+    io.setInt32("eip_spi_dma", data_.eip_spi_dma);
+    io.setInt32("log_uart_async", data_.log_uart_async);
+    io.setInt32("eip_scope_gpio", data_.eip_scope_gpio);
+    io.setBool("pk_bench", data_.pick_bench_enable);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      io.setInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    }
+    io.setFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
+    io.setFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    for (int i = 0; i < kPickClassSlots; ++i) {
+      io.setFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
+      io.setFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+    }
+    io.setFloat("fin_open_mm", data_.pick_finger_open_mm);
+    io.setFloat("fin_wid_mm", data_.pick_finger_thick_mm);
+    io.setFloat("fin_len_mm", data_.pick_finger_width_mm);
+    io.setFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
+    io.setInt32("pk_guard_ms", data_.pick_guard_ms);
+    io.setBool("pk_dropin", data_.pick_dropin_enable);
+    io.setBool("pk_drop_any_th", data_.pick_drop_any_theta);
+    io.setFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
+
+    io.setFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
+    io.setFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
+    io.setFloat("cal_acc_mm_s2", data_.eip_home_cal_accel_mm_s2);
+    io.setFloat("cal_creep_mm_s", data_.eip_creep_speed_mm_s);
+    io.setInt32("cal_timeout_ms", data_.gantry_calibration_timeout_ms);
+    io.setInt32("trv_timeout_ms", data_.gantry_travel_measurement_timeout_ms);
+
+    io.setBool("eth_static", data_.eth_use_static_ip);
+    io.setString("eth_ip", data_.eth_static_ip);
+    io.setString("eth_gw", data_.eth_static_gateway);
+    io.setString("eth_netmask", data_.eth_static_netmask);
+    io.setInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
+
+    io.setInt32("disp_orient", data_.display_orientation);
+    io.setInt32("disp_bright", data_.display_brightness);
+    io.setInt32("disp_bl_to_s", data_.display_backlight_timeout_s);
+
+    io.setBool("con_auth", data_.console_tcp_auth_enable);
+    io.setString("con_pw", data_.console_tcp_password);
+    io.setInt32("con_tries", data_.console_tcp_auth_max_tries);
+    io.setInt32("con_ttl_s", data_.console_tcp_auth_remember_s);
+    io.setInt32("con_max_peers", data_.console_tcp_auth_remember_max);
+
+    io.setBool("con_tcp_en", data_.console_tcp_enable);
+    io.setBool("con_uart_en", data_.console_uart_enable);
+    io.setInt32("con_port", data_.console_tcp_port);
+    io.setBool("con_log_en", data_.console_tcp_log_enable);
+    io.setInt32("con_log_lvl", data_.console_tcp_log_level);
+    io.setInt32("ota_port", data_.ota_server_port);
+
+    io.setBool("eip_en", data_.eip_scanner_enabled);
+    io.setBool("eip_x_en", data_.eip_axis_x);
+    io.setBool("eip_z_en", data_.eip_axis_z);
+    io.setBool("eip_th_en", data_.eip_axis_theta);
+    io.setString("eip_ip_x", data_.eip_target_ip_x);
+    io.setString("eip_ip_z", data_.eip_target_ip_z);
+    io.setString("eip_ip_th", data_.eip_target_ip_theta);
+    io.setString("w5500_ip", data_.eip_w5500_ip);
+    io.setString("w5500_sub", data_.eip_w5500_subnet);
+    io.setString("w5500_gw", data_.eip_w5500_gateway);
+    io.setInt32("w5500_spi_hz", data_.eip_w5500_spi_hz);
+    io.setFloat("eip_x_puu_mm", data_.eip_axis_x_puu_per_mm);
+    io.setFloat("eip_z_puu_mm", data_.eip_axis_z_puu_per_mm);
+    io.setFloat("eip_th_puu_deg", data_.eip_axis_theta_puu_per_deg);
+    io.setInt32("eip_x_rpi_us", data_.eip_x_rpi_us);
+    io.setInt32("eip_th_rpi_us", data_.eip_theta_rpi_us);
+    io.setInt32("eip_endstop_src", data_.eip_endstop_source);
+    io.setFloat("th_abs_min_deg", data_.axis_theta_drive_abs_min_deg);
+    io.setFloat("th_abs_max_deg", data_.axis_theta_drive_abs_max_deg);
+    io.setString("hcs01_eng_ip", data_.hcs01_eng_ip);
+
+    io.setString("dev_pw", data_.dev_mode_password);
+}
+
 bool AppConfig::load() {
     if (!storage_) return false;
+    loadDefaults();
 
-    // Load every parameter from storage if present
-    storage_->getInt32("spd_mm_s", data_.gantry_default_speed_mm_per_s);
-    storage_->getInt32("acc_mm_s2", data_.gantry_default_accel_mm_per_s2);
-    storage_->getInt32("dec_mm_s2", data_.gantry_default_decel_mm_per_s2);
-    storage_->getInt32("th_spd_deg_s", data_.gantry_default_speed_deg_per_s);
-    storage_->getInt32("th_acc_deg_s2", data_.gantry_default_accel_deg_per_s2);
-    storage_->getInt32("th_dec_deg_s2", data_.gantry_default_decel_deg_per_s2);
-    storage_->getInt32("ceil_spd_mm_s", data_.gantry_path_max_speed_mm_per_s);
-    storage_->getInt32("ceil_acc_mm_s2", data_.gantry_path_max_accel_mm_per_s2);
-    storage_->getInt32("ceil_dec_mm_s2", data_.gantry_path_max_decel_mm_per_s2);
-    storage_->getInt32("eip_stop_dec", data_.gantry_eip_assumed_stop_decel_mm_s2);
-
-    storage_->getFloat("x_lead_mm", data_.axis_x_lead_mm_per_rev);
-    storage_->getFloat("x_lim_min_mm", data_.axis_x_hard_limit_min_mm);
-    storage_->getFloat("x_lim_max_mm", data_.axis_x_hard_limit_max_mm);
-    storage_->getFloat("x_max_spd_mm_s", data_.axis_x_max_speed_mm_per_s);
-    storage_->getFloat("x_acc_mm_s2", data_.axis_x_accel_mm_per_s2);
-    storage_->getFloat("x_dec_mm_s2", data_.axis_x_decel_mm_per_s2);
-    storage_->getFloat("x_tol_mm", data_.axis_x_position_tolerance_mm);
-    storage_->getInt32("x_enc_ppr", data_.axis_x_encoder_ppr);
-    storage_->getFloat("x_gear_ratio", data_.axis_x_motor_reducer_ratio);
-    storage_->getInt32("x_home_pps", data_.axis_x_homing_speed_pps);
-
-    storage_->getFloat("z_lead_mm", data_.axis_z_lead_mm_per_rev);
-    storage_->getInt32("z_crit_rpm", data_.axis_z_critical_rpm);
-    storage_->getFloat("z_lim_min_mm", data_.axis_z_hard_limit_min_mm);
-    storage_->getFloat("z_lim_max_mm", data_.axis_z_hard_limit_max_mm);
-    storage_->getFloat("z_max_spd_mm_s", data_.axis_z_max_speed_mm_per_s);
-    storage_->getFloat("z_acc_mm_s2", data_.axis_z_accel_mm_per_s2);
-    storage_->getFloat("z_dec_mm_s2", data_.axis_z_decel_mm_per_s2);
-    storage_->getFloat("z_tol_mm", data_.axis_z_position_tolerance_mm);
-    storage_->getInt32("z_enc_ppr", data_.axis_z_encoder_ppr);
-    storage_->getFloat("z_gear_ratio", data_.axis_z_motor_reducer_ratio);
-    storage_->getBool("z_has_brake", data_.axis_z_has_motor_brake);
-    storage_->getInt32("z_home_pps", data_.axis_z_homing_speed_pps);
-    storage_->getFloat("z_datum_mm", data_.gantry_z_datum_offset_above_bed_mm);
-
-    storage_->getFloat("th_gear_ratio", data_.axis_theta_output_gear_ratio);
-    storage_->getFloat("th_lim_min_deg", data_.axis_theta_hard_limit_min_deg);
-    storage_->getFloat("th_lim_max_deg", data_.axis_theta_hard_limit_max_deg);
-    storage_->getFloat("th_spd_max", data_.axis_theta_max_speed_deg_per_s);
-    storage_->getFloat("th_acc_deg", data_.axis_theta_accel_deg_per_s2);
-    storage_->getFloat("th_dec_deg", data_.axis_theta_decel_deg_per_s2);
-    storage_->getFloat("th_tol_deg", data_.axis_theta_position_tolerance_deg);
-    storage_->getInt32("th_enc_ppr", data_.axis_theta_encoder_ppr);
-    storage_->getFloat("th_reducer", data_.axis_theta_motor_reducer_ratio);
-    storage_->getInt32("th_home_pps", data_.axis_theta_homing_speed_pps);
-    storage_->getBool("th_sequential", data_.gantry_theta_sequential);
-
-    storage_->getFloat("geom_z_y_mm", data_.gantry_z_axis_y_offset_mm);
-    storage_->getFloat("geom_th_x_mm", data_.gantry_theta_x_offset_mm);
-    storage_->getFloat("geom_grp_x_mm", data_.gantry_gripper_x_offset_mm);
-    storage_->getFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
-    storage_->getFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
-    storage_->getFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
-    storage_->getFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
-    storage_->getFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
-    storage_->getFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
-    storage_->getFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
-    storage_->getInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
-    storage_->getInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
-
-    storage_->getFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
-    storage_->getFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
-    storage_->getFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
-    storage_->getFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
-    storage_->getFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
-    storage_->getFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
-    storage_->getFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
-    storage_->getFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
-    storage_->getFloat("batt_x", data_.test_battery_x_mm);
-    storage_->getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
-    storage_->getInt32("cv_tau_min_us", data_.tau_min_us);
-    storage_->getInt32("cv_tau_max_us", data_.tau_max_us);
-    storage_->getInt32("cv_vis_ms", data_.pick_vision_latency_ms);
-    storage_->getInt32("cv_valve_ms", data_.pick_valve_ms);
-    storage_->getInt32("pk_von_ms", data_.pick_valve_on_ms);
-    storage_->getInt32("pk_voff_ms", data_.pick_valve_off_ms);
-    storage_->getInt32("pk_tr_von", data_.pick_trim_von_ms);
-    storage_->getInt32("pk_tr_voff", data_.pick_trim_voff_ms);
-    storage_->getInt32("pk_tr_cls", data_.pick_trim_close_ms);
-    storage_->getInt32("pk_tr_z", data_.pick_trim_z_ms);
-    storage_->getInt32("pk_tr_grp", data_.pick_trim_grip_ms);
-    storage_->getInt32("pk_tr_hld", data_.pick_trim_hold_ms);
-    storage_->getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
-    storage_->getInt32("pk_off_close", data_.pick_offset_close_ms);
-    storage_->getInt32("vis_batt_x", data_.vision_x_from_batt);
-    storage_->getInt32("pk_off_retract", data_.pick_offset_retract_ms);
-    storage_->getInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
-    storage_->getInt32("disp_tft_en", data_.display_tft_enable);
-    storage_->getInt32("eip_txwr_split", data_.eip_txwr_split);
-    storage_->getInt32("eip_spi_dma", data_.eip_spi_dma);
-    storage_->getInt32("log_uart_async", data_.log_uart_async);
-    storage_->getInt32("eip_scope_gpio", data_.eip_scope_gpio);
-    storage_->getBool("pk_bench", data_.pick_bench_enable);
-    for (int i = 0; i < kPickClassSlots; ++i) {
-      storage_->getInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    // Newest first, so a damaged set falls back to the one before it.
+    std::vector<uint8_t> blobs[kConfigSetSlots];
+    int order[kConfigSetSlots];
+    int valid = 0;
+    for (int slot = 0; slot < kConfigSetSlots; ++slot) {
+        set_valid_[slot] = false;
+        blobs[slot].resize(kConfigSetMaxBytes);
+        size_t len = blobs[slot].size();
+        if (storage_->getBlob(kSetKeys[slot], blobs[slot].data(), len) &&
+            parseConfigSet(blobs[slot].data(), len, sets_[slot])) {
+            set_valid_[slot] = true;
+            int at = valid++;
+            while (at > 0 && sets_[order[at - 1]].seq < sets_[slot].seq) {
+                order[at] = order[at - 1];
+                --at;
+            }
+            order[at] = slot;
+        }
     }
-    storage_->getFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
-    storage_->getFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
-    for (int i = 0; i < kPickClassSlots; ++i) {
-      storage_->getFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
-      storage_->getFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+
+    int32_t requested = -1;
+    const bool revert = storage_->getInt32(kBaseRequestKey, requested);
+    ConfigSetSource source = ConfigSetSource::Edited;
+    int base = valid > 0 ? order[0] : -1;
+    if (revert && requested == 0) {
+        base = -1;
+        source = ConfigSetSource::Defaults;
+    } else if (revert) {
+        for (int i = 0; i < valid; ++i) {
+            if (sets_[order[i]].seq == static_cast<uint32_t>(requested)) {
+                base = order[i];
+                source = ConfigSetSource::Restored;
+            }
+        }
     }
-    storage_->getFloat("fin_open_mm", data_.pick_finger_open_mm);
-    storage_->getFloat("fin_wid_mm", data_.pick_finger_thick_mm);
-    storage_->getFloat("fin_len_mm", data_.pick_finger_width_mm);
-    storage_->getFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
-    storage_->getInt32("pk_guard_ms", data_.pick_guard_ms);
-    storage_->getBool("pk_dropin", data_.pick_dropin_enable);
-    storage_->getBool("pk_drop_any_th", data_.pick_drop_any_theta);
-    storage_->getFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
+    if (base >= 0) {
+        ConfigSetReader reader(blobs[base].data() + sizeof(ConfigSetHeader),
+                               sets_[base].payload_len);
+        readParams(reader);
+    }
 
-    storage_->getFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
-    storage_->getFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
-    storage_->getFloat("cal_acc_mm_s2", data_.eip_home_cal_accel_mm_s2);
-    storage_->getFloat("cal_creep_mm_s", data_.eip_creep_speed_mm_s);
-    storage_->getInt32("cal_timeout_ms", data_.gantry_calibration_timeout_ms);
-    storage_->getInt32("trv_timeout_ms", data_.gantry_travel_measurement_timeout_ms);
+    FoundKeys found(*storage_);
+    readParams(found);
+    int32_t changed_at = 0;
+    storage_->getInt32(kChangedAtKey, changed_at);
+    {
+        std::lock_guard<std::mutex> lock(change_mutex_);
+        merged_ = found.take();
+        changed_.clear();
+    }
 
-    storage_->getBool("eth_static", data_.eth_use_static_ip);
-    storage_->getString("eth_ip", data_.eth_static_ip, sizeof(data_.eth_static_ip));
-    storage_->getString("eth_gw", data_.eth_static_gateway, sizeof(data_.eth_static_gateway));
-    storage_->getString("eth_netmask", data_.eth_static_netmask, sizeof(data_.eth_static_netmask));
-    storage_->getInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
-
-    storage_->getInt32("disp_orient", data_.display_orientation);
-    storage_->getInt32("disp_bright", data_.display_brightness);
-    storage_->getInt32("disp_bl_to_s", data_.display_backlight_timeout_s);
-
-    storage_->getBool("con_auth", data_.console_tcp_auth_enable);
-    storage_->getString("con_pw", data_.console_tcp_password, sizeof(data_.console_tcp_password));
-    storage_->getInt32("con_tries", data_.console_tcp_auth_max_tries);
-    storage_->getInt32("con_ttl_s", data_.console_tcp_auth_remember_s);
-    storage_->getInt32("con_max_peers", data_.console_tcp_auth_remember_max);
-
-    storage_->getBool("con_tcp_en", data_.console_tcp_enable);
-    storage_->getBool("con_uart_en", data_.console_uart_enable);
-    storage_->getInt32("con_port", data_.console_tcp_port);
-    storage_->getBool("con_log_en", data_.console_tcp_log_enable);
-    storage_->getInt32("con_log_lvl", data_.console_tcp_log_level);
-    storage_->getInt32("ota_port", data_.ota_server_port);
-
-    storage_->getBool("eip_en", data_.eip_scanner_enabled);
-    storage_->getBool("eip_x_en", data_.eip_axis_x);
-    storage_->getBool("eip_z_en", data_.eip_axis_z);
-    storage_->getBool("eip_th_en", data_.eip_axis_theta);
-    storage_->getString("eip_ip_x", data_.eip_target_ip_x, sizeof(data_.eip_target_ip_x));
-    storage_->getString("eip_ip_z", data_.eip_target_ip_z, sizeof(data_.eip_target_ip_z));
-    storage_->getString("eip_ip_th", data_.eip_target_ip_theta, sizeof(data_.eip_target_ip_theta));
-    storage_->getString("w5500_ip", data_.eip_w5500_ip, sizeof(data_.eip_w5500_ip));
-    storage_->getString("w5500_sub", data_.eip_w5500_subnet, sizeof(data_.eip_w5500_subnet));
-    storage_->getString("w5500_gw", data_.eip_w5500_gateway, sizeof(data_.eip_w5500_gateway));
-    storage_->getInt32("w5500_spi_hz", data_.eip_w5500_spi_hz);
-    storage_->getFloat("eip_x_puu_mm", data_.eip_axis_x_puu_per_mm);
-    storage_->getFloat("eip_z_puu_mm", data_.eip_axis_z_puu_per_mm);
-    storage_->getFloat("eip_th_puu_deg", data_.eip_axis_theta_puu_per_deg);
-    storage_->getInt32("eip_x_rpi_us", data_.eip_x_rpi_us);
-    storage_->getInt32("eip_th_rpi_us", data_.eip_theta_rpi_us);
-    storage_->getInt32("eip_endstop_src", data_.eip_endstop_source);
-    storage_->getFloat("th_abs_min_deg", data_.axis_theta_drive_abs_min_deg);
-    storage_->getFloat("th_abs_max_deg", data_.axis_theta_drive_abs_max_deg);
-    storage_->getString("hcs01_eng_ip", data_.hcs01_eng_ip, sizeof(data_.hcs01_eng_ip));
-
-    storage_->getString("dev_pw", data_.dev_mode_password, sizeof(data_.dev_mode_password));
-
+    ConfigSetWriter writer;
+    writeParams(writer);
+    const std::vector<uint8_t>& payload = writer.payload();
+    const bool unchanged =
+        valid > 0 && sets_[order[0]].payload_len == payload.size() &&
+        std::memcmp(blobs[order[0]].data() + sizeof(ConfigSetHeader), payload.data(),
+                    payload.size()) == 0;
+    const uint32_t stamp = changed_at != 0 ? static_cast<uint32_t>(changed_at) : clockUnixSeconds();
+    set_saved_ = unchanged || writeSet(payload, writer.count(), source, stamp);
     return true;
 }
 
-bool AppConfig::save() {
+bool AppConfig::writeSet(const std::vector<uint8_t>& payload, uint16_t param_count,
+                         ConfigSetSource source, uint32_t unix_s) {
+    if (sizeof(ConfigSetHeader) + payload.size() > kConfigSetMaxBytes) {
+        return false;
+    }
+    // An empty or damaged slot first, then the oldest set.
+    int slot = -1;
+    uint32_t newest = 0;
+    for (int i = 0; i < kConfigSetSlots; ++i) {
+        if (!set_valid_[i]) {
+            if (slot < 0 || set_valid_[slot]) {
+                slot = i;
+            }
+            continue;
+        }
+        if (sets_[i].seq > newest) {
+            newest = sets_[i].seq;
+        }
+        if (slot < 0 || (set_valid_[slot] && sets_[i].seq < sets_[slot].seq)) {
+            slot = i;
+        }
+    }
+    ConfigSetHeader header;
+    header.seq = newest + 1;
+    header.unix_s = unix_s;
+    header.payload_len = static_cast<uint16_t>(payload.size());
+    header.payload_hash = configHash(payload.data(), payload.size());
+    header.param_count = param_count;
+    header.source = static_cast<uint8_t>(source);
+
+    std::vector<uint8_t> blob(sizeof(header) + payload.size());
+    std::memcpy(blob.data(), &header, sizeof(header));
+    std::memcpy(blob.data() + sizeof(header), payload.data(), payload.size());
+    if (!storage_->setBlob(kSetKeys[slot], blob.data(), blob.size()) || !storage_->commit()) {
+        return false;
+    }
+    sets_[slot] = header;
+    set_valid_[slot] = true;
+    return true;
+}
+
+void AppConfig::commitPending() {
+    if (!storage_ || !set_saved_) return;
+    std::lock_guard<std::mutex> lock(change_mutex_);
+    for (const std::string& key : merged_) {
+        storage_->eraseKey(key.c_str());
+    }
+    merged_.clear();
+    storage_->eraseKey(kBaseRequestKey);
+    if (changed_.empty()) {
+        storage_->eraseKey(kChangedAtKey);
+    }
+    storage_->commit();
+}
+
+void AppConfig::recordChange(const char* key) {
+    merged_.erase(std::remove(merged_.begin(), merged_.end(), key), merged_.end());
+    if (std::find(changed_.begin(), changed_.end(), key) == changed_.end()) {
+        changed_.emplace_back(key);
+    }
+    const uint32_t now = clockUnixSeconds();
+    if (now != 0) {
+        storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
+    }
+    storage_->commit();
+}
+
+bool AppConfig::requestBase(uint32_t seq) {
     if (!storage_) return false;
-
-    storage_->setInt32("spd_mm_s", data_.gantry_default_speed_mm_per_s);
-    storage_->setInt32("acc_mm_s2", data_.gantry_default_accel_mm_per_s2);
-    storage_->setInt32("dec_mm_s2", data_.gantry_default_decel_mm_per_s2);
-    storage_->setInt32("th_spd_deg_s", data_.gantry_default_speed_deg_per_s);
-    storage_->setInt32("th_acc_deg_s2", data_.gantry_default_accel_deg_per_s2);
-    storage_->setInt32("th_dec_deg_s2", data_.gantry_default_decel_deg_per_s2);
-    storage_->setInt32("ceil_spd_mm_s", data_.gantry_path_max_speed_mm_per_s);
-    storage_->setInt32("ceil_acc_mm_s2", data_.gantry_path_max_accel_mm_per_s2);
-    storage_->setInt32("ceil_dec_mm_s2", data_.gantry_path_max_decel_mm_per_s2);
-    storage_->setInt32("eip_stop_dec", data_.gantry_eip_assumed_stop_decel_mm_s2);
-
-    storage_->setFloat("x_lead_mm", data_.axis_x_lead_mm_per_rev);
-    storage_->setFloat("x_lim_min_mm", data_.axis_x_hard_limit_min_mm);
-    storage_->setFloat("x_lim_max_mm", data_.axis_x_hard_limit_max_mm);
-    storage_->setFloat("x_max_spd_mm_s", data_.axis_x_max_speed_mm_per_s);
-    storage_->setFloat("x_acc_mm_s2", data_.axis_x_accel_mm_per_s2);
-    storage_->setFloat("x_dec_mm_s2", data_.axis_x_decel_mm_per_s2);
-    storage_->setFloat("x_tol_mm", data_.axis_x_position_tolerance_mm);
-    storage_->setInt32("x_enc_ppr", data_.axis_x_encoder_ppr);
-    storage_->setFloat("x_gear_ratio", data_.axis_x_motor_reducer_ratio);
-    storage_->setInt32("x_home_pps", data_.axis_x_homing_speed_pps);
-
-    storage_->setFloat("z_lead_mm", data_.axis_z_lead_mm_per_rev);
-    storage_->setInt32("z_crit_rpm", data_.axis_z_critical_rpm);
-    storage_->setFloat("z_lim_min_mm", data_.axis_z_hard_limit_min_mm);
-    storage_->setFloat("z_lim_max_mm", data_.axis_z_hard_limit_max_mm);
-    storage_->setFloat("z_max_spd_mm_s", data_.axis_z_max_speed_mm_per_s);
-    storage_->setFloat("z_acc_mm_s2", data_.axis_z_accel_mm_per_s2);
-    storage_->setFloat("z_dec_mm_s2", data_.axis_z_decel_mm_per_s2);
-    storage_->setFloat("z_tol_mm", data_.axis_z_position_tolerance_mm);
-    storage_->setInt32("z_enc_ppr", data_.axis_z_encoder_ppr);
-    storage_->setFloat("z_gear_ratio", data_.axis_z_motor_reducer_ratio);
-    storage_->setBool("z_has_brake", data_.axis_z_has_motor_brake);
-    storage_->setInt32("z_home_pps", data_.axis_z_homing_speed_pps);
-    storage_->setFloat("z_datum_mm", data_.gantry_z_datum_offset_above_bed_mm);
-
-    storage_->setFloat("th_gear_ratio", data_.axis_theta_output_gear_ratio);
-    storage_->setFloat("th_lim_min_deg", data_.axis_theta_hard_limit_min_deg);
-    storage_->setFloat("th_lim_max_deg", data_.axis_theta_hard_limit_max_deg);
-    storage_->setFloat("th_spd_max", data_.axis_theta_max_speed_deg_per_s);
-    storage_->setFloat("th_acc_deg", data_.axis_theta_accel_deg_per_s2);
-    storage_->setFloat("th_dec_deg", data_.axis_theta_decel_deg_per_s2);
-    storage_->setFloat("th_tol_deg", data_.axis_theta_position_tolerance_deg);
-    storage_->setInt32("th_enc_ppr", data_.axis_theta_encoder_ppr);
-    storage_->setFloat("th_reducer", data_.axis_theta_motor_reducer_ratio);
-    storage_->setInt32("th_home_pps", data_.axis_theta_homing_speed_pps);
-    storage_->setBool("th_sequential", data_.gantry_theta_sequential);
-
-    storage_->setFloat("geom_z_y_mm", data_.gantry_z_axis_y_offset_mm);
-    storage_->setFloat("geom_th_x_mm", data_.gantry_theta_x_offset_mm);
-    storage_->setFloat("geom_grp_x_mm", data_.gantry_gripper_x_offset_mm);
-    storage_->setFloat("geom_grp_z_mm", data_.gantry_gripper_z_offset_mm);
-    storage_->setFloat("geom_safe_z_mm", data_.gantry_safe_z_height_mm);
-    storage_->setFloat("geom_cal_x_mm", data_.gantry_cal_x_park_mm);
-    storage_->setFloat("geom_cal_z_mm", data_.gantry_cal_z_park_mm);
-    storage_->setFloat("geom_cal_th_deg", data_.gantry_cal_theta_park_deg);
-    storage_->setFloat("col_x_min_mm", data_.gantry_conveyor_collision_x_min_mm);
-    storage_->setFloat("col_z_min_mm", data_.gantry_conveyor_collision_z_min_mm);
-    storage_->setInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
-    storage_->setInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
-
-    storage_->setFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
-    storage_->setFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
-    storage_->setFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
-    storage_->setFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
-    storage_->setFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
-    storage_->setFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
-    storage_->setFloat("cv_cnv_near_mm", data_.conveyor_frame_near_x_mm);
-    storage_->setFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
-    storage_->setFloat("batt_x", data_.test_battery_x_mm);
-    storage_->setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
-    storage_->setInt32("cv_tau_min_us", data_.tau_min_us);
-    storage_->setInt32("cv_tau_max_us", data_.tau_max_us);
-    storage_->setInt32("cv_vis_ms", data_.pick_vision_latency_ms);
-    storage_->setInt32("cv_valve_ms", data_.pick_valve_ms);
-    storage_->setInt32("pk_von_ms", data_.pick_valve_on_ms);
-    storage_->setInt32("pk_voff_ms", data_.pick_valve_off_ms);
-    storage_->setInt32("pk_tr_von", data_.pick_trim_von_ms);
-    storage_->setInt32("pk_tr_voff", data_.pick_trim_voff_ms);
-    storage_->setInt32("pk_tr_cls", data_.pick_trim_close_ms);
-    storage_->setInt32("pk_tr_z", data_.pick_trim_z_ms);
-    storage_->setInt32("pk_tr_grp", data_.pick_trim_grip_ms);
-    storage_->setInt32("pk_tr_hld", data_.pick_trim_hold_ms);
-    storage_->setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
-    storage_->setInt32("pk_off_close", data_.pick_offset_close_ms);
-    storage_->setInt32("vis_batt_x", data_.vision_x_from_batt);
-    storage_->setInt32("pk_off_retract", data_.pick_offset_retract_ms);
-    storage_->setInt32("eip_spi_khz", data_.eip_w5500_spi_khz);
-    storage_->setInt32("disp_tft_en", data_.display_tft_enable);
-    storage_->setInt32("eip_txwr_split", data_.eip_txwr_split);
-    storage_->setInt32("eip_spi_dma", data_.eip_spi_dma);
-    storage_->setInt32("log_uart_async", data_.log_uart_async);
-    storage_->setInt32("eip_scope_gpio", data_.eip_scope_gpio);
-    storage_->setBool("pk_bench", data_.pick_bench_enable);
-    for (int i = 0; i < kPickClassSlots; ++i) {
-      storage_->setInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+    std::lock_guard<std::mutex> lock(change_mutex_);
+    for (const std::string& key : merged_) {
+        storage_->eraseKey(key.c_str());
     }
-    storage_->setFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
-    storage_->setFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
-    for (int i = 0; i < kPickClassSlots; ++i) {
-      storage_->setFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
-      storage_->setFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
+    for (const std::string& key : changed_) {
+        storage_->eraseKey(key.c_str());
     }
-    storage_->setFloat("fin_open_mm", data_.pick_finger_open_mm);
-    storage_->setFloat("fin_wid_mm", data_.pick_finger_thick_mm);
-    storage_->setFloat("fin_len_mm", data_.pick_finger_width_mm);
-    storage_->setFloat("fin_spd_mm_s", data_.pick_jaw_speed_mm_s);
-    storage_->setInt32("pk_guard_ms", data_.pick_guard_ms);
-    storage_->setBool("pk_dropin", data_.pick_dropin_enable);
-    storage_->setBool("pk_drop_any_th", data_.pick_drop_any_theta);
-    storage_->setFloat("pk_stage_x_mm", data_.pick_stage_x_mm);
-
-    storage_->setFloat("cal_spd_mm_s", data_.eip_home_cal_speed_mm_s);
-    storage_->setFloat("cal_th_spd_deg", data_.eip_home_theta_speed_deg_s);
-    storage_->setFloat("cal_acc_mm_s2", data_.eip_home_cal_accel_mm_s2);
-    storage_->setFloat("cal_creep_mm_s", data_.eip_creep_speed_mm_s);
-    storage_->setInt32("cal_timeout_ms", data_.gantry_calibration_timeout_ms);
-    storage_->setInt32("trv_timeout_ms", data_.gantry_travel_measurement_timeout_ms);
-
-    storage_->setBool("eth_static", data_.eth_use_static_ip);
-    storage_->setString("eth_ip", data_.eth_static_ip);
-    storage_->setString("eth_gw", data_.eth_static_gateway);
-    storage_->setString("eth_netmask", data_.eth_static_netmask);
-    storage_->setInt32("eth_timeout_ms", data_.eth_ip_wait_timeout_ms);
-
-    storage_->setInt32("disp_orient", data_.display_orientation);
-    storage_->setInt32("disp_bright", data_.display_brightness);
-    storage_->setInt32("disp_bl_to_s", data_.display_backlight_timeout_s);
-
-    storage_->setBool("con_auth", data_.console_tcp_auth_enable);
-    storage_->setString("con_pw", data_.console_tcp_password);
-    storage_->setInt32("con_tries", data_.console_tcp_auth_max_tries);
-    storage_->setInt32("con_ttl_s", data_.console_tcp_auth_remember_s);
-    storage_->setInt32("con_max_peers", data_.console_tcp_auth_remember_max);
-
-    storage_->setBool("con_tcp_en", data_.console_tcp_enable);
-    storage_->setBool("con_uart_en", data_.console_uart_enable);
-    storage_->setInt32("con_port", data_.console_tcp_port);
-    storage_->setBool("con_log_en", data_.console_tcp_log_enable);
-    storage_->setInt32("con_log_lvl", data_.console_tcp_log_level);
-    storage_->setInt32("ota_port", data_.ota_server_port);
-
-    storage_->setBool("eip_en", data_.eip_scanner_enabled);
-    storage_->setBool("eip_x_en", data_.eip_axis_x);
-    storage_->setBool("eip_z_en", data_.eip_axis_z);
-    storage_->setBool("eip_th_en", data_.eip_axis_theta);
-    storage_->setString("eip_ip_x", data_.eip_target_ip_x);
-    storage_->setString("eip_ip_z", data_.eip_target_ip_z);
-    storage_->setString("eip_ip_th", data_.eip_target_ip_theta);
-    storage_->setString("w5500_ip", data_.eip_w5500_ip);
-    storage_->setString("w5500_sub", data_.eip_w5500_subnet);
-    storage_->setString("w5500_gw", data_.eip_w5500_gateway);
-    storage_->setInt32("w5500_spi_hz", data_.eip_w5500_spi_hz);
-    storage_->setFloat("eip_x_puu_mm", data_.eip_axis_x_puu_per_mm);
-    storage_->setFloat("eip_z_puu_mm", data_.eip_axis_z_puu_per_mm);
-    storage_->setFloat("eip_th_puu_deg", data_.eip_axis_theta_puu_per_deg);
-    storage_->setInt32("eip_x_rpi_us", data_.eip_x_rpi_us);
-    storage_->setInt32("eip_th_rpi_us", data_.eip_theta_rpi_us);
-    storage_->setInt32("eip_endstop_src", data_.eip_endstop_source);
-    storage_->setFloat("th_abs_min_deg", data_.axis_theta_drive_abs_min_deg);
-    storage_->setFloat("th_abs_max_deg", data_.axis_theta_drive_abs_max_deg);
-    storage_->setString("hcs01_eng_ip", data_.hcs01_eng_ip);
-
-    storage_->setString("dev_pw", data_.dev_mode_password);
-
-    return storage_->commit();
+    merged_.clear();
+    changed_.clear();
+    storage_->eraseKey(kChangedAtKey);
+    const uint32_t now = clockUnixSeconds();
+    if (now != 0) {
+        storage_->setInt32(kChangedAtKey, static_cast<int32_t>(now));
+    }
+    return storage_->setInt32(kBaseRequestKey, static_cast<int32_t>(seq)) && storage_->commit();
 }
 
 bool AppConfig::factoryReset() {
-    if (!storage_) return false;
-    storage_->eraseAll();
+    if (!requestBase(0)) return false;
     loadDefaults();
     return true;
+}
+
+bool AppConfig::restoreSet(uint32_t seq) {
+    if (seq == 0) return false;
+    for (int i = 0; i < kConfigSetSlots; ++i) {
+        if (set_valid_[i] && sets_[i].seq == seq) {
+            return requestBase(seq);
+        }
+    }
+    return false;
+}
+
+int AppConfig::configSets(ConfigSetInfo out[kConfigSetSlots]) const {
+    int count = 0;
+    for (int slot = 0; slot < kConfigSetSlots; ++slot) {
+        if (!set_valid_[slot]) {
+            continue;
+        }
+        ConfigSetInfo info;
+        info.valid = true;
+        info.seq = sets_[slot].seq;
+        info.unix_s = sets_[slot].unix_s;
+        info.param_count = sets_[slot].param_count;
+        info.source = static_cast<ConfigSetSource>(sets_[slot].source);
+        int at = count++;
+        while (at > 0 && out[at - 1].seq < info.seq) {
+            out[at] = out[at - 1];
+            --at;
+        }
+        out[at] = info;
+    }
+    return count;
+}
+
+ConfigSetInfo AppConfig::activeSet() const {
+    ConfigSetInfo sets[kConfigSetSlots];
+    return configSets(sets) > 0 ? sets[0] : ConfigSetInfo{};
+}
+
+int AppConfig::pendingChanges() const {
+    std::lock_guard<std::mutex> lock(change_mutex_);
+    return static_cast<int>(changed_.size());
 }
 
 bool AppConfig::unlockDeveloperMode(const char* password) {
@@ -1144,8 +1389,9 @@ bool AppConfig::changeDeveloperPassword(const char* old_pw, const char* new_pw) 
     std::strncpy(data_.dev_mode_password, new_pw, sizeof(data_.dev_mode_password) - 1);
     data_.dev_mode_password[sizeof(data_.dev_mode_password) - 1] = '\0';
     if (storage_) {
+        std::lock_guard<std::mutex> lock(change_mutex_);
         storage_->setString("dev_pw", data_.dev_mode_password);
-        storage_->commit();
+        recordChange("dev_pw");
     }
     return true;
 }
@@ -1288,8 +1534,9 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else return false;
 
     if (storage_) {
+        std::lock_guard<std::mutex> lock(change_mutex_);
         storage_->setInt32(key, val);
-        storage_->commit();
+        recordChange(key);
     }
     return true;
 }
@@ -1440,8 +1687,9 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else return false;
 
     if (storage_) {
+        std::lock_guard<std::mutex> lock(change_mutex_);
         storage_->setFloat(key, val);
-        storage_->commit();
+        recordChange(key);
     }
     return true;
 }
@@ -1492,8 +1740,9 @@ bool AppConfig::setParamBool(const char* key, bool val, bool& out_reboot_require
     else return false;
 
     if (storage_) {
+        std::lock_guard<std::mutex> lock(change_mutex_);
         storage_->setBool(key, val);
-        storage_->commit();
+        recordChange(key);
     }
     return true;
 }
@@ -1546,8 +1795,9 @@ bool AppConfig::setParamString(const char* key, const char* val, bool& out_reboo
     dst[cap - 1] = '\0';
 
     if (storage_) {
+        std::lock_guard<std::mutex> lock(change_mutex_);
         storage_->setString(key, dst);
-        storage_->commit();
+        recordChange(key);
     }
     return true;
 }

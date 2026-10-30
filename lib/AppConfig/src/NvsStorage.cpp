@@ -93,14 +93,19 @@ bool NvsStorage::setString(const char* key, const char* val) {
     return (err == ESP_OK);
 }
 
-bool NvsStorage::eraseAll() {
+bool NvsStorage::getBlob(const char* key, void* out_buf, size_t& in_out_len) {
     if (!initialized_) return false;
-    esp_err_t err = nvs_erase_all(static_cast<nvs_handle_t>(handle_));
-    if (err == ESP_OK) {
-        nvs_commit(static_cast<nvs_handle_t>(handle_));
-        return true;
-    }
-    return false;
+    return nvs_get_blob(static_cast<nvs_handle_t>(handle_), key, out_buf, &in_out_len) == ESP_OK;
+}
+
+bool NvsStorage::setBlob(const char* key, const void* data, size_t len) {
+    if (!initialized_) return false;
+    return nvs_set_blob(static_cast<nvs_handle_t>(handle_), key, data, len) == ESP_OK;
+}
+
+bool NvsStorage::eraseKey(const char* key) {
+    if (!initialized_) return false;
+    return nvs_erase_key(static_cast<nvs_handle_t>(handle_), key) == ESP_OK;
 }
 
 bool NvsStorage::commit() {
@@ -125,7 +130,9 @@ bool NvsStorage::getBool(const char*, bool&) { return false; }
 bool NvsStorage::setBool(const char*, bool) { return true; }
 bool NvsStorage::getString(const char*, char*, size_t) { return false; }
 bool NvsStorage::setString(const char*, const char*) { return true; }
-bool NvsStorage::eraseAll() { return true; }
+bool NvsStorage::getBlob(const char*, void*, size_t&) { return false; }
+bool NvsStorage::setBlob(const char*, const void*, size_t) { return true; }
+bool NvsStorage::eraseKey(const char*) { return true; }
 bool NvsStorage::commit() { return true; }
 
 } // namespace Config

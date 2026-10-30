@@ -89,6 +89,7 @@ add_library(app_config STATIC
 )
 target_include_directories(app_config PUBLIC
     "${REPO_ROOT}/lib/AppConfig/src"
+    "${REPO_ROOT}/lib/Gantry/src"
     "${REPO_ROOT}/include"
 )
 
