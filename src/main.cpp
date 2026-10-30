@@ -410,7 +410,9 @@ extern "C" void app_main(void) {
                           AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
     gantry.setZAxisLimits(AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM);
     gantry.setThetaLimits(AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
-    gantry.setSafeZHeight(GANTRY_SAFE_Z_HEIGHT_MM);
+    // cfg geom_safe_z_mm (applied at boot): the pick scheduler's hover, staging
+    // and bin poses use the same value, so they sit inside the traverse band.
+    gantry.setSafeZHeight(Config::AppConfig::instance().data().gantry_safe_z_height_mm);
 
     ESP_LOGI(TAG, "Initializing gantry...");
     if (!gantry.begin()) {
