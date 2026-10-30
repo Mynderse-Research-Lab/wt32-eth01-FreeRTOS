@@ -29,6 +29,13 @@ void startScannerTask(W5500& chip, w5500::W5500Hal& hal, ILinkStatus& link,
 // Dump Class 1 latency ring stats (exchange / O->T / cycle / cmd-to-StartMotion).
 void dumpClass1TimingStats();
 
+// Close Class 1 cleanly so a flash erase cannot time the connections out, and
+// hold it closed until resumeClass1(). Blocks until closed; false after
+// timeout_ms, and the link is left running. X/Z share the multi-axis task; a
+// theta-only build does not support this.
+bool pauseClass1(uint32_t timeout_ms);
+void resumeClass1();
+
 // Logic-analyzer marker: drive `gpio` high for each Class 1 exchange (multi-axis
 // loop). -1 disables. Call before startScannerTask(). Diagnostic only.
 void setScopeMarkerGpio(int gpio);

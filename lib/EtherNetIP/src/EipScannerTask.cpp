@@ -668,6 +668,22 @@ ScannerConfig makeThetaConfig() {
 }
 #endif
 
+// Requested by pauseClass1(); the multi-axis task closes Class 1 and waits here.
+std::atomic<bool> g_class1_pause_request{false};
+std::atomic<bool> g_class1_paused{false};
+
+void holdClass1WhilePaused() {
+  if (!g_class1_pause_request.load()) {
+    return;
+  }
+  ESP_LOGI(TAG, "Class 1 closed for a parameter save");
+  g_class1_paused.store(true);
+  while (g_class1_pause_request.load()) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  g_class1_paused.store(false);
+}
+
 void multiAxisTask(void* arg) {
   auto* ctx = static_cast<ScannerTaskCtx*>(arg);
   uint32_t backoff_ms = 1000;
@@ -706,8 +722,10 @@ void multiAxisTask(void* arg) {
   ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
 
   while (true) {
+    holdClass1WhilePaused();
     uint32_t link_wait_polls = 0;
     while (!ctx->link->isUp()) {
+      holdClass1WhilePaused();
       backoff_ms = 1000;
       // This wait is otherwise silent: report a W5500 that never shows link
       // (unreadable chip, held in reset, cable) every 5 s.
@@ -829,6 +847,7 @@ void multiAxisTask(void* arg) {
     uint32_t soft_miss_last_warn_ms = 0;
     uint32_t input_miss_streak = 0;
     bool need_chip_recover = false;
+    bool planned_close = false;
     uint32_t timing_cycles = 0;
     uint32_t spi_check_cycles = 0;
     uint8_t last_phy = logW5500LinkMode(*ctx->hal);
@@ -841,6 +860,10 @@ void multiAxisTask(void* arg) {
     setLogScanner(&scanner);
 
     while (true) {
+      if (g_class1_pause_request.load()) {
+        planned_close = true;
+        break;
+      }
       if (!ctx->link->isUp()) {
         if (++lnk_low_reads >= kLinkDownConfirmReads) break;
       } else if (lnk_low_reads != 0) {
@@ -930,7 +953,14 @@ void multiAxisTask(void* arg) {
       pacedClass1Cycle(last_wake, rpi_us);
     }
 
-    // Every break above sets need_chip_recover, so a plain exit is a
+    if (planned_close) {
+      setLogScanner(nullptr);
+      (void)scanner.flushDeferredLogs();
+      scanner.disconnect();
+      continue;
+    }
+
+    // Every other break sets need_chip_recover, so a plain exit is a
     // confirmed LNK=0. A chip that reset itself also needs its config back.
     if (!need_chip_recover) {
       link_down_us = logW5500LinkDown(*ctx->hal);
@@ -948,6 +978,23 @@ void multiAxisTask(void* arg) {
 }
 
 }  // namespace
+
+bool pauseClass1(uint32_t timeout_ms) {
+  g_class1_pause_request.store(true);
+  const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+  while (!g_class1_paused.load()) {
+    if (esp_timer_get_time() > deadline_us) {
+      g_class1_pause_request.store(false);
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  return true;
+}
+
+void resumeClass1() {
+  g_class1_pause_request.store(false);
+}
 
 void setScopeMarkerGpio(int gpio) {
   if (gpio < 0) {
@@ -1065,6 +1112,8 @@ void startScannerTask(W5500&, w5500::W5500Hal&, ILinkStatus&, EipProcessImage*,
                       EipProcessImage*, EipProcessImage*) {}
 void dumpClass1TimingStats() {}
 void setScopeMarkerGpio(int) {}
+bool pauseClass1(uint32_t) { return true; }
+void resumeClass1() {}
 }  // namespace eip
 
 #endif
