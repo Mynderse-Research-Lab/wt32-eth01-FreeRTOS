@@ -27,6 +27,9 @@ namespace Gantry {
 namespace Path {
 
 inline constexpr float kAxisEpsMm = 0.05f;
+/// A move has reached its target within this. Wider than the drive's 0.5 mm
+/// arrival band, to catch a timeout or abort that clears busy far from it.
+inline constexpr float kArriveEpsMm = 1.0f;
 
 /// Theta starts at this fraction of the in-band X+Z traverse segment.
 inline constexpr float kThetaStartFrac = 0.25f;

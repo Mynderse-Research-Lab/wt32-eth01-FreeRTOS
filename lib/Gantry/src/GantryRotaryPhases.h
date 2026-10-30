@@ -9,13 +9,15 @@
 
 #include <cstdint>
 
+#include "GantryControlPeriod.h"
+
 namespace Gantry {
 namespace RotaryPhase {
 
 inline constexpr uint8_t kPreloadTicks = 4;
 inline constexpr uint8_t kReleaseHaltTicks = 10;
 inline constexpr uint8_t kStartAckTicks = 4;
-inline constexpr float kTickS = 0.010f;
+inline constexpr float kTickS = kLegacyTickS;
 /// Worst case from moveToDeg() until the drive runs the profile.
 inline constexpr float kStartMaxS =
     static_cast<float>(kPreloadTicks + kReleaseHaltTicks + kStartAckTicks) * kTickS;

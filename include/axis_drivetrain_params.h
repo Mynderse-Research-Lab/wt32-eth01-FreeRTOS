@@ -471,6 +471,10 @@
 #define AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
     (((double)AXIS_Z_CRITICAL_RPM / 60.0) * (double)AXIS_Z_LEAD_MM_PER_REV)
 
+/* Z: speed limit for pick moves, deliberately 5 % under the whip ceiling. */
+#define AXIS_Z_PICK_SPEED_MM_PER_S \
+    (0.95 * AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S)
+
 /* Theta: rotary encoder pulses per degree */
 #define AXIS_THETA_PULSES_PER_DEG \
     (((double)AXIS_THETA_ENCODER_PPR * (double)AXIS_THETA_MOTOR_REDUCER_RATIO * (double)AXIS_THETA_OUTPUT_GEAR_RATIO) / 360.0)

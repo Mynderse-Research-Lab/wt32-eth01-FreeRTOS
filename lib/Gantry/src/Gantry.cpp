@@ -2530,10 +2530,7 @@ bool Gantry::pathSegmentAtTarget() const {
     const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
     const float x = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
     const float z = axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_);
-    // Wider than drive arrival band (0.5 mm): catch timeout/abort that
-    // clears busy far from the commanded endpoint (e.g. X never moved).
-    constexpr float kPathArriveEpsMm = 1.0f;
-    return Path::segmentEndpointsReached(x, z, seg, kPathArriveEpsMm);
+    return Path::segmentEndpointsReached(x, z, seg, Path::kArriveEpsMm);
 }
 
 void Gantry::failPath(const char* why) {

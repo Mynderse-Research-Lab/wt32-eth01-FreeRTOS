@@ -22,8 +22,12 @@ inline void setControlPeriodUs(uint32_t us) {
   controlPeriodUs() = us;
 }
 
+// The historical 100 Hz tick that phase lengths are counted in.
+inline constexpr uint32_t kLegacyTickUs = 10000u;
+inline constexpr float kLegacyTickS = 0.010f;
+
 // `ticks` is the historical count at 100 Hz. 50 ticks is 500 ms.
-inline uint32_t legacyTicksUs(uint32_t ticks) { return ticks * 10000u; }
+inline uint32_t legacyTicksUs(uint32_t ticks) { return ticks * kLegacyTickUs; }
 
 inline void spendUs(uint32_t& budget) {
   const uint32_t step = controlPeriodUs();
