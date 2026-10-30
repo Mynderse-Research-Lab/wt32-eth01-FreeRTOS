@@ -172,6 +172,25 @@ static void test_hover_clears_tall_object_and_respects_ceiling(void) {
     ASSERT_NEAR(1e-9, 101.95 - 73.8 - 6.0, p.z_hover_mm);
 }
 
+static void test_plunge_time_uses_the_z_decel(void) {
+    StrikePlan::Inputs in = simInputs(26.6, 17.3, 0.0, 600.0, 99.0);
+    in.az_mm_s2 = 5000.0;
+    const double dist = 99.0 - 44.82;
+    // 800 mm/s needs 64 + 64 mm at 5000 mm/s2, so this stroke is a triangle.
+    in.dz_mm_s2 = 0.0;
+    const StrikePlan::Plan same = StrikePlan::plan(in);
+    ASSERT_NEAR(1e-9, 2.0 * std::sqrt(dist / 5000.0), same.tau_plunge_s);
+
+    in.dz_mm_s2 = 10000.0;
+    const StrikePlan::Plan fast = StrikePlan::plan(in);
+    const double v_peak = std::sqrt(2.0 * dist * 5000.0 * 10000.0 / 15000.0);
+    ASSERT_NEAR(1e-9, v_peak / 5000.0 + v_peak / 10000.0, fast.tau_plunge_s);
+
+    // Long stroke: full-speed cruise between ramps of 64 mm and 32 mm.
+    ASSERT_NEAR(1e-9, 0.16 + 0.08 + (300.0 - 96.0) / 800.0,
+                StrikePlan::trapezoidSeconds(300.0, 800.0, 5000.0, 10000.0));
+}
+
 static void test_rejects_unpickable_inputs(void) {
     TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(0.0, 17.3, 0.0, 600.0, 99.0)).ok);
     TEST_ASSERT_FALSE(StrikePlan::plan(simInputs(92.1, 53.0, 0.0, 600.0, 99.0)).ok);
@@ -198,6 +217,7 @@ int main(void) {
     RUN_TEST(test_close_stays_between_plunge_and_retract);
     RUN_TEST(test_offsets_are_limited_to_100_ms);
     RUN_TEST(test_hover_clears_tall_object_and_respects_ceiling);
+    RUN_TEST(test_plunge_time_uses_the_z_decel);
     RUN_TEST(test_rejects_unpickable_inputs);
     RUN_TEST(test_jaw_stroke_solves_pneumatic_model);
     return UNITY_END();

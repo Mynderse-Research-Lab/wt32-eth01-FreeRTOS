@@ -57,6 +57,7 @@ struct Inputs {
     double pad_half_open_mm = 0.0;   // half of the open jaw gap
     double vz_mm_s = 0.0;            // Z plunge speed cap
     double az_mm_s2 = 0.0;           // Z acceleration
+    double dz_mm_s2 = 0.0;           // Z deceleration, 0 = same as az_mm_s2
     double valve_delay_s = 0.0;      // close command to jaw motion
     double valve_tau_s = kValveTauS;
     double jaw_speed_mm_s = kJawSpeedMmS;
@@ -83,18 +84,19 @@ struct Plan {
     double dwell_s = 0.0;            // bottom dwell the offsets ask for, signed
 };
 
-/// Time-optimal trapezoid/triangle duration (physics_engines.trapezoid_duration).
-inline double trapezoidSeconds(double distance_mm, double v_max, double a_max) {
+/// Time-optimal trapezoid/triangle duration (physics_engines.trapezoid_duration)
+/// with separate accel and decel ramps.
+inline double trapezoidSeconds(double distance_mm, double v_max, double a_max, double d_max) {
     const double dist = std::fabs(distance_mm);
-    if (dist < 1e-6 || v_max <= 0.0 || a_max <= 0.0) {
+    if (dist < 1e-6 || v_max <= 0.0 || a_max <= 0.0 || d_max <= 0.0) {
         return 0.0;
     }
-    const double t_acc = v_max / a_max;
-    const double d_acc = 0.5 * a_max * t_acc * t_acc;
-    if (dist < 2.0 * d_acc) {
-        return 2.0 * std::sqrt(dist / a_max);
+    const double d_ramps = 0.5 * v_max * v_max * (1.0 / a_max + 1.0 / d_max);
+    if (dist < d_ramps) {
+        const double v_peak = std::sqrt(2.0 * dist * a_max * d_max / (a_max + d_max));
+        return v_peak / a_max + v_peak / d_max;
     }
-    return 2.0 * t_acc + (dist - 2.0 * d_acc) / v_max;
+    return v_max / a_max + v_max / d_max + (dist - d_ramps) / v_max;
 }
 
 /// Time for one jaw to travel stroke_mm after valve opening:
@@ -161,7 +163,8 @@ inline Plan plan(const Inputs& in) {
     p.z_grasp_mm = zg;
 
     const double to_top = (z_top - zh) > kMinTopMm ? (z_top - zh) : kMinTopMm;
-    p.tau_plunge_s = trapezoidSeconds(zg - zh, in.vz_mm_s, in.az_mm_s2);
+    const double dz = in.dz_mm_s2 > 0.0 ? in.dz_mm_s2 : in.az_mm_s2;
+    p.tau_plunge_s = trapezoidSeconds(zg - zh, in.vz_mm_s, in.az_mm_s2, dz);
     p.tau_band_s = p.tau_plunge_s - std::sqrt(2.0 * to_top / in.az_mm_s2);
 
     double q_full = in.pad_half_open_mm - 0.5 * in.width_mm;
