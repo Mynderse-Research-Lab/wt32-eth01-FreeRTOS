@@ -25,6 +25,7 @@ Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEM
 | `PUB00028R1-Recommended-IP-Addressing-Methods-for-EtherNetIP-Devices.pdf` | ODVA IP addressing recommendations |
 | `EtherNetIP Interoperabiltiy Recommendations.pdf.pdf` | ODVA 2009 conference paper on interoperability and performance testing |
 | `PUB00070_Recommended-Functionality-for-EIP-Devices-v10.pdf` | ODVA Roundtable recommendations for EtherNet/IP devices (R10, 2018) |
+| CIP Networks Library Vol 1, Ed. 3.3 (not in git) | ODVA CIP specification (2007). All rights reserved: local copy only, do not commit |
 | CIP Networks Library Vol 2, Ed. 1.18 (not in git) | ODVA EtherNet/IP specification. Single-subscription licence, p. iii: local copy only, do not commit |
 | `AB_Kinetix_drive_specs.pdf` / `AB_Kinetix_motor_specs.pdf` | Drive / motor specs |
 | `2198-in003_-en-p.pdf` | Kinetix installation |

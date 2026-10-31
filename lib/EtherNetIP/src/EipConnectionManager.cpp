@@ -62,7 +62,7 @@ uint16_t makeNetworkConnectionParams(uint16_t connection_size_bytes,
   params |= static_cast<uint16_t>((variable_size ? 1u : 0u) << 9);
   params |= static_cast<uint16_t>((static_cast<uint16_t>(priority) & 0x3) << 10);
   if (run_idle_header) {
-    // O->T Run/Idle header format (ODVA Vol 2, network params bit 8).
+    // Not a CIP flag: bit 8 belongs to Connection Size (ODVA Vol 1, Table 3-5.8).
     params |= static_cast<uint16_t>(1u << 8);
   }
   params |= static_cast<uint16_t>((static_cast<uint16_t>(type) & 0x3) << 13);
