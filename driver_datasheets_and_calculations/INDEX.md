@@ -20,6 +20,10 @@ Production motion is **EtherNet/IP** (see `docs/EXPECTED_ELECTROMECHANICAL_ASSEM
 | `Technical Information_Beta 80-SRS*.pdf` | Z ballscrew actuator |
 | `Technical Information_SCHUNK KGG 100-80*.pdf` | Gripper |
 | `AB_Kinetix5100_user_manual.pdf` | Kinetix 5100 |
+| `PUB00213R0_EtherNetIP_Developers_Guide.pdf` | ODVA EtherNet/IP Quick Start for Vendors Handbook |
+| `PUB00123R1_Common-Industrial_Protocol_and_Family_of_CIP_Networks.pdf` | ODVA overview of CIP and EtherNet/IP (2016) |
+| `PUB00028R1-Recommended-IP-Addressing-Methods-for-EtherNetIP-Devices.pdf` | ODVA IP addressing recommendations |
+| `EtherNetIP Interoperabiltiy Recommendations.pdf.pdf` | ODVA 2009 conference paper on interoperability and performance testing |
 | `AB_Kinetix_drive_specs.pdf` / `AB_Kinetix_motor_specs.pdf` | Drive / motor specs |
 | `2198-in003_-en-p.pdf` | Kinetix installation |
 | `R911325518_*HCS01_Commissioning Manual.pdf` | HCS01 connectors |
