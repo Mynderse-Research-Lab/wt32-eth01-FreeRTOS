@@ -284,17 +284,30 @@ KnownTask g_rt_known[kRunTimeMaxTasks];
 size_t g_rt_known_count = 0;
 UBaseType_t g_rt_known_total = 0;
 std::atomic<bool> g_rt_pending{false};
-uint32_t g_rt_gap_us = 0;  // set before g_rt_pending
+uint32_t g_rt_gap_us = 0;  // set before g_rt_pending, with the breakdown below
 uint32_t g_rt_end_us = 0;
+uint32_t g_rt_exchange_us = 0;
+uint32_t g_rt_rest_us = 0;
+uint32_t g_rt_pace_us = 0;
 int64_t g_rt_last_us = 0;  // scanner task only
 
-void noteRunTimeGap(int64_t t0, uint32_t gap_us) {
+// The last report, kept for 'gaptrace': a log burst (cfg export) can make the
+// net console drop the line, as it did on 2026-11-03.
+std::mutex g_rt_report_mutex;
+char g_rt_report[400] = "none since boot";
+uint32_t g_rt_report_count = 0;
+
+void noteRunTimeGap(int64_t t0, uint32_t gap_us, uint32_t exchange_us, uint32_t rest_us,
+                    uint32_t pace_us) {
     if (gap_us < kRunTimeGapUs || g_rt_pending.load() ||
         t0 - g_rt_last_us < kRunTimeMinIntervalUs) {
         return;
     }
     g_rt_gap_us = gap_us;
     g_rt_end_us = static_cast<uint32_t>(t0);
+    g_rt_exchange_us = exchange_us;
+    g_rt_rest_us = rest_us;
+    g_rt_pace_us = pace_us;
     g_rt_last_us = t0;
     g_rt_pending.store(true);
 }
@@ -356,14 +369,13 @@ void serviceRunTimeTrace() {
     if (g_rt_pending.load()) {
         const uint32_t start_us = g_rt_end_us - g_rt_gap_us;
         const RunTimeSnapshot* before = g_rt_history.atOrBefore(start_us);
-        if (before == nullptr) {
-            ESP_LOGW(TAG, "Class 1 gap %lu us: run-time history too short to cover it",
-                     static_cast<unsigned long>(g_rt_gap_us));
-        } else {
+        static char line[220];  // static: EipLog has a 4 KB stack
+        size_t used = 0;
+        if (before != nullptr) {
             TaskRunDelta top[kRunTimeReportTasks];
             const size_t n = diffRunTimes(*before, snap, top, kRunTimeReportTasks);
-            static char line[200];  // static: EipLog has a 4 KB stack
-            size_t used = 0;
+            used = static_cast<size_t>(snprintf(line, sizeof(line), " CPU ms over %lu ms:",
+                static_cast<unsigned long>((snap.t_us - before->t_us) / 1000)));
             for (size_t i = 0; i < n && used < sizeof(line); ++i) {
                 char core[6];
                 if (top[i].core < 0) {
@@ -379,10 +391,21 @@ void serviceRunTimeTrace() {
                     used += static_cast<size_t>(w);
                 }
             }
-            ESP_LOGW(TAG, "Class 1 gap %lu us: CPU ms per task over %lu ms around it:%s",
+        } else {
+            snprintf(line, sizeof(line), " run-time history too short to cover it");
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_rt_report_mutex);
+            ++g_rt_report_count;
+            snprintf(g_rt_report, sizeof(g_rt_report),
+                     "#%lu at %lu ms: gap %lu us (exchange %lu, rest %lu, pace %lu);%s",
+                     static_cast<unsigned long>(g_rt_report_count),
+                     static_cast<unsigned long>(g_rt_end_us / 1000),
                      static_cast<unsigned long>(g_rt_gap_us),
-                     static_cast<unsigned long>((snap.t_us - before->t_us) / 1000),
-                     (used > 0) ? line : " none");
+                     static_cast<unsigned long>(g_rt_exchange_us),
+                     static_cast<unsigned long>(g_rt_rest_us),
+                     static_cast<unsigned long>(g_rt_pace_us), line);
+            ESP_LOGW(TAG, "Class 1 gap report %s", g_rt_report);
         }
         g_rt_pending.store(false);
     }
@@ -400,7 +423,8 @@ void noteLoopGap(int64_t t0, int64_t prev_t0, int64_t prev_t1, int64_t prev_t2,
                  uint32_t prev_ot_us, uint32_t prev_drain_us) {
     if (prev_t0 <= 0 || t0 <= prev_t0) return;
     const uint32_t gap = static_cast<uint32_t>(t0 - prev_t0);
-    noteRunTimeGap(t0, gap);
+    noteRunTimeGap(t0, gap, static_cast<uint32_t>(prev_t1 - prev_t0),
+                   static_cast<uint32_t>(t0 - prev_t2), static_cast<uint32_t>(g_pace_us));
     portENTER_CRITICAL(&g_diag_mux);
     if (gap > g_worst_gap.gap_us) {
         g_worst_gap.gap_us = gap;
@@ -1169,6 +1193,12 @@ void setScopeMarkerGpio(int gpio) {
   ESP_LOGW(TAG, "Class 1 exchange marker on GPIO%d (cfg eip_scope_gpio)", gpio);
 }
 
+void printLastClass1GapReport() {
+    std::lock_guard<std::mutex> lock(g_rt_report_mutex);
+    ESP_LOGI(TAG, "Class 1 gap report (10 ms or more; %lu since boot): %s",
+             static_cast<unsigned long>(g_rt_report_count), g_rt_report);
+}
+
 void dumpClass1TimingStats() {
   const Class1TimingSnapshot ex = class1TimingStats().exchange();
   const Class1TimingSnapshot ot = class1TimingStats().otSend();
@@ -1270,6 +1300,7 @@ namespace eip {
 void startScannerTask(W5500&, w5500::W5500Hal&, ILinkStatus&, EipProcessImage*,
                       EipProcessImage*, EipProcessImage*) {}
 void dumpClass1TimingStats() {}
+void printLastClass1GapReport() {}
 void setScopeMarkerGpio(int) {}
 bool pauseClass1(uint32_t) { return true; }
 void resumeClass1() {}

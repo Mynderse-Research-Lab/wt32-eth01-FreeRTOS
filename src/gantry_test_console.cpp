@@ -2851,6 +2851,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
              strcmp(cmdLower, "faults") != 0 &&
              strcmp(cmdLower, "alarms") != 0 &&
              strcmp(cmdLower, "eiptiming") != 0 &&
+             strcmp(cmdLower, "gaptrace") != 0 &&
              strcmp(cmdLower, "bootlog") != 0 &&
              strncmp(cmdLower, "ethlink", 7) != 0 &&
              strcmp(cmdLower, "limits") != 0 &&
@@ -3401,6 +3402,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     ESP_LOGI(TAG, "%s", line);
   } else if (strcmp(cmdLower, "eiptiming") == 0) {
     eip::dumpClass1TimingStats();
+  } else if (strcmp(cmdLower, "gaptrace") == 0) {
+    eip::printLastClass1GapReport();
   } else if (strcmp(cmdLower, "bootlog") == 0) {
     ESP_LOGI(TAG, "=== boot log (%u bytes captured from reset) ===",
              static_cast<unsigned>(bootLogRingBytes()));
@@ -3512,6 +3515,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix and theta HCS01 diag");
   ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm and theta PUU/deg");
   ESP_LOGI(TAG, "  eiptiming            - dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)");
+  ESP_LOGI(TAG, "  gaptrace             - last Class 1 gap >= 10 ms: breakdown + CPU ms per task");
   ESP_LOGI(TAG, "  bootlog              - print the first ~12 KB of log output since reset");
   ESP_LOGI(TAG, "  ethlink <x|z|t> [1|2] [clear] - drive port speed/duplex/negotiation + error counters");
   ESP_LOGI(TAG, "  puu t <scale>        - set live theta PUU/deg (re-run home t)");
