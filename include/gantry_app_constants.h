@@ -105,12 +105,7 @@
 #define CONSOLE_TASK_CORE              0
 #define TFT_UI_TASK_STACK           4096
 #define TFT_UI_TASK_PRIORITY           2
-// Core 1 (G-D3): the UI holds the MCP23S17 mutex for each DC/button access. On
-// core 0 the console and lwIP preempted it there for up to 365 ms, so the
-// gripper and the pick health check timed out at 8 ms. On core 1 only short
-// periodic tasks run above it, and a waiter's priority inheritance lets it
-// finish at once. At priority 2 it never preempts Class 1.
-#define TFT_UI_TASK_CORE               1
+#define TFT_UI_TASK_CORE               0
 
 #define PICK_SCHEDULER_TASK_STACK   8192
 #define PICK_SCHEDULER_TASK_PRIORITY   4
