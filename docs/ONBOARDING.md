@@ -34,7 +34,7 @@ The cell sorts batteries off a moving conveyor. Vision reports where a battery i
 flowchart LR
   subgraph cell ["Closed cell network: 10.42.0.0/24 and CellNet Layer 2 (0x88B5)"]
     V["Vision IPC<br/>node 0x01<br/>10.42.0.2"]
-    C["Conveyor WT32<br/>node 0x02<br/>address TBD, see C-2"]
+    C["Conveyor WT32<br/>node 0x02<br/>10.42.0.3, see C-2"]
     G["Gantry WT32<br/>node 0x03<br/>10.42.0.100"]
     S["Supervisor Pi<br/>node 0x04<br/>10.42.0.1"]
   end
@@ -111,7 +111,8 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 |------|-----|
 | Send `stop`, then `status`, before every OTA flash | Motors must be off and the gantry idle |
 | Test with the 9V cell only | The trigger-sensor workaround sends one fixed frame until the ML model is ready |
-| At least 7 s between strikes; regulator at 6 bar | The KGG 100-80 closing time of 0.19 s is specified at 6 bar. Reason for the 7 s spacing: TBD |
+| Space vision detections at least 7 s apart in demonstrations | A demonstration control, not a safety measure: it gives the unoptimized planner room to complete each pick. Several detections per second is the goal (G-C10) |
+| Gripper regulator at 6 bar | The KGG 100-80 closing time of 0.19 s is specified at 6 bar |
 | Eliminate Class 1 drops; never add auto-recovery | A hidden link fault on a motion system is a safety problem |
 | Stored parameters are the only runtime source | Primary objective: avoid NVS read and write delays, so values are loaded once and motion uses RAM. Motion and pick code also never reads a macro for a value with a stored key |
 | Pick code never keeps its own copy of a gantry parameter | One unified source of parameters |
@@ -207,6 +208,7 @@ Turns detections into timed strikes. Code: `src/pick_scheduler.cpp`, `include/pi
 | G-C7 | Picks and console `move` share `spd_mm_s`, so jogs default to 750 mm/s (plan P0.1) | Confirmed. **The plan's fix adds separate `pk_*` speed keys, which contradicts the single-source rule** | **Decision:** a bench speed limit on `move`, or a deliberate exception |
 | G-C8 | Duplicated logic remains between Gantry and scheduler: path timing, theta window, trapezoid math in four copies | Confirmed by a scan on 2026-10-30 | Remove when next touching that code |
 | G-C9 | The per-pick dwell warning fires every pick while offsets differ (plan M3) | Suggested; console bursts are a known LAN trigger (G-E1) | Warn once per offset change |
+| G-C10 | Detection rate. Demonstrations space vision detections at least 7 s apart so the unoptimized planner completes each pick; the goal is several detections per second | Decision 2026-11-03: a starting point, not a limit | An optimization problem: measure the pick cycle once G-C1 and G-C2 are closed, then shorten the spacing step by step |
 
 ### 5.4 Gripper and field I/O
 
@@ -217,7 +219,7 @@ SCHUNK KGG 100-80 pneumatic gripper, driven through an MCP23S17 output (PA0) and
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
 | G-D1 | Generic field I/O and ADC are deferred to hardware Rev02. The LV board schematic is in the Google Drive project folder under `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed in [DEV_TRACKER](DEV_TRACKER.md) | Plan with Rev02 |
-| G-D2 | HV/LV schematic review is pending. The LV board schematic is at the same Google Drive path, `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed | Electrical review. Owner TBD |
+| G-D2 | HV/LV schematic review is pending. The LV board schematic is at the same Google Drive path, `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed | Electrical review. Owner: Zia-Ahmed-1 (amohamm20@ltu.edu) |
 
 ### 5.5 Controller, cell network and tools
 
@@ -315,7 +317,7 @@ Carries cells past the gantry and reports belt position. The gantry treats `disp
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
 | C-1 | The firmware is at [wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter). The copy at `D:\Projects\wt32-eth01-velmeter-testing` is not a git checkout, and C-2 and C-3 were read from it | Confirmed | Work from a clone; check C-2 and C-3 against `main` |
-| C-2 | Address conflict: the project and the Pi's `NETWORK.md` give the conveyor `10.42.0.2`, which is the vision host. An unidentified device sits at `10.42.0.50` | Confirmed conflict; `.50` not identified | Identify the node's real address, then fix the docs |
+| C-2 | The conveyor moves to `10.42.0.3` (decided 2026-11-03). It was set to `10.42.0.2`, the vision host's address, in the project and the Pi's `NETWORK.md`. An unidentified device sits at `10.42.0.50` | Decision; the conveyor firmware ([wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter)) and `NETWORK.md` still say `.2` | Check `.3` is free, change the conveyor firmware and `NETWORK.md`, then identify `.50` |
 | C-3 | Its protocol header differs from the gantry's (see X-3) | Confirmed | Sync, and check the wire format still matches |
 
 ### 7.2 Belt, drive and encoder
