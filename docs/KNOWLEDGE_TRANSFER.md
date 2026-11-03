@@ -1,4 +1,4 @@
-# Engineer Onboarding
+# Knowledge Transfer
 
 **Status:** Living template. Filled in from the code, live logs and project docs, last checked 2026-10-30 at commit `d6e8f8e`.
 **Audience:** Engineers continuing development on the battery sorting cell.
