@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 
 // MCP23S17 Register addresses
 #define MCP23S17_IODIRA   0x00  // I/O Direction Port A
@@ -49,6 +50,9 @@ struct mcp23s17_handle {
     uint8_t port_a_pullup;
     uint8_t port_b_pullup;
     bool owns_bus;
+    // Current holder of spi_mutex, for the timeout log (G-D3).
+    volatile int64_t held_since_us;
+    char holder[16];
 };
 
 static const char *TAG = "MCP23S17";
@@ -63,6 +67,22 @@ static constexpr int kMcpClass1RetryAttempts = 4;
 // Why the last mcp23s17_lock() failed (for the error log).
 static const char* s_lock_fail = "";
 
+static inline void mcp23s17_note_holder(mcp23s17_handle_t handle) {
+    handle->held_since_us = esp_timer_get_time();
+    const char *name = pcTaskGetName(NULL);
+    strncpy(handle->holder, name != NULL ? name : "?", sizeof(handle->holder) - 1);
+    handle->holder[sizeof(handle->holder) - 1] = '\0';
+}
+
+// Who holds spi_mutex now and for how long, logged when a lock times out.
+static void mcp23s17_log_holder(mcp23s17_handle_t handle) {
+    const int64_t since = handle->held_since_us;
+    if (since != 0) {
+        ESP_LOGE(TAG, "  spi_mutex held by %s for %lld us so far", handle->holder,
+                 (long long)(esp_timer_get_time() - since));
+    }
+}
+
 static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     if (handle == NULL || handle->spi_mutex == NULL) {
         s_lock_fail = "no handle";
@@ -70,6 +90,7 @@ static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     }
     if (handle->owns_bus) {
         if (xSemaphoreTake(handle->spi_mutex, kMcpSpiLockTimeoutTicks) == pdTRUE) {
+            mcp23s17_note_holder(handle);
             return true;
         }
         s_lock_fail = "mutex timeout";
@@ -89,6 +110,7 @@ static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
             return false;
         }
         if (!spi3_class1_critical_active()) {
+            mcp23s17_note_holder(handle);
             return true;
         }
         xSemaphoreGive(handle->spi_mutex);
@@ -99,6 +121,7 @@ static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
 
 static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
     if (handle != NULL && handle->spi_mutex != NULL) {
+        handle->held_since_us = 0;
         xSemaphoreGive(handle->spi_mutex);
     }
 }
@@ -138,6 +161,7 @@ static esp_err_t mcp23s17_read_register_unlocked(mcp23s17_handle_t handle, uint8
 static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t value) {
     if (!mcp23s17_lock(handle)) {
         ESP_LOGE(TAG, "SPI mutex lock failed for write reg 0x%02X (%s)", reg, s_lock_fail);
+        mcp23s17_log_holder(handle);
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = mcp23s17_write_register_unlocked(handle, reg, value);
@@ -148,6 +172,7 @@ static esp_err_t mcp23s17_write_register(mcp23s17_handle_t handle, uint8_t reg, 
 static esp_err_t mcp23s17_read_register(mcp23s17_handle_t handle, uint8_t reg, uint8_t* value) {
     if (!mcp23s17_lock(handle)) {
         ESP_LOGE(TAG, "SPI mutex lock failed for read reg 0x%02X (%s)", reg, s_lock_fail);
+        mcp23s17_log_holder(handle);
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = mcp23s17_read_register_unlocked(handle, reg, value);
