@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "CipMessageRouter.h"
+#include "CipTcpIpInterface.h"
 #include "EipClass1DeferredLog.h"
 #include "EipClass1Timing.h"
 #include "EipClass1TimingStats.h"
@@ -1701,8 +1702,149 @@ static void test_cip_sequence_number_wraparound(void) {
   TEST_ASSERT_EQUAL_UINT32(dummy_assembly.size(), out_assy.size());
 }
 
+static void test_session_nop_frame(void) {
+    FakeTcpClient tcp;
+    tcp.enqueueResponse(makeRegisterSessionReply(0x0A0B0C0D));
+    eip::EipSession session(tcp);
+    TEST_ASSERT_TRUE(session.registerSession());
+
+    TEST_ASSERT_TRUE(session.sendNop());
+    const Bytes& f = tcp.lastSent();
+    TEST_ASSERT_EQUAL_UINT32(24, f.size());
+    const uint8_t head[8] = {0x00, 0x00, 0x00, 0x00, 0x0D, 0x0C, 0x0B, 0x0A};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(head, f.data(), sizeof(head));
+    for (size_t i = 8; i < 12; ++i) {
+        TEST_ASSERT_EQUAL_HEX8(0, f[i]);  // status
+    }
+    for (size_t i = 20; i < 24; ++i) {
+        TEST_ASSERT_EQUAL_HEX8(0, f[i]);  // options
+    }
+}
+
+static void test_session_nop_needs_a_session(void) {
+    FakeTcpClient tcp;
+    eip::EipSession session(tcp);
+    TEST_ASSERT_FALSE(session.sendNop());
+    TEST_ASSERT_EQUAL_UINT32(0, tcp.allSent().size());
+}
+
+static void test_encap_nop_interval_policy(void) {
+    TEST_ASSERT_EQUAL_UINT32(30000, eip::encapNopIntervalMs(true, 120));
+    TEST_ASSERT_EQUAL_UINT32(30000, eip::encapNopIntervalMs(false, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, eip::encapNopIntervalMs(true, 0));
+    TEST_ASSERT_EQUAL_UINT32(250, eip::encapNopIntervalMs(true, 1));
+    TEST_ASSERT_EQUAL_UINT32(900000, eip::encapNopIntervalMs(true, 3600));
+}
+
+static void test_encap_inactivity_timeout_request(void) {
+    // Get_Attribute_Single, 3-word path: class 0xF5, instance 1, attribute 13.
+    const Bytes expected = {0x0E, 0x03, 0x20, 0xF5, 0x24, 0x01, 0x30, 0x0D};
+    const Bytes req = eip::buildEncapInactivityTimeoutGetRequest();
+    TEST_ASSERT_EQUAL_UINT32(expected.size(), req.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), req.data(), expected.size());
+}
+
+namespace {
+
+Bytes makeGetAttributeMrReply(uint8_t general_status, const Bytes& data) {
+    Bytes cip;
+    eip::ByteWriter w(cip);
+    w.u8(static_cast<uint8_t>(eip::CipService::kGetAttributeSingle) |
+         eip::kCipReplyServiceMask);
+    w.u8(0);
+    w.u8(general_status);
+    w.u8(0);
+    w.bytes(data);
+    return cip;
+}
+
+// One axis whose drive answers attribute 13 with `reply` before Forward Open.
+struct KeptAliveAxis {
+    FakeTcpClient tcp;
+    FakeUdpEndpoint udp;
+    std::unique_ptr<eip::EipMultiScanner> scanner;
+
+    explicit KeptAliveAxis(const Bytes& attr13_reply) {
+        const uint32_t handle = 0x33330003;
+        tcp.enqueueResponse(makeRegisterSessionReply(handle));
+        tcp.enqueueResponse(makeSendRRDataEncapReply(handle, attr13_reply));
+        tcp.enqueueResponse(
+            makeSendRRDataEncapReply(handle, makeForwardOpenMrReply(makeSampleForwardOpenReply())));
+        eip::ScannerConfig cfg = makeTestScannerConfig();
+        cfg.read_encap_inactivity_timeout = true;
+        eip::MultiAxisSlot slots[1] = {{cfg, nullptr}};
+        eip::ITcpClient* tcps[1] = {&tcp};
+        scanner = std::make_unique<eip::EipMultiScanner>(tcps, 1, udp, slots);
+        TEST_ASSERT_TRUE(scanner->openAxis(0));
+    }
+
+    size_t nopsSent() const {
+        size_t n = 0;
+        for (const Bytes& f : tcp.allSent()) {
+            if (f.size() == 24 && f[0] == 0x00 && f[1] == 0x00) {
+                ++n;
+            }
+        }
+        return n;
+    }
+};
+
+}  // namespace
+
+static void test_open_reads_the_timeout_and_spaces_nops(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{60, 0}));  // 60 s
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+    TEST_ASSERT_EQUAL_UINT32(15000, ax.scanner->axisEncapNopIntervalMs(0));
+
+    const int64_t now = eip::class1NowUs();
+    ax.scanner->serviceEncapKeepalive(now);
+    TEST_ASSERT_EQUAL_UINT32(0, ax.nopsSent());
+
+    const int64_t due = now + 15000LL * 1000;
+    ax.scanner->serviceEncapKeepalive(due);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.nopsSent());
+    ax.scanner->serviceEncapKeepalive(due + 1000);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.nopsSent());
+    ax.scanner->serviceEncapKeepalive(due + 15000LL * 1000);
+    TEST_ASSERT_EQUAL_UINT32(2, ax.nopsSent());
+}
+
+static void test_unreadable_timeout_assumes_the_default(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0x14, Bytes{}));  // attribute not supported
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+    TEST_ASSERT_EQUAL_UINT32(30000, ax.scanner->axisEncapNopIntervalMs(0));
+}
+
+static void test_disabled_timeout_sends_no_nop(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{0, 0}));
+    ax.scanner->serviceEncapKeepalive(eip::class1NowUs() + 3600LL * 1000 * 1000);
+    TEST_ASSERT_EQUAL_UINT32(0, ax.nopsSent());
+}
+
+static void test_failed_nop_is_logged_once_and_not_recovered(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{120, 0}));
+    const size_t connects = ax.tcp.connects();
+    ax.tcp.failSendsUntilReconnect();
+    const int64_t due = eip::class1NowUs() + 30000LL * 1000;
+
+    ax.scanner->serviceEncapKeepalive(due);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.scanner->pendingLogCount());
+    ax.scanner->serviceEncapKeepalive(due + 30000LL * 1000);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.scanner->pendingLogCount());
+    TEST_ASSERT_EQUAL_UINT32(connects, ax.tcp.connects());
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+}
+
 int main(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_session_nop_frame);
+  RUN_TEST(test_session_nop_needs_a_session);
+  RUN_TEST(test_encap_nop_interval_policy);
+  RUN_TEST(test_encap_inactivity_timeout_request);
+  RUN_TEST(test_open_reads_the_timeout_and_spaces_nops);
+  RUN_TEST(test_unreadable_timeout_assumes_the_default);
+  RUN_TEST(test_disabled_timeout_sends_no_nop);
+  RUN_TEST(test_failed_nop_is_logged_once_and_not_recovered);
   RUN_TEST(test_session_register);
   RUN_TEST(test_class1_cpf_bytes);
   RUN_TEST(test_io_connection_output_frame);

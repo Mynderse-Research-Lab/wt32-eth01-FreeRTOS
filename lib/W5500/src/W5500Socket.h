@@ -69,6 +69,12 @@ bool socketListen(W5500Hal& hal, uint8_t sock, uint16_t port);
 // Send data on a connected TCP socket. Returns bytes sent, or -1 on error.
 int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len);
 
+// TCP send that issues SEND and returns without polling SENDOK, for a rare
+// frame sent from the Class 1 task (encapsulation NOP). It first reports the
+// previous one's outcome: -1 if it timed out or the socket is no longer
+// ESTABLISHED. Returns bytes queued, or -1.
+int socketSendNoWait(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len);
+
 // Receive data from a connected TCP socket.
 // Returns bytes read, 0 if no data within timeout, -1 on error/disconnect.
 int socketRecv(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,

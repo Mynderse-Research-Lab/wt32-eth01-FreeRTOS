@@ -28,6 +28,7 @@ enum class Class1LogEvent : uint8_t {
     kAxisReopenRequested,  // a = age us
     kAxisReopenOk,         // no payload
     kAxisReopenFailed,     // a = next retry ms
+    kEncapNopFailed,       // a = NOP interval ms
 };
 
 struct Class1LogEntry {

@@ -90,6 +90,15 @@ class EipMultiScanner {
   uint32_t recvTimeoutMs() const;
   bool udpBound() const { return udp_bound_; }
 
+  /// Send one due encapsulation NOP (at most one axis per call), so each drive's
+  /// explicit TCP session stays inside its Encapsulation Inactivity Timeout.
+  /// Call from the Class 1 task outside its critical section. A failed NOP is
+  /// logged once per open; nothing is reconnected here.
+  void serviceEncapKeepalive(int64_t now_us);
+
+  /// NOP period for axis i from its attribute 13 (0 = none needed).
+  uint32_t axisEncapNopIntervalMs(size_t i) const;
+
   /// Print queued Class 1 events. Call only *outside* the W5500 bus lock and
   /// the SPI3 Class 1 critical section (never from exchangeOnce). Returns the
   /// number of events drained. On host builds events are drained silently.
@@ -160,6 +169,10 @@ class EipMultiScanner {
     // Latched once per ForwardOpen (not per cyclic start) so "first T->O" is
     // reported once even though priming drains before beginCyclicExchange.
     bool first_to_logged = false;
+    // Encapsulation NOP keepalive, set from attribute 13 at each open.
+    uint32_t nop_interval_ms = 0;
+    int64_t next_nop_us = 0;
+    bool nop_failed_logged = false;
     // Per-axis reopen (HCS01): pending until a reopen succeeds.
     bool reopen_pending = false;
     int64_t reopen_due_us = 0;
@@ -172,6 +185,7 @@ class EipMultiScanner {
   // Does not touch the shared UDP socket or other axes.
   void closeAxis(size_t i, bool forward_close = true);
   bool reconnectExplicitSession(size_t i);
+  void readEncapInactivityTimeout(size_t i);
   bool sendAxisOutput(size_t i);
   bool applyFeedback(size_t i, const uint8_t* assembly, size_t len);
   size_t matchAxisByConnectionId(uint32_t connection_id) const;

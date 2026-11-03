@@ -45,6 +45,10 @@ struct ScannerConfig {
   /// Connection Size (ODVA Vol 1, Table 3-5.8). The target learns the 4-byte
   /// header from the connection path (Vol 1, section 3-6.1), not from a flag.
   bool include_run_idle_bit_in_net_params = false;
+  /// Read TCP/IP object attribute 13 before Forward Open to set the NOP period.
+  /// When false the spec default (120 s) is assumed; host fakes that answer a
+  /// fixed reply sequence leave it off.
+  bool read_encap_inactivity_timeout = false;
   ConnectionType to_connection_type = ConnectionType::kMulticast;
 };
 

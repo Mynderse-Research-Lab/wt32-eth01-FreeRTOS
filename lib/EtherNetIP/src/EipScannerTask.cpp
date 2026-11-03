@@ -972,6 +972,9 @@ void multiAxisTask(void* arg) {
         continue;
       }
 
+      // Class 1 is not encapsulation activity, so without this each drive
+      // closes its explicit TCP session after its inactivity timeout (G-B2).
+      scanner.serviceEncapKeepalive(class1NowUs());
       logTimingSnapshotPeriodic(timing_cycles);
       checkW5500SpiPeriodic(*ctx->hal, spi_check_cycles, last_phy);
       pacedClass1Cycle(last_wake, rpi_us);

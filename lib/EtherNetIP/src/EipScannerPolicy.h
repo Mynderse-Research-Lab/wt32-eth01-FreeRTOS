@@ -87,6 +87,7 @@ inline ScannerConfig makeKinetixScannerConfig(const KinetixScannerArgs& a) {
     cfg.connection_timeout_multiplier = kClass1ConnectionTimeoutMultiplier;
     cfg.include_run_idle_header = true;
     cfg.include_run_idle_bit_in_net_params = false;
+    cfg.read_encap_inactivity_timeout = true;
     cfg.to_connection_type = a.to_point_to_point ? ConnectionType::kPointToPoint
                                                  : ConnectionType::kMulticast;
     return cfg;
@@ -118,6 +119,7 @@ inline ScannerConfig makeThetaScannerConfig(const ThetaScannerArgs& a = {}) {
     cfg.connection_timeout_multiplier = kClass1ConnectionTimeoutMultiplier;
     cfg.include_run_idle_header = true;
     cfg.include_run_idle_bit_in_net_params = false;
+    cfg.read_encap_inactivity_timeout = true;
     cfg.to_connection_type = a.to_point_to_point ? ConnectionType::kPointToPoint
                                                  : ConnectionType::kMulticast;
     return cfg;

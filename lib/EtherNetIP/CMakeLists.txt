@@ -9,6 +9,7 @@ idf_component_register(
         "src/EipCpf.cpp"
         "src/CipMessageRouter.cpp"
         "src/CipEthernetLink.cpp"
+        "src/CipTcpIpInterface.cpp"
         "src/EipConnectionManager.cpp"
         "src/Kinetix5100Assembly.cpp"
         "src/Kinetix5100ParamAccess.cpp"

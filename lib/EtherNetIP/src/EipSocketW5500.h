@@ -22,6 +22,7 @@ public:
     bool connect(const char* host, uint16_t port) override;
     void close() override;
     ssize_t send(const uint8_t* data, size_t len) override;
+    ssize_t sendNoWait(const uint8_t* data, size_t len) override;
     ssize_t recv(uint8_t* buf, size_t max_len, uint32_t timeout_ms) override;
     bool isConnected() const override;
 

@@ -729,6 +729,10 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
             return -1;
         }
 
+        // A socketSendNoWait leaves its SENDOK set; it must not pass for ours.
+        const uint8_t stale = readSocketReg(hal, sock, Sn_IR) & Sn_IR_SENDOK;
+        clearSendInterrupts(hal, sock, stale);
+
         uint16_t txWr = readSocketReg16(hal, sock, Sn_TX_WR);
         hal.writeBuf(kBlockSocketTxBuf(sock), txWr, data, static_cast<uint16_t>(len));
 
@@ -762,6 +766,36 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
     }
     clearSendInterrupts(hal, sock, ir);
     return -1;
+}
+
+int socketSendNoWait(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
+    if (len == 0) return 0;
+    if (len > 0xFFFF) return -1;
+
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
+
+    // The previous call's outcome is still in Sn_IR.
+    const uint8_t ir = readSocketReg(hal, sock, Sn_IR) &
+                       (Sn_IR_SENDOK | Sn_IR_TIMEOUT | Sn_IR_DISCON);
+    clearSendInterrupts(hal, sock, ir);
+    if ((ir & (Sn_IR_TIMEOUT | Sn_IR_DISCON)) != 0) {
+        return -1;
+    }
+    if (readSocketReg(hal, sock, Sn_SR) != SOCK_ESTABLISHED) {
+        return -1;
+    }
+    if (readSocketSizeReg16Stable(hal, sock, Sn_TX_FSR) < static_cast<uint16_t>(len)) {
+        return -1;
+    }
+
+    uint16_t txWr = readSocketReg16(hal, sock, Sn_TX_WR);
+    hal.writeBuf(kBlockSocketTxBuf(sock), txWr, data, static_cast<uint16_t>(len));
+    txWr += static_cast<uint16_t>(len);
+    writeTxWr(hal, sock, txWr);
+    noteSocketTxWr(sock, txWr);
+    writeSocketReg(hal, sock, Sn_CR, Sn_CR_SEND);
+    noteSocketSend(sock);
+    return static_cast<int>(len);
 }
 
 int socketRecv(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,

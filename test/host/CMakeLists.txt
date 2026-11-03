@@ -63,6 +63,7 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/EipCpf.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/CipEthernetLink.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/CipTcpIpInterface.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100ParamAccess.cpp"

@@ -25,6 +25,10 @@ class EipSession {
   bool sendExplicit(const Bytes& cip_request, Bytes& out_cip_response,
                     uint16_t timeout_ms = 500);
   bool unregisterSession();
+  /// Encapsulation NOP (0x0000): no reply, and it counts as activity for the
+  /// target's Encapsulation Inactivity Timeout (ODVA Vol 2, section 2-5.5.2).
+  /// Sent without waiting; false when this or the previous NOP failed.
+  bool sendNop();
 
   uint32_t sessionHandle() const { return session_handle_; }
   bool isRegistered() const { return session_handle_ != 0; }

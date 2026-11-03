@@ -6,6 +6,7 @@
 #include <climits>
 
 #include "CipMessageRouter.h"
+#include "CipTcpIpInterface.h"
 #include "EipClass1TimingStats.h"
 #include "EipCpf.h"
 #include "EipScannerPolicy.h"
@@ -241,6 +242,11 @@ bool EipMultiScanner::openAxis(size_t i) {
     return false;
   }
   ax.state = AxisState::kRegistered;
+  if (ax.config.read_encap_inactivity_timeout) {
+      readEncapInactivityTimeout(i);
+  } else {
+      ax.nop_interval_ms = eip::encapNopIntervalMs(false, 0);
+  }
 
   if (!forwardOpenAxis(i)) {
     (void)ax.session->unregisterSession();
@@ -250,6 +256,8 @@ bool EipMultiScanner::openAxis(size_t i) {
   }
 
   configureIo(i);
+  ax.next_nop_us = class1NowUs() + static_cast<int64_t>(ax.nop_interval_ms) * 1000;
+  ax.nop_failed_logged = false;
   ax.state = AxisState::kConnected;
   ax.first_to_logged = false;
   // Do not stamp last_feedback_us here — FO→peer-open gap is not T->O age.
@@ -612,6 +620,11 @@ size_t EipMultiScanner::flushDeferredLogs() {
         ESP_LOGW(kTag, "axis%u reopen failed — retry in %lu ms", ax,
                  static_cast<unsigned long>(e.a));
         break;
+      case Class1LogEvent::kEncapNopFailed:
+        ESP_LOGW(kTag, "axis%u explicit TCP session lost: NOP failed (every %lu ms)."
+                 " Class 1 carries on; the close rebuilds the session", ax,
+                 static_cast<unsigned long>(e.a));
+        break;
       default:
         ESP_LOGW(kTag, "axis%u unknown Class 1 event %d", ax,
                  static_cast<int>(e.event));
@@ -639,6 +652,55 @@ bool EipMultiScanner::reconnectExplicitSession(size_t i) {
   ax.tcp->close();
   if (!ax.tcp->connect(ax.config.target_ip, EipSession::kDefaultPort)) return false;
   return ax.session->registerSession();
+}
+
+// Read on the axis's own session before Forward Open. A drive that does not
+// answer gets the spec default, so it is still kept alive.
+void EipMultiScanner::readEncapInactivityTimeout(size_t i) {
+    AxisRuntime& ax = axes_[i];
+    uint16_t timeout_s = 0;
+    bool known = false;
+    Bytes reply;
+    MessageRouterResponse mr;
+    if (ax.session->sendExplicit(buildEncapInactivityTimeoutGetRequest(), reply) &&
+        parseMessageRouterResponse(reply, mr)) {
+        known = mr.isSuccess() && parseEncapInactivityTimeout(mr.data, timeout_s);
+    }
+    ax.nop_interval_ms = eip::encapNopIntervalMs(known, timeout_s);
+#ifdef ESP_PLATFORM
+    if (known) {
+        ESP_LOGI(kTag, "axis%u encapsulation inactivity timeout %u s, NOP every %lu ms",
+                 static_cast<unsigned>(i), static_cast<unsigned>(timeout_s),
+                 static_cast<unsigned long>(ax.nop_interval_ms));
+    } else {
+        ESP_LOGW(kTag, "axis%u encapsulation inactivity timeout not read (CIP status 0x%02X),"
+                 " assuming %u s, NOP every %lu ms",
+                 static_cast<unsigned>(i), mr.general_status,
+                 static_cast<unsigned>(kEncapInactivityTimeoutDefaultS),
+                 static_cast<unsigned long>(ax.nop_interval_ms));
+    }
+#endif
+}
+
+void EipMultiScanner::serviceEncapKeepalive(int64_t now_us) {
+    for (size_t i = 0; i < axis_count_; ++i) {
+        AxisRuntime& ax = axes_[i];
+        if (ax.state != AxisState::kConnected || ax.nop_interval_ms == 0 ||
+            ax.session == nullptr || now_us < ax.next_nop_us) {
+            continue;
+        }
+        ax.next_nop_us = now_us + static_cast<int64_t>(ax.nop_interval_ms) * 1000;
+        if (!ax.session->sendNop() && !ax.nop_failed_logged) {
+            ax.nop_failed_logged = true;
+            deferred_log_.push(Class1LogEvent::kEncapNopFailed, static_cast<uint8_t>(i),
+                               ax.nop_interval_ms);
+        }
+        return;
+    }
+}
+
+uint32_t EipMultiScanner::axisEncapNopIntervalMs(size_t i) const {
+    return (i < axis_count_) ? axes_[i].nop_interval_ms : 0;
 }
 
 bool EipMultiScanner::gracefulCloseAxis(size_t i) {
