@@ -46,9 +46,18 @@ void BusMutex::unlock() {
 }
 
 BusHoldStats BusMutex::take() {
-    std::lock_guard<std::mutex> lock(m_);
+    m_.lock();
+    const int64_t acquired = pollNowUs();
     const BusHoldStats out = stats_;
     stats_ = BusHoldStats{};
+    // G-B6 check: this hold was not recorded, yet a low-priority caller can be
+    // preempted holding it. Record it in the new window, where the wait of a
+    // task blocked behind it lands as well.
+    const int64_t hold = pollNowUs() - acquired;
+    stats_.max_hold_us = static_cast<uint32_t>(hold);
+    std::strncpy(stats_.holder, "take:", sizeof(stats_.holder) - 1);
+    currentTaskName(stats_.holder + 5, sizeof(stats_.holder) - 5);
+    m_.unlock();
     return out;
 }
 
