@@ -59,8 +59,8 @@ flowchart LR
   S -. "TCP console :2323, OTA :8032" .-> G
   S -. "NTP :123" .-> V
   S -. "NTP :123" .-> G
-  E["Engineer PC"] -. "ZeroTier 10.168.40.1, toolbox /dev" .-> S
-  E -. "or a cable: a free 10.42.0.x" .- SW
+  E["Engineer PC<br/>a free 10.42.0.x"] === SW
+  E -. "toolbox http://10.42.0.1/dev" .-> S
 ```
 
 **One pick, end to end:**
@@ -105,7 +105,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 
 | Step | Command or place | Done means |
 |------|------------------|------------|
-| Reach the cell | ZeroTier to `10.168.40.1`, or a free address on `10.42.0.0/24` | Toolbox opens at `http://10.168.40.1/dev` |
+| Reach the cell | A cable into the cell switch, with a free static address on `10.42.0.0/24` | Toolbox opens at `http://10.42.0.1/dev` |
 | Host tests | `cmake -S test/host -B build/host` then `cmake --build build/host` and `ctest --test-dir build/host --output-on-failure` | 28 of 28 pass; both must pass before a change is final |
 | Firmware | `idf.py -C idf build`, target `esp32` | Image builds, from `sdkconfig.defaults` only |
 | Read the rules | [Working rules](#machine-safety-and-working-rules) below, and [CONTRIBUTING.md](../CONTRIBUTING.md) | You know what not to do |
@@ -232,7 +232,7 @@ SCHUNK KGG 100-80 pneumatic gripper, driven through an MCP23S17 output (PA0) and
 
 ### 5.5 Controller, cell network and tools
 
-WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`, `src/gantry_test_console.cpp`, `src/gantry_ota.cpp`. Flash with `python tools/supervisor_ota.py`.
+WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`, `src/gantry_test_console.cpp`, `src/gantry_ota.cpp`. Flash with `python tools/supervisor_ota.py --host 10.42.0.1`.
 
 **Open items and blockers**
 
@@ -347,7 +347,7 @@ Raspberry Pi, CellNet node `0x04`. Sends heartbeats and `CELL_COMMAND`, records 
 
 | Component | Detail | Location |
 |-----------|--------|----------|
-| Host | Debian 13. `eth0` `10.42.0.1`, ZeroTier `10.168.40.1`, Wi-Fi to a hotspot | Pi |
+| Host | Debian 13. `eth0` `10.42.0.1`, Wi-Fi to a hotspot | Pi |
 | `adsb-supervisor` | C++ service. Config in `/etc/adsb-cell.env` | Source `~/ADSB-PI-base/src`, binary `/usr/local/bin` |
 | `adsb-cell-dhcp` | DHCP on the cell switch | Pi service |
 | `chrony` | NTP server for `10.42.0.0/24`; replaced `systemd-timesyncd` on 2026-10-30 | `/etc/chrony/conf.d/gantry-cell.conf` |
