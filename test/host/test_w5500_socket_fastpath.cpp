@@ -3,6 +3,7 @@
 
 #include "W5500.h"
 #include "W5500Hal.h"
+#include "W5500BusMutex.h"
 #include "W5500Socket.h"
 #include "unity.h"
 
@@ -940,8 +941,21 @@ static void test_tcp_send_ignores_a_stale_sendok(void) {
     TEST_ASSERT_EQUAL_INT(-1, w5500::socketSend(hal, 0, frame, sizeof(frame)));
 }
 
+// G-B6: reading the statistics must not need the bus mutex. With the old
+// take() this deadlocked here; on the gantry it held off Class 1 for 30 ms.
+static void test_bus_stats_take_does_not_need_the_bus_mutex(void) {
+    w5500::BusMutex m;
+    m.lock();
+    const w5500::BusHoldStats first = m.take();
+    m.unlock();
+    (void)first;
+    const w5500::BusHoldStats s = m.take();
+    TEST_ASSERT_EQUAL_STRING("host", s.holder);  // the hold just released
+}
+
 int main(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_bus_stats_take_does_not_need_the_bus_mutex);
   RUN_TEST(test_tcp_send_nowait_skips_sendok_poll);
   RUN_TEST(test_tcp_send_nowait_reports_the_previous_failure);
   RUN_TEST(test_tcp_send_nowait_needs_an_established_socket);

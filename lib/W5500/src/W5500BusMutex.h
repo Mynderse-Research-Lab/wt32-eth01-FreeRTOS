@@ -22,7 +22,8 @@ public:
     void lock();
     void unlock();
 
-    /// Copy the stats and start a new window.
+    /// Copy the stats and start a new window. Never takes the bus mutex, so a
+    /// low-priority caller cannot hold off Class 1 (G-B6).
     BusHoldStats take();
 
 private:
