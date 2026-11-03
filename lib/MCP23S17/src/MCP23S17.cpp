@@ -119,15 +119,20 @@ static inline bool mcp23s17_lock(mcp23s17_handle_t handle) {
     return false;
 }
 
-// A hold longer than this makes an 8 ms waiter likely to time out (G-D3).
-static constexpr int64_t kMcpLongHoldUs = 4000;
+// Holds past the 8 ms waiter timeout are logged, at most once a second: at
+// 4 ms the log ran ~6 lines a second and was load in itself (G-D3).
+static constexpr int64_t kMcpLongHoldUs = 20000;
+static constexpr int64_t kMcpHoldLogEveryUs = 1000000;
+static int64_t s_hold_log_us = 0;
 
 static inline void mcp23s17_unlock(mcp23s17_handle_t handle) {
     if (handle != NULL && handle->spi_mutex != NULL) {
-        const int64_t held = esp_timer_get_time() - handle->held_since_us;
+        const int64_t now = esp_timer_get_time();
+        const int64_t held = now - handle->held_since_us;
         handle->held_since_us = 0;
         xSemaphoreGive(handle->spi_mutex);
-        if (held > kMcpLongHoldUs) {
+        if (held > kMcpLongHoldUs && now - s_hold_log_us >= kMcpHoldLogEveryUs) {
+            s_hold_log_us = now;
             ESP_LOGW(TAG, "spi_mutex held %lld us by %s", (long long)held, pcTaskGetName(NULL));
         }
     }
