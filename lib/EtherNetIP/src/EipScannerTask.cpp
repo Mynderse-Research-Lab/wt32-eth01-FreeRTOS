@@ -8,6 +8,7 @@
 #include "EipClass1TimingStats.h"
 #include "EipReliabilityStats.h"
 #include "EipMultiScanner.h"
+#include "EipRunTimeTrace.h"
 #include "EipProcessImage.h"
 #include "EipScanner.h"
 #include "EipScannerPolicy.h"
@@ -26,6 +27,8 @@
 #include "freertos/task.h"
 
 #include <atomic>
+#include <cstdio>
+#include <cstring>
 #include <mutex>
 
 #include "driver/gpio.h"
@@ -260,6 +263,132 @@ portMUX_TYPE g_diag_mux = portMUX_INITIALIZER_UNLOCKED;
 LoopGap g_worst_gap;    // guarded by g_diag_mux
 int64_t g_pace_us = 0;  // previous iteration's time in paceClass1Cycle
 
+// Run-time trace (G-B6): class1LogTask snapshots per-task CPU time each period,
+// and a gap of kRunTimeGapUs or more is reported as CPU time per task across it.
+constexpr uint32_t kRunTimeGapUs = 10000;
+constexpr int64_t kRunTimeMinIntervalUs = 5000000;
+constexpr size_t kRunTimeReportTasks = 8;
+RunTimeHistory g_rt_history;  // class1LogTask only, as are the tables below
+
+// Listing the tasks takes the kernel lock while scanning every stack, so it
+// runs only when the task count changes. Each period reads the known tasks'
+// counters without the stack scan.
+struct KnownTask {
+    TaskHandle_t handle = nullptr;
+    uint32_t number = 0;
+    int8_t core = -1;
+    char name[configMAX_TASK_NAME_LEN] = {};
+};
+TaskStatus_t g_rt_status[kRunTimeMaxTasks];
+KnownTask g_rt_known[kRunTimeMaxTasks];
+size_t g_rt_known_count = 0;
+UBaseType_t g_rt_known_total = 0;
+std::atomic<bool> g_rt_pending{false};
+uint32_t g_rt_gap_us = 0;  // set before g_rt_pending
+uint32_t g_rt_end_us = 0;
+int64_t g_rt_last_us = 0;  // scanner task only
+
+void noteRunTimeGap(int64_t t0, uint32_t gap_us) {
+    if (gap_us < kRunTimeGapUs || g_rt_pending.load() ||
+        t0 - g_rt_last_us < kRunTimeMinIntervalUs) {
+        return;
+    }
+    g_rt_gap_us = gap_us;
+    g_rt_end_us = static_cast<uint32_t>(t0);
+    g_rt_last_us = t0;
+    g_rt_pending.store(true);
+}
+
+bool listRunTimeTasks() {
+    configRUN_TIME_COUNTER_TYPE total = 0;
+    const UBaseType_t n = uxTaskGetSystemState(g_rt_status, kRunTimeMaxTasks, &total);
+    g_rt_known_count = 0;
+    if (n == 0) {
+        return false;  // more tasks than kRunTimeMaxTasks
+    }
+    for (UBaseType_t i = 0; i < n; ++i) {
+        KnownTask& k = g_rt_known[g_rt_known_count++];
+        const BaseType_t core = xTaskGetCoreID(g_rt_status[i].xHandle);
+        k.handle = g_rt_status[i].xHandle;
+        k.number = static_cast<uint32_t>(g_rt_status[i].xTaskNumber);
+        k.core = (core == tskNO_AFFINITY) ? -1 : static_cast<int8_t>(core);
+        strncpy(k.name, g_rt_status[i].pcTaskName, sizeof(k.name) - 1);
+        k.name[sizeof(k.name) - 1] = '\0';
+    }
+    g_rt_known_total = uxTaskGetNumberOfTasks();
+    return true;
+}
+
+bool takeRunTimeSnapshot(RunTimeSnapshot& snap) {
+    if (g_rt_known_count == 0 || uxTaskGetNumberOfTasks() != g_rt_known_total) {
+        if (!listRunTimeTasks()) {
+            return false;
+        }
+    }
+    snap.t_us = static_cast<uint32_t>(esp_timer_get_time());
+    snap.count = static_cast<uint8_t>(g_rt_known_count);
+    for (size_t i = 0; i < g_rt_known_count; ++i) {
+        TaskStatus_t st;
+        // pdFALSE: no stack scan; a known state skips eTaskGetState().
+        vTaskGetInfo(g_rt_known[i].handle, &st, pdFALSE, eRunning);
+        snap.tasks[i].task_number = g_rt_known[i].number;
+        snap.tasks[i].run_us = static_cast<uint32_t>(st.ulRunTimeCounter);
+        snap.tasks[i].core = g_rt_known[i].core;
+    }
+    return true;
+}
+
+const char* runTimeTaskName(uint32_t task_number) {
+    for (size_t i = 0; i < g_rt_known_count; ++i) {
+        if (g_rt_known[i].number == task_number) {
+            return g_rt_known[i].name;
+        }
+    }
+    return "?";
+}
+
+// Called by class1LogTask each period: one snapshot, and the report when due.
+void serviceRunTimeTrace() {
+    static RunTimeSnapshot snap;
+    if (!takeRunTimeSnapshot(snap)) {
+        return;
+    }
+    if (g_rt_pending.load()) {
+        const uint32_t start_us = g_rt_end_us - g_rt_gap_us;
+        const RunTimeSnapshot* before = g_rt_history.atOrBefore(start_us);
+        if (before == nullptr) {
+            ESP_LOGW(TAG, "Class 1 gap %lu us: run-time history too short to cover it",
+                     static_cast<unsigned long>(g_rt_gap_us));
+        } else {
+            TaskRunDelta top[kRunTimeReportTasks];
+            const size_t n = diffRunTimes(*before, snap, top, kRunTimeReportTasks);
+            static char line[200];  // static: EipLog has a 4 KB stack
+            size_t used = 0;
+            for (size_t i = 0; i < n && used < sizeof(line); ++i) {
+                char core[6];
+                if (top[i].core < 0) {
+                    snprintf(core, sizeof(core), "any");
+                } else {
+                    snprintf(core, sizeof(core), "c%d", static_cast<int>(top[i].core));
+                }
+                const int w = snprintf(line + used, sizeof(line) - used, " %s/%s %lu.%lu |",
+                                       runTimeTaskName(top[i].task_number), core,
+                                       static_cast<unsigned long>(top[i].delta_us / 1000),
+                                       static_cast<unsigned long>((top[i].delta_us % 1000) / 100));
+                if (w > 0) {
+                    used += static_cast<size_t>(w);
+                }
+            }
+            ESP_LOGW(TAG, "Class 1 gap %lu us: CPU ms per task over %lu ms around it:%s",
+                     static_cast<unsigned long>(g_rt_gap_us),
+                     static_cast<unsigned long>((snap.t_us - before->t_us) / 1000),
+                     (used > 0) ? line : " none");
+        }
+        g_rt_pending.store(false);
+    }
+    g_rt_history.push(snap);
+}
+
 // paceClass1Cycle, timed for the loop-gap breakdown (multi-axis loop).
 void pacedClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
     const int64_t tp = class1NowUs();
@@ -271,6 +400,7 @@ void noteLoopGap(int64_t t0, int64_t prev_t0, int64_t prev_t1, int64_t prev_t2,
                  uint32_t prev_ot_us, uint32_t prev_drain_us) {
     if (prev_t0 <= 0 || t0 <= prev_t0) return;
     const uint32_t gap = static_cast<uint32_t>(t0 - prev_t0);
+    noteRunTimeGap(t0, gap);
     portENTER_CRITICAL(&g_diag_mux);
     if (gap > g_worst_gap.gap_us) {
         g_worst_gap.gap_us = gap;
@@ -389,6 +519,7 @@ void class1LogTask(void*) {
                 (void)g_log_scanner->flushDeferredLogs();
             }
         }
+        serviceRunTimeTrace();
         if (++ticks >= 100 / kLogTaskPeriodMs) {
             ticks = 0;
             trickleSnapshotLine();

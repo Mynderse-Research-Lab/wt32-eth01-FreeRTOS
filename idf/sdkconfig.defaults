@@ -42,6 +42,12 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 # FreeRTOS tick at 1000 Hz so pdMS_TO_TICKS(1) is a real millisecond.
 CONFIG_FREERTOS_HZ=1000
 
+# Per-task CPU time (esp_timer clock) for the Class 1 gap report (G-B6): the
+# EipLog task diffs snapshots around a gap to name the task that held the CPU.
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U32=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+
 # W5500 EtherNet/IP daisy-chain: WT32 (.10) -> X (.20) -> Z (.21) -> HCS01.
 # HCS01 engineering HTTP/IndraWorks = .22 (MAC …B6); CIP/FKM = .23 (MAC …B9).
 # X PORT1 uplink is mutually exclusive: WT32 XOR PC (never both).
