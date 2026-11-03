@@ -30,14 +30,21 @@ Items with `(plan)` also appear in the plans listed in [Appendix B](#appendix-b-
 
 The cell sorts batteries off a moving conveyor. Vision reports where a battery is and what it is, the conveyor reports how far the belt has moved, and the gantry intercepts the battery on the moving belt, grips it and drops it in a bin. The supervisor coordinates and gives engineers a way in.
 
+Thick lines are cables. Arrows are messages, which all cross the switch.
+
 ```mermaid
 flowchart LR
   subgraph cell ["Closed cell network: 10.42.0.0/24 and CellNet Layer 2 (0x88B5)"]
+    SW{{"Unmanaged switch<br/>100BASE-TX, Layer 2"}}
     V["Vision IPC<br/>node 0x01<br/>10.42.0.2"]
     C["Conveyor WT32<br/>node 0x02<br/>10.42.0.3, see C-2"]
     G["Gantry WT32<br/>node 0x03<br/>10.42.0.100"]
     S["Supervisor Pi<br/>node 0x04<br/>10.42.0.1"]
   end
+  V === SW
+  C === SW
+  S === SW
+  G ===|"LAN8720"| SW
   subgraph bus ["Motion bus: 192.168.1.0/24, EtherNet/IP"]
     X["Kinetix X<br/>.20"]
     Z["Kinetix Z<br/>.21"]
@@ -47,12 +54,13 @@ flowchart LR
   C -- "CONVEYOR_SPEED" --> G
   S -- "CELL_COMMAND, HEARTBEAT" --> G
   G -- "GANTRY_STATUS" --> S
-  G -- "W5500, Class 1, 2 ms RPI" --> X
+  G -- "W5500 (own port, not the switch), Class 1, 2 ms RPI" --> X
   X --> Z --> T
   S -. "TCP console :2323, OTA :8032" .-> G
   S -. "NTP :123" .-> V
   S -. "NTP :123" .-> G
   E["Engineer PC"] -. "ZeroTier 10.168.40.1, toolbox /dev" .-> S
+  E -. "or a cable: a free 10.42.0.x" .- SW
 ```
 
 **One pick, end to end:**
