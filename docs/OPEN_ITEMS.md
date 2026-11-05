@@ -34,7 +34,7 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | [G-C7](#g-c-pick-scheduler) | **Decision:** a bench speed limit on `move`, or a deliberate exception | Slow console jogs while picks run at pick speed |
 | [G-B7](#g-b-motion-bus-w5500-ethernetip) | **Decision:** does the strike timing need a 2 ms RPI? | A wider Class 1 timeout margin |
 | [G-D3](#g-d-gripper-field-io-and-panel) | **Decision:** approve the SPI3 priority ceiling | Ending the MCP23S17 lock failures. The gripper write takes the same lock |
-| [C-2](#conveyor) | A conveyor firmware change, flashed over USB | Any IP access to the conveyor, OTA included: today it has no address |
+| [C-2](#conveyor) | A conveyor firmware change, flashed over USB (it can carry the N-2 receiver too) | Any IP access to the conveyor, OTA included: today it has no address |
 | [S-5](#supervisor) | **Decision:** adopt, merge or retire `sorting-cell-coordinator` | Any production HMI work |
 | [X-1](#repository-and-documentation) | A push of this branch | Anyone else building on its work since 2026-09-18 |
 
@@ -130,9 +130,15 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| S-3 | The console and OTA password is compile-time only, and in git history. Both servers compare against `CONSOLE_TCP_PASSWORD` (`gantry_net_console.cpp:274`, `main.cpp:476`), which is `CONFIG_CONSOLE_TCP_PASSWORD` from `idf/sdkconfig.defaults`. A hard-coded fallback for an empty value sits in `ethernet_app_config.h:77`, `AppConfig.cpp:637`, `AppConfigData.h:159` and `gantry_ota.cpp:446`. The stored key `con_pw` has no reader, and `cfg passwd` changes the developer password, not this one | Confirmed in code 2026-11-05. The supervisor repository's `cell.env.example` leaves its passwords blank (`b980b06`) | Decide where it lives; the stored `con_pw`, read by both servers, would fit the stored-parameter rule. Then remove the fallbacks, rotate it (today that takes a rebuild and flash), and update the Pi's `/etc/adsb-cell.env` in step |
 | S-4 | Download, Upload and Save to NVS have not been clicked in a browser against the gantry | Confirmed: only `cfg export` and `cfg save` were run, from a script | Try each once with motors off |
 | S-5 | `sorting-cell-coordinator` overlaps the running supervisor and describes a Zenoh-era design. It was last touched 2026-08-20 | Confirmed, not deployed | **Decision:** adopt, merge or retire. Same for the [roadmap](DEVELOPMENT_ROADMAP.md)'s Zenoh plan |
+
+## Cell transport
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| N-1 | CellNet L2 becomes the only transport protocol in the cell. The IP services between nodes move onto it: console (TCP `:2323`), gantry OTA (TCP `:8032`), conveyor OTA (HTTP `:8080`) and time (NTP `:123`). The supervisor web application stays on HTTP for engineers | Decision 2026-11-05 | Migrate one service at a time, OTA first (N-2) |
+| N-2 | OTA over CellNet. A node reboots into an OTA-only mode, where the update is its only task, so no queue or task priorities are needed. No authentication (research setup). Larger frames and resends are worth adding only if the whole update is faster than today's TCP OTA | Decision 2026-11-05. No baseline yet: `tools/supervisor_ota.py` does not time the upload, and no duration was ever recorded. Today `parseFrame` drops frames over 64 bytes (`CellNetL2Framing.h:41`) | Time a TCP OTA of the current 843,360-byte gantry image, then design against that number. The conveyor needs one USB flash to receive it (C-2) |
 
 ## Repository and documentation
 
@@ -151,6 +157,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | G-B6 | Class 1 gaps of 30 to 90 ms, outside the exchange, dropped theta or X and Z with the motors off | 2026-11-03, `7ee74f3` | Cause: `BusMutex::take()` locked the W5500 bus mutex to read its statistics, every 100 ms from the priority-2 `EipLog` task on core 0. Preempted there by network work (`tcpip`, priority 18), it kept the scanner blocked with core 1 idle; its own hold was never recorded, so reports showed a long wait with no holder. Measured: `take:EipLog` held the mutex 29.6 ms while the scanner waited 28.5 ms in a 31 ms gap. Fix: the statistics have their own spinlock, and `take()` never touches the bus mutex. Before the fix, 3 gaps in 30 min under console load (`cfg export` every 10 s plus `status`); after it, none in 45 min of the same load (1830 commands), no loop gap of 6 ms or more and no bus-mutex wait of 3 ms or more. The lasting rule is in the working rules |
 | G-D4 | The panel BOM lost its lockable main disconnect, `DISC1`, in `5bfbe1d` (2026-08-21) | 2026-11-05, by decision | Intentional: the three phases go straight to `CB0`, the 40 A 3-pole main MCCB (Allen-Bradley 140UT-D7D3-C40) at the 240 V three-phase panel input. The BOM lists no lock-off for `CB0`; G-D2 checks it |
 | V-2 | SSH from the dev PC to `10.42.0.2` timed out on 2026-10-30 | 2026-11-05 | From the cell network, through the Pi, the vision IPC answered on port 22 and accepted the `sorter` key |
+| S-3 | The console and OTA password is compile-time only, with hard-coded fallbacks in four source files | 2026-11-05, by decision | No security is kept beyond the supervisor web application in this research setup |
 | S-1 | The live supervisor source had no git repository | 2026-11-03 | [ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor) (private) holds it, checked 2026-11-05 at `b980b06`. The Pi's `~/ADSB-PI-base` is a deployed copy, and each deploy is logged in that repository's `docs/DEPLOYED_STATE.md` |
 | S-2 | `docs/INTEGRATION_WT32.md` said the scheduler does not consume `CELL_COMMAND` | 2026-11-03, supervisor `b980b06` | The rewritten doc says the gantry accepts `CELL_COMMAND` only from node `0x04`, checked 2026-11-05 |
 | X-3 | Three copies of `cell_net_l2_protocol.h`, and the conveyor's differs from the gantry's | 2026-11-03 | This repository is the source. The supervisor's `vendor/cellnet` is refreshed from it by `scripts/sync-cellnet.py`, last from `7ee74f3`, and matched `HEAD` on 2026-11-05. The conveyor's copy still differs, tracked as C-3 |
