@@ -1,6 +1,6 @@
 # Open Items and Blockers
 
-**Status:** Live list. Reviewed against the code at `d11ebe2` on 2026-11-05.
+**Status:** Live list. Reviewed against the code at `d11ebe2`, and checked on the cell from the Pi, on 2026-11-05.
 **Companion:** [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) says what each subsystem is and how the pieces connect. This page tracks what is unfinished.
 
 ## How to keep this list live
@@ -34,8 +34,7 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | [G-C7](#g-c-pick-scheduler) | **Decision:** a bench speed limit on `move`, or a deliberate exception | Slow console jogs while picks run at pick speed |
 | [G-B7](#g-b-motion-bus-w5500-ethernetip) | **Decision:** does the strike timing need a 2 ms RPI? | A wider Class 1 timeout margin |
 | [G-D3](#g-d-gripper-field-io-and-panel) | **Decision:** approve the SPI3 priority ceiling | Ending the MCP23S17 lock failures. The gripper write takes the same lock |
-| [G-D4](#g-d-gripper-field-io-and-panel) | **Decision:** was the lockable main disconnect dropped from the BOM on purpose? | The panel build and the electrical review (G-D2) |
-| [C-2](#conveyor) | A change to the conveyor firmware | The conveyor and the vision IPC share `10.42.0.2` until then |
+| [C-2](#conveyor) | A conveyor firmware change, flashed over USB | Any IP access to the conveyor, OTA included: today it has no address |
 | [S-5](#supervisor) | **Decision:** adopt, merge or retire `sorting-cell-coordinator` | Any production HMI work |
 | [X-1](#repository-and-documentation) | A push of this branch | Anyone else building on its work since 2026-09-18 |
 
@@ -84,9 +83,8 @@ Background for these items, with the specification references, is in [§5.2 of t
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
 | G-D1 | Generic field I/O and ADC are deferred to hardware Rev02. The LV board schematic is in the Google Drive project folder under `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed in `DEV_TRACKER.md` | Plan with Rev02 |
-| G-D2 | HV/LV schematic review is pending. The LV board schematic is at the same Google Drive path, `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed | Electrical review. Owner: Zia-Ahmed-1 (amohamm20@ltu.edu) |
+| G-D2 | HV/LV schematic review is pending. The LV board schematic is at the same Google Drive path, `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed | Electrical review. Owner: Zia-Ahmed-1 (amohamm20@ltu.edu). Include whether `CB0` can be locked off, now that it is the first device on the supply (G-D4) |
 | G-D3 | MCP23S17 accesses fail with `SPI mutex lock failed ... (mutex timeout)`. Waiters give up after 8 ms (`kMcpSpiLockTimeoutTicks`), and the gripper, the inputs and the health check all take this lock | Confirmed 2026-11-03 with holder logging (`2f91228`, `722c793`, `51f7528`): 3 lock failures in 45 min, and one in the soak after the revert, with no Class 1 effect. The holder is `TftUiTask` (priority 2, core 0), for up to 365 ms. Once `PickScheduler` held it for 131 ms, most likely waiting for the SPI3 bus itself. With the TFT task on core 1 (`3e8fc51`), the longest hold in the first 3.5 min was 30 ms, but Class 1 starved (gaps of 38 and 46 ms, one `E602` on X), so it was reverted (`d02f324`). That network work preempts the TFT mid-transfer is inferred from the hold pattern, not measured | **Decision:** a priority ceiling for SPI3. Raise any SPI3 or MCP23S17 holder to priority 19 for one transfer, and split the TFT fill into short chunks. First check the ST7789 datasheet on resuming a pixel write after a chip-select toggle. Then soak with the hold log, which reports holds over 20 ms |
-| G-D4 | The panel BOM lost its lockable main disconnect. `BOM.xlsx` at `d5263d0` lists `DISC1`, "Main disconnect, lockable handle". From `5bfbe1d` (2026-08-21) on, that row is gone. A row "Main circuit breaker / disconnect, MCCB, 10 A, 2-pole" remains, and its text does not mention a lockable handle | Confirmed by comparing the two revisions. First raised in `DEV_TRACKER.md` | **Decision:** a deliberate scope cut (is there a lockable disconnect upstream?) or an accidental deletion. The lockable handle is the lockout/tagout provision. Settle it in the electrical review (G-D2) |
 
 ### G-E Controller, cell network and tools
 
@@ -110,20 +108,19 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| V-1 | Vision code is not known to be in version control | Not checked: the host was unreachable from the dev PC on 2026-10-30, and the review PC had no link to the cell on 2026-11-05 | Confirm, then put it in git |
-| V-2 | SSH from the dev PC to `10.42.0.2` timed out on 2026-10-30, while the Pi still saw the host | Confirmed | Retry from a PC on the cell switch |
+| V-1 | Vision code is not in version control on the vision IPC | Confirmed 2026-11-05: no git checkout for `UHVSorter` (1.3 GB, newest file 2025-03-21), `UHVSorter_yoloOBB_UDP_Stream` (2.1 GB, 2025-09-16) or `vision_sim`, the Gantry team's trigger workaround (`simulate-vision-output.py`, `cell_net_l2.py`). The only repositories there are two third-party libraries | Ask the Computer Science team where their code is kept. Put `vision_sim` in git |
 | V-3 | ML model not ready; blocks all multi-class and multi-cell testing | Confirmed | Computer Science team; date TBD |
 | V-4 | Static camera-to-gantry transform is not done (on hold) | Confirmed | Resume with V-3 |
 | V-5 | Angle reference disagrees with the wire contract (same as G-C3) | Confirmed | Agree one definition with the Computer Science team, and fix the header comment |
-| V-6 | Arduino sketch location unknown | Confirmed: not found in an earlier search | Find it and put it in git |
+| V-6 | Arduino sketch location unknown | Confirmed: not found in an earlier search, and not on the vision IPC (no `.ino` file, no Arduino folder, 2026-11-05) | Find it and put it in git |
 | V-7 | Sensor timing varies, and the 6 mm centre offset depends on battery pose | Confirmed: 38 ms measurement period, chain jitter about ±10 ms | Replaced by V-3 |
 
 ## Conveyor
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| C-1 | The firmware is at [wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter). The copy at `D:\Projects\wt32-eth01-velmeter-testing` is not a git checkout, and C-2 and C-3 were read from it | Confirmed | Work from a clone; check C-2 and C-3 against `main` |
-| C-2 | The conveyor moves to `10.42.0.3` (decided 2026-11-03). Its firmware still uses `10.42.0.2`, the vision host's address. An unidentified device sits at `10.42.0.50` | Decision. The supervisor's `docs/NETWORK.md` already lists `.3` as planned (`b980b06`). `.50` is the first address of the Pi's DHCP pool, `.50` to `.80`, so that device probably holds a lease (assumed) | Check `.3` is free, then change the conveyor firmware. Identify `.50`. Point the supervisor's `NETWORK.md` at this page; it still cites `ONBOARDING.md` |
+| C-1 | The firmware is at [wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter). The copy at `D:\Projects\wt32-eth01-velmeter-testing` is not a git checkout, and C-2 and C-3 were read from it | Confirmed. It does not match the running build: it compiles a static `.2` with DHCP off, while the flashed conveyor runs DHCP (2026-11-05) | Work from a clone; check C-2 and C-3 against `main` |
+| C-2 | The conveyor moves to `10.42.0.3` (decided 2026-11-03). Today it has no IP address at all. The flashed firmware asks the Pi's DHCP for one about 73 times an hour, is offered `.50` every time, and never takes it. The `.50` device seen earlier was most likely the conveyor (assumed) | Decision. Confirmed 2026-11-05 from the Pi: the `CONVEYOR_SPEED` frames come from `34:ab:95:7e:de:2b`, which sent 1825 DHCP discovers from 2026-11-04 04:10, when the log starts, with no `DHCPACK`. A ping sweep of `10.42.0.0/24` found only the vision IPC, which alone answers ARP for `.2`. `.3` is free. The supervisor's `docs/NETWORK.md` lists `.3` as planned (`b980b06`) | Give the conveyor a static `.3` with DHCP off, and flash it over USB: without an address it has no OTA. Confirm `.3` answers. Point the supervisor's `NETWORK.md` at this page; it still cites `ONBOARDING.md` |
 | C-3 | Its protocol header differs from the gantry's | Confirmed 2026-11-05: the `wt32-eth01-velmeter-testing` copy differs from `include/cell_net_l2_protocol.h` in 30 lines | Sync it from the gantry's header, as the supervisor's `scripts/sync-cellnet.py` does, and check the wire format still matches |
 | C-4 | Encoder scale (mm per count) and belt hardware are undocumented here | Confirmed gap | Fill in the conveyor table in the Knowledge Transfer page |
 | C-5 | The conveyor must act on `CELL_COMMAND` in future: integrated conveyor control is needed instead of manual pot-based control | Confirmed requirement. Current firmware not checked | Design start, stop and speed commands |
@@ -152,6 +149,8 @@ Background for these items, with the specification references, is in [§5.2 of t
 |----|------|--------|----------|
 | G-A3 | Conveyor-height sensor on the machine but not wired | 2026-10-31, `a4811b9`, by decision | No conveyor-height sensor will be used. `col_x_min_mm` and `col_z_min_mm` set the conveyor region |
 | G-B6 | Class 1 gaps of 30 to 90 ms, outside the exchange, dropped theta or X and Z with the motors off | 2026-11-03, `7ee74f3` | Cause: `BusMutex::take()` locked the W5500 bus mutex to read its statistics, every 100 ms from the priority-2 `EipLog` task on core 0. Preempted there by network work (`tcpip`, priority 18), it kept the scanner blocked with core 1 idle; its own hold was never recorded, so reports showed a long wait with no holder. Measured: `take:EipLog` held the mutex 29.6 ms while the scanner waited 28.5 ms in a 31 ms gap. Fix: the statistics have their own spinlock, and `take()` never touches the bus mutex. Before the fix, 3 gaps in 30 min under console load (`cfg export` every 10 s plus `status`); after it, none in 45 min of the same load (1830 commands), no loop gap of 6 ms or more and no bus-mutex wait of 3 ms or more. The lasting rule is in the working rules |
+| G-D4 | The panel BOM lost its lockable main disconnect, `DISC1`, in `5bfbe1d` (2026-08-21) | 2026-11-05, by decision | Intentional: the three phases go straight to `CB0`, the 40 A 3-pole main MCCB (Allen-Bradley 140UT-D7D3-C40) at the 240 V three-phase panel input. The BOM lists no lock-off for `CB0`; G-D2 checks it |
+| V-2 | SSH from the dev PC to `10.42.0.2` timed out on 2026-10-30 | 2026-11-05 | From the cell network, through the Pi, the vision IPC answered on port 22 and accepted the `sorter` key |
 | S-1 | The live supervisor source had no git repository | 2026-11-03 | [ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor) (private) holds it, checked 2026-11-05 at `b980b06`. The Pi's `~/ADSB-PI-base` is a deployed copy, and each deploy is logged in that repository's `docs/DEPLOYED_STATE.md` |
 | S-2 | `docs/INTEGRATION_WT32.md` said the scheduler does not consume `CELL_COMMAND` | 2026-11-03, supervisor `b980b06` | The rewritten doc says the gantry accepts `CELL_COMMAND` only from node `0x04`, checked 2026-11-05 |
 | X-3 | Three copies of `cell_net_l2_protocol.h`, and the conveyor's differs from the gantry's | 2026-11-03 | This repository is the source. The supervisor's `vendor/cellnet` is refreshed from it by `scripts/sync-cellnet.py`, last from `7ee74f3`, and matched `HEAD` on 2026-11-05. The conveyor's copy still differs, tracked as C-3 |

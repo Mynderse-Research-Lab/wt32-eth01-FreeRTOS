@@ -72,7 +72,7 @@ the generated BOM / wire schedule and the electrical-review register below.
 
 | From | To | Medium |
 |------|----|--------|
-| Utility | DISC1 → CB0 → PDB | Feeder / #8 class per BOM |
+| Utility | CB0 → PDB (the three phases go straight to CB0; no separate disconnect) | Feeder / #8 class per BOM |
 | CB1/K1/LF1 | X drive L1/L2/L3 | Branch AC |
 | CB2/K2/LF2 | Z drive | Branch AC |
 | CB3/K3/LF3 | HCS01 | Branch AC (theta deferred) |
