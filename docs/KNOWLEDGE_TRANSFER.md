@@ -30,37 +30,49 @@ Items with `(plan)` also appear in the plans listed in [Appendix B](#appendix-b-
 
 The cell sorts batteries off a moving conveyor. Vision reports where a battery is and what it is, the conveyor reports how far the belt has moved, and the gantry intercepts the battery on the moving belt, grips it and drops it in a bin. The supervisor coordinates and gives engineers a way in.
 
-Thick lines are cables. Arrows are messages, which all cross the switch.
+**Wiring.** Every cell host plugs into one unmanaged switch. The motion bus is a separate daisy-chain on the gantry's own W5500 port.
 
 ```mermaid
-flowchart LR
-  subgraph cell ["Closed cell network: 10.42.0.0/24 and CellNet Layer 2 (0x88B5)"]
+flowchart TB
+  subgraph cell ["Closed cell network: 10.42.0.0/24"]
+    direction TB
+    V["Vision IPC<br/>10.42.0.2"]
+    C["Conveyor WT32<br/>10.42.0.3, see C-2"]
+    S["Supervisor Pi<br/>10.42.0.1"]
+    E["Engineer PC<br/>a free 10.42.0.x"]
     SW{{"Unmanaged switch<br/>100BASE-TX, Layer 2"}}
-    V["Vision IPC<br/>node 0x01<br/>10.42.0.2"]
-    C["Conveyor WT32<br/>node 0x02<br/>10.42.0.3, see C-2"]
-    G["Gantry WT32<br/>node 0x03<br/>10.42.0.100"]
-    S["Supervisor Pi<br/>node 0x04<br/>10.42.0.1"]
+    G["Gantry WT32<br/>10.42.0.100"]
+    V === SW
+    C === SW
+    S === SW
+    E === SW
+    SW ===|"LAN8720"| G
   end
-  V === SW
-  C === SW
-  S === SW
-  G ===|"LAN8720"| SW
-  subgraph bus ["Motion bus: 192.168.1.0/24, EtherNet/IP"]
-    X["Kinetix X<br/>.20"]
-    Z["Kinetix Z<br/>.21"]
-    T["HCS01 theta<br/>.23"]
+  subgraph bus ["Motion bus: 192.168.1.0/24, EtherNet/IP daisy-chain"]
+    direction LR
+    X["Kinetix X<br/>.20"] === Z["Kinetix Z<br/>.21"] === T["HCS01 theta<br/>.23"]
   end
-  V -- "VISION_DETECT" --> G
-  C -- "CONVEYOR_SPEED" --> G
+  G ===|"W5500 .10, own port, never the switch"| X
+```
+
+**Messages.** Solid arrows are CellNet Layer 2 frames (EtherType 0x88B5), dotted arrows are IP services, and the thick arrow is EtherNet/IP Class 1 on the motion bus. All cell traffic crosses the switch above.
+
+```mermaid
+flowchart TB
+  E["Engineer PC"]
+  S["Supervisor Pi<br/>node 0x04"]
+  V["Vision IPC<br/>node 0x01"]
+  G["Gantry WT32<br/>node 0x03"]
+  C["Conveyor WT32<br/>node 0x02"]
+  D["Drives<br/>X, Z, theta"]
+  E -. "toolbox http://10.42.0.1/dev" .-> S
   S -- "CELL_COMMAND, HEARTBEAT" --> G
   G -- "GANTRY_STATUS" --> S
-  G -- "W5500 (own port, not the switch), Class 1, 2 ms RPI" --> X
-  X --> Z --> T
-  S -. "TCP console :2323, OTA :8032" .-> G
+  S -. "console :2323, OTA :8032, NTP :123" .-> G
   S -. "NTP :123" .-> V
-  S -. "NTP :123" .-> G
-  E["Engineer PC<br/>a free 10.42.0.x"] === SW
-  E -. "toolbox http://10.42.0.1/dev" .-> S
+  V -- "VISION_DETECT" --> G
+  C -- "CONVEYOR_SPEED" --> G
+  G == "Class 1, 2 ms RPI" ==> D
 ```
 
 **One pick, end to end:**
