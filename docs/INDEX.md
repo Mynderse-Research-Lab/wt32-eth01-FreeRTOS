@@ -4,7 +4,8 @@ Canonical product-design and software architecture set (EIP production architect
 
 | Document | Summary | Audience |
 |----------|---------|----------|
-| [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) | Start here: subsystems, how they connect, components, and open items and blockers | New engineers |
+| [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) | Start here: subsystems, how they connect, components and working rules | New engineers |
+| [OPEN_ITEMS.md](OPEN_ITEMS.md) | Live list of open items, blockers and decisions, with closed items kept for reference | Everyone, before starting work |
 | [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
 | [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
 | [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |

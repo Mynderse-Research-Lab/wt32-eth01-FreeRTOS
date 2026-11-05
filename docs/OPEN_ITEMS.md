@@ -1,0 +1,170 @@
+# Open Items and Blockers
+
+**Status:** Live list. Reviewed against the code at `d11ebe2` on 2026-11-05.
+**Companion:** [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) says what each subsystem is and how the pieces connect. This page tracks what is unfinished.
+
+## How to keep this list live
+
+1. Change an item in the same commit as the work that changes it: new evidence, a decision, a fix.
+2. Give a new item the next free ID in its group. IDs are never reused, so old references stay valid.
+3. To close an item, move it to [Closed items](#closed-items) with the date, the commit and the evidence. Do not delete it.
+4. Keep [Blockers and decisions](#blockers-and-decisions) in step with the rows below it.
+5. If closing an item teaches a lasting rule, add the rule to the [working rules](KNOWLEDGE_TRANSFER.md#machine-safety-and-working-rules) in the Knowledge Transfer page.
+6. After checking the whole list against the code, update the status line.
+
+Every item carries an evidence label. **Do not treat a label lower than Confirmed as fact.**
+
+| Label | Meaning |
+|-------|---------|
+| **Confirmed** | Checked against code, a live log or a measurement. |
+| **Suggested** | From an AI-generated plan and not yet checked. Treat it as a lead. |
+| **Decision** | Needs a call from the project lead before anyone starts. |
+
+Items with `(plan)` also appear in the [suggested plans](#suggested-plans-since-2026-10-29). `DEV_TRACKER.md`, cited below, is not in git (X-2).
+
+## Blockers and decisions
+
+These items stop other work, or need a call before anyone starts. The full rows are in the sections below.
+
+| ID | Waiting on | Holds up |
+|----|------------|----------|
+| [V-3](#vision) | The ML model, from the Computer Science team | All multi-class and multi-cell testing, the camera transform (V-4), and retiring the trigger workaround (V-7) |
+| [G-C3](#g-c-pick-scheduler), [V-5](#vision) | **Decision:** one angle reference, agreed with the Computer Science team | Theta from real vision frames. Today `cv_jaw_deg` compensates on the bench |
+| [G-C2](#g-c-pick-scheduler) | **Decision:** is a bottom dwell acceptable now? | Finishing the tuning (G-C1), and with it the detection-rate work (G-C10) |
+| [G-C7](#g-c-pick-scheduler) | **Decision:** a bench speed limit on `move`, or a deliberate exception | Slow console jogs while picks run at pick speed |
+| [G-B7](#g-b-motion-bus-w5500-ethernetip) | **Decision:** does the strike timing need a 2 ms RPI? | A wider Class 1 timeout margin |
+| [G-D3](#g-d-gripper-field-io-and-panel) | **Decision:** approve the SPI3 priority ceiling | Ending the MCP23S17 lock failures. The gripper write takes the same lock |
+| [G-D4](#g-d-gripper-field-io-and-panel) | **Decision:** was the lockable main disconnect dropped from the BOM on purpose? | The panel build and the electrical review (G-D2) |
+| [C-2](#conveyor) | A change to the conveyor firmware | The conveyor and the vision IPC share `10.42.0.2` until then |
+| [S-5](#supervisor) | **Decision:** adopt, merge or retire `sorting-cell-coordinator` | Any production HMI work |
+| [X-1](#repository-and-documentation) | A push of this branch | Anyone else building on its last 74 commits |
+
+## Gantry
+
+### G-A Axes and mechanics
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-A1 | Multiple gantries are planned. Preferred: one gantry manages 2 classes, dropping one class left and the other right. Fallback: one gantry for each class (9V, laptop, li-ion pack, powertool battery) | Confirmed plan. Not supported yet: one `GANTRY` node id, one `gantry1` status field, one bin pose | Add node ids and per-class drop poses; start with two-sided drop |
+| G-A2 | Z continuous torque is about 0.95× the SCHUNK 1.35 N·m requirement | Confirmed in `DEV_TRACKER.md`, not re-measured | Review before production duty. The tracker's options: derate the profile, or move to E1007 |
+| G-A4 | Why Z reads about −42 instead of 48 after a reboot, before `calibrate all` | Confirmed reading; a physical drop was not ruled out | Observe Z across a reboot |
+
+### G-B Motion bus (W5500, EtherNet/IP)
+
+Background for these items, with the specification references, is in [§5.2 of the Knowledge Transfer page](KNOWLEDGE_TRANSFER.md#52-motion-bus-w5500-ethernetip).
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-B1 | `cfg save` closes Class 1 cleanly on X and Z, including rebuilding dropped sessions. Whether theta stays clear after a dropped-session close is still unknown | Confirmed 2026-10-30 at 723 s: X got no reply for 500 ms, then X and Z reconnected and the close was accepted, with no `E602`. Theta was clear after the 60 s save, but already latched at 723 s (G-B6) | Repeat with the alarm clear first, and only one session on the gantry |
+| G-B2 | Kinetix explicit TCP sessions die while Class 1 keeps running. Sometimes the socket shows `CLOSE_WAIT`; on 2026-10-30 the send succeeded and no reply came. A status check alone does not catch it, because a broken connection only shows up on a send (Vol 2, §2-5.5.1, p. 2-21) | Drop confirmed in logs. Spec-level cause confirmed: Class 1 is not encapsulation activity (Vol 2, §2-5.5.2), and we send none after Forward Open. The timing fits, not yet proven: the save at 60 s was under the 120 s default and closed cleanly, and the save at 723 s found X dropped. Theta's session sits equally idle and survives, which this does not explain | Fixed by the NOP keepalive (`379b4ac`), one run so far. On 2026-11-03 Class 1 ran 538 s from boot, then `cfg save` closed X, Z and theta each with one Forward_Close on its original session: no rebuild, no `E602`, theta clear, no `NOP failed`, and no Class 1 gap over the 6 ms report threshold after the first 15 s. Theta lacking attribute 13 likely explains why its session always survived (assumed: unsupported attribute taken to mean no timeout). Repeat on a longer run before closing the item. To see which side ends the session, capture with Wireshark through a port-mirroring switch (ODVA PUB00213, p. 20) |
+| G-B3 | Class 1 gaps of 6 to 20 ms with no `cfg` write nearby | Confirmed. None of 6 ms or more in the 45 min G-B6 soak, then one on 2026-11-03 on `51f7528`: 20 ms at 774 s, inside the exchange, 11.9 ms of it in the receive drain. Unlike G-B6, the scanner was not blocked. The exchange takes the same bus mutex, so G-B6's preempted `take()` may explain the earlier gaps (likely, not traced) | Below the 32 ms timeout, but the worst left 12 ms of margin. Read `gaptrace` after the next one. Measure packet intervals at a network tap, as in [ODVA's performance tests](../driver_datasheets_and_calculations/EtherNetIP%20Interoperabiltiy%20Recommendations.pdf.pdf), pp. 3 to 5 |
+| G-B4 | The Class 1 cadence gate from `eiptiming` is not met | Confirmed 2026-08-18 on image `0x9c6c0`, recorded in `DEV_TRACKER.md`: cycle min, p50 and p99 of 1342, 1999 and 2659 µs, against a gate of min at least about 1900 µs and p99 at most about 2100 µs; `soft_miss=0` | Re-measure on the current image |
+| G-B5 | Target IPs, RPI and PUU scales still come from Kconfig, so those `cfg` keys do nothing (plan P1.3) | Confirmed. Left on purpose: stored values are developer-locked and a wrong one changes the Class 1 target | Read the stored values first, then route them |
+| G-B7 | We run the Kinetix at its 2.0 ms minimum RPI. Rockwell recommends 20 ms for this drive, as it is a simple I/O device rather than an integrated-motion drive | Confirmed: manual p. 197 | **Decision:** does the strike timing need 2 ms? A slower RPI would widen the timeout margin |
+| G-B8 | Class 1 sequence handling differs from Vol 2, §3-4.1: `EipIoConnection::resetSequences()` starts the encapsulation sequence at 0 rather than a random value, and the T->O parser (`EipCpf.cpp:151`) reads the connection ID and ignores the sequence number, so nothing is discarded | Confirmed in code. No fault traced to it. A stall does not skip our O->T numbers, so the gap rule should not bite on a healthy link (assumed; reading the drive's Connection Manager counters would confirm it) | Low priority. Fix alongside the next Class 1 change |
+| G-B9 | The `include_run_idle_bit_in_net_params` option sets bit 8 of the Forward_Open network parameters, believing it a Run/Idle flag. Bit 8 belongs to Connection Size (Vol 1, Table 3-5.8, p. 3-57), and no such flag exists | Confirmed in code and spec. Off in production (`EipScannerPolicy.h:89`), so no live effect. It would add 256 bytes to the declared size, which would explain why the Kinetix appeared to reject it (assumed, not tested) | Low priority. Remove the option and its test |
+
+### G-C Pick scheduler
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-C1 | Tuning: picks lift, but many grip only half the 9V cell | Confirmed 2026-10-30: 7 of 9 overhanging; offsets were still being tuned | Finish offset tuning; run `cfg export` for current values |
+| G-C2 | Z reverses short of grasp depth: about 1.15 mm at 5000 mm/s² and zero dwell, past the accepted 1 mm | Confirmed: `pick actual` logs | Offsets of −60 / +10 reached 0.1 to 0.4 mm; **Decision:** is bottom dwell acceptable now? |
+| G-C3 | Vision angle frame is unresolved. The wire comment says 0° is along +Y; the sorter script measures from camera +X; `cv_jaw_deg` = 90 compensates on the bench (plan P0.2) | Confirmed conflict; the plan's transform is unverified | **Decision:** fix the reference with the Computer Science team, then convert once. Verify before reusing the plan's formula |
+| G-C4 | `classifyFollowers()`: 190 ms grip dwell in ready time, no strike lead in the deadline, world X minus joint X, packs 11 to 13 can be pruned (plan P0.3) | Confirmed in code | Fix each with a host test; hidden while only single cells run |
+| G-C5 | Trigger sensor geometry is compile-time: `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` (plan P1.2) | Confirmed: `pick_scheduler.cpp:57,61`; breaks the stored-parameter rule | Add stored keys |
+| G-C6 | `tau_band_s` assumes the object top is crossed while accelerating (plan P2.1) | Confirmed in `strike_plan.h:168`. Dormant while `acc_mm_s2` equals `dec_mm_s2` | Compute from the full profile; add a test with unequal ramps |
+| G-C7 | Picks and console `move` share `spd_mm_s`, so jogs default to 750 mm/s (plan P0.1) | Confirmed. **The plan's fix adds separate `pk_*` speed keys, which contradicts the single-source rule** | **Decision:** a bench speed limit on `move`, or a deliberate exception |
+| G-C8 | Duplicated logic remains between Gantry and scheduler: path timing, theta window, trapezoid math in four copies | Confirmed by a scan on 2026-10-30 | Remove when next touching that code |
+| G-C9 | The per-pick dwell warning fires every pick while offsets differ (plan M3) | Suggested; console bursts are a known LAN trigger (G-E1) | Warn once per offset change |
+| G-C10 | Detection rate. Demonstrations space vision detections at least 7 s apart so the unoptimized planner completes each pick; the goal is several detections per second | Decision 2026-11-03: a starting point, not a limit | An optimization problem: measure the pick cycle once G-C1 and G-C2 are closed, then shorten the spacing step by step |
+
+### G-D Gripper, field I/O and panel
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-D1 | Generic field I/O and ADC are deferred to hardware Rev02. The LV board schematic is in the Google Drive project folder under `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed in `DEV_TRACKER.md` | Plan with Rev02 |
+| G-D2 | HV/LV schematic review is pending. The LV board schematic is at the same Google Drive path, `Design Work\Network\Interface Module\WT32-ETH01-IM-REV02` | Confirmed | Electrical review. Owner: Zia-Ahmed-1 (amohamm20@ltu.edu) |
+| G-D3 | MCP23S17 accesses fail with `SPI mutex lock failed ... (mutex timeout)`. Waiters give up after 8 ms (`kMcpSpiLockTimeoutTicks`), and the gripper, the inputs and the health check all take this lock | Confirmed 2026-11-03 with holder logging (`2f91228`, `722c793`, `51f7528`): 3 lock failures in 45 min, and one in the soak after the revert, with no Class 1 effect. The holder is `TftUiTask` (priority 2, core 0), for up to 365 ms. Once `PickScheduler` held it for 131 ms, most likely waiting for the SPI3 bus itself. With the TFT task on core 1 (`3e8fc51`), the longest hold in the first 3.5 min was 30 ms, but Class 1 starved (gaps of 38 and 46 ms, one `E602` on X), so it was reverted (`d02f324`). That network work preempts the TFT mid-transfer is inferred from the hold pattern, not measured | **Decision:** a priority ceiling for SPI3. Raise any SPI3 or MCP23S17 holder to priority 19 for one transfer, and split the TFT fill into short chunks. First check the ST7789 datasheet on resuming a pixel write after a chip-select toggle. Then soak with the hold log, which reports holds over 20 ms |
+| G-D4 | The panel BOM lost its lockable main disconnect. `BOM.xlsx` at `d5263d0` lists `DISC1`, "Main disconnect, lockable handle". From `5bfbe1d` (2026-08-21) on, that row is gone. A row "Main circuit breaker / disconnect, MCCB, 10 A, 2-pole" remains, and its text does not mention a lockable handle | Confirmed by comparing the two revisions. First raised in `DEV_TRACKER.md` | **Decision:** a deliberate scope cut (is there a lockable disconnect upstream?) or an accidental deletion. The lockable handle is the lockout/tagout provision. Settle it in the electrical review (G-D2) |
+
+### G-E Controller, cell network and tools
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-E1 | LAN side can go silent while Class 1 keeps running, seen during `ztrace raw 500 250` (plan P1.1) | Confirmed incident: [STRIKE_TIMING](STRIKE_TIMING_MEASUREMENTS_2026-10-25.md). The plan's TBUS mechanism is Suggested | Avoid large dumps; root-cause the EMAC TX path |
+| G-E2 | `ntp_server` pointer is kept by SNTP (plan P2.3) | Suggested. Key is reboot-only, so low risk | Copy to a static buffer |
+| G-E3 | The `ota` "Compiled" stamp does not change on incremental builds, and the version string can read `-dirty` | Confirmed | Do not identify a build from it alone |
+| G-E4 | Programming harness on IO0 fights the Ethernet clock | Confirmed, accepted | Unplug the harness to run plant Ethernet |
+
+### G-F Runtime parameters
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| G-F1 | `cfg factory` then `cfg save` installs defaults that do not match this machine: for example `col_z_min_mm` 115 against 122 live, `cv_x_off_mm` 245 against 307.5 | Confirmed from the live config | **Download parameters first.** Consider updating `sdkconfig.defaults` |
+| G-F2 | About 68 stored keys have no reader, so `cfg` cannot change them (plan P2.2 counts 70) | Confirmed by name search | Wire them up or remove them |
+| G-F3 | The parameter file leaves out the 31 developer-locked keys unless unlocked | Confirmed | Unlock before downloading a full backup |
+| G-F4 | `x_lim_max_mm` also sets X scale at the next `calibrate x` (plan M2) | Suggested, consistent with `x_hard_span_mm` | Separate the soft limit from the span |
+
+## Vision
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| V-1 | Vision code is not known to be in version control | Not checked: the host was unreachable from the dev PC on 2026-10-30, and the review PC had no link to the cell on 2026-11-05 | Confirm, then put it in git |
+| V-2 | SSH from the dev PC to `10.42.0.2` timed out on 2026-10-30, while the Pi still saw the host | Confirmed | Retry from a PC on the cell switch |
+| V-3 | ML model not ready; blocks all multi-class and multi-cell testing | Confirmed | Computer Science team; date TBD |
+| V-4 | Static camera-to-gantry transform is not done (on hold) | Confirmed | Resume with V-3 |
+| V-5 | Angle reference disagrees with the wire contract (same as G-C3) | Confirmed | Agree one definition with the Computer Science team, and fix the header comment |
+| V-6 | Arduino sketch location unknown | Confirmed: not found in an earlier search | Find it and put it in git |
+| V-7 | Sensor timing varies, and the 6 mm centre offset depends on battery pose | Confirmed: 38 ms measurement period, chain jitter about ±10 ms | Replaced by V-3 |
+
+## Conveyor
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| C-1 | The firmware is at [wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter). The copy at `D:\Projects\wt32-eth01-velmeter-testing` is not a git checkout, and C-2 and C-3 were read from it | Confirmed | Work from a clone; check C-2 and C-3 against `main` |
+| C-2 | The conveyor moves to `10.42.0.3` (decided 2026-11-03). Its firmware still uses `10.42.0.2`, the vision host's address. An unidentified device sits at `10.42.0.50` | Decision. The supervisor's `docs/NETWORK.md` already lists `.3` as planned (`b980b06`). `.50` is the first address of the Pi's DHCP pool, `.50` to `.80`, so that device probably holds a lease (assumed) | Check `.3` is free, then change the conveyor firmware. Identify `.50`. Point the supervisor's `NETWORK.md` at this page; it still cites `ONBOARDING.md` |
+| C-3 | Its protocol header differs from the gantry's | Confirmed 2026-11-05: the `wt32-eth01-velmeter-testing` copy differs from `include/cell_net_l2_protocol.h` in 30 lines | Sync it from the gantry's header, as the supervisor's `scripts/sync-cellnet.py` does, and check the wire format still matches |
+| C-4 | Encoder scale (mm per count) and belt hardware are undocumented here | Confirmed gap | Fill in the conveyor table in the Knowledge Transfer page |
+| C-5 | The conveyor must act on `CELL_COMMAND` in future: integrated conveyor control is needed instead of manual pot-based control | Confirmed requirement. Current firmware not checked | Design start, stop and speed commands |
+| C-6 | Belt speed can be set to any value, but only by hand through the pot-based motor driver. It needs closed-loop control | Confirmed requirement | Replace with closed-loop speed control, driven from C-5 |
+
+## Supervisor
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| S-3 | The firmware's default console password sits in `idf/sdkconfig.defaults` (`CONFIG_CONSOLE_TCP_PASSWORD`), so it is in git history | Confirmed 2026-11-05. The supervisor repository's `cell.env.example` now leaves its passwords blank (`b980b06`) | Rotate it, on the gantry with `cfg passwd` and in the Pi's `/etc/adsb-cell.env` together. Then decide how a fresh board gets its first password without one in git |
+| S-4 | Download, Upload and Save to NVS have not been clicked in a browser against the gantry | Confirmed: only `cfg export` and `cfg save` were run, from a script | Try each once with motors off |
+| S-5 | `sorting-cell-coordinator` overlaps the running supervisor and describes a Zenoh-era design. It was last touched 2026-08-20 | Confirmed, not deployed | **Decision:** adopt, merge or retire. Same for the [roadmap](DEVELOPMENT_ROADMAP.md)'s Zenoh plan |
+
+## Repository and documentation
+
+| ID | Item | Evidence | Next step |
+|----|------|----------|-----------|
+| X-1 | 74 commits on `feat/conveyor-traffic-debug` are unpushed, and `main` has 9 commits this branch lacks | Confirmed 2026-11-05 against `upstream` | Push; expect a conflict in `PICK_SCHEDULER_KINEMATICS.md` |
+| X-2 | **Uncommitted doc edits describe fixes that are not in the code.** `DEV_TRACKER.md` lists `pk_app_spd_mm_s`, `cv_trig_y_mm` and the follower fixes as done. Four more docs carry uncommitted edits (kinematics, pickup, protocol, firmware review), and some of these describe a theta mapping at ingestion. `DEV_TRACKER.md` itself has never been committed, yet `AGENTS.md` and `INDEX.md` list it | Confirmed 2026-11-05: none of those keys are in `src`, `lib`, `include` or `sdkconfig.defaults`, and git has no history for the tracker | Review before committing. Trust the code. Then commit the tracker, or drop it from `AGENTS.md` and `INDEX.md` |
+| X-4 | Stale or broken links and claims. `LOW_LEVEL_GANTRY_CONTROL.md` links the missing `MQTT_comms_subsys.md`. `FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md` has `file:///` URIs. The [roadmap](DEVELOPMENT_ROADMAP.md) says the gripper is not assembled. `EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` still lists a conveyor-height sensor as future work, against G-A3's closing decision. The documentation plan also flags spaces in schematic links | Confirmed 2026-11-05, except the schematic links, which are Suggested | Apply the plan's link fixes, and correct the roadmap and assembly lines |
+| X-5 | Scratch files and logs clutter the repo root, some tracked | Confirmed 2026-11-05: `fix_math.py` to `fix_math3.py`, `pktmon.txt` and a screenshot are tracked at the root, and `lib/CellNetL2/Untitled` is untracked | Remove from tracking and ignore |
+
+## Closed items
+
+| ID | Item | Closed | Evidence |
+|----|------|--------|----------|
+| G-A3 | Conveyor-height sensor on the machine but not wired | 2026-10-31, `a4811b9`, by decision | No conveyor-height sensor will be used. `col_x_min_mm` and `col_z_min_mm` set the conveyor region |
+| G-B6 | Class 1 gaps of 30 to 90 ms, outside the exchange, dropped theta or X and Z with the motors off | 2026-11-03, `7ee74f3` | Cause: `BusMutex::take()` locked the W5500 bus mutex to read its statistics, every 100 ms from the priority-2 `EipLog` task on core 0. Preempted there by network work (`tcpip`, priority 18), it kept the scanner blocked with core 1 idle; its own hold was never recorded, so reports showed a long wait with no holder. Measured: `take:EipLog` held the mutex 29.6 ms while the scanner waited 28.5 ms in a 31 ms gap. Fix: the statistics have their own spinlock, and `take()` never touches the bus mutex. Before the fix, 3 gaps in 30 min under console load (`cfg export` every 10 s plus `status`); after it, none in 45 min of the same load (1830 commands), no loop gap of 6 ms or more and no bus-mutex wait of 3 ms or more. The lasting rule is in the working rules |
+| S-1 | The live supervisor source had no git repository | 2026-11-03 | [ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor) (private) holds it, checked 2026-11-05 at `b980b06`. The Pi's `~/ADSB-PI-base` is a deployed copy, and each deploy is logged in that repository's `docs/DEPLOYED_STATE.md` |
+| S-2 | `docs/INTEGRATION_WT32.md` said the scheduler does not consume `CELL_COMMAND` | 2026-11-03, supervisor `b980b06` | The rewritten doc says the gantry accepts `CELL_COMMAND` only from node `0x04`, checked 2026-11-05 |
+| X-3 | Three copies of `cell_net_l2_protocol.h`, and the conveyor's differs from the gantry's | 2026-11-03 | This repository is the source. The supervisor's `vendor/cellnet` is refreshed from it by `scripts/sync-cellnet.py`, last from `7ee74f3`, and matched `HEAD` on 2026-11-05. The conveyor's copy still differs, tracked as C-3 |
+
+## Suggested plans since 2026-10-29
+
+These AI-generated plans sit in the Antigravity `brain` folder on the lead's PC. **They are suggestions, not approved work.** Line numbers in them drift. None of their fixes had been applied at `d11ebe2`: the pick scheduler, strike plan, intercept, `AppConfig` and `main.cpp` sources are unchanged since `d6e8f8e`.
+
+| Plan | Date | Use it for | Caution |
+|------|------|------------|---------|
+| `implementation_plan.md` | 10-29 | Strike timing and queueing background | Never approved; partly stale |
+| `codebase_status_plan.md` | 10-30 | Risk register and workstreams | Written before `cfg save` |
+| `recent_commits_review.md` | 10-30 | Findings H1 to L5 | Predates the later commits |
+| `codebase_deep_review_and_open_items.md` | 10-30 | The P0 to P3 register | P0.1 conflicts with the single-source rule |
+| `p0_p1_remediation_plan.md` | 10-30 | Worked maths and proposed code | Same conflict; its theta formula differs from the review's, and the frame question (G-C3) is still open |
+| `categorical_documentation_plan.md` | 10-30 | Six-pillar doc structure, reader journeys | Applies to `INDEX.md` and `README.md` |
