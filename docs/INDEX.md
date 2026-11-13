@@ -11,6 +11,7 @@ Canonical product-design and software architecture set (EIP production architect
 | [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |
 | [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware review, data integrity fixes, memory optimizations, and 8-stage holistic test cycle | Firmware developers / QA |
 | [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol specification, data integrity model, and multi-platform deployment manual (ESP32 / Linux) | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
+| [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md) | Draft block protocol for firmware updates over CellNet L2 (N-2), with the measurements it rests on and the decisions it needs | Gantry, Conveyor and Supervisor developers |
 | [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate conventions (+Y downstream, +Z down) and feasibility/timing algorithms ($\tau = D / v_{belt}$) for the Pick Scheduler. | Firmware / Subsystem developers |
 | [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) | End-to-end mathematical narrative of one pickup, from the camera observation through the belt, grasp, bin, and the following object. | Firmware / mechanical / vision |
 | [DEV_TRACKER.md](DEV_TRACKER.md) | Active hardware bring-up and firmware milestone tracker | Firmware / commissioning |
