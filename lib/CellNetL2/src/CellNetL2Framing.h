@@ -37,7 +37,9 @@ class CellNetL2Framing {
  public:
   /// Minimum Ethernet frame length on the wire, excluding the 4-byte FCS.
   static constexpr size_t kMinEthFrameLen = 60;
-  /// Largest accepted receive length: a minimum frame with the FCS still attached.
+  /// Largest accepted receive length: a minimum frame plus 4 bytes, so a receiver that
+  /// keeps the FCS still passes. ESP-IDF strips the FCS before the L2 input hook
+  /// (esp_eth_mac_esp_dma.c), so on the WT32 nodes those 4 bytes can carry payload.
   static constexpr size_t kMaxPaddedRxLen = 64;
 
   /**
