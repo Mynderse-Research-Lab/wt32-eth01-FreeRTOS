@@ -42,6 +42,12 @@ enum class CellMsgType : uint8_t {
   CONVEYOR_SPEED = 0x02,   // Conveyor -> Gantry / Supervisor
   GANTRY_STATUS = 0x03,    // Gantry -> Supervisor
   CELL_COMMAND = 0x04,     // Supervisor -> Gantry / Conveyor
+  // Firmware update over CellNet (docs/CELLNET_OTA_PROTOCOL.md, N-2)
+  OTA_BEGIN = 0x05,        // Supervisor -> node in OTA mode
+  OTA_DATA = 0x06,         // Supervisor -> node; variable length, up to 508 bytes
+  OTA_STATUS = 0x07,       // Node -> Supervisor
+  OTA_END = 0x08,          // Supervisor -> node
+  OTA_RESULT = 0x09,       // Node -> Supervisor
 };
 
 #pragma pack(push, 1)
@@ -120,7 +126,8 @@ struct L2GantryStatusPayload {
  * @brief Payload for Message Type 0x04: Cell Supervisor Command.
  */
 struct L2CellCommandPayload {
-  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK, 6=SET_GRIPPER (param_u8=0|1)
+  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK, 6=SET_GRIPPER (param_u8=0|1),
+                       // 7=REBOOT_TO_OTA (param_u16=OTA session)
   uint8_t param_u8;
   uint16_t param_u16;
   float param_float;
@@ -138,6 +145,52 @@ struct L2HeartbeatPayload {
 /**
  * @brief Full Wire Frames.
  */
+/**
+ * @brief OTA payloads (docs/CELLNET_OTA_PROTOCOL.md section 4).
+ */
+struct L2OtaBeginPayload {
+  uint16_t session;
+  uint16_t block_size;  // 4096
+  uint16_t frag_data;   // data bytes per OTA_DATA fragment
+  uint16_t reserved;
+  uint32_t image_size;
+};
+
+/** Fixed part of OTA_DATA; data_len data bytes follow it. */
+struct L2OtaDataHeader {
+  uint16_t session;
+  uint16_t block;
+  uint8_t frag;
+  uint8_t flags;  // bit 0: ACK_REQ
+  uint16_t data_len;
+};
+
+struct L2OtaStatusPayload {
+  uint16_t session;
+  uint16_t block;
+  uint8_t status;         // CellNet::Ota::Status
+  uint8_t processed_seq;  // last OTA_DATA sequence taken from the receive buffers
+  uint8_t missing[16];    // bit i set = fragment i missing
+};
+
+struct L2OtaEndPayload {
+  uint16_t session;
+  uint16_t reserved;
+  uint32_t image_size;
+};
+
+struct L2OtaResultPayload {
+  uint16_t session;
+  uint8_t status;
+  uint8_t reserved;
+  uint16_t erase_ms;
+  uint16_t stream_ms;
+  uint16_t write_ms;
+  uint16_t check_ms;
+  uint16_t emac_missed;    // must be 0: no frame dropped for want of a buffer
+  uint16_t emac_overflow;
+};
+
 struct L2HeartbeatFrame {
   L2EthernetHeader eth;
   L2CellHeader cell;
@@ -166,6 +219,36 @@ struct L2CellCommandFrame {
   L2EthernetHeader eth;
   L2CellHeader cell;
   L2CellCommandPayload payload;
+};
+
+struct L2OtaBeginFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaBeginPayload payload;
+};
+
+struct L2OtaDataFrameHeader {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaDataHeader payload;
+};
+
+struct L2OtaStatusFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaStatusPayload payload;
+};
+
+struct L2OtaEndFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaEndPayload payload;
+};
+
+struct L2OtaResultFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaResultPayload payload;
 };
 
 #pragma pack(pop)

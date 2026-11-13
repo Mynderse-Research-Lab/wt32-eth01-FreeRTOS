@@ -29,7 +29,15 @@ struct ParsedFrame {
     L2ConveyorSpeedPayload conveyor_speed;
     L2GantryStatusPayload gantry_status;
     L2CellCommandPayload cell_command;
+    L2OtaBeginPayload ota_begin;
+    L2OtaDataHeader ota_data;
+    L2OtaStatusPayload ota_status;
+    L2OtaEndPayload ota_end;
+    L2OtaResultPayload ota_result;
   } payload{};
+  /// OTA_DATA only: the data bytes, inside the caller's receive buffer (valid
+  /// only while that buffer is). Length is payload.ota_data.data_len.
+  const uint8_t* ota_data = nullptr;
   bool valid{false};
 };
 
@@ -41,6 +49,9 @@ class CellNetL2Framing {
   /// keeps the FCS still passes. ESP-IDF strips the FCS before the L2 input hook
   /// (esp_eth_mac_esp_dma.c), so on the WT32 nodes those 4 bytes can carry payload.
   static constexpr size_t kMaxPaddedRxLen = 64;
+  /// OTA_DATA alone may be longer: one 512-byte EMAC buffer holds 508 bytes plus
+  /// the FCS (docs/CELLNET_OTA_PROTOCOL.md section 5).
+  static constexpr size_t kMaxOtaDataFrameLen = 508;
 
   /**
    * @brief Retrieve expected total frame length (Ethernet + Cell + Payload) for a message type.
@@ -97,6 +108,28 @@ class CellNetL2Framing {
   static std::vector<uint8_t> buildCellCommandFrame(
       const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
       uint32_t timestamp_us, const L2CellCommandPayload& payload,
+      const uint8_t dest_mac[6] = nullptr);
+
+  /** @brief Build OTA frames (Types 0x05-0x09). OTA_DATA copies data_len bytes. */
+  static std::vector<uint8_t> buildOtaBeginFrame(
+      const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+      uint32_t timestamp_us, const L2OtaBeginPayload& payload,
+      const uint8_t dest_mac[6] = nullptr);
+  static std::vector<uint8_t> buildOtaDataFrame(
+      const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+      uint32_t timestamp_us, const L2OtaDataHeader& header, const uint8_t* data,
+      const uint8_t dest_mac[6] = nullptr);
+  static std::vector<uint8_t> buildOtaStatusFrame(
+      const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+      uint32_t timestamp_us, const L2OtaStatusPayload& payload,
+      const uint8_t dest_mac[6] = nullptr);
+  static std::vector<uint8_t> buildOtaEndFrame(
+      const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+      uint32_t timestamp_us, const L2OtaEndPayload& payload,
+      const uint8_t dest_mac[6] = nullptr);
+  static std::vector<uint8_t> buildOtaResultFrame(
+      const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+      uint32_t timestamp_us, const L2OtaResultPayload& payload,
       const uint8_t dest_mac[6] = nullptr);
 };
 
