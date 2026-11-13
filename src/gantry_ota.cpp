@@ -384,13 +384,25 @@ static void otaServerTask(void *param) {
     tv.tv_sec = 2;
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
+    // Where the stream time goes: waiting in recv() (the sender or TCP) or
+    // inside esp_ota_write() (flash erase and program). Reported in OK COMPLETE.
+    const int64_t stream_t0 = esp_timer_get_time();
+    int64_t recv_us = 0;
+    int64_t write_us = 0;
+    int64_t write_max_us = 0;
+    uint32_t recv_calls = 0;
+
     while (received_bytes < image_size) {
       size_t to_read = sizeof(chunk_buf);
       if (image_size - received_bytes < to_read) {
         to_read = image_size - received_bytes;
       }
 
+      const int64_t recv_t0 = esp_timer_get_time();
       ssize_t read_bytes = recv(client_fd, chunk_buf, to_read, 0);
+      const int64_t write_t0 = esp_timer_get_time();
+      recv_us += write_t0 - recv_t0;
+      recv_calls++;
       if (read_bytes <= 0) {
         ESP_LOGE(TAG, "OTA socket recv error during stream: read %zd, errno %d",
                  read_bytes, errno);
@@ -399,12 +411,18 @@ static void otaServerTask(void *param) {
       }
 
       err = gantryOtaWriteStream(ota_handle, chunk_buf, (size_t)read_bytes);
+      const int64_t write_dt = esp_timer_get_time() - write_t0;
+      write_us += write_dt;
+      if (write_dt > write_max_us) {
+        write_max_us = write_dt;
+      }
       if (err != ESP_OK) {
         stream_failed = true;
         break;
       }
       received_bytes += (size_t)read_bytes;
     }
+    const int64_t stream_us = esp_timer_get_time() - stream_t0;
 
     if (stream_failed || received_bytes != image_size) {
       ESP_LOGE(TAG, "OTA stream aborted: received %zu / %zu bytes",
@@ -416,14 +434,24 @@ static void otaServerTask(void *param) {
     }
 
     // Step 5: Finish & validate image
+    const int64_t finish_t0 = esp_timer_get_time();
     err = gantryOtaFinishStream(ota_handle, target_part);
+    const int64_t finish_us = esp_timer_get_time() - finish_t0;
     if (err != ESP_OK) {
       sendStr(client_fd, "ERR VALIDATION_FAILED\n");
       close(client_fd);
       continue;
     }
 
-    sendStr(client_fd, "OK COMPLETE: Rebooting into new firmware...\n");
+    // Keep this line short: the supervisor shows it in a 128-byte status message.
+    char done[112];
+    snprintf(done, sizeof(done),
+             "OK COMPLETE ms: stream=%lu recv=%lu write=%lu wmax=%lu verify=%lu n=%lu\n",
+             (unsigned long)(stream_us / 1000), (unsigned long)(recv_us / 1000),
+             (unsigned long)(write_us / 1000), (unsigned long)(write_max_us / 1000),
+             (unsigned long)(finish_us / 1000), (unsigned long)recv_calls);
+    ESP_LOGI(TAG, "%s", done);
+    sendStr(client_fd, done);
     vTaskDelay(pdMS_TO_TICKS(500));
     close(client_fd);
     close(listen_fd);
