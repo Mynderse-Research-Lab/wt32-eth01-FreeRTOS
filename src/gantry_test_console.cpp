@@ -3263,6 +3263,13 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
     }
+  } else if (strcmp(cmdLower, "netstat") == 0 || strcmp(cmdLower, "netstat reset") == 0) {
+    char line[200];
+    if (!pickSchedulerNetStats(strcmp(cmdLower, "netstat reset") == 0, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strncmp(cmdLower, "vismark", 7) == 0) {
     const char* arg = cmdLower + 7;
     while (*arg == ' ') {
@@ -3561,6 +3568,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  netcon                        - TCP console send counters");
   ESP_LOGI(TAG, "  gripmark on|off               - grip timing marker on GPIO17 (TFT backlight off)");
   ESP_LOGI(TAG, "  vismark on|off                - vision frame receipt marker on GPIO17 (TFT backlight off)");
+  ESP_LOGI(TAG, "  netstat [reset]               - CellNet RX counters and EMAC drop counters");
   ESP_LOGI(TAG, "  beltcal [near|far|cnvyr near|cnvyr far|batt|z|apply [center]] - belt/conveyor/battery X");
   ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 deg along +Y)");
   ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");

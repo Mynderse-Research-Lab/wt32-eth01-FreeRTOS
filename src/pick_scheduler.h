@@ -58,6 +58,8 @@ bool pickSchedulerVisMark(bool on, char* out, size_t out_len);
 // recorded); "apply center" also sets cv_x_off_mm to the belt centre's
 // end-effector X (theta 0).
 bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len);
+// CellNet receive counters and EMAC drop counters (netstat); reset zeroes them.
+bool pickSchedulerNetStats(bool reset, char* out, size_t out_len);
 
 #endif  // PICK_SCHEDULER_H
 

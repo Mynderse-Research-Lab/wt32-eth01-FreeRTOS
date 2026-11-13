@@ -17,6 +17,7 @@
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "soc/emac_dma_struct.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/queue.h"
@@ -160,6 +161,7 @@ static std::atomic<bool> s_halt_motion{false};
 static bool s_cell_run = false;
 static bool s_cell_paused = false;
 static Gantry::Gantry* s_gantry = nullptr;
+static CellNet::CellNetL2Node* s_net_l2 = nullptr;  // for netstat
 static std::atomic<bool> s_cell_in_jaws{false};
 
 static TaskHandle_t s_strike_task = nullptr;
@@ -2065,6 +2067,7 @@ void pickSchedulerTask(void *param) {
     ESP_LOGW(TAG, "strike trace task unavailable — ztrace stays empty");
   }
 
+    s_net_l2 = cfg->net_l2;
     if (cfg->net_l2 != nullptr) {
     cfg->net_l2->onVisionDetect([](const L2VisionDetectPayload &payload, const L2CellHeader &) {
       VisionItem item = {};
@@ -2567,4 +2570,41 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
     snprintf(out, out_len,
              "usage: beltcal [near|far|cnvyr near|cnvyr far|batt|z|show|apply|apply center]");
     return false;
+}
+
+// netstat (N-2): CellNet receive counters, plus the EMAC's own drop counters:
+// frames the DMA dropped for want of a free receive buffer, and receive FIFO
+// overflows. The EMAC register clears on read, so the counts are summed here.
+bool pickSchedulerNetStats(bool reset, char* out, size_t out_len) {
+    static uint32_t s_emac_missed = 0;
+    static uint32_t s_emac_overflow = 0;
+    static bool s_emac_rollover = false;
+    const uint32_t reg = EMAC_DMA.dmamissedfr.val;  // one read: it clears
+    s_emac_missed += reg & 0xFFFFu;
+    s_emac_overflow += (reg >> 17) & 0x7FFu;
+    s_emac_rollover = s_emac_rollover || ((reg >> 16) & 1u) != 0 || ((reg >> 28) & 1u) != 0;
+    if (s_net_l2 == nullptr) {
+        snprintf(out, out_len, "CellNet is not running");
+        return false;
+    }
+    if (reset) {
+        s_net_l2->resetStats();
+        s_emac_missed = 0;
+        s_emac_overflow = 0;
+        s_emac_rollover = false;
+        snprintf(out, out_len, "netstat reset");
+        return true;
+    }
+    const CellNet::CellNetStats st = s_net_l2->getStats();
+    snprintf(out, out_len,
+             "netstat t_ms=%lld tx=%lu rx=%lu rx_invalid=%lu seq_drops=%lu "
+             "emac_missed=%lu emac_overflow=%lu%s",
+             static_cast<long long>(esp_timer_get_time() / 1000),
+             static_cast<unsigned long>(st.tx_frames), static_cast<unsigned long>(st.rx_frames),
+             static_cast<unsigned long>(st.rx_invalid_frames),
+             static_cast<unsigned long>(st.rx_sequence_drops),
+             static_cast<unsigned long>(s_emac_missed),
+             static_cast<unsigned long>(s_emac_overflow),
+             s_emac_rollover ? " (an EMAC counter rolled over)" : "");
+    return true;
 }
