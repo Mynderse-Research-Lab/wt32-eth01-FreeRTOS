@@ -689,9 +689,10 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   return p;
 }
 
-// Grasp is half the height down from the object top, capped at 25.4 mm below
-// that top. The hover clears the tallest tracked cell unless the fingers
-// already hover at hover_at_mm.
+// Grasp: a cell under 30 mm tall is gripped 3 mm above the belt; a taller one
+// half its height down from the object top, capped at 25.4 mm below that top.
+// The hover clears the tallest tracked cell unless the fingers already hover
+// at hover_at_mm.
 static ZPlan zPlan(const PickConfig& p, float object_h_mm, float tallest_mm,
                    float hover_at_mm = -1.0f) {
   ZPlan z;

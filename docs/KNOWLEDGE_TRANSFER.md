@@ -102,7 +102,7 @@ Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUID
 | Conveyor | [wt32-eth01-velmeter](https://github.com/Mynderse-Research-Lab/wt32-eth01-velmeter) | Git, branches `main` and `testing` | WT32-ETH01, ESP-IDF 5.4+ |
 | Vision | Computer Science team; repo TBD. Trigger workaround: `~/vision_sim/` on the vision host | **None known**, TBD | Ubuntu 22.04 IPC |
 | Supervisor | [ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor), private. Deployed as a copy to `~/ADSB-PI-base` on the Pi | Git. The Pi copy has none; each deploy is logged in the repository's `docs/DEPLOYED_STATE.md` | Raspberry Pi, Debian 13 |
-| Production HMI, planned | `D:\Projects\sorting-cell-coordinator` | Git, last commit 2026-08-20 | Not deployed, see S-5 |
+| Production HMI, retired | `D:\Projects\sorting-cell-coordinator` | Git, last commit 2026-08-20 | Never deployed; retired 2026-11-13 with the Zenoh plan (S-5). The supervisor is the HMI |
 
 ## 4. First-day setup
 
@@ -248,7 +248,7 @@ $$z_g = \begin{cases} z_b - 3 & h < 30 \text{ mm} \\ z_b - h + \min(h/2, \, 25.4
 $$z_h = \max\big(\min(z_b - h - 6, \; z_{safe}), \; z_{min}\big), \qquad z_{safe} = z_{min} + 48.4 \tag{9}$$
 
 - $c$ is the clearance on each side between the cell and an open pad, which is also each jaw's stroke to contact.
-- (8) is `zPlan`. Its code comment still describes only the half-height rule (G-C12).
+- (8) is `zPlan`.
 - (9) is the hover from `StrikePlan::plan`: 6 mm above the cell top, but never lower than the safe-Z ceiling. For a 9V on a belt at Z 122 the ceiling wins, so the plunge starts at $z_{safe}$.
 
 #### 5.3.5 Strike plan

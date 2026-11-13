@@ -37,7 +37,6 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | [G-B7](#g-b-motion-bus-w5500-ethernetip) | **Decision:** does the strike timing need a 2 ms RPI? | A wider Class 1 timeout margin |
 | [G-D3](#g-d-gripper-field-io-and-panel) | **Decision:** approve the SPI3 priority ceiling | Ending the MCP23S17 lock failures. The gripper write takes the same lock |
 | [C-2](#conveyor) | A conveyor firmware change, flashed over USB (it can carry the N-2 receiver too) | Any IP access to the conveyor, OTA included: today it has no address |
-| [S-5](#supervisor) | **Decision:** adopt, merge or retire `sorting-cell-coordinator` | Any production HMI work |
 | [X-1](#repository-and-documentation) | A push of this branch | Anyone else building on its work since 2026-09-18 |
 
 ## Gantry
@@ -80,7 +79,6 @@ Background for these items, with the specification references, is in [§5.2 of t
 | G-C9 | The per-pick dwell warning fires every pick while offsets differ (plan M3) | Suggested; console bursts are a known LAN trigger (G-E1) | Warn once per offset change |
 | G-C10 | Detection rate. Demonstrations space vision detections at least 7 s apart so the unoptimized planner completes each pick; the goal is several detections per second | Decision 2026-11-03: a starting point, not a limit | An optimization problem: measure the pick cycle once G-C1 and G-C2 are closed, then shorten the spacing step by step |
 | G-C11 | For cells within 35° of across the belt, the 15 ms depth cap in `StrikePlan::plan` overrides the 2 mm entry margin. At 0° and 300 mm/s the commanded fingertips pass the cell top while the cell is still 1.8 mm short of the upstream pad face | Confirmed by running the code with today's defaults (KT 5.3.9). Not exercised: every bench pick so far had the length along the belt (90°). The drive's 30–35 ms lag probably hides it (assumed) | **Decision:** which constraint wins. Then test a 0° strike at belt speed |
-| G-C12 | `zPlan`'s comment gives only the half-height grasp rule, but cells under 30 mm are grasped 3 mm above the belt (`pick_scheduler.cpp:698`). The 3, 30 and 25.4 mm are literals | Confirmed in code. The 3 mm rule is intended ([STRIKE_TIMING](STRIKE_TIMING_MEASUREMENTS_2026-10-25.md)) | Fix the comment; decide whether the three values become stored keys |
 | G-C13 | The vision contract says capture displacement is required and a latency estimate is no substitute (`pick_intercept.h:218`), but `acceptDetect` accepts any frame without it whenever `cv_vis_ms` > 0, the default (`pick_scheduler.cpp:1151`) | Confirmed in code. Needed today: the trigger stand-in sends no capture displacement | **Decision:** keep the latency fallback only for the stand-in (`vis_batt_x`), or allow it for all frames and fix the comment |
 
 ### G-D Gripper, field I/O and panel
@@ -136,8 +134,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| S-4 | Download, Upload and Save to NVS have not been clicked in a browser against the gantry | Confirmed: only `cfg export` and `cfg save` were run, from a script | Try each once with motors off |
-| S-5 | `sorting-cell-coordinator` overlaps the running supervisor and describes a Zenoh-era design. It was last touched 2026-08-20 | Confirmed, not deployed | **Decision:** adopt, merge or retire. Same for the [roadmap](DEVELOPMENT_ROADMAP.md)'s Zenoh plan |
+| S-4 | Download, Upload and Save to NVS have not been clicked in a browser against the gantry | Confirmed: only `cfg export` and `cfg save` were run, from a script. On 2026-11-13 how far the browser test got was not known, and the supervisor does not log these buttons | Try each once with motors off, and note the result here |
 
 ## Cell transport
 
@@ -152,7 +149,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 |----|------|----------|-----------|
 | X-1 | `feat/conveyor-traffic-debug` is unpushed past `74be86b` (2026-09-18), the `upstream` tip: 75 commits up to `48f2c57`. `main` has 9 commits this branch lacks | Confirmed 2026-11-05 against `upstream` | Push; expect a conflict in `PICK_SCHEDULER_KINEMATICS.md` |
 | X-2 | **Uncommitted doc edits describe fixes that are not in the code.** `DEV_TRACKER.md` lists `pk_app_spd_mm_s`, `cv_trig_y_mm` and the follower fixes as done. Four more docs carry uncommitted edits (kinematics, pickup, protocol, firmware review), and some of these describe a theta mapping at ingestion. `DEV_TRACKER.md` itself has never been committed, yet `AGENTS.md` and `INDEX.md` list it | Confirmed 2026-11-05: none of those keys are in `src`, `lib`, `include` or `sdkconfig.defaults`, and git has no history for the tracker | Review before committing. Trust the code. Then commit the tracker, or drop it from `AGENTS.md` and `INDEX.md` |
-| X-4 | Stale or broken links and claims. `LOW_LEVEL_GANTRY_CONTROL.md` links the missing `MQTT_comms_subsys.md`. `FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md` has `file:///` URIs. The [roadmap](DEVELOPMENT_ROADMAP.md) says the gripper is not assembled. `EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` still lists a conveyor-height sensor as future work, against G-A3's closing decision. The documentation plan also flags spaces in schematic links | Confirmed 2026-11-05, except the schematic links, which are Suggested | Apply the plan's link fixes, and correct the roadmap and assembly lines |
+| X-4 | Stale or broken links and claims. `LOW_LEVEL_GANTRY_CONTROL.md` links the missing `MQTT_comms_subsys.md`. `FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md` has `file:///` URIs. The [roadmap](DEVELOPMENT_ROADMAP.md) says the gripper is not assembled and still plans the Zenoh migration retired by S-5. `EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` still lists a conveyor-height sensor as future work, against G-A3's closing decision. The documentation plan also flags spaces in schematic links | Confirmed 2026-11-05, except the schematic links, which are Suggested | Apply the plan's link fixes, and correct the roadmap and assembly lines |
 | X-5 | Scratch files and logs clutter the repo root, some tracked | Confirmed 2026-11-05: `fix_math.py` to `fix_math3.py`, `pktmon.txt` and a screenshot are tracked at the root, and `lib/CellNetL2/Untitled` is untracked | Remove from tracking and ignore |
 
 ## Closed items
@@ -164,6 +161,8 @@ Background for these items, with the specification references, is in [§5.2 of t
 | G-D4 | The panel BOM lost its lockable main disconnect, `DISC1`, in `5bfbe1d` (2026-08-21) | 2026-11-05, by decision | Intentional: the three phases go straight to `CB0`, the 40 A 3-pole main MCCB (Allen-Bradley 140UT-D7D3-C40) at the 240 V three-phase panel input. The BOM lists no lock-off for `CB0`; G-D2 checks it |
 | V-2 | SSH from the dev PC to `10.42.0.2` timed out on 2026-10-30 | 2026-11-05 | From the cell network, through the Pi, the vision IPC answered on port 22 and accepted the `sorter` key |
 | S-3 | The console and OTA password is compile-time only, with hard-coded fallbacks in four source files | 2026-11-05, by decision | No security is kept beyond the supervisor web application in this research setup |
+| G-C12 | `zPlan`'s comment gave only the half-height grasp rule, missing the 3 mm rule for cells under 30 mm | 2026-11-13 | The comment now states both rules (`pick_scheduler.cpp:692`). The 3, 30 and 25.4 mm stay literals |
+| S-5 | `sorting-cell-coordinator` overlapped the running supervisor with a Zenoh-era design | 2026-11-13, by decision | Retired, with the roadmap's Zenoh plan. The running supervisor stays the HMI, and CellNet L2 is the cell transport (N-1) |
 | S-1 | The live supervisor source had no git repository | 2026-11-03 | [ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor) (private) holds it, checked 2026-11-05 at `b980b06`. The Pi's `~/ADSB-PI-base` is a deployed copy, and each deploy is logged in that repository's `docs/DEPLOYED_STATE.md` |
 | S-2 | `docs/INTEGRATION_WT32.md` said the scheduler does not consume `CELL_COMMAND` | 2026-11-03, supervisor `b980b06` | The rewritten doc says the gantry accepts `CELL_COMMAND` only from node `0x04`, checked 2026-11-05 |
 | X-3 | Three copies of `cell_net_l2_protocol.h`, and the conveyor's differs from the gantry's | 2026-11-03 | This repository is the source. The supervisor's `vendor/cellnet` is refreshed from it by `scripts/sync-cellnet.py`, last from `7ee74f3`, and matched `HEAD` on 2026-11-05. The conveyor's copy still differs, tracked as C-3 |
