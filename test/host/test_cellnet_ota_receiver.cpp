@@ -366,6 +366,20 @@ void test_processed_seq_echoed(void) {
     TEST_ASSERT_EQUAL_UINT8(9, dup.processed_seq);  // counted even when dropped
 }
 
+void test_progress_timer_restarts_after_slow_erase(void) {
+    // Firmware passes onBegin a time taken before the erase (2.8 s measured);
+    // it must restart the timer once READY goes out (2026-11-13 review).
+    FakeFlash fl;
+    const auto img = makeImage(kBlockSize);
+    OtaReceiver rx(fl, kSession, 0);
+    TEST_ASSERT_EQUAL(Status::READY, rx.onBegin(kSession, kBlockSize, kFrag, img.size(), 1000).status);
+    const uint32_t after_erase = 1000 + 3000;
+    TEST_ASSERT_TRUE(rx.expired(after_erase));  // what the review found
+    rx.restartProgressTimer(after_erase);
+    TEST_ASSERT_FALSE(rx.expired(after_erase + kProgressTimeoutMs));
+    TEST_ASSERT_TRUE(rx.expired(after_erase + kProgressTimeoutMs + 1));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_geometry_for_gantry_image);
@@ -384,5 +398,6 @@ int main(void) {
     RUN_TEST(test_flash_failures);
     RUN_TEST(test_deadlines);
     RUN_TEST(test_processed_seq_echoed);
+    RUN_TEST(test_progress_timer_restarts_after_slow_erase);
     return UNITY_END();
 }

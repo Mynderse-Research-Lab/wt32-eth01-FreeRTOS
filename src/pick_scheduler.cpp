@@ -12,6 +12,7 @@
 #include "axis_drivetrain_params.h"
 #include "gantry_app_constants.h"
 #include "gpio_expander.h"
+#include "gantry_ota.h"
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -36,6 +37,7 @@ constexpr uint8_t kCmdPause = 3;
 constexpr uint8_t kCmdClearFault = 4;
 constexpr uint8_t kCmdPark = 5;
 constexpr uint8_t kCmdSetGripper = 6;
+constexpr uint8_t kCmdRebootToOta = 7;  // param_u16 = OTA session (N-2)
 
 constexpr uint8_t kStrikeZ = 1;
 constexpr uint8_t kStrikeGrip = 2;
@@ -69,6 +71,7 @@ constexpr int64_t kMcpCheckEveryUs = 1000000;
 struct CellCmd {
   uint8_t command_id;
   uint8_t param_u8;
+  uint16_t param_u16;
 };
 
 struct VisionItem {
@@ -1882,6 +1885,10 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
 
 static void applyCellCommand(PickSchedulerTaskConfig *cfg, const CellCmd &cmd) {
   switch (cmd.command_id) {
+    case kCmdRebootToOta:
+      // Refused while busy or on an unconfirmed image; on success it restarts.
+      (void)gantryOtaRebootToCellNetMode(cfg->gantry, cmd.param_u16);
+      break;
     case kCmdStart: {
       clearParts();
       s_cell_paused = false;
@@ -2088,7 +2095,7 @@ void pickSchedulerTask(void *param) {
         s_halt_motion.store(true);
         disarmStrike();
       }
-      const CellCmd cmd = {payload.command_id, payload.param_u8};
+      const CellCmd cmd = {payload.command_id, payload.param_u8, payload.param_u16};
       if (xQueueSend(s_cmd_queue, &cmd, 0) != pdTRUE) {
         ESP_LOGW(TAG, "CELL_COMMAND queue full, id=%u",
                  static_cast<unsigned>(payload.command_id));

@@ -8,6 +8,7 @@ set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(APP_SRCS
     "${APP_ROOT}/src/main.cpp"
     "${APP_ROOT}/src/pick_scheduler.cpp"
+    "${APP_ROOT}/src/gantry_cellnet_ota.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
     "${APP_ROOT}/src/gantry_net_console.cpp"
     "${APP_ROOT}/src/gantry_ota.cpp"

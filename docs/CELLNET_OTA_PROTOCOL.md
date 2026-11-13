@@ -1,6 +1,6 @@
 # CellNet OTA Block Protocol (draft)
 
-**Status:** Draft, 2026-11-13, for [N-2](OPEN_ITEMS.md#cell-transport). Nothing here is implemented yet. Two adversarial reviews checked this draft on 2026-11-13; their findings are folded in.
+**Status:** 2026-11-13, for [N-2](OPEN_ITEMS.md#cell-transport). Implemented in this repository (receiver `lib/CellNetL2/src/CellNetOtaReceiver.cpp`, firmware `src/gantry_cellnet_ota.cpp`, test sender `tools/cellnet_ota_send.cpp`); the supervisor sender is still to do. **First run on the gantry:** 5.57 s on the node, EMAC missed 0, no resends (N-2). Two adversarial reviews checked this draft on 2026-11-13; their findings are folded in.
 **Decided 2026-11-13** ([section 10](#10-decisions)):
 - D1: variant B, 486-byte frames.
 - D2: 20 receive buffers.

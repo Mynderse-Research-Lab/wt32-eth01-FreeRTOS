@@ -162,6 +162,10 @@ CONFIG_ETH_USE_ESP32_EMAC=y
 # unprocessed, so no frame is dropped for want of a buffer while a flash write
 # stalls reception (docs/CELLNET_OTA_PROTOCOL.md section 5.1, decision D2).
 CONFIG_ETH_DMA_RX_BUFFER_NUM=20
+# Serialize esp_eth_transmit: CellNet status frames, lwIP and the CellNet OTA
+# heartbeat transmit from different tasks, and the EMAC TX path has no lock of
+# its own (esp_eth_mac_esp_dma.c; esp_eth.c takes this mutex when enabled).
+CONFIG_ETH_TRANSMIT_MUTEX=y
 CONFIG_LWIP_IPV4=y
 # tcpip_thread (prio 18) on core 0: core 1 runs the Class 1 scanner, and an
 # unpinned lwIP thread preempted it for milliseconds at a time.

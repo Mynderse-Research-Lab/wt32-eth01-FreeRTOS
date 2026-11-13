@@ -78,6 +78,10 @@ public:
     /** Write the completed block; returns an ERR_FLASH reply on failure. */
     Reply commit(uint32_t now_ms);
 
+    /** Restart the 2 s progress timer. Call with a fresh time once READY is sent:
+     *  onBegin() gets its time before the erase, which takes seconds. */
+    void restartProgressTimer(uint32_t now_ms) { last_progress_ms_ = now_ms; }
+
     /** Deadline passed (30 s to OTA_BEGIN, or 2 s without progress). The caller
      *  then aborts and reboots into the normal image. */
     bool expired(uint32_t now_ms) const;

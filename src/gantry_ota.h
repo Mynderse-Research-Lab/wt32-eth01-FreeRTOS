@@ -112,4 +112,20 @@ esp_err_t gantryOtaStartServer(Gantry::Gantry *gantry, int port, const char *pas
 esp_err_t gantryOtaFlashStallTest(Gantry::Gantry *gantry, bool erase, int writes, char *out,
                                   size_t out_len);
 
+/**
+ * @brief CELL_COMMAND 7 (REBOOT_TO_OTA): refuse while busy or while the running
+ *        image is not marked valid; otherwise disable the motors, store the
+ *        session in noinit RAM and restart into OTA-only mode (does not return).
+ *        docs/CELLNET_OTA_PROTOCOL.md section 3.
+ */
+esp_err_t gantryOtaRebootToCellNetMode(Gantry::Gantry *gantry, uint16_t session);
+
+/** @brief At boot: true (and the session) only after a software reset with a valid
+ *         flag; the flag is cleared either way. Call first in app_main. */
+bool gantryOtaCellNetModeRequested(uint16_t *session);
+
+/** @brief Run OTA-only mode: Ethernet, CellNet and the OTA receiver only. Never
+ *         returns; reboots into the new image on success, the old one otherwise. */
+void gantryOtaRunCellNetMode(uint16_t session);
+
 #endif  // GANTRY_OTA_H
