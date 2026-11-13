@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/CellNetL2Framing.cpp"
         "src/CellNetL2.cpp"
+        "src/CellNetOtaReceiver.cpp"
         "src/EspEthL2Transport.cpp"
     INCLUDE_DIRS
         "src"
