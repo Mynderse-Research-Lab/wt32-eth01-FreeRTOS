@@ -11,12 +11,19 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 namespace Network {
 
 static const char* TAG = "EthernetLink";
+
+static EthernetBootTimes s_boot_times;
+
+EthernetBootTimes ethernetBootTimes() {
+    return s_boot_times;
+}
 // WT32-ETH01: GPIO16 gates the LAN8720 external crystal (not a PHY reset line).
 // Vendor / ESPHome use PHY address 1 (strapped on-module).
 static constexpr gpio_num_t ETH_PHY_OSC_GPIO = GPIO_NUM_16;
@@ -193,6 +200,9 @@ bool EthernetLink::start() {
     if (started_) {
         return true;
     }
+    if (s_boot_times.start_us < 0) {
+        s_boot_times.start_us = esp_timer_get_time();
+    }
 
     // Phase-1 bring-up: initialize networking primitives and keep the link
     // state explicit. LAN8720 driver install/start is the next step.
@@ -307,6 +317,9 @@ bool EthernetLink::start() {
         return false;
     }
 
+    if (s_boot_times.eth_started_us < 0) {
+        s_boot_times.eth_started_us = esp_timer_get_time();
+    }
     started_ = true;
     link_up_ = false;
     ESP_LOGI(TAG, "LAN8720 Ethernet started (phy_addr=auto, RMII CLK_EXT_IN GPIO0)");
@@ -358,6 +371,9 @@ void EthernetLink::handleEthEvent(void* handler_args, esp_event_base_t, int32_t 
         ESP_LOGW(TAG, "Ethernet PHY link down");
     } else if (event_id == ETHERNET_EVENT_CONNECTED) {
         self->phy_link_connected_ = true;
+        if (s_boot_times.link_up_us < 0) {
+            s_boot_times.link_up_us = esp_timer_get_time();
+        }
         ESP_LOGI(TAG, "Ethernet PHY link up");
 #if ETH_USE_STATIC_IP
         if (self->hasUsableIp()) {
@@ -374,6 +390,9 @@ void EthernetLink::handleIpEvent(void* handler_args, esp_event_base_t, int32_t e
         return;
     }
     auto* event = static_cast<ip_event_got_ip_t*>(event_data);
+    if (s_boot_times.got_ip_us < 0) {
+        s_boot_times.got_ip_us = esp_timer_get_time();
+    }
     self->link_up_ = true;
 #if ETH_USE_STATIC_IP
     ESP_LOGI(TAG, "Ethernet got IP (static): " IPSTR, IP2STR(&event->ip_info.ip));

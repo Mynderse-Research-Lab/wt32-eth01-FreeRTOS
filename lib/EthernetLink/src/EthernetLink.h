@@ -12,6 +12,16 @@
 
 namespace Network {
 
+// Boot milestones in esp_timer microseconds since app start (-1 until reached),
+// read by the console 'boottime' command (N-2 boot-to-link measurement).
+struct EthernetBootTimes {
+    int64_t start_us = -1;       // EthernetLink::start() entered
+    int64_t eth_started_us = -1; // esp_eth_start() returned
+    int64_t link_up_us = -1;     // first PHY link-up event
+    int64_t got_ip_us = -1;      // first IP address
+};
+EthernetBootTimes ethernetBootTimes();
+
 class EthernetLink {
 public:
     EthernetLink() = default;

@@ -158,6 +158,10 @@ CONFIG_CONSOLE_TCP_LOG_LEVEL_INFO=y
 # WT32 uses external 50 MHz into GPIO0 (CLK_IN); do not output CLK on GPIO17
 # (GPIO17 is W5500 MOSI in this pin map).
 CONFIG_ETH_USE_ESP32_EMAC=y
+# 20 EMAC receive buffers (default 10): CellNet OTA keeps at most 18 frames
+# unprocessed, so no frame is dropped for want of a buffer while a flash write
+# stalls reception (docs/CELLNET_OTA_PROTOCOL.md section 5.1, decision D2).
+CONFIG_ETH_DMA_RX_BUFFER_NUM=20
 CONFIG_LWIP_IPV4=y
 # tcpip_thread (prio 18) on core 0: core 1 runs the Class 1 scanner, and an
 # unpinned lwIP thread preempted it for milliseconds at a time.

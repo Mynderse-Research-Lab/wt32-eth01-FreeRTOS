@@ -103,4 +103,13 @@ esp_err_t gantryOtaFinishStream(esp_ota_handle_t handle, const esp_partition_t *
  */
 esp_err_t gantryOtaStartServer(Gantry::Gantry *gantry, int port, const char *password);
 
+/**
+ * @brief N-2 diagnostic: erase (erase=true) or write back to back (erase=false)
+ *        n 4 KB blocks in the passive slot from 1.5 MB on, to measure EMAC
+ *        buffering while a flash write stalls reception.
+ * @return ESP_OK with a summary in out; refuses while the motors are enabled.
+ */
+esp_err_t gantryOtaFlashStallTest(Gantry::Gantry *gantry, bool erase, int writes, char *out,
+                                  size_t out_len);
+
 #endif  // GANTRY_OTA_H

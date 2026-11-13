@@ -1,6 +1,11 @@
 # CellNet OTA Block Protocol (draft)
 
-**Status:** Draft, 2026-11-13, for [N-2](OPEN_ITEMS.md#cell-transport). Nothing here is implemented yet. Three decisions are needed before work starts ([section 10](#10-decisions-needed)). Two adversarial reviews checked this draft on 2026-11-13; their findings are folded in.
+**Status:** Draft, 2026-11-13, for [N-2](OPEN_ITEMS.md#cell-transport). Nothing here is implemented yet. Two adversarial reviews checked this draft on 2026-11-13; their findings are folded in.
+**Decided 2026-11-13** ([section 10](#10-decisions)):
+- D1: variant B, 486-byte frames.
+- D2: 20 receive buffers.
+- **No frame may ever be dropped because the receive buffers are full** ([section 5.1](#51-zero-drops-from-full-receive-buffers)).
+- D3 was measured before any protocol code was written ([section 2.1](#21-d3-measured-2026-11-13)).
 **Scope:** firmware updates for the WT32 nodes over CellNet L2, sent by the supervisor. This replaces the TCP OTA on port 8032 as part of N-1, which makes CellNet the only transport in the cell.
 
 Evidence labels follow [OPEN_ITEMS.md](OPEN_ITEMS.md#how-to-keep-this-list-live):
@@ -27,6 +32,10 @@ Evidence labels follow [OPEN_ITEMS.md](OPEN_ITEMS.md#how-to-keep-this-list-live)
 | Flash write window | up to 8 KB per cache-off window, so one 4 KB write is one window | `CONFIG_SPI_FLASH_WRITE_CHUNK_SIZE=8192`; ESP-IDF `esp_flash_api.c` (`esp_flash_write`) |
 | Erase | yields to other tasks every 20 ms | `CONFIG_SPI_FLASH_YIELD_DURING_ERASE=y`, `CONFIG_SPI_FLASH_ERASE_YIELD_DURATION_MS=20` |
 | Rollback | on; task-watchdog panic off | `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`; `CONFIG_ESP_TASK_WDT_PANIC` not set |
+| Reset to app start (ROM, bootloader, image check) | 0.52 s in all three reboots | Measured, D3a (section 2.1) |
+| `EthernetLink::start` to PHY link up | 1.76 to 1.86 s | Measured, D3a |
+| Frames the receive buffers hold during a 4 KB flash write | exactly the buffer count: 10 with 10 buffers, 20 with 20 | Measured, D3b (section 2.1) |
+| 4 KB flash write after an erase, under receive load | 11.1 to 26.8 ms; 96 writes in 1.16 to 1.25 s | Measured, D3b |
 
 ## 2. The floor, and why CellNet can at best match TCP
 
@@ -40,11 +49,54 @@ The whole update can therefore be no shorter than erase + write + check: 2.8 + 2
 OTA-only mode (decided in N-2) also costs one extra reboot before the update.
 - After the TCP flashes, the new app's clock started about 1.6 s after `OK COMPLETE` (derived from its uptime at the first console answer). 0.7 s of that is the receiver's own delay before `esp_restart`.
 - The network was answering within 7 s of app start, but polling every 3.5 s gives no closer bound.
-- So boot-to-link time is not known. Decision D3 asks for it to be measured from the supervisor.
+- D3a has since measured the boot: 3.44 to 3.54 s from reset to the first frame in normal mode, and about 2.4 to 2.8 s expected in OTA mode (section 2.1).
 
 On the 2026-11-05 rule ("larger frames and resends only if faster than TCP"):
 - **Resends are not optional.** Frames were lost at every rate above 2,000 frames/s, so the protocol needs them to be correct.
 - **Larger frames buy about 0.8 s** (section 8), but still do not beat TCP once the reboot is counted. This is decision D1.
+
+### 2.1 D3, measured 2026-11-13
+
+**D3a, reboot to first frame.**
+- Method:
+  - The supervisor's toolbox sent `cfg reboot` three times.
+  - A listener on the Pi (`l2listen`, raw socket, kernel receive timestamps) recorded every frame from the gantry's MAC.
+  - The app start time is worked out from each CellNet frame's cell-header timestamp: the receive time minus that timestamp, which counts microseconds since app start. The three frames in each run agreed within 0.15 ms.
+  - The console command `boottime` gives the Ethernet milestones, measured from app start.
+
+| Stage (normal-mode boot) | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Last frame before reset → app start | 0.517 s | 0.518 s | 0.517 s |
+| App start → `EthernetLink::start` | 1.053 s | 1.053 s | 1.053 s |
+| `start` → PHY link up | 1.763 s | 1.864 s | 1.864 s |
+| App start → first CellNet frame (`GANTRY_STATUS`) | 2.925 s | 3.025 s | 3.025 s |
+| **Reset → first frame (Pi clock)** | **3.44 s** | **3.54 s** | **3.54 s** |
+
+- **OTA-mode entry, derived:** reset to app start 0.52 s + reaching Ethernet start (assumed about 0.1 s, since the OTA branch starts Ethernet first; measure it once built) + `start` to link up 1.76 to 1.86 s + the first OTA-mode heartbeat, at most 0.25 s. That is **about 2.4 to 2.8 s**.
+- Most of it is inside `EthernetLink::start` (driver install, PHY reset, auto-negotiation), and this measurement does not split it further. A finer split could show whether OTA mode can shorten it.
+
+**D3b, receive buffers during flash writes.**
+- Method:
+  - The gantry did 96 back-to-back 4 KB writes into the unused tail of its passive slot (console `flashstall erase` then `flashstall write`, from 1.5 MB on).
+  - Meanwhile the Pi sent bursts of B 486-byte frames at line rate, one burst every 13.7 ms, so about 85 bursts landed inside writes.
+  - The EMAC missed-frame counter was read with `netstat`, and the erase ran before the counters were zeroed.
+
+| Burst B | 10 buffers: missed | 20 buffers: missed |
+|---|---|---|
+| 8 | 0 | 0 |
+| 10 | 8 | 0 |
+| 12 | 161 | 0 |
+| 16 | 485 | 0 |
+| 18 | 628 | 0 |
+| 19 | 775 | 0 |
+| 20 | 768 | 4 |
+| 21 | 832 | 85 |
+| 24 | 1,039 | 325 |
+| Control: B = 24, no writes | 15 of 4,800 | 4 of 4,800 |
+
+- **During a write the receive task takes nothing out**, so the buffers hold exactly their count: 10, then 20. Above that, each burst loses about B minus the buffer count. The few losses at exactly the buffer count came from other traffic, which normal mode lets through.
+- The FIFO-overflow counter stayed at 0 in every run.
+- This confirms both rules of section 5.1. With 20 buffers and W = 18, the window leaves 2 spare. In OTA mode the address filter keeps all other traffic out.
 
 ## 3. Entering and leaving OTA-only mode
 
@@ -70,15 +122,15 @@ On the 2026-11-05 rule ("larger frames and resends only if faster than TCP"):
 
 ## 4. Messages
 
-All frames carry CellNet's EtherType 0x88B5, version 1 and the 8-byte cell header (`include/cell_net_l2_protocol.h`). The cell header's `sequence` is not used by OTA. OTA frames are unicast between the supervisor and one node.
+All frames carry CellNet's EtherType 0x88B5, version 1 and the 8-byte cell header (`include/cell_net_l2_protocol.h`). In `OTA_DATA`, the cell header's `sequence` byte numbers every frame the sender sends, resends and probes included; the window in section 5.1 is counted with it. OTA frames are unicast between the supervisor and the node's OTA address (section 5.1).
 
 | Type | Name | Direction | Payload (little-endian, packed) | Frame |
 |------|------|-----------|----------------------------------|-------|
 | 0x05 | `OTA_BEGIN` | S → N | `session u16`, `block_size u16` (4096), `frag_data u16`, `reserved u16`, `image_size u32` | 34 B, padded to 60 |
 | 0x06 | `OTA_DATA` | S → N | `session u16`, `block u16`, `frag u8`, `flags u8` (bit 0 `ACK_REQ`), `data_len u16`, `data[data_len]` | 30 B + data |
-| 0x07 | `OTA_STATUS` | N → S | `session u16`, `block u16`, `status u8`, `reserved u8`, `missing[16]` (bit *i* set = fragment *i* missing) | 44 B, padded to 60 |
+| 0x07 | `OTA_STATUS` | N → S | `session u16`, `block u16`, `status u8`, `processed_seq u8` (the last `OTA_DATA` sequence the node has taken from its receive buffers), `missing[16]` (bit *i* set = fragment *i* missing) | 44 B, padded to 60 |
 | 0x08 | `OTA_END` | S → N | `session u16`, `reserved u16`, `image_size u32` | 30 B, padded to 60 |
-| 0x09 | `OTA_RESULT` | N → S | `session u16`, `status u8`, `reserved u8`, `erase_ms u16`, `stream_ms u16`, `write_ms u16`, `check_ms u16` | 34 B, padded to 60 |
+| 0x09 | `OTA_RESULT` | N → S | `session u16`, `status u8`, `reserved u8`, `erase_ms u16`, `stream_ms u16`, `write_ms u16`, `check_ms u16`, `emac_missed u16`, `emac_overflow u16` | 38 B, padded to 60 |
 
 **`OTA_STATUS` codes:** `READY` (erase done), `RECEIVED`, `MISSING` (bitmap valid), `ERR_SIZE`, `ERR_SESSION`, `ERR_BUSY`, `ERR_FLASH`, `ERR_VERIFY`, `ERR_TIMEOUT`.
 
@@ -104,20 +156,37 @@ Writes use `esp_ota_write_with_offset(handle, data, len, block * 4096)`. The ran
 
 **`ACK_REQ`.** The sender sets it on the last frame of every burst: the first send of a block, every resend set, and every timeout probe. The node answers **every** `ACK_REQ` frame with the status of that frame's block, even when the frame is a duplicate and even when the block is complete. This removes both livelocks: a lost `MISSING` and a resend lost again.
 
-**Variant A: 64-byte frames (no parser size change).**
-- 64 − 30 header bytes leaves 34 data bytes, so a full block is 121 fragments.
-- 121 fragments cannot wait in 10 buffers during a write, so A is stop-and-wait: the node writes block *n*, **then** sends `RECEIVED n`, and only then does the sender start block *n*+1.
-
-**Variant B: one-buffer frames of 486 bytes (parser cap 508 for `OTA_DATA`).**
-- A full block is 9 fragments (8 × 456 + 448 data bytes), and nine fit in the 10 buffers.
-- When block *n* is complete, the node sends `RECEIVED n`, **then** writes it.
-- The sender, now allowed one block ahead, sends block *n*+1, which waits in the EMAC buffers during the write. The task picks it up as soon as the write returns.
-- One buffer is left for other traffic, which runs at about 5 to 6 frames/s. Two such frames arriving during a write cost a fragment, and the bitmap recovers it. D2 asks whether to add margin.
+**Variant B (decided): one-buffer frames of 486 bytes, parser cap 508 for `OTA_DATA`.**
+- A full block is 9 fragments (8 × 456 + 448 data bytes). A 486-byte frame plus its 4-byte FCS fits one 512-byte receive buffer.
+- When block *n* is complete, the node sends `RECEIVED n`, **then** writes it. The sender may then send block *n*+1, which waits in the receive buffers during the write. The task picks it up as soon as the write returns.
 - `parseFrame` needs a per-type maximum length: 508 for `OTA_DATA`, 64 for the rest.
+- Variant A (64-byte frames, stop-and-wait, about 7.3 s) was the alternative. D1 rejected it.
 
-**Sender pacing.** The receive measurements used evenly paced frames, and that is the only condition they cover. A line-rate burst of 64-byte frames (about 148,800 frames/s at 100 Mbit/s) would overrun the 10 buffers within 10 frames.
-- The sender paces `OTA_DATA` at no more than 25,000 frames/s, a 40 µs gap, which is inside the measured loss-free range.
-- Variant B's 9-frame burst fits the buffers even unpaced, but it is paced the same way for margin.
+### 5.1 Zero drops from full receive buffers
+
+**Requirement (2026-11-13):** no frame may ever be dropped because all receive buffers are full. Sizing alone cannot promise that, because it depends on what else arrives during a write. Two rules bound every frame that can reach the buffers:
+
+**1. Only the OTA sender can reach the buffers.**
+- On entering OTA mode, the node switches the EMAC to a private OTA address: its own MAC with the locally administered bit set (first octet `| 0x02`), applied with `esp_eth_ioctl(ETH_CMD_S_MAC_ADDR)`.
+- It turns broadcast reception off (`emac_ll_broadcast_frame_enable(false)`, register bit `dbf`), and turns receive-all-multicast and promiscuous mode off (`ETH_CMD_S_ALL_MULTICAST`, `ETH_CMD_S_PROMISCUOUS`).
+- With `receive_all` cleared, as ESP-IDF sets it (`emac_hal.c:129`), the MAC passes to the receive buffers only frames that pass the address filter (`emac_mac_struct.h:78`).
+- Nothing else in the cell knows the OTA address: it has no IP and never answers ARP. Broadcasts, other nodes' CellNet traffic and the supervisor's TCP console retries are all dropped by the MAC before they can take a buffer.
+- The node's heartbeats in OTA mode are sent from the OTA address. That is how the supervisor learns where to send.
+
+**2. The sender never has more frames unprocessed than the buffers hold.**
+- Each `OTA_STATUS` carries `processed_seq`, the last `OTA_DATA` sequence the node has taken out of its receive buffers.
+- The sender keeps (last sequence sent − `processed_seq`), modulo 256, at or below **W = 18**. Every `OTA_DATA` counts: first sends, resends and `ACK_REQ` probes.
+- With 20 buffers (D2), at most 18 frames can be waiting at any moment, whether the node is writing, erasing or anything else, with 2 buffers spare.
+- A block (9 frames) plus a full resend of the next block still fits inside W, so the window never slows the one-block-ahead pipeline.
+- When the window is full, the sender waits for a status. If none comes within 100 ms, it sends **no** new frame. Instead it waits again, and aborts after 20 such waits. A probe is sent only while the window has room.
+
+**Why this is a guarantee.** Frames reach the buffers only from the sender (rule 1). The sender cannot have more than 18 frames that the node has not yet taken out of the buffers (rule 2). 18 is less than 20. This holds for any stall length, so no write time and no scheduling delay can fill the buffers. Two other losses remain possible, and both are recovered by the resend rules:
+- CRC errors on the wire.
+- An EMAC receive-FIFO overflow. That is a different counter, and it read 0 at every rate tested, up to 10 MB/s.
+
+**Proof in every run.** `OTA_RESULT` reports the EMAC missed-frame count (buffers full) and the FIFO-overflow count, each read and cleared at `OTA_BEGIN`. **The missed count must be 0 in every update**, and the acceptance test fails otherwise. D3b measures the buffer count during a real flash write before the protocol is built.
+
+**Sender pacing.** With both rules in place, the sender needs no pacing to protect the buffers. It sends at line rate, about 24,500 486-byte frames/s at 100 Mbit/s.
 
 ## 6. Timing, loss and the end of the update
 
@@ -129,7 +198,7 @@ Writes use `esp_ota_write_with_offset(handle, data, len, block * 4096)`. The ran
 **Progress timer.** The node's 2 s abort counts from `READY`, and is reset only by progress: a newly completed block, or `OTA_END`. Frames that keep arriving without progress do not reset it.
 
 **Sender timeouts.**
-- 100 ms with no status after a burst, then a probe with `ACK_REQ`. 100 ms is assumed: it covers a 4 KB write (13.5 ms) and the longest single write measured after an up-front erase (59 ms). Check it against `write_ms` in `OTA_RESULT`.
+- 100 ms with no status after a burst, then a probe with `ACK_REQ`, but only while the window has room (section 5.1). 100 ms is assumed: it covers a 4 KB write (13.5 ms) and the longest single write measured after an up-front erase (59 ms). Check it against `write_ms` in `OTA_RESULT`.
 - After 20 retries on one block, the sender aborts.
 
 **End.**
@@ -140,8 +209,8 @@ Writes use `esp_ota_write_with_offset(handle, data, len, block * 4096)`. The ran
 - **The update counts as done only when the node's first frame after the reboot shows the new slot** (`GANTRY_STATUS.active_slot`). A missing `OTA_RESULT` means "unknown", not "failed".
 
 **Loss cost (derived, to be measured in OTA-only mode).**
-- At 0.16 % loss, about 0.19 fragments are lost per variant-A block, about 40 per update. Each is resent after one `MISSING` round trip.
-- Only a lost last fragment or a lost status costs a 100 ms timeout. That happens about 0.3 times per update in each direction (206 × 0.16 %), about 0.1 s in total at worst.
+- The 0.16 to 0.31 % loss measured on 2026-11-13 was all from full buffers (EMAC missed frames), which section 5.1 designs out. The remaining causes, CRC errors and FIFO overflow, have not been seen. Measure the real rate in OTA mode.
+- Each lost fragment is resent after one `MISSING` round trip. Only a lost last fragment or a lost status costs a 100 ms timeout.
 
 **Rollback.**
 - Keep TCP OTA until a CellNet update has been proven end to end on each node. An image whose CellNet receiver is broken would otherwise be recoverable only over USB.
@@ -181,27 +250,28 @@ Per-block cost:
 | | Erase | Blocks | Check | On the node | Plus |
 |---|---|---|---|---|---|
 | TCP today (measured) | 2.8–2.9 s | 3.0–3.1 s | 0.6 s | **6.4–6.6 s** | none |
-| CellNet A, 64-byte frames | 2.8 s | about 3.9 s | 0.6 s | **about 7.3 s** | reboot into OTA mode, loss (about 0.1 s) |
-| CellNet B, 486-byte frames | 2.8 s | about 2.9 s | 0.6 s | **about 6.3 s** | reboot into OTA mode, loss |
+| CellNet A, 64-byte frames (rejected, D1) | 2.8 s | about 3.9 s | 0.6 s | about 7.3 s | reboot into OTA mode, loss |
+| **CellNet B, 486-byte frames (decided)** | 2.8 s | about 2.9 s | 0.6 s | **about 6.3 s** | reboot into OTA mode, about 2.4 to 2.8 s (D3a), so about 8.7 to 9.1 s from the command |
 
 ## 9. Work, once decided
 
 In this repository:
 1. `include/cell_net_l2_protocol.h`: message types 0x05 to 0x09, their payloads, `CELL_COMMAND` id 7, and heartbeat bits 15 and 14.
-2. `lib/CellNetL2`: build and parse the new types, with the derived-length checks of section 4 and, for variant B only, the per-type maximum length.
-3. A pure-logic receiver state machine: session, `next_block`, fragment bitmap, `ACK_REQ` replies, progress timer, `OTA_END` rules. **Host-test it before wiring** (`AGENTS.md`), with the loss, duplicate and reorder sequences from the 2026-11-13 reviews as test cases.
-4. `src/gantry_ota.cpp`: the CellNet receiver, reusing `gantryOtaStartStream` and `gantryOtaFinishStream`, with offset writes.
-5. `CELL_COMMAND 7` handling: the busy and image-valid checks, `gantryOtaDisableMotors`, the noinit flag, then `esp_restart`.
-6. `app_main`: the OTA-mode branch (flag check, link-up attach, heartbeat, deadline). It lives in the kept working-tree `main.cpp` (X-6).
+2. `lib/CellNetL2`: build and parse the new types, with the derived-length checks of section 4 and the per-type maximum length (508 for `OTA_DATA`).
+3. `idf/sdkconfig.defaults`: `CONFIG_ETH_DMA_RX_BUFFER_NUM=20` (D2).
+4. A pure-logic receiver state machine: session, `next_block`, fragment bitmap, `ACK_REQ` replies, progress timer, `OTA_END` rules. **Host-test it before wiring** (`AGENTS.md`), with the loss, duplicate and reorder sequences from the 2026-11-13 reviews as test cases.
+5. `src/gantry_ota.cpp`: the CellNet receiver, reusing `gantryOtaStartStream` and `gantryOtaFinishStream`, with offset writes.
+6. `CELL_COMMAND 7` handling: the busy and image-valid checks, `gantryOtaDisableMotors`, the noinit flag, then `esp_restart`.
+7. `app_main`: the OTA-mode branch (flag check, OTA address and filters of section 5.1, link-up attach, heartbeat, deadline). It lives in the kept working-tree `main.cpp` (X-6).
 
 Outside this repository:
-- **Supervisor** ([ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor)): a CellNet sender behind `/api/ota`, with a session counter, pacing and the retry rules. Keep TCP until CellNet OTA is proven (N-1 migrates one service at a time). Refresh its `vendor/cellnet` copy with `scripts/sync-cellnet.py` (X-3).
+- **Supervisor** ([ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor)): a CellNet sender behind `/api/ota`, with a session counter, the W = 18 window and the retry rules. Keep TCP until CellNet OTA is proven (N-1 migrates one service at a time). Refresh its `vendor/cellnet` copy with `scripts/sync-cellnet.py` (X-3).
 - **Conveyor:** one USB flash to install the receiver (C-2).
 
-## 10. Decisions needed
+## 10. Decisions
 
-| ID | Question | Options |
-|----|----------|---------|
-| D1 | Fragment size | **A, 64-byte frames:** about 7.3 s on the node, no parser size change, the simplest design, and within the 2026-11-05 rule. **B, 486-byte frames:** about 6.3 s, roughly equal to TCP, but needs per-type frame lengths and the one-block-ahead window |
-| D2 | Variant B only: raise `CONFIG_ETH_DMA_RX_BUFFER_NUM` | Keep 10, with one spare buffer during a write. Or raise it to 20, using 5 KB more RAM in every mode, and set it in `idf/sdkconfig.defaults` |
-| D3 | Measure before building? | From the supervisor: the time from `REBOOT_TO_OTA` to the node's first frame, which is the real cost of OTA-only mode. Frame loss in OTA-only mode at the paced rate |
+| ID | Question | Decision (2026-11-13) |
+|----|----------|-----------------------|
+| D1 | Fragment size | **B, 486-byte frames**: about 6.3 s on the node, roughly equal to TCP. Needs per-type frame lengths and the one-block-ahead window |
+| D2 | Raise `CONFIG_ETH_DMA_RX_BUFFER_NUM` | **Yes, to 20**, set in `idf/sdkconfig.defaults`. It costs 5 KB more RAM in every mode. Together with section 5.1, **no frame may be dropped because the receive buffers are full** |
+| D3 | Measure before building | **Yes, first; measured 2026-11-13** (section 2.1). D3a: 3.44 to 3.54 s from reset to the first frame in normal mode, about 2.4 to 2.8 s expected in OTA mode. D3b: during a flash write the receive buffers hold exactly their count (10, or 20) and nothing is taken out, which confirms the section 5.1 guarantee |

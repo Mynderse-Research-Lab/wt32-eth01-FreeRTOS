@@ -23,6 +23,7 @@
 #endif
 #include "freertos/task.h"
 #include "ethernet_app_config.h"
+#include "EthernetLink.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
 #include "gantry_console_parse.h"
@@ -3263,6 +3264,30 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
     }
+  } else if (strcmp(cmdLower, "boottime") == 0) {
+    const Network::EthernetBootTimes bt = Network::ethernetBootTimes();
+    ESP_LOGI(TAG, "boottime reset=%d (ms since app start, -1 = not reached): eth_start=%lld "
+                  "eth_started=%lld phy_link_up=%lld got_ip=%lld",
+             static_cast<int>(esp_reset_reason()),
+             bt.start_us < 0 ? -1LL : static_cast<long long>(bt.start_us / 1000),
+             bt.eth_started_us < 0 ? -1LL : static_cast<long long>(bt.eth_started_us / 1000),
+             bt.link_up_us < 0 ? -1LL : static_cast<long long>(bt.link_up_us / 1000),
+             bt.got_ip_us < 0 ? -1LL : static_cast<long long>(bt.got_ip_us / 1000));
+  } else if (strncmp(cmdLower, "flashstall ", 11) == 0) {
+    char mode[8] = {};
+    int writes = 96;
+    const int got = sscanf(cmdLower + 11, "%7s %d", mode, &writes);
+    const bool erase = strcmp(mode, "erase") == 0;
+    char line[200];
+    if (got < 1 || (!erase && strcmp(mode, "write") != 0)) {
+      ESP_LOGE(TAG, "usage: flashstall erase|write [n]");
+      return;
+    }
+    if (gantryOtaFlashStallTest(cfg->gantry, erase, writes, line, sizeof(line)) != ESP_OK) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strcmp(cmdLower, "netstat") == 0 || strcmp(cmdLower, "netstat reset") == 0) {
     char line[200];
     if (!pickSchedulerNetStats(strcmp(cmdLower, "netstat reset") == 0, line, sizeof(line))) {
@@ -3569,6 +3594,8 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  gripmark on|off               - grip timing marker on GPIO17 (TFT backlight off)");
   ESP_LOGI(TAG, "  vismark on|off                - vision frame receipt marker on GPIO17 (TFT backlight off)");
   ESP_LOGI(TAG, "  netstat [reset]               - CellNet RX counters and EMAC drop counters");
+  ESP_LOGI(TAG, "  boottime                      - Ethernet start / PHY link-up / IP times since app start");
+  ESP_LOGI(TAG, "  flashstall erase|write [n]    - erase, then n back-to-back 4 KB writes, passive slot from 1.5 MB (motors off)");
   ESP_LOGI(TAG, "  beltcal [near|far|cnvyr near|cnvyr far|batt|z|apply [center]] - belt/conveyor/battery X");
   ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 deg along +Y)");
   ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");
