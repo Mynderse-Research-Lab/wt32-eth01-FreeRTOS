@@ -175,7 +175,7 @@ esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry) {
 }
 
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
-                              const esp_partition_t *&target_part) {
+                              const esp_partition_t *&target_part, size_t image_size) {
     // A move, home or pick in progress is not interrupted for an update.
     if (gantry != nullptr && gantry->isBusy()) {
         ESP_LOGE(TAG, "OTA REFUSED: Gantry is BUSY (move/home/pick). Stop it before flashing.");
@@ -196,7 +196,11 @@ esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
   ESP_LOGI(TAG, "Initiating OTA update stream into partition '%s' (0x%06lX)...",
            target_part->label, (unsigned long)target_part->address);
 
-  esp_err_t err = esp_ota_begin(target_part, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+  // Erasing the announced range up front lets the flash driver use 64 KB block
+  // erases instead of one 4 KB sector erase per write (N-2).
+  esp_err_t err = esp_ota_begin(target_part,
+                                image_size > 0 ? image_size : OTA_WITH_SEQUENTIAL_WRITES,
+                                &handle);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "esp_ota_begin failed: %s (0x%x)", esp_err_to_name(err), err);
     return err;
@@ -361,7 +365,9 @@ static void otaServerTask(void *param) {
     // Step 3: Safety check & start stream
     esp_ota_handle_t ota_handle = 0;
     const esp_partition_t *target_part = nullptr;
-    esp_err_t err = gantryOtaStartStream(ctx->gantry, ota_handle, target_part);
+    const int64_t erase_t0 = esp_timer_get_time();
+    esp_err_t err = gantryOtaStartStream(ctx->gantry, ota_handle, target_part, image_size);
+    const int64_t erase_us = esp_timer_get_time() - erase_t0;
     if (err != ESP_OK) {
       if (err == ESP_ERR_INVALID_STATE) {
         sendStr(client_fd, "ERR SAFETY: Gantry busy (move/home/pick in progress)\n");
@@ -446,11 +452,12 @@ static void otaServerTask(void *param) {
     // Keep this line short: the supervisor shows it in a 128-byte status message.
     char done[112];
     snprintf(done, sizeof(done),
-             "OK COMPLETE ms: stream=%lu recv=%lu write=%lu wmax=%lu verify=%lu n=%lu\n",
+             "OK COMPLETE ms: erase=%lu stream=%lu recv=%lu write=%lu wmax=%lu verify=%lu n=%lu\n",
+             (unsigned long)(erase_us / 1000),
              (unsigned long)(stream_us / 1000), (unsigned long)(recv_us / 1000),
              (unsigned long)(write_us / 1000), (unsigned long)(write_max_us / 1000),
              (unsigned long)(finish_us / 1000), (unsigned long)recv_calls);
-    ESP_LOGI(TAG, "%s", done);
+    ESP_LOGI(TAG, "%.*s", (int)strcspn(done, "\n"), done);
     sendStr(client_fd, done);
     vTaskDelay(pdMS_TO_TICKS(500));
     close(client_fd);

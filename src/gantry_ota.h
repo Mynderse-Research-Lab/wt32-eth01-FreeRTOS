@@ -75,11 +75,14 @@ esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry);
  * @param gantry Active Gantry instance to check for motion idle state.
  * @param handle Output OTA transaction handle.
  * @param target_part Output pointer to target partition receiving update.
+ * @param image_size Size announced by the sender. That range is erased before
+ *        the stream, in 64 KB blocks where aligned; 0 erases sector by sector
+ *        while writing.
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the gantry is busy or
  *         the motors would not disable.
  */
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
-                              const esp_partition_t *&target_part);
+                              const esp_partition_t *&target_part, size_t image_size);
 
 /**
  * @brief Write a chunk of the incoming firmware binary to flash.

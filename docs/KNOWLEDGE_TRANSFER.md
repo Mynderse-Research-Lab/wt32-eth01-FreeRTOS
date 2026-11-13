@@ -190,7 +190,7 @@ The other ODVA documents in `driver_datasheets_and_calculations` are overviews o
 
 ### 5.3 Pick scheduler
 
-Turns detections into timed strikes. Code: `src/pick_scheduler.cpp`, `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`). The image now running may still use the compile-time value (X-6).
+Turns detections into timed strikes. Code: `src/pick_scheduler.cpp`, `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`). The gantry is built from a kept, uncommitted `main.cpp` that uses the compile-time `GANTRY_SAFE_Z_HEIGHT_MM` instead (G-F6), also 48.4 mm.
 
 The model below was read from the code at `e4d64ad` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
 
@@ -358,7 +358,7 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | $\theta_{off}$ | Jaw angle offset | `cv_jaw_deg` | 90° |
 | $z_b$ | Belt surface, joint Z | `col_z_min_mm` | 115 mm (122 live, G-F1) |
 | — | Conveyor box edge, X | `col_x_min_mm` | 95 mm |
-| $z_{safe} - z_{min}$ | Traverse ceiling | stored `geom_safe_z_mm`, applied at boot | 48.4 mm by default (X-6) |
+| $z_{safe} - z_{min}$ | Traverse ceiling | stored `geom_safe_z_mm`, applied at boot | 48.4 mm by default; compile-time in the running build (G-F6) |
 | $v_z$ | Plunge speed | 0.95 × `z_crit_rpm`/60 × `z_lead_mm` | 950 mm/s |
 | $a_z, d_z$ | Accel, decel (all linear axes) | `acc_mm_s2`, `dec_mm_s2` | 3000 mm/s² (5000 in the 2026-10-30 runs, G-C2) |
 | — | Approach speed | `spd_mm_s` | 50 mm/s (750 live, G-C7) |
