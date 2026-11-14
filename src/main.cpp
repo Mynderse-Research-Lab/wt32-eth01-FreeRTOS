@@ -172,6 +172,12 @@ void tftUiTask(void* param) {
 // app_main
 // ---------------------------------------------------------------------------
 extern "C" void app_main(void) {
+    // CellNet OTA (N-2): after REBOOT_TO_OTA, run OTA-only mode and nothing else.
+    uint16_t ota_session = 0;
+    if (gantryOtaCellNetModeRequested(&ota_session)) {
+        gantryOtaRunCellNetMode(ota_session);  // does not return
+        return;
+    }
     // First: keep start-up logs readable from the LAN console ('bootlog').
     bootLogRingInstall();
     ESP_LOGI(TAG, "\n========================================");

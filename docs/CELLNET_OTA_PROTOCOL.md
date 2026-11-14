@@ -262,7 +262,7 @@ In this repository:
 4. A pure-logic receiver state machine: session, `next_block`, fragment bitmap, `ACK_REQ` replies, progress timer, `OTA_END` rules. **Host-test it before wiring** (`AGENTS.md`), with the loss, duplicate and reorder sequences from the 2026-11-13 reviews as test cases.
 5. `src/gantry_ota.cpp`: the CellNet receiver, reusing `gantryOtaStartStream` and `gantryOtaFinishStream`, with offset writes.
 6. `CELL_COMMAND 7` handling: the busy and image-valid checks, `gantryOtaDisableMotors`, the noinit flag, then `esp_restart`.
-7. `app_main`: the OTA-mode branch (flag check, OTA address and filters of section 5.1, link-up attach, heartbeat, deadline). It lives in the kept working-tree `main.cpp` (X-6).
+7. `app_main`: the OTA-mode branch (flag check, OTA address and filters of section 5.1, link-up attach, heartbeat, deadline). It is in `src/main.cpp`, first in `app_main`.
 
 Outside this repository:
 - **Supervisor** ([ADSB_Sorter-supervisor](https://github.com/Mynderse-Research-Lab/ADSB_Sorter-supervisor)): a CellNet sender behind `/api/ota`, with a session counter, the W = 18 window and the retry rules. Keep TCP until CellNet OTA is proven (N-1 migrates one service at a time). Refresh its `vendor/cellnet` copy with `scripts/sync-cellnet.py` (X-3).
