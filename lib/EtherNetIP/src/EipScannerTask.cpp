@@ -978,15 +978,10 @@ void multiAxisTask(void* arg) {
       }
     }
 
-    // Prime UDP dest/ARP for every axis and empty RX before cyclic start.
-    if (ok) {
-      for (int prime = 0; prime < 4; ++prime) {
-        (void)scanner.sendKeepaliveAll();
-        (void)scanner.drainBufferedInputs();
-        vTaskDelay(pdMS_TO_TICKS(2));
-      }
-    }
-    // Keepalive / priming events print here, before the Class 1 loop starts.
+    // Connect events print here. From the last priming keepalive below to the
+    // first cyclic O->T this task must not log: a log that blocked (UART ring
+    // full of the boot help text) left a drive without O->T long enough for
+    // its connection to time out (G-B12).
     (void)scanner.flushDeferredLogs();
 
     if (!ok && w5500LostConfig(*ctx->hal)) {
@@ -1018,7 +1013,17 @@ void multiAxisTask(void* arg) {
 
     ESP_LOGI(TAG, "Multi-axis Class 1 running (RPI=%lu us)",
              static_cast<unsigned long>(rpi_us));
+    uint8_t last_phy = logW5500LinkMode(*ctx->hal);
     g_class1_budget_rpi_us = rpi_us;
+
+    // Prime UDP dest/ARP for every axis and empty RX before cyclic start.
+    // No logging from here on: priming events wait for the log task
+    // (setLogScanner below), so cyclic O->T follows the keepalives at once.
+    for (int prime = 0; prime < 4; ++prime) {
+      (void)scanner.sendKeepaliveAll();
+      (void)scanner.drainBufferedInputs();
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
     class1TimingStats().reset();
     // Seed feedback clocks at cyclic start — FO timestamps must not count.
     scanner.beginCyclicExchange();
@@ -1029,7 +1034,6 @@ void multiAxisTask(void* arg) {
     bool planned_close = false;
     uint32_t timing_cycles = 0;
     uint32_t spi_check_cycles = 0;
-    uint8_t last_phy = logW5500LinkMode(*ctx->hal);
     int64_t cycle_anchor_us = class1NowUs();
     TickType_t last_wake = xTaskGetTickCount();
     uint32_t lnk_low_reads = 0;
