@@ -14,6 +14,10 @@ The password is never printed or written anywhere.
 Usage:
   set ADSB_DEV_PASS in the environment (or add --prompt to type it), then
   python tools/supervisor_ota.py [idf/build/wt32_eth01_gantry.bin] [--host 10.168.40.1]
+         [--transport cellnet|tcp]
+
+The supervisor sends over CellNet L2 by default (since 2026-11-14); --transport
+tcp uses its TCP relay to the gantry's port 8032 instead.
 """
 from __future__ import annotations
 
@@ -71,8 +75,9 @@ class Toolbox:
         with self.opener.open(f"{self.base}/api/ota/status", timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
 
-    def upload(self, image: bytes) -> str:
-        req = urllib.request.Request(f"{self.base}/api/ota", data=image, method="POST")
+    def upload(self, image: bytes, transport: str | None = None) -> str:
+        url = f"{self.base}/api/ota" + (f"?transport={transport}" if transport else "")
+        req = urllib.request.Request(url, data=image, method="POST")
         req.add_header("Content-Type", "application/octet-stream")
         with self.opener.open(req, timeout=UPLOAD_TIMEOUT_S) as resp:
             return resp.read().decode("utf-8", errors="replace")
@@ -111,6 +116,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("binary", nargs="?", default=DEFAULT_BIN)
     ap.add_argument("--host", default=DEFAULT_HOST)
+    ap.add_argument("--transport", choices=("cellnet", "tcp"), default=None,
+                    help="OTA transport; default: the supervisor's (CellNet L2)")
     ap.add_argument("--prompt", action="store_true",
                     help=f"ask for the toolbox password when {PASSWORD_ENV} is not set")
     ap.add_argument("--discard-unsaved", action="store_true",
@@ -140,7 +147,7 @@ def main() -> int:
     print(f"running slot {old_slot}, uptime {old_up} s")
 
     print(f"uploading {len(image)} bytes ...")
-    reply = tb.upload(image)
+    reply = tb.upload(image, args.transport)
     print("  " + reply.strip()[:200])
 
     deadline = time.time() + OTA_DONE_TIMEOUT_S
@@ -153,7 +160,7 @@ def main() -> int:
             last = line
         if st.get("total") == len(image) and st.get("state") == "ok":
             break
-        if st.get("state") == "error":
+        if st.get("state") in ("error", "failed"):
             raise SystemExit("[ERROR] OTA failed: " + str(st.get("message")))
         time.sleep(1.0)
     else:
