@@ -73,6 +73,8 @@ using GantryConsole::kMinSpeedMmPerS;
 using GantryConsole::parseAxisToken;
 
 SemaphoreHandle_t g_consoleCmdMutex = nullptr;
+// Guards the sink/reply pointers and tee install state; held for microseconds.
+SemaphoreHandle_t g_teeMutex = nullptr;
 
 GantryConsoleReplyFn g_replyFn = nullptr;
 void *g_replyCtx = nullptr;
@@ -150,6 +152,19 @@ void uninstallTeeIfIdle() {
   g_teeInstalled = false;
 }
 
+// Publishes a (fn, ctx) pair for the unlocked readers in consoleTeeVprintf:
+// a reader that sees a non-null fn also sees its ctx. Call with g_teeMutex held.
+void setFnCtx(GantryConsoleReplyFn *fn_slot, void **ctx_slot, GantryConsoleReplyFn fn,
+              void *ctx) {
+    if (fn != nullptr) {
+        __atomic_store_n(ctx_slot, ctx, __ATOMIC_RELAXED);
+        __atomic_store_n(fn_slot, fn, __ATOMIC_RELEASE);
+    } else {
+        __atomic_store_n(fn_slot, fn, __ATOMIC_RELEASE);
+        __atomic_store_n(ctx_slot, ctx, __ATOMIC_RELAXED);
+    }
+}
+
 int consoleTeeVprintf(const char *fmt, va_list args) {
   char buf[512];
   va_list copy;
@@ -158,12 +173,20 @@ int consoleTeeVprintf(const char *fmt, va_list args) {
   va_end(copy);
   if (n > 0) {
     buf[sizeof(buf) - 1] = '\0';
-    if (g_sessionFn != nullptr) {
+    // Any task logs here, unlocked: load each pointer once, so a detach
+    // between the test and the call can never make it call a null pointer.
+    // Writers store ctx before a non-null fn; a stale ctx is caught by
+    // sendAll's live-fd check.
+    const GantryConsoleReplyFn session_fn = __atomic_load_n(&g_sessionFn, __ATOMIC_ACQUIRE);
+    if (session_fn != nullptr) {
       if (lanLogAllowsLine(buf)) {
-        g_sessionFn(g_sessionCtx, buf);
+        session_fn(__atomic_load_n(&g_sessionCtx, __ATOMIC_RELAXED), buf);
       }
-    } else if (g_replyFn != nullptr) {
-      g_replyFn(g_replyCtx, buf);
+    } else {
+      const GantryConsoleReplyFn reply_fn = __atomic_load_n(&g_replyFn, __ATOMIC_ACQUIRE);
+      if (reply_fn != nullptr) {
+        reply_fn(__atomic_load_n(&g_replyCtx, __ATOMIC_RELAXED), buf);
+      }
     }
   }
   if (g_prevVprintf != nullptr) {
@@ -172,10 +195,16 @@ int consoleTeeVprintf(const char *fmt, va_list args) {
   return vprintf(fmt, args);
 }
 
+// The SerialCmd and NetConsole tasks both get here first; a guarded static
+// (thread-safe in ESP-IDF, components/cxx/cxx_guards.cpp) creates each mutex
+// exactly once, where a check-then-create could make two.
 void ensureConsoleMutex() {
-  if (g_consoleCmdMutex == nullptr) {
+  static const bool created = [] {
     g_consoleCmdMutex = xSemaphoreCreateMutex();
-  }
+    g_teeMutex = xSemaphoreCreateMutex();
+    return true;
+  }();
+  (void)created;
 }
 
 struct ControlStateSnapshot {
@@ -3485,21 +3514,24 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 }
 }  // namespace
 
+// The sink swap takes only the short tee lock, never g_consoleCmdMutex: a UART
+// command holds that for its whole run (calibrate all: up to 120 s), which
+// stalled a TCP connect or disconnect behind it. Loggers read the sink pair
+// unlocked; sendAll's live-fd check drops a line a swap leaves stale.
 void gantryConsoleAttachLogSink(GantryConsoleReplyFn fn, void *ctx) {
-  ensureConsoleMutex();
-  if (g_consoleCmdMutex != nullptr) {
-    xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
-  }
-  g_sessionFn = fn;
-  g_sessionCtx = ctx;
-  if (fn != nullptr) {
-    installTeeIfNeeded();
-  } else {
-    uninstallTeeIfIdle();
-  }
-  if (g_consoleCmdMutex != nullptr) {
-    xSemaphoreGive(g_consoleCmdMutex);
-  }
+    ensureConsoleMutex();
+    if (g_teeMutex != nullptr) {
+        xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+    }
+    setFnCtx(&g_sessionFn, &g_sessionCtx, fn, ctx);
+    if (fn != nullptr) {
+        installTeeIfNeeded();
+    } else {
+        uninstallTeeIfIdle();
+    }
+    if (g_teeMutex != nullptr) {
+        xSemaphoreGive(g_teeMutex);
+    }
 }
 
 void gantryConsoleDetachLogSink(void) {
@@ -3513,22 +3545,29 @@ void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *li
     xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
   }
 
+  if (g_teeMutex != nullptr) {
+    xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+  }
   const bool use_temp_tee = (reply_fn != nullptr && g_sessionFn == nullptr);
-  g_replyFn = reply_fn;
-  g_replyCtx = reply_ctx;
+  setFnCtx(&g_replyFn, &g_replyCtx, reply_fn, reply_ctx);
   if (use_temp_tee) {
     installTeeIfNeeded();
+  }
+  if (g_teeMutex != nullptr) {
+    xSemaphoreGive(g_teeMutex);
   }
 
   processCommand(cfg, line);
 
+  if (g_teeMutex != nullptr) {
+    xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+  }
+  setFnCtx(&g_replyFn, &g_replyCtx, nullptr, nullptr);
   if (use_temp_tee) {
-    g_replyFn = nullptr;
-    g_replyCtx = nullptr;
     uninstallTeeIfIdle();
-  } else {
-    g_replyFn = nullptr;
-    g_replyCtx = nullptr;
+  }
+  if (g_teeMutex != nullptr) {
+    xSemaphoreGive(g_teeMutex);
   }
 
   if (g_consoleCmdMutex != nullptr) {

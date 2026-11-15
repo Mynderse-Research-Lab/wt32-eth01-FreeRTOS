@@ -33,6 +33,10 @@ constexpr TickType_t kConsoleSendWaitTicks = pdMS_TO_TICKS(500);
 
 SemaphoreHandle_t g_sendMutex = nullptr;
 TaskHandle_t g_consoleTask = nullptr;
+// The client whose socket the log sink feeds; -1 when none. Set and cleared
+// under g_sendMutex, so a log line from a logger that read the sink just
+// before a detach never reaches a closed fd or a later client reusing it.
+int g_liveFd = -1;
 
 // Send outcomes since boot, read with netcon (console "busy" hunt, 2026-10-27).
 struct SendStats {
@@ -40,6 +44,7 @@ struct SendStats {
     uint32_t waited_short = 0;   // console-loop text not fully sent in time
     uint32_t log_skipped = 0;    // log text skipped: another send in progress
     uint32_t log_short = 0;      // log text cut by a full socket
+    uint32_t log_stale = 0;      // log text for a client no longer attached
     uint32_t log_sends = 0;
     uint32_t max_wait_ms = 0;
     int last_errno = 0;
@@ -89,6 +94,13 @@ bool sendAll(int fd, const char *text, bool wait) {
         }
         return false;
     }
+    if (!wait && fd != g_liveFd) {
+        ++g_stats.log_stale;
+        if (g_sendMutex != nullptr) {
+            xSemaphoreGive(g_sendMutex);
+        }
+        return false;
+    }
     size_t off = 0;
     while (off < n) {
         const ssize_t w = send(fd, text + off, n - off, MSG_DONTWAIT);
@@ -124,6 +136,17 @@ bool sendAll(int fd, const char *text, bool wait) {
         xSemaphoreGive(g_sendMutex);
     }
     return off == n;
+}
+
+// Waits out any log send in flight, so close() never runs under one.
+void setLiveFd(int fd) {
+    if (g_sendMutex != nullptr) {
+        xSemaphoreTake(g_sendMutex, portMAX_DELAY);
+    }
+    g_liveFd = fd;
+    if (g_sendMutex != nullptr) {
+        xSemaphoreGive(g_sendMutex);
+    }
 }
 
 // The console task's own command output waits for its turn like the prompt:
@@ -335,6 +358,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
     return;
   }
 
+  setLiveFd(client_fd);
   void *ctx_fd = reinterpret_cast<void *>(static_cast<intptr_t>(client_fd));
   if (CONSOLE_TCP_LOG_ENABLE) {
     gantryConsoleAttachLogSink(replyToSocket, ctx_fd);
@@ -362,6 +386,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
               std::strcmp(line, "quit") == 0) {
             sendAll(client_fd, "Bye\r\n", /*wait=*/true);
             gantryConsoleDetachLogSink();
+            setLiveFd(-1);
             close(client_fd);
             ESP_LOGI(TAG, "TCP client logged out");
             return;
@@ -384,6 +409,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
   }
 
   gantryConsoleDetachLogSink();
+  setLiveFd(-1);
   close(client_fd);
   ESP_LOGI(TAG, "TCP client disconnected");
 }
@@ -469,13 +495,14 @@ void gantryNetConsoleStart(const GantryTestConsoleConfig *cfg) {
 void gantryNetConsoleStats(char *out, size_t out_len) {
     int len = snprintf(out, out_len,
                        "netcon waited=%lu short=%lu max_wait=%lu ms | log=%lu skipped=%lu "
-                       "short=%lu | last_errno=%d | rx=%lu",
+                       "short=%lu stale=%lu | last_errno=%d | rx=%lu",
                        static_cast<unsigned long>(g_stats.waited_sends),
                        static_cast<unsigned long>(g_stats.waited_short),
                        static_cast<unsigned long>(g_stats.max_wait_ms),
                        static_cast<unsigned long>(g_stats.log_sends),
                        static_cast<unsigned long>(g_stats.log_skipped),
-                       static_cast<unsigned long>(g_stats.log_short), g_stats.last_errno,
+                       static_cast<unsigned long>(g_stats.log_short),
+                       static_cast<unsigned long>(g_stats.log_stale), g_stats.last_errno,
                        static_cast<unsigned long>(g_rx_count));
     // Newest first (the first is this netcon, its prompt still open), so a
     // truncated log line still keeps the commands just before it.

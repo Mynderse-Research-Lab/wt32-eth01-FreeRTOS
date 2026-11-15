@@ -91,7 +91,7 @@ Maths and timing are in [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS
 
 Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md). The header is `include/cell_net_l2_protocol.h`, and this repository is its source. The supervisor copies it into its `vendor/cellnet` with its `scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has drifted (C-3).
 
-**Direction (decided 2026-11-05):** CellNet L2 is to become the only transport between cell nodes; the console, OTA and time services above move onto it, OTA first (N-1, N-2). The supervisor web application stays on HTTP.
+**Direction (decided 2026-11-05):** CellNet L2 is to become the only transport between cell nodes; the OTA and time services above move onto it, OTA first (N-1, N-2). The supervisor web application stays on HTTP, and so does the gantry console on TCP `:2323` (amended 2026-11-15).
 
 **Never connect the motion bus to the cell switch.** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY §3](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md#3-networks--cell-topology) explains the isolation rule.
 

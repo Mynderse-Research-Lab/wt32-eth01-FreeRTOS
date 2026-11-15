@@ -1,9 +1,11 @@
-# CellNet Console Stream (draft)
+# CellNet Console Stream (draft, not pursued)
 
-**Status:** Draft, 2026-11-14, revision 2, for [N-1](OPEN_ITEMS.md#cell-transport). The gantry console is the second service to move from IP onto CellNet L2, after OTA ([CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md)).
-- Nothing here is implemented yet.
-- Revision 2 folds in an adversarial review of revision 1 against the code. Revision 1 assumed that only the transport changes. That is not true: the console's output routing and log sink must change too ([section 5](#5-the-gantry-side)).
-- Decisions are needed before work starts ([section 10](#10-decisions-needed)).
+**Status:** **Not pursued (user decision 2026-11-15).** The gantry console stays on TCP `2323`; see [N-1](OPEN_ITEMS.md#cell-transport). This file is kept as the record of what a move would have cost.
+- Revision 2 (2026-11-14) folded an adversarial review into revision 1. A follow-up check costed it at about 3,800–4,500 lines and 14–21 engineer-days (Assumed) to rebuild TCP's reliability on the same LAN8720 and switch.
+- No console fault was traced to TCP itself. The gantry keeps lwIP anyway (NTP, the TCP OTA route, CellNet's start-up), so the move would remove one listener, not the IP stack.
+- A message-oriented console (request id, chunked replies, best-effort logs) was the cheaper alternative; the user rejected it too.
+- **Measured 2026-11-15 on the gantry** (`netcon`, about 4 h uptime): `log=12 skipped=0 short=0`, `waited=1315 short=0 max_wait=4 ms`. Receipt-to-prompt on the gantry: `bootlog` 1,480 ms, `cfg export` 774–791 ms, `help` 504 ms. This answers D4 below: `bootlog` runs at about 11.8 KB/s on the gantry side.
+- Of the shared-code defects in section 1.2, only two matter with TCP as the only network console: attach and detach waiting on `g_consoleCmdMutex`, and the tee reading the sink pair without a lock. Both were fixed on TCP (2026-11-15). The fix's own review found two more, also fixed: the tee loaded `g_sessionFn` twice (a detach between the test and the call could call a null pointer), and the console mutexes were created lazily with a check-then-create race.
 
 **Scope:** the gantry console between the supervisor and the gantry. Today that is TCP port `2323`. The conveyor is out of scope (user, 2026-11-14).
 
