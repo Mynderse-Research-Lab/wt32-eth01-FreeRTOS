@@ -1491,6 +1491,26 @@ bool pickSchedulerCalibrate(const char* args, char* out, size_t out_len) {
   return false;
 }
 
+// GANTRY_STATUS.active_slot: 0 for ota_0, 1 for ota_1, 0xFF otherwise. Read
+// once: the running partition cannot change without a reboot. The CellNet OTA
+// sender checks the slot change from it (N-2).
+static uint8_t runningOtaSlot() {
+  static const uint8_t slot = []() -> uint8_t {
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running == nullptr) {
+      return 0xFF;
+    }
+    if (running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) {
+      return 0;
+    }
+    if (running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) {
+      return 1;
+    }
+    return 0xFF;
+  }();
+  return slot;
+}
+
 static void publishGantryStatus(PickSchedulerTaskConfig *cfg) {
   if (cfg == nullptr || cfg->net_l2 == nullptr || !cfg->net_l2->isReady()) {
     return;
@@ -1513,7 +1533,7 @@ static void publishGantryStatus(PickSchedulerTaskConfig *cfg) {
     motion = cfg->gantry->isGripperActive() ? 3 : 2;
   }
   cfg->net_l2->sendGantryStatus(
-      motion, 0, joints.x, joints.z, joints.theta, s_last_cycle_ms, fault);
+      motion, runningOtaSlot(), joints.x, joints.z, joints.theta, s_last_cycle_ms, fault);
 }
 
 static bool running() {
