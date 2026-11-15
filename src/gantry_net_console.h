@@ -13,4 +13,11 @@ void gantryNetConsoleStart(const GantryTestConsoleConfig *cfg);
 /** One line of TCP send counters since boot (netcon). */
 void gantryNetConsoleStats(char *out, size_t out_len);
 
+/**
+ * Called by a command that wants to restart. From the NetConsole task it
+ * returns true and the console sends the prompt, closes the client and then
+ * restarts. From any other task it returns false and the caller restarts.
+ */
+bool gantryNetConsoleDeferRestart(void);
+
 #endif  // GANTRY_NET_CONSOLE_H

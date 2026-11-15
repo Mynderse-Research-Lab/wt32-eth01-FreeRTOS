@@ -37,6 +37,8 @@ TaskHandle_t g_consoleTask = nullptr;
 // under g_sendMutex, so a log line from a logger that read the sink just
 // before a detach never reaches a closed fd or a later client reusing it.
 int g_liveFd = -1;
+// Set by gantryNetConsoleDeferRestart from the console task's own command.
+bool g_restartPending = false;
 
 // Send outcomes since boot, read with netcon (console "busy" hunt, 2026-10-27).
 struct SendStats {
@@ -404,6 +406,16 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
           rx.prompt_ok = sendAll(client_fd, "\r\n> ", /*wait=*/true);
           rx.done_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
           len = 0;
+          if (g_restartPending) {
+            // The prompt ends the supervisor's exchange; the close sends a
+            // FIN, so its next command reconnects instead of waiting.
+            gantryConsoleDetachLogSink();
+            setLiveFd(-1);
+            close(client_fd);
+            ESP_LOGI(TAG, "TCP client closed for restart");
+            vTaskDelay(pdMS_TO_TICKS(300));
+            esp_restart();
+          }
         }
       } else if (c >= 32 && c <= 126 && len + 1 < kLineCap) {
         line[len++] = c;
@@ -520,9 +532,21 @@ void gantryNetConsoleStats(char *out, size_t out_len) {
     }
 }
 
+bool gantryNetConsoleDeferRestart(void) {
+    if (g_consoleTask == nullptr || xTaskGetCurrentTaskHandle() != g_consoleTask) {
+        return false;
+    }
+    g_restartPending = true;
+    return true;
+}
+
 #else  // !CONSOLE_TCP_ENABLE
 
 void gantryNetConsoleStart(const GantryTestConsoleConfig *) {}
+
+bool gantryNetConsoleDeferRestart(void) {
+    return false;
+}
 
 void gantryNetConsoleStats(char *out, size_t out_len) {
     snprintf(out, out_len, "netcon disabled");

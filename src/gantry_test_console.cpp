@@ -2736,7 +2736,12 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     ESP_LOGI(TAG, "Rebooting");
-    esp_restart();
+    // Over TCP the console ends the reply and closes the client first;
+    // restarting here sent no prompt and no FIN, and the supervisor's console
+    // stayed busy for its 180 s deadline (OPEN_ITEMS S-7).
+    if (!gantryNetConsoleDeferRestart()) {
+        esp_restart();
+    }
     return;
   }
   if (cmdTokenIs(token, "lock") && *rest == '\0') {
