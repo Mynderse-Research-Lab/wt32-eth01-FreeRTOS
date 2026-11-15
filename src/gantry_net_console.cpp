@@ -360,13 +360,16 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
 
   setLiveFd(client_fd);
   void *ctx_fd = reinterpret_cast<void *>(static_cast<intptr_t>(client_fd));
+  // Banner first, sink second: a log line ahead of the banner pushed its
+  // prompt past the supervisor's banner read, and that prompt then ended the
+  // first command's reply early (OPEN_ITEMS S-6, 2026-11-15).
+  sendBanner(client_fd);
   if (CONSOLE_TCP_LOG_ENABLE) {
     gantryConsoleAttachLogSink(replyToSocket, ctx_fd);
     ESP_LOGI(TAG, "TCP LAN log sink attached (min level=%d)", CONSOLE_TCP_LOG_LEVEL);
   } else {
     ESP_LOGI(TAG, "TCP LAN logging disabled (commands only)");
   }
-  sendBanner(client_fd);
 
   char line[kLineCap];
   size_t len = 0;
