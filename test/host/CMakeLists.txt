@@ -169,6 +169,15 @@ target_include_directories(test_path_profile PRIVATE
 target_link_libraries(test_path_profile PRIVATE unity)
 add_test(NAME test_path_profile COMMAND test_path_profile)
 
+# W5500 deferred log for real-time paths (G-B13)
+add_executable(test_w5500_deferred_log
+    "test_w5500_deferred_log.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500DeferredLog.cpp"
+)
+target_include_directories(test_w5500_deferred_log PRIVATE "${REPO_ROOT}/lib/W5500/src")
+target_link_libraries(test_w5500_deferred_log PRIVATE unity)
+add_test(NAME test_w5500_deferred_log COMMAND test_w5500_deferred_log)
+
 # W5500 SPI frame encoding test (pure C++ constexpr logic, no ESP-IDF)
 add_executable(test_w5500_spi "test_w5500_spi.cpp")
 target_include_directories(test_w5500_spi PRIVATE

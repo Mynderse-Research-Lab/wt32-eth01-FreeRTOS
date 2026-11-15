@@ -16,6 +16,7 @@
 #include "Hcs01Assembly.h"
 #include "W5500.h"
 #include "W5500BusMutex.h"
+#include "W5500DeferredLog.h"
 #include "W5500Diag.h"
 #include "W5500Socket.h"
 #include "Spi3Bus.h"
@@ -537,6 +538,7 @@ void class1LogTask(void*) {
     uint32_t ticks = 0;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(kLogTaskPeriodMs));
+        (void)w5500::drainDeferredLogs();
         {
             std::lock_guard<std::mutex> lock(g_log_scanner_mutex);
             if (g_log_scanner != nullptr) {
@@ -566,7 +568,7 @@ void checkW5500SocketDests(w5500::W5500Hal& hal) {
         const uint8_t bit = static_cast<uint8_t>(1u << m.sock);
         now_bad = static_cast<uint8_t>(now_bad | bit);
         if (reported & bit) continue;
-        ESP_LOGW(TAG,
+        (void)w5500::deferLog(TAG, 'W', esp_log_timestamp(),
                  "W5500 s%u destination changed: chip %u.%u.%u.%u:%u, written "
                  "%lu.%lu.%lu.%lu:%u",
                  static_cast<unsigned>(m.sock), m.raw[0], m.raw[1], m.raw[2],
@@ -593,16 +595,18 @@ void checkW5500SpiPeriodic(w5500::W5500Hal& hal, uint32_t& cycles,
         char now[24];
         w5500::formatPhy(last_phy, was, sizeof(was));
         w5500::formatPhy(res.phycfgr, now, sizeof(now));
-        ESP_LOGW(TAG, "W5500 link changed: %s (0x%02X) -> %s (0x%02X)", was,
-                 last_phy, now, res.phycfgr);
+        (void)w5500::deferLog(TAG, 'W', esp_log_timestamp(),
+                              "W5500 link changed: %s (0x%02X) -> %s (0x%02X)", was,
+                              last_phy, now, res.phycfgr);
         last_phy = res.phycfgr;
     }
     checkW5500SocketDests(hal);
     if (res.ok) return;
-    ESP_LOGW(TAG,
-             "W5500 SPI read-back mismatch: ver=0x%02X mac=%02X:%02X:%02X:%02X:%02X:%02X "
-             "ip=%u.%u.%u.%u",
-             res.version, res.mac[0], res.mac[1], res.mac[2], res.mac[3],
+    (void)w5500::deferLog(
+        TAG, 'W', esp_log_timestamp(),
+        "W5500 SPI read-back mismatch: ver=0x%02X mac=%02X:%02X:%02X:%02X:%02X:%02X "
+        "ip=%u.%u.%u.%u",
+        res.version, res.mac[0], res.mac[1], res.mac[2], res.mac[3],
              res.mac[4], res.mac[5], res.ip[0], res.ip[1], res.ip[2], res.ip[3]);
 }
 
@@ -1050,8 +1054,9 @@ void multiAxisTask(void* arg) {
       if (!ctx->link->isUp()) {
         if (++lnk_low_reads >= kLinkDownConfirmReads) break;
       } else if (lnk_low_reads != 0) {
-        ESP_LOGW(TAG, "W5500 LNK=0 on %lu read(s), then up — not a link loss",
-                 static_cast<unsigned long>(lnk_low_reads));
+        (void)w5500::deferLog(TAG, 'W', esp_log_timestamp(),
+                              "W5500 LNK=0 on %lu read(s), then up — not a link loss",
+                              static_cast<unsigned long>(lnk_low_reads));
         lnk_low_reads = 0;
       }
       const int64_t t0 = class1NowUs();
@@ -1094,9 +1099,11 @@ void multiAxisTask(void* arg) {
         const uint32_t now_ms =
             static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
         if (shouldWarnSoftMiss(soft_miss_last_warn_ms, now_ms)) {
-          ESP_LOGW(TAG, "T->O soft-miss #%lu (stale beyond %lux RPI after cyclic)",
-                   static_cast<unsigned long>(input_miss_streak),
-                   static_cast<unsigned long>(kClass1StaleTeardownRpiMultiples));
+          // Queued: the loop must keep pumping O->T to recover (G-B13).
+          (void)w5500::deferLog(TAG, 'W', esp_log_timestamp(),
+                                "T->O soft-miss #%lu (stale beyond %lux RPI after cyclic)",
+                                static_cast<unsigned long>(input_miss_streak),
+                                static_cast<unsigned long>(kClass1StaleTeardownRpiMultiples));
         }
         // Keep pumping O->T for a few cycles before dual teardown + recover.
         if (shouldTeardownAfterInputMisses(input_miss_streak)) {

@@ -7,6 +7,7 @@
 
 #include "W5500.h"  // register/status/command constants
 #include "W5500BusMutex.h"
+#include "W5500DeferredLog.h"
 #include "W5500Diag.h"
 #include "W5500Poll.h"
 
@@ -18,9 +19,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#define W5500_LOGI(...) ESP_LOGI(TAG, __VA_ARGS__)
-#define W5500_LOGW(...) ESP_LOGW(TAG, __VA_ARGS__)
-#define W5500_LOGE(...) ESP_LOGE(TAG, __VA_ARGS__)
+// Socket calls run inside the W5500 bus mutex and on the Class 1 path, so
+// they never print directly: a line is queued and EipLog prints it (G-B13).
+#define W5500_LOGI(...) ::w5500::deferLog(TAG, 'I', esp_log_timestamp(), __VA_ARGS__)
+#define W5500_LOGW(...) ::w5500::deferLog(TAG, 'W', esp_log_timestamp(), __VA_ARGS__)
+#define W5500_LOGE(...) ::w5500::deferLog(TAG, 'E', esp_log_timestamp(), __VA_ARGS__)
 #else
 #include <chrono>
 #include <thread>
@@ -566,10 +569,10 @@ int socketOpen(W5500Hal& hal, SocketMode mode, uint16_t localPort,
         if (udpMulticastListenIp != 0) {
             W5500_LOGI("UDP multicast sock=%d port=%u group=%u.%u.%u.%u",
                      sock, localPort,
-                     (udpMulticastListenIp >> 24) & 0xFF,
-                     (udpMulticastListenIp >> 16) & 0xFF,
-                     (udpMulticastListenIp >> 8) & 0xFF,
-                     udpMulticastListenIp & 0xFF);
+                     static_cast<unsigned>((udpMulticastListenIp >> 24) & 0xFF),
+                     static_cast<unsigned>((udpMulticastListenIp >> 16) & 0xFF),
+                     static_cast<unsigned>((udpMulticastListenIp >> 8) & 0xFF),
+                     static_cast<unsigned>(udpMulticastListenIp & 0xFF));
         } else {
             W5500_LOGI("UDP sock=%d bound port=%u", sock, localPort);
         }
