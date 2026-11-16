@@ -178,15 +178,16 @@ static void test_side_jaw_sweep_is_perpendicular_and_short(void) {
     const PickIntercept::JawChoice jaw =
         PickIntercept::chooseSideJaw(0.0f, cell, 0.0f, -180.0f, 180.0f);
     TEST_ASSERT_TRUE(jaw.ok);
-    const float rel = std::remainder(jaw.joint_deg - cell, 180.0f);
-    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, rel);
+    // Pads along the long axis: pose = cell (mod 180), joint = 90° - pose.
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, std::remainder(jaw.pose_deg - cell, 180.0f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, jaw.joint_deg + jaw.pose_deg);
     TEST_ASSERT_TRUE(jaw.travel_deg <= 90.0f + 1e-3f);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, std::fabs(jaw.joint_deg), jaw.travel_deg);
     const PickIntercept::JawChoice offset =
         PickIntercept::chooseSideJaw(0.0f, cell, 10.0f, -180.0f, 180.0f);
     TEST_ASSERT_TRUE(offset.ok);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f,
-                             std::remainder(offset.joint_deg - cell - 10.0f, 180.0f));
+                             std::remainder(offset.pose_deg - cell - 10.0f, 180.0f));
   }
 }
 
@@ -208,7 +209,7 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   full.length_mm = 120.0f;
   const auto jaw = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, -180.0f, 180.0f);
   const auto fit = PickIntercept::classifyClearance(
-      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), full, f, false);
+      0.0f, PickIntercept::closeAxisDeg(jaw.pose_deg), full, f, false);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(fit.mode));
   TEST_ASSERT_EQUAL_STRING("late Z off", fit.reason);
@@ -228,9 +229,9 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   PickIntercept::CellGeom wider = full;
   wider.width_mm = 60.0f;
   const auto g40 = PickIntercept::classifyClearance(
-      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), mid, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.pose_deg), mid, f, true);
   const auto g60 = PickIntercept::classifyClearance(
-      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), wider, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.pose_deg), wider, f, true);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 20.0f, g40.side_gap_mm);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, g60.side_gap_mm);
   const auto slow = PickIntercept::strikeLeads(
@@ -251,7 +252,7 @@ static void test_full_width_is_a_pick_and_grasp_is_half_height(void) {
   PickIntercept::CellGeom over = full;
   over.width_mm = 81.0f;
   const auto bad = PickIntercept::classifyClearance(
-      0.0f, PickIntercept::closeAxisDeg(jaw.joint_deg), over, f, true);
+      0.0f, PickIntercept::closeAxisDeg(jaw.pose_deg), over, f, true);
   TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::Skip),
                     static_cast<int>(bad.mode));
   TEST_ASSERT_EQUAL_STRING("cell wider than jaws", bad.reason);
@@ -266,16 +267,18 @@ static void test_command_theta_quantizes_to_a_tenth(void) {
 }
 
 static void test_side_jaw_is_linear_and_rejects_when_nothing_fits(void) {
-  const auto from_plus = PickIntercept::chooseSideJaw(170.0f, 0.0f, 0.0f, -180.0f, 180.0f);
+  // Cell along the belt (90°): joint 0° or ±180°.
+  const auto from_plus = PickIntercept::chooseSideJaw(170.0f, 90.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_TRUE(from_plus.ok);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 180.0f, from_plus.joint_deg);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, from_plus.travel_deg);
-  const auto from_minus = PickIntercept::chooseSideJaw(-170.0f, 0.0f, 0.0f, -180.0f, 180.0f);
+  const auto from_minus = PickIntercept::chooseSideJaw(-170.0f, 90.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, -180.0f, from_minus.joint_deg);
-  // 175 to -85 is a linear 260°. The equivalent joint at 95° is only 80° away.
-  const auto no_wrap = PickIntercept::chooseSideJaw(175.0f, -85.0f, 0.0f, -180.0f, 180.0f);
+  // Cell -5° gives joints 95° and -85°. From 175° the linear move to -85° is 260°; 95° is 80°.
+  const auto no_wrap = PickIntercept::chooseSideJaw(175.0f, -5.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 95.0f, no_wrap.joint_deg);
-  const auto none = PickIntercept::chooseSideJaw(0.0f, 90.0f, 0.0f, 0.0f, 60.0f);
+  // Cell across the belt (0°) needs joint ±90°, outside 0..60.
+  const auto none = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, 0.0f, 60.0f);
   TEST_ASSERT_FALSE(none.ok);
 }
 
@@ -287,7 +290,7 @@ static void test_lane_band_is_about_29_deg_for_18650(void) {
     const float c = static_cast<float>(deg);
     const auto jaw = PickIntercept::chooseSideJaw(0.0f, c, 0.0f, -180.0f, 180.0f);
     const auto g = PickIntercept::classifyClearance(
-        c, PickIntercept::closeAxisDeg(jaw.joint_deg), cell, f, true);
+        c, PickIntercept::closeAxisDeg(jaw.pose_deg), cell, f, true);
     // 50 mm fingers. Along the belt (90°) the cell sits between the pads. Across the belt (0°) it does not.
     if (std::fabs(std::fabs(c) - 90.0f) < 1.0f) {
       TEST_ASSERT_EQUAL(static_cast<int>(PickIntercept::Clearance::EarlyZ),

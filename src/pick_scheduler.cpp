@@ -880,7 +880,7 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
     }
     jaw_joint = Gantry::Path::commandThetaDeg(pose.theta, choice.joint_deg);
   }
-  eval.jaw_world_deg = jaw_joint - p.jaw_offset;
+  eval.jaw_world_deg = Gantry::thetaPoseFromJointDeg(jaw_joint);
 
   PickIntercept::Occupant occ[PickIntercept::kTrackerCap];
   int n_occ = 0;

@@ -86,7 +86,7 @@ struct L2VisionDetectPayload {
   uint32_t item_id;              // 0
   float x_across_mm;             // 4  centroid across the belt
   float y_bat_mm;                // 8  camera-relative, +Y downstream
-  float theta_deg;               // 12 long axis: 0° along +Y, + toward −X
+  float theta_deg;               // 12 long axis: 0° along +X, 90° along +Y
   uint8_t battery_class;         // 16 1–10 pick, 11–13 pack occupant
   uint8_t reserved[3];           // 17 bit0 required: capture_displacement_m is valid
   float capture_displacement_m;  // 20 metres at exposure; the bit must be set
@@ -97,9 +97,24 @@ struct L2VisionDetectPayload {
 ```
 
 `y_bat_mm` is measured from the camera center at the capture instant; the gantry adds
-`cv_cam_y_mm` to get world Y (+Y downstream). `theta_deg` is the cell long axis: 0° is
-parallel to +Y and positive rotation about +Z runs from +Y toward −X, in `[-180°, 180°)`.
-The gantry folds it to ±90° and grips the width faces. The theta joint matches that long axis: 0° holds the pads parallel to +Y, and open/close is perpendicular to the pads.
+`cv_cam_y_mm` to get world Y (+Y downstream).
+
+**Frames.** The vision frame is right-handed: +X across the belt, +Y downstream, +Z up,
+z = 0 on the belt. `theta_deg` is the cell long axis in that frame: 0° along +X, 90° along
++Y, positive about +Z, in `[-180°, 180°)`. The gantry joint frame is rotated 180° about Y:
+\(X_g = -X_v\), \(Y_g = Y_v\), \(Z_g = -Z_v\) (down), and the belt surface is the
+calibrated joint \(z_{\max}\). The gantry pose frame (`GantryKinematics`) keeps the vision
+axes, so detections enter it with offsets only (`cv_x_off_mm`, `cv_cam_y_mm`).
+
+**Theta joint.** The joint turns about \(+Z_g\) and holds the pads along +Y at 0°, so
+\(\theta_{\mathrm{joint}} = 90^\circ - \theta_{\mathrm{pose}}\). For a side grip the pads
+run along the long axis, \(\theta_{\mathrm{pose}} = \mathrm{fold}(\theta) +\) `cv_jaw_deg`
+(0° by default), which gives
+\[
+\theta_{\mathrm{joint}} = 90^\circ - \mathrm{fold}(\theta) - \texttt{cv\_jaw\_deg} + k \cdot 180^\circ ,
+\]
+with \(k\) choosing the in-range joint with the least travel (`chooseSideJaw`). A cell along
+the belt (\(\theta = 90^\circ\)) is gripped at joint 0°, one across the belt at ±90°.
 `item_id` is nonzero and stays the same across repeated observations of one object in a
 conveyor epoch. `battery_class` `1`–`10` is a pick: AAA, AA, D, C, 9V, CR123A, 18650,
 21700, 26650, 32650. `11`–`13` is a pack occupant that is tracked and not picked: laptop,

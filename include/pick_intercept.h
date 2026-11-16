@@ -4,9 +4,10 @@
  *
  * Grouped as in docs/PICK_SCHEDULER_KINEMATICS.md: frames, body, belt odometer,
  * clearance, motion time, then neighbours and the part tracker. Vision Y is
- * camera-relative. Cell angles are in the vision frame: 0° is the long axis along +Y
- * (downstream), positive toward −X. The jaw offset maps them to the gantry pose frame
- * (0° along New +X). The jaws grip across the cell.
+ * camera-relative. Cell angles are in the vision frame, which is also the pose frame:
+ * 0° is the long axis along +X (across the belt), 90° along +Y (downstream), positive
+ * about +Z (up). The theta joint is 90° - pose (GantryKinematics). The jaws grip across
+ * the cell.
  * Fingers go to grasp height early only when the X-projection misses both
  * finger lanes; otherwise Z waits and must still be at grasp height before contact.
  */
@@ -15,6 +16,7 @@
 #define PICK_INTERCEPT_H
 
 #include "GantryControlPeriod.h"
+#include "GantryKinematics.h"
 #include "GantryLinearPhases.h"
 #include "GantryPathProfile.h"
 #include "GantryRotaryPhases.h"
@@ -310,19 +312,19 @@ inline float halfTurnDeg(float deg) {
 
 struct JawChoice {
   bool ok = false;
-  float joint_deg = 0.0f;
-  float travel_deg = 0.0f;
+  float joint_deg = 0.0f;  // theta joint command
+  float pose_deg = 0.0f;   // pad direction in the pose frame (90° - joint_deg)
+  float travel_deg = 0.0f;  // |joint_deg - current joint|
 };
 
-// Returns a gantry pose angle, not a joint angle. cell_deg is the vision angle; the
-// jaw offset (cv_jaw_deg, 90° by default) turns it into the pose frame, and
-// Kinematics::inverse gives joint = 90° − pose. Joint 0° holds the pads parallel to +Y
-// and closes across the belt (side grip). The finger rectangles use the close axis, 90°
-// from the pads. The two equivalent poses differ by 180° and are ranked by linear travel;
-// theta is not modulo.
+// Side grip: the pads run along the cell's long axis, so the pad direction in the pose
+// frame is fold(cell_deg) + jaw_offset_deg (cv_jaw_deg, 0° by default). The joint is
+// 90° - pose (GantryKinematics): joint 0° holds the pads along +Y. current_deg and the
+// limits are joint angles. The two equivalent joints differ by 180° and are ranked by
+// linear travel; theta is not modulo.
 inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offset_deg,
                                float lim_min_deg, float lim_max_deg) {
-  const float base = halfTurnDeg(cell_deg) + jaw_offset_deg;
+  const float base = Gantry::thetaJointFromPoseDeg(halfTurnDeg(cell_deg) + jaw_offset_deg);
   JawChoice best;
   for (int k = -3; k <= 3; ++k) {
     const float cand = base + 180.0f * static_cast<float>(k);
@@ -333,15 +335,17 @@ inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offs
     if (!best.ok || d < best.travel_deg) {
       best.ok = true;
       best.joint_deg = cand;
+      best.pose_deg = Gantry::thetaPoseFromJointDeg(cand);
       best.travel_deg = d;
     }
   }
   return best;
 }
 
-// Open/close direction for the finger rectangles. Perpendicular to the pads.
-inline float closeAxisDeg(float theta_joint_deg) {
-  return theta_joint_deg + 90.0f;
+// Open/close direction for the finger rectangles, in the pose frame. Perpendicular to the
+// pads.
+inline float closeAxisDeg(float pad_pose_deg) {
+  return pad_pose_deg + 90.0f;
 }
 
 inline bool jointsArrived(float x, float z, float theta, float x_t, float z_t, float theta_t,

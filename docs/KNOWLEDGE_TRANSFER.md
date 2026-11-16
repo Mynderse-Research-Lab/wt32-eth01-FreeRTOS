@@ -238,9 +238,9 @@ $$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
 
 The pads run along the long axis and the jaws close across the width (`chooseSideJaw`):
 
-$$\theta_j = \operatorname{fold}(\theta) + \theta_{off} + k \cdot {180^{\circ}} \tag{6}$$
+$$\theta_j = 90^\circ - \operatorname{fold}(\theta) - \theta_{off} + k \cdot {180^{\circ}} \tag{6}$$
 
-Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta_{off}$ is `cv_jaw_deg` (90°, the bench compensation of G-C3), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
+Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `cv_jaw_deg` (0°; the joint turns about the downward joint Z, so joint = 90° − pose), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
 
 $$c = \tfrac{1}{2}(o - w) \tag{7}$$
 
@@ -356,7 +356,7 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | $v_j$ | Jaw speed | `fin_spd_mm_s` | 210 mm/s |
 | $t_{valve}$ | Valve delay | `pk_von_ms` | 8 ms |
 | $\Delta_p, \Delta_c, \Delta_r$ | Operator offsets | `pk_off_plunge`, `pk_off_close`, `pk_off_retract` | 0 ms |
-| $\theta_{off}$ | Jaw angle offset | `cv_jaw_deg` | 90° |
+| $\theta_{off}$ | Jaw angle offset | `cv_jaw_deg` | 0° |
 | $z_b$ | Belt surface, joint Z | `col_z_min_mm` | 115 mm (122 live, G-F1) |
 | — | Conveyor box edge, X | `col_x_min_mm` | 95 mm |
 | $z_{safe} - z_{min}$ | Traverse ceiling | stored `geom_safe_z_mm`, applied at boot | 48.4 mm by default |

@@ -724,7 +724,7 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `thetalim` | Software theta joint min/max (deg) |
 | `picksim <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Queue a detection (needs Start). `y` is camera-relative. Class 1–10 is a pick (AAA, AA, D, C, 9V, CR123A, 18650, 21700, 26650, 32650). Class 11–13 is a pack occupant and is not picked. All three sizes are required. The command stamps the live belt displacement as the capture sample |
 | `pickplan <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and the rejection reason |
-| `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° along +Y) at the current belt speed: `P` pick, `S` skip |
+| `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° across the belt, 90° along it) at the current belt speed: `P` pick, `S` skip |
 | `pickcal valve \| jaw \| jawoff \| cam` | Valve delay, per-class jaw time (`0` = derived from jaw travel), jaw offset, camera mark/apply |
 | `ztrace [raw <start> <count>]` | Inspect last strike's 1 kHz vertical Z trace. Summary prints timing, overshoot, settle. Raw dumps are throttled (20 ms pace) to prevent socket overflow |
 
@@ -767,8 +767,9 @@ pre-position → timed strike → bin drop. The Ethernet receive callback only q
 detection and its receipt time. A separate `PickStrike` task fires the Z release and grip
 from `esp_timer` one-shots, re-timed from the newest belt state on every conveyor frame.
 
-- **Side grip only.** Cell angle 0° is the long axis along +Y; positive rotation about +Z
-  runs from +Y toward −X. The theta joint equals fold(θ) + `cv_jaw_deg`: 0° holds the pads parallel to +Y and the open/close motion along ±X. Of the two equivalent
+- **Side grip only.** Cell angle 0° is the long axis along +X (across the belt), 90° along
+  +Y, positive about +Z up. The theta joint turns about the downward joint Z and holds the pads along +Y at 0°:
+  joint = 90° − (fold(θ) + `cv_jaw_deg`), with `cv_jaw_deg` 0° by default. Of the two equivalent
   angles the one with less linear theta travel inside `thetalim` is used, else skip
   `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
   to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.

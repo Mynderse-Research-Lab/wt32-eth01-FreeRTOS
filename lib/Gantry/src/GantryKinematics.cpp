@@ -24,7 +24,7 @@ EndEffectorPose Kinematics::forward(const JointConfig& joints,
     // Invert Z: z_home = z_max (complete retraction), z=0 is conveyor surface
     pose.z     = params.z_stroke_mm - joints.z;
     // Theta: 0° is along New +X, +90° is along +Y
-    pose.theta = 90.0f - joints.theta;
+    pose.theta = thetaPoseFromJointDeg(joints.theta);
 
     return pose;
 }
@@ -38,7 +38,7 @@ JointConfig Kinematics::inverse(const EndEffectorPose& pose,
     // Invert Z: joint.z = z_max - pose.z
     joints.z     = params.z_stroke_mm - pose.z;
     // Theta: joint.theta = 90° - pose.theta
-    joints.theta = 90.0f - pose.theta;
+    joints.theta = thetaJointFromPoseDeg(pose.theta);
 
     return joints;
 }

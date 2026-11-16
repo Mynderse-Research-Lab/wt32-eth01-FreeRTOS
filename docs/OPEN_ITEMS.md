@@ -29,7 +29,7 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | ID | Waiting on | Holds up |
 |----|------------|----------|
 | [V-3](#vision) | The ML model, from the Computer Science team | All multi-class and multi-cell testing, the camera transform (V-4), and retiring the trigger workaround (V-7) |
-| [G-C3](#g-c-pick-scheduler), [V-5](#vision) | **Decision:** one angle reference, agreed with the Computer Science team | Theta from real vision frames. Today `cv_jaw_deg` compensates on the bench |
+| [G-C3](#g-c-pick-scheduler) | Bench: store `cv_jaw_deg` 0 and check the trigger frame's θ | Every grip after the next flash: a stored 90 or a θ of 0 for a cell along the belt turns the jaws 90° |
 | [G-C2](#g-c-pick-scheduler) | **Decision:** is a bottom dwell acceptable now? | Finishing the tuning (G-C1), and with it the detection-rate work (G-C10) |
 | [G-C7](#g-c-pick-scheduler) | **Decision:** a bench speed limit on `move`, or a deliberate exception | Slow console jogs while picks run at pick speed |
 | [G-C11](#g-c-pick-scheduler) | **Decision:** the 15 ms depth cap or the 2 mm entry margin? | Picks of cells lying across the belt (0–35°) |
@@ -73,7 +73,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 |----|------|----------|-----------|
 | G-C1 | Tuning: picks lift, but many grip only half the 9V cell | Confirmed 2026-10-30: 7 of 9 overhanging; offsets were still being tuned | Finish offset tuning; run `cfg export` for current values |
 | G-C2 | Z reverses short of grasp depth: about 1.15 mm at 5000 mm/s² and zero dwell, past the accepted 1 mm | Confirmed: `pick actual` logs | Offsets of −60 / +10 reached 0.1 to 0.4 mm; **Decision:** is bottom dwell acceptable now? |
-| G-C3 | Vision angle frame is unresolved. The wire comment says 0° is along +Y; the sorter script measures from camera +X; `cv_jaw_deg` = 90 compensates on the bench (plan P0.2) | Confirmed conflict; the plan's transform is unverified | **Decision:** fix the reference with the Computer Science team, then convert once. Verify before reusing the plan's formula |
+| G-C3 | Angle reference decided 2026-11-16 (user): vision θ 0° along +X, 90° along +Y, positive about +Z up; joint = 90° − pose through `GantryKinematics`; `cv_jaw_deg` default 0. The gantry still stores 90, and the trigger frame's θ is unknown | Code and host tests changed in the same commit; not yet run on the gantry | Before picking: `cfg set cv_jaw_deg 0`; read `th=` in a `vision queued` log line (90 for a cell along the belt); watch one small positive θ joint move on the Pi camera (pads turn from +Y toward +X_v) |
 | G-C4 | `classifyFollowers()`: 190 ms grip dwell in ready time, no strike lead in the deadline, world X minus joint X, packs 11 to 13 can be pruned (plan P0.3) | Confirmed in code | Fix each with a host test; hidden while only single cells run |
 | G-C5 | Trigger sensor geometry is compile-time: `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` (plan P1.2) | Confirmed: `pick_scheduler.cpp:57,61`; breaks the stored-parameter rule | Add stored keys |
 | G-C6 | `tau_band_s` assumes the object top is crossed while accelerating (plan P2.1) | Confirmed in `strike_plan.h:168`, and not dormant with equal ramps: it is wrong whenever the top lies past mid-plunge. For the bench 9V it is 4.4 ms long at today's 48.4 ceiling (8.4 ms at 35.7). It changes the plan only for cell angles of 33–43° (300 mm/s); at 90°, every bench pick so far, it cancels out (KT 5.3.9) | Compute it from the full profile (`timeAlongProfile`); add a test with the top past mid-plunge |
@@ -117,7 +117,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | V-1 | Vision code is not in version control on the vision IPC | Confirmed 2026-11-05: no git checkout for `UHVSorter` (1.3 GB, newest file 2025-03-21), `UHVSorter_yoloOBB_UDP_Stream` (2.1 GB, 2025-09-16) or `vision_sim`, the Gantry team's trigger workaround (`simulate-vision-output.py`, `cell_net_l2.py`). The only repositories there are two third-party libraries | Ask the Computer Science team where their code is kept. Put `vision_sim` in git |
 | V-3 | ML model not ready; blocks all multi-class and multi-cell testing | Confirmed | Computer Science team; date TBD |
 | V-4 | Static camera-to-gantry transform is not done (on hold) | Confirmed | Resume with V-3 |
-| V-5 | Angle reference disagrees with the wire contract (same as G-C3) | Confirmed | Agree one definition with the Computer Science team, and fix the header comment |
+| V-5 | Header comment now gives θ from +X (2026-11-16, G-C3). The vision code must send that reference | The sorter script measures from camera +X (G-C3 evidence); not checked against the belt axes | Confirm with the Computer Science team |
 | V-6 | Arduino sketch location unknown | Confirmed: not found in an earlier search, and not on the vision IPC (no `.ino` file, no Arduino folder, 2026-11-05) | Find it and put it in git |
 | V-7 | Sensor timing varies, and the 6 mm centre offset depends on battery pose | Confirmed: 38 ms measurement period, chain jitter about ±10 ms | Replaced by V-3 |
 

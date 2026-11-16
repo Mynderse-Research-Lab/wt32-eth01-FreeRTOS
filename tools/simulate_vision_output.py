@@ -14,7 +14,7 @@ detection without it. --udp keeps the old UDP bridge to the MuJoCo sim.
 Frame sent (include/cell_net_l2_protocol.h, the firmware vision contract):
   x_across_mm  across the belt, from the camera-image centre line
   y_bat_mm     along the belt, from the camera centre
-  theta_deg    long axis, 0 along +Y (downstream), + about +Z toward -X
+  theta_deg    long axis, 0 along +X (across), 90 along +Y (downstream), + about +Z up
   battery_class firmware id (5 = 9V, 11 laptop, 12 Li-ion pack, 13 power tool)
 """
 
@@ -124,13 +124,12 @@ def choose_center_coords(x_max_mm, y_max_mm, length, width, theta):
 def to_firmware_frame(x_c, y_c, angle_rad):
     """Image coordinates to the firmware vision contract.
 
-    The image angle runs from +x (across the belt) toward +y (downstream); the
-    firmware's 0 deg is along +Y with + toward -X, so theta = angle - 90 deg,
-    folded into [-180, 180).
+    The image angle runs from +x (across the belt) toward +y (downstream), which
+    is the firmware reference too, so theta is the angle folded into [-180, 180).
     """
     x_across = x_c - X_MAX_MM / 2.0
     y_bat = y_c - Y_MAX_MM / 2.0
-    theta = math.degrees(angle_rad) - 90.0
+    theta = math.degrees(angle_rad)
     theta = (theta + 180.0) % 360.0 - 180.0
     return x_across, y_bat, theta
 

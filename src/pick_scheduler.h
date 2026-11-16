@@ -31,7 +31,7 @@ bool pickSchedulerPlan(float x_across_mm, float y_bat_mm, float theta_deg,
                        uint8_t battery_class, uint32_t item_id, char* out, size_t out_len,
                        float width_mm, float length_mm, float height_from_belt_mm);
 
-// Pick or skip per cell angle (-90..85 deg, 5 deg steps; 0° along +Y) at the
+// Pick or skip per cell angle (-90..85 deg, 5 deg steps; 0° across, 90° along the belt) at the
 // current belt speed for one battery class. Writes one line into out.
 bool pickSchedulerCover(uint8_t battery_class, char* out, size_t out_len);
 

@@ -30,6 +30,12 @@
 
 namespace Gantry {
 
+/// Theta joint to pose angle. The joint turns about joint +Z (down) and its 0° holds the
+/// pads along +Y; the pose angle turns about +Z up from +X. pose = 90° - joint.
+inline float thetaPoseFromJointDeg(float joint_deg) { return 90.0f - joint_deg; }
+/// Inverse of thetaPoseFromJointDeg: joint = 90° - pose.
+inline float thetaJointFromPoseDeg(float pose_deg) { return 90.0f - pose_deg; }
+
 /**
  * @class Kinematics
  * @brief Forward and inverse kinematics for the 3-axis gantry.

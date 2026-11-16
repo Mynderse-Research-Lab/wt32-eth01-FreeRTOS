@@ -3641,7 +3641,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  boottime                      - Ethernet start / PHY link-up / IP times since app start");
   ESP_LOGI(TAG, "  flashstall erase|write [n]    - erase, then n back-to-back 4 KB writes, passive slot from 1.5 MB (motors off)");
   ESP_LOGI(TAG, "  beltcal [near|far|cnvyr near|cnvyr far|batt|z|apply [center]] - belt/conveyor/battery X");
-  ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 deg along +Y)");
+  ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 across, 90 along the belt)");
   ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");
   ESP_LOGI(TAG, "  cfg                  - list settings (same keys as the panel menu)");
   ESP_LOGI(TAG, "  cfg <key> [value]    - read or set a setting; developer keys need unlock");
