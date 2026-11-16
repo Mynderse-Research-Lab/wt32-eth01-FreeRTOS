@@ -106,12 +106,14 @@ z = 0 on the belt. `theta_deg` is the cell long axis in that frame: 0° along +X
 calibrated joint \(z_{\max}\). The gantry pose frame (`GantryKinematics`) keeps the vision
 axes, so detections enter it with offsets only (`vis_x_off_mm`, `vis_cam_y_mm`).
 
-**Theta joint.** The joint turns about \(+Z_g\) and holds the pads along +Y at 0°, so
-\(\theta_{\mathrm{joint}} = 90^\circ - \theta_{\mathrm{pose}}\). For a side grip the pads
-run along the long axis, \(\theta_{\mathrm{pose}} = \mathrm{fold}(\theta) +\) `jaw_off_deg`
+**Theta joint.** The joint holds the pads along +Y at 0°, and a positive joint turns them
+counter-clockwise seen from above, about \(+Z_v\) (checked on the Pi camera on 2026-11-16: at
++45° the +X finger moved downstream). So
+\(\theta_{\mathrm{joint}} = \theta_{\mathrm{pose}} - 90^\circ\). For a side grip the pads run
+along the long axis, \(\theta_{\mathrm{pose}} = \mathrm{fold}(\theta) +\) `jaw_off_deg`
 (0° by default), which gives
 \[
-\theta_{\mathrm{joint}} = 90^\circ - \mathrm{fold}(\theta) - \texttt{cv\_jaw\_deg} + k \cdot 180^\circ ,
+\theta_{\mathrm{joint}} = \mathrm{fold}(\theta) + \texttt{jaw\_off\_deg} - 90^\circ + k \cdot 180^\circ ,
 \]
 with \(k\) choosing the in-range joint with the least travel (`chooseSideJaw`). A cell along
 the belt (\(\theta = 90^\circ\)) is gripped at joint 0°, one across the belt at ±90°.

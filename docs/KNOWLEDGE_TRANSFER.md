@@ -238,9 +238,9 @@ $$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
 
 The pads run along the long axis and the jaws close across the width (`chooseSideJaw`):
 
-$$\theta_j = 90^\circ - \operatorname{fold}(\theta) - \theta_{off} + k \cdot {180^{\circ}} \tag{6}$$
+$$\theta_j = \operatorname{fold}(\theta) + \theta_{off} - 90^\circ + k \cdot {180^{\circ}} \tag{6}$$
 
-Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `jaw_off_deg` (0°; the joint turns about the downward joint Z, so joint = 90° − pose), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
+Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `jaw_off_deg` (0°; joint 0° holds the pads along +Y and a positive joint turns them counter-clockwise seen from above, so joint = pose − 90°), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
 
 $$c = \tfrac{1}{2}(o - w) \tag{7}$$
 

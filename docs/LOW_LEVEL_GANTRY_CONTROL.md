@@ -768,8 +768,9 @@ detection and its receipt time. A separate `PickStrike` task fires the Z release
 from `esp_timer` one-shots, re-timed from the newest belt state on every conveyor frame.
 
 - **Side grip only.** Cell angle 0° is the long axis along +X (across the belt), 90° along
-  +Y, positive about +Z up. The theta joint turns about the downward joint Z and holds the pads along +Y at 0°:
-  joint = 90° − (fold(θ) + `jaw_off_deg`), with `jaw_off_deg` 0° by default. Of the two equivalent
+  +Y, positive about +Z up. The theta joint holds the pads along +Y at 0° and turns them counter-clockwise
+  seen from above (Pi camera check, 2026-11-16): joint = fold(θ) + `jaw_off_deg` − 90°, with `jaw_off_deg`
+  0° by default. Of the two equivalent
   angles the one with less linear theta travel inside `thetalim` is used, else skip
   `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
   to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.

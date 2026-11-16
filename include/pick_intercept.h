@@ -6,7 +6,7 @@
  * clearance, motion time, then neighbours and the part tracker. Vision Y is
  * camera-relative. Cell angles are in the vision frame, which is also the pose frame:
  * 0° is the long axis along +X (across the belt), 90° along +Y (downstream), positive
- * about +Z (up). The theta joint is 90° - pose (GantryKinematics). The jaws grip across
+ * about +Z (up). The theta joint is pose - 90° (GantryKinematics). The jaws grip across
  * the cell.
  * Fingers go to grasp height early only when the X-projection misses both
  * finger lanes; otherwise Z waits and must still be at grasp height before contact.
@@ -313,13 +313,13 @@ inline float halfTurnDeg(float deg) {
 struct JawChoice {
   bool ok = false;
   float joint_deg = 0.0f;  // theta joint command
-  float pose_deg = 0.0f;   // pad direction in the pose frame (90° - joint_deg)
+  float pose_deg = 0.0f;   // pad direction in the pose frame (joint_deg + 90°)
   float travel_deg = 0.0f;  // |joint_deg - current joint|
 };
 
 // Side grip: the pads run along the cell's long axis, so the pad direction in the pose
 // frame is fold(cell_deg) + jaw_offset_deg (jaw_off_deg, 0° by default). The joint is
-// 90° - pose (GantryKinematics): joint 0° holds the pads along +Y. current_deg and the
+// pose - 90° (GantryKinematics): joint 0° holds the pads along +Y. current_deg and the
 // limits are joint angles. The two equivalent joints differ by 180° and are ranked by
 // linear travel; theta is not modulo.
 inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offset_deg,

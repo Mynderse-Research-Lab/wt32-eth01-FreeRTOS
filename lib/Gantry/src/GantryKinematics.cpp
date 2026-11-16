@@ -37,7 +37,7 @@ JointConfig Kinematics::inverse(const EndEffectorPose& pose,
     joints.x     = params.x_stroke_mm - pose.x - params.theta_x_offset_mm;
     // Invert Z: joint.z = z_max - pose.z
     joints.z     = params.z_stroke_mm - pose.z;
-    // Theta: joint.theta = 90° - pose.theta
+    // Theta: joint.theta = pose.theta - 90°
     joints.theta = thetaJointFromPoseDeg(pose.theta);
 
     return joints;

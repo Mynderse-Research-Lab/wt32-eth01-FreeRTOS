@@ -59,7 +59,7 @@ static void test_forward_z_adds_datum_offset(void) {
 static void test_forward_theta_orientation(void) {
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(60.0f, pose.theta);  // 90 - 30 (0° along New +X, +90° along +Y)
+  TEST_ASSERT_EQUAL_FLOAT(120.0f, pose.theta);  // 30 + 90 (0° along New +X, +90° along +Y)
 }
 
 static void test_forward_zero_joints(void) {
@@ -68,7 +68,7 @@ static void test_forward_zero_joints(void) {
   TEST_ASSERT_EQUAL_FLOAT(605.0f, pose.x);  // 550 - (-55)
   TEST_ASSERT_EQUAL_FLOAT(80.0f, pose.y);
   TEST_ASSERT_EQUAL_FLOAT(150.0f, pose.z);  // complete retraction
-  TEST_ASSERT_EQUAL_FLOAT(90.0f, pose.theta);  // 90 - 0 = 90° (along +Y)
+  TEST_ASSERT_EQUAL_FLOAT(90.0f, pose.theta);  // 0 + 90 = 90° (along +Y)
 }
 
 static void test_forward_negative_theta_and_x(void) {
@@ -76,7 +76,7 @@ static void test_forward_negative_theta_and_x(void) {
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
   TEST_ASSERT_EQUAL_FLOAT(615.0f, pose.x);  // 550 - (-10 + (-55))
   TEST_ASSERT_EQUAL_FLOAT(145.0f, pose.z);  // 150 - 5
-  TEST_ASSERT_EQUAL_FLOAT(135.0f, pose.theta); // 90 - (-45)
+  TEST_ASSERT_EQUAL_FLOAT(45.0f, pose.theta);  // -45 + 90
 }
 
 static void test_forward_y_independent_of_joints(void) {
@@ -104,7 +104,7 @@ static void test_inverse_round_trip(void) {
 
 static void test_inverse_drops_pose_y(void) {
   Gantry::KinematicParameters params = makeParams();
-  Gantry::EndEffectorPose pose(505.0f, 999.0f, 125.0f, 60.0f);
+  Gantry::EndEffectorPose pose(505.0f, 999.0f, 125.0f, 120.0f);
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
   // pose.y must not affect joints (no Y actuator)
   TEST_ASSERT_EQUAL_FLOAT(100.0f, inv.x);
@@ -140,7 +140,7 @@ static void test_forward_inverse_with_alt_offsets(void) {
   TEST_ASSERT_EQUAL_FLOAT(488.0f, pose.x);  // 550 - (50 + 12)
   TEST_ASSERT_EQUAL_FLOAT(-40.0f, pose.y);
   TEST_ASSERT_EQUAL_FLOAT(140.0f, pose.z);  // 150 - 10
-  TEST_ASSERT_EQUAL_FLOAT(110.0f, pose.theta); // 90 - (-20)
+  TEST_ASSERT_EQUAL_FLOAT(70.0f, pose.theta);  // -20 + 90
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
   TEST_ASSERT_EQUAL_FLOAT(50.0f, inv.x);
   TEST_ASSERT_EQUAL_FLOAT(10.0f, inv.z);

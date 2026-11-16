@@ -178,9 +178,9 @@ static void test_side_jaw_sweep_is_perpendicular_and_short(void) {
     const PickIntercept::JawChoice jaw =
         PickIntercept::chooseSideJaw(0.0f, cell, 0.0f, -180.0f, 180.0f);
     TEST_ASSERT_TRUE(jaw.ok);
-    // Pads along the long axis: pose = cell (mod 180), joint = 90° - pose.
+    // Pads along the long axis: pose = cell (mod 180), joint = pose - 90°.
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, std::remainder(jaw.pose_deg - cell, 180.0f));
-    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, jaw.joint_deg + jaw.pose_deg);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 90.0f, jaw.pose_deg - jaw.joint_deg);
     TEST_ASSERT_TRUE(jaw.travel_deg <= 90.0f + 1e-3f);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, std::fabs(jaw.joint_deg), jaw.travel_deg);
     const PickIntercept::JawChoice offset =
@@ -274,8 +274,8 @@ static void test_side_jaw_is_linear_and_rejects_when_nothing_fits(void) {
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.0f, from_plus.travel_deg);
   const auto from_minus = PickIntercept::chooseSideJaw(-170.0f, 90.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, -180.0f, from_minus.joint_deg);
-  // Cell -5° gives joints 95° and -85°. From 175° the linear move to -85° is 260°; 95° is 80°.
-  const auto no_wrap = PickIntercept::chooseSideJaw(175.0f, -5.0f, 0.0f, -180.0f, 180.0f);
+  // Cell 5° gives joints -85° and 95°. From 175° the linear move to -85° is 260°; 95° is 80°.
+  const auto no_wrap = PickIntercept::chooseSideJaw(175.0f, 5.0f, 0.0f, -180.0f, 180.0f);
   TEST_ASSERT_FLOAT_WITHIN(1e-3f, 95.0f, no_wrap.joint_deg);
   // Cell across the belt (0°) needs joint ±90°, outside 0..60.
   const auto none = PickIntercept::chooseSideJaw(0.0f, 0.0f, 0.0f, 0.0f, 60.0f);

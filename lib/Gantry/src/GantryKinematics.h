@@ -30,11 +30,13 @@
 
 namespace Gantry {
 
-/// Theta joint to pose angle. The joint turns about joint +Z (down) and its 0° holds the
-/// pads along +Y; the pose angle turns about +Z up from +X. pose = 90° - joint.
-inline float thetaPoseFromJointDeg(float joint_deg) { return 90.0f - joint_deg; }
-/// Inverse of thetaPoseFromJointDeg: joint = 90° - pose.
-inline float thetaJointFromPoseDeg(float pose_deg) { return 90.0f - pose_deg; }
+/// Theta joint to pose angle (pad direction, 0° along +X, 90° along +Y, positive about +Z
+/// up). Joint 0° holds the pads along +Y, and a positive joint turns them counter-clockwise
+/// seen from above (checked on the Pi camera 2026-11-16: at +45° the +X finger moved
+/// downstream). pose = joint + 90°.
+inline float thetaPoseFromJointDeg(float joint_deg) { return joint_deg + 90.0f; }
+/// Inverse of thetaPoseFromJointDeg: joint = pose - 90°.
+inline float thetaJointFromPoseDeg(float pose_deg) { return pose_deg - 90.0f; }
 
 /**
  * @class Kinematics
@@ -49,7 +51,7 @@ public:
      *   - pose.x = params.x_stroke_mm - (joint.x + theta_x_offset) (x_home = x_max)
      *   - pose.y = z_axis_y_offset_mm (along-belt placement is fixed)
      *   - pose.z = params.z_stroke_mm - joint.z (z=0 conveyor, z=z_max complete retraction)
-     *   - pose.theta = 90° - joint.theta (0° along New +X, +90° along +Y)
+     *   - pose.theta = joint.theta + 90° (0° along New +X, +90° along +Y)
      */
     static EndEffectorPose forward(const JointConfig& joints,
                                     const KinematicParameters& params);
