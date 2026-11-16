@@ -357,12 +357,6 @@ menu "Gantry kinematics"
         config PICK_DEFAULT_BELT_SPEED_MM_S
             float "Default belt speed (mm/s)"
             default 1524.0
-        config TAU_MIN_US
-            int "Minimum time-to-pick tau (us)"
-            default 100000
-        config TAU_MAX_US
-            int "Maximum time-to-pick tau (us)"
-            default 5000000
     endmenu
 
     menu "Homing and calibration"

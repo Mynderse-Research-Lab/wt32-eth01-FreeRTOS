@@ -1,13 +1,15 @@
 # Bench ramp for the coordinated grasp
 
-Production timed picks stay off. `pk_dropin` stays off and is not the switch. `pk_bench` allows one selected case at a time. The paper grid is in [PICK_COORDINATED_GRASP_VALIDATION.md](PICK_COORDINATED_GRASP_VALIDATION.md). Simulation is not a bench result.
+**Not runnable yet.** The pick path does not call `coordinated_grasp.h`, and the firmware has no bench switch or close-trigger trim. The stored keys once meant for them (`pk_bench`, `pk_voff_ms`, `pk_tr_*`) were read by nothing and were removed on 2026-11-16. The ladder below needs that path built first.
+
+Production timed picks stay off. `pk_dropin` stays off and is not the switch. The bench switch is to allow one selected case at a time. The paper grid is in [PICK_COORDINATED_GRASP_VALIDATION.md](PICK_COORDINATED_GRASP_VALIDATION.md). Simulation is not a bench result.
 
 Do this at 6 bar, with finger width 10 mm and finger length 50 mm (`fin_wid_mm`, `fin_len_mm`).
 
 1. Confirm conveyor travel, speed, and timestamp are one sample.
-2. Measure command-to-valve, jaw-motion start, and the Z response. The bases are valve-on 8 ms (`pk_von_ms`), valve-off 17 ms (`pk_voff_ms`), and full close 190 ms. Trims start at 0.
-3. Enable `pk_bench` for one cell, one angle, and one speed.
-4. Tune the gripper close trigger, `pk_tr_grp`, until the gap between the pads and the cell is under 0.5 mm at the moment Z reaches grasp depth.
+2. Measure command-to-valve, jaw-motion start, and the Z response. The bases are valve-on 8 ms (`pk_von_ms`), valve-off 17 ms, and full close 190 ms. Trims start at 0.
+3. Enable the bench switch for one cell, one angle, and one speed.
+4. Tune the gripper close trigger until the gap between the pads and the cell is under 0.5 mm at the moment Z reaches grasp depth.
 5. Retract on that same instant. There is no dwell between the drop and the retract. The last of the close happens while Z is moving up.
 6. Start at 20 mm/s. Step by 20 mm/s toward 1500 mm/s.
 7. Record travel, the close-trigger time, the measured pre-grasp gap, Z feedback, drag, and whether the cell stayed in the fingers.

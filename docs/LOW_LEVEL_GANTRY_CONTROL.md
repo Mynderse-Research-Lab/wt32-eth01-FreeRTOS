@@ -785,10 +785,9 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   contact. The 4 mm lane margin, 3 mm hover, 15 ms guard, and flat-rectangle contact model
   are provisional and need bench replacement. With `pk_dropin` off that case is skipped
   (`late Z off`).
-- **Bench pair.** `pk_bench` (default off) arms Z release and the close command from the coordinated
-  grasp in `coordinated_grasp.h`. Fingers are 10 mm wide and 50 mm long. Valve-on for that path is
-  `pk_von_ms` (8). `pk_dropin` is not the switch. The update task period is `GANTRY_UPDATE_PERIOD_MS`
-  (10). The strike edge does not wait on that task.
+- **Coordinated grasp.** `coordinated_grasp.h` is host-tested (`test_coordinated_grasp`) but the
+  pick path does not call it, and there is no bench switch for it. `pk_dropin` is not that switch.
+  The update task period is `GANTRY_UPDATE_PERIOD_MS` (10). The strike edge does not wait on that task.
 - **Failures** (belt stop, stale frames, conveyor restart, refined angle out of the frozen
   jaw's clearance, grip write failure, missed deadline) abort the pick and call
   `retractToSafeZ()` at the ballscrew cap. A commanded close blocks another pick until the
@@ -919,10 +918,10 @@ At runtime the stored parameters are the only source. `main.cpp` and the console
 
 NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time it was saved, and a hash. Boot loads it. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
 
-Key motion and pick parameters stored in `AppConfig`:
-- **Pick Approach Motion:** `pk_app_spd_mm_s` (default 750 mm/s) and `pk_app_th_deg_s` (default 90 °/s) are dedicated pick approach parameters decoupled from manual jog defaults (`spd_mm_s = 50`, `th_spd_deg_s = 30`).
-- **Conveyor & Trigger Geometry:** `cv_trig_y_mm` (default -130.0 mm upstream of camera) and `cv_trig_off_mm` (default 6.0 mm trigger center behind lead edge) replace hardcoded macros.
-- **EtherNet/IP Targets:** Drive IP addresses for X, Z, and Theta (`eip_x_ip`, `eip_z_ip`, `eip_th_ip`) are stored in NVS, allowing runtime network reconfiguration without re-flashing.
+Notes on what is and is not stored:
+- **Pick approach motion** has no keys of its own. Picks use the global profile: `spd_mm_s`, `ceil_spd_mm_s` only when a later part would otherwise be missed, and `th_spd_deg_s` capped by `th_spd_max` (`pickConfig()` in `pick_scheduler.cpp`; G-C7).
+- **Trigger sensor geometry** is still compile-time: `kTriggerSensorYFromCamMm` (−130 mm) and `kTriggerCentreBehindMm` (6 mm) in `pick_scheduler.cpp` (G-C5).
+- **Drive IP addresses** are stored: `eip_ip_x`, `eip_ip_z`, `eip_ip_th` (developer keys, applied after a reboot).
 
 | Step | What happens |
 |------|--------------|

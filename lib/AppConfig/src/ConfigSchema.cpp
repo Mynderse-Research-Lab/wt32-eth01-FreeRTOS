@@ -95,10 +95,6 @@ static const std::vector<ParamSchema> s_schemas = {
      "Joint X of the conveyor frame's far edge ('beltcal cnvyr far'). Shown by 'beltcal'; no motion reads it."},
     {"cv_belt_spd",    "Default Belt Spd",   "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 10.0f, "mm/s", {},
      "Belt speed 'pickcover' uses when no conveyor frame is current."},
-    {"cv_tau_min_us",  "Tau Min",            "Conveyor", ParamType::INT, AccessLevel::END_USER, false, 1000.0f, 10000000.0f, 10000.0f, "us", {},
-     "Stored only; no firmware code reads it."},
-    {"cv_tau_max_us",  "Tau Max",            "Conveyor", ParamType::INT, AccessLevel::END_USER, false, 1000.0f, 30000000.0f, 50000.0f, "us", {},
-     "Stored only; no firmware code reads it."},
 
     // ========================================================================
     // 7. Vision: detections into gantry coordinates (End-User)
@@ -156,69 +152,12 @@ static const std::vector<ParamSchema> s_schemas = {
     {"fin_spd_mm_s",   "Jaw Speed",          "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 2000.0f, 5.0f, "mm/s", {},
      "Speed of each jaw while closing (SCHUNK KGG 100-80: 40 mm in 0.19 s at 6 bar). Sets the close time when the class time is 0."},
 
-    // ========================================================================
-    // 9. Cells: class size labels (End-User)
-    // ========================================================================
-    {"cell_aaa_len_mm", "AAA Length",         "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_aa_len_mm", "AA Length",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_d_len_mm",  "D Length",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_c_len_mm",  "C Length",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_9v_len_mm", "9V Length",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_cr123_len", "CR123A Length",      "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_18650_len", "18650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_21700_len", "21700 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_26650_len", "26650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_32650_len", "32650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_aaa_h_mm",  "AAA Height",         "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_aa_h_mm",   "AA Height",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_d_h_mm",    "D Height",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_c_h_mm",    "C Height",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_9v_h_mm",   "9V Height",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_cr123_h_mm", "CR123A Height",      "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_18650_h_mm", "18650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_21700_h_mm", "21700 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_26650_h_mm", "26650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
-    {"cell_32650_h_mm", "32650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
-     "Size label only; the pick code takes sizes from the detection and does not read it."},
 
     // ========================================================================
-    // 10. Pick: strike timing and cycle (End-User)
+    // 9. Pick: strike timing and cycle (End-User)
     // ========================================================================
     {"pk_von_ms",      "Valve On",           "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
      "Valve delay the strike planner allows before the jaws move (strike_plan valve_delay_s)."},
-    {"pk_voff_ms",     "Valve Off",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_von",      "Trim Valve On",      "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_voff",     "Trim Valve Off",     "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_cls",      "Trim Close",         "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_z",        "Trim Z",             "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_grp",      "Trim Grip",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
-    {"pk_tr_hld",      "Trim Hold",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
-     "Stored only; no firmware code reads it."},
     // Strike plan offsets (strike_plan.h). Each moves only its own event.
     {"pk_off_plunge",  "Z Plunge Offset",    "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
      "Moves the strike plan's Z plunge by this many ms; the other events stay where they are."},
@@ -226,8 +165,6 @@ static const std::vector<ParamSchema> s_schemas = {
      "Moves the strike plan's grip close by this many ms; the other events stay where they are."},
     {"pk_off_retract", "Z Retract Offset",   "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
      "Moves the strike plan's Z retract by this many ms; the other events stay where they are."},
-    {"pk_bench",       "Bench Pick",         "Pick",     ParamType::BOOL, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
-     "Stored only; no firmware code reads it."},
     {"pk_guard_ms",    "Timing Guard",       "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 200.0f, 1.0f, "ms", {},
      "Z must reach grasp depth this long before jaw contact; the late-Z window check adds it too."},
     {"pk_dropin",      "Drop-in Strike",     "Pick",     ParamType::BOOL, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
@@ -238,7 +175,7 @@ static const std::vector<ParamSchema> s_schemas = {
      "Joint X where the gantry waits between picks, at SAFE_Z with theta 0."},
 
     // ========================================================================
-    // 11. Homing & Calibration (End-User)
+    // 10. Homing & Calibration (End-User)
     // ========================================================================
     {"cal_spd_mm_s",  "Search Speed",      "Homing & Cal",   ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 200.0f, 1.0f, "mm/s", {}},
     {"cal_th_spd_deg","Theta Search Spd",  "Homing & Cal",   ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 360.0f, 1.0f, "deg/s", {}},
@@ -248,7 +185,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"trv_timeout_ms","Travel Timeout",    "Homing & Cal",   ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 300000.0f, 5000.0f, "ms", {}},
 
     // ========================================================================
-    // 12. Network (LAN8720) (End-User)
+    // 11. Network (LAN8720) (End-User)
     // ========================================================================
     {"eth_static",    "Use Static IP",     "Network",        ParamType::BOOL,   AccessLevel::END_USER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"eth_ip",        "Static IP",         "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
@@ -258,7 +195,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"eth_timeout_ms","Link Timeout",      "Network",        ParamType::INT,    AccessLevel::END_USER, true,  100.0f, 60000.0f, 500.0f, "ms", {}},
 
     // ========================================================================
-    // 13. Display (End-User)
+    // 12. Display (End-User)
     // ========================================================================
     {"disp_orient",   "Orientation",       "Display",        ParamType::CHOICE, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {"Landscape", "Portrait"}},
     {"disp_bright",   "Brightness",        "Display",        ParamType::INT,    AccessLevel::END_USER, false, 0.0f, 100.0f, 5.0f, "%", {}},
@@ -266,7 +203,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"disp_tft_en",   "TFT UI Enabled",    "Display",        ParamType::INT,    AccessLevel::END_USER, true,  0.0f, 1.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 14. Console Security (Developer)
+    // 13. Console Security (Developer)
     // ========================================================================
     {"con_auth",      "TCP Auth Enable",   "Console Sec",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"con_pw",        "TCP Password",      "Console Sec",    ParamType::STRING, AccessLevel::DEVELOPER, true,  0.0f, 0.0f, 0.0f, "", {}},
@@ -275,7 +212,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"con_max_peers", "Max Remembered",    "Console Sec",    ParamType::INT,    AccessLevel::DEVELOPER, false, 1.0f, 16.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 15. Console Options (Developer)
+    // 14. Console Options (Developer)
     // ========================================================================
     {"con_tcp_en",    "TCP Console En",    "Console Opt",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"con_uart_en",   "UART Console En",   "Console Opt",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
@@ -285,7 +222,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"ota_port",      "OTA Server Port",   "Console Opt",    ParamType::INT,    AccessLevel::DEVELOPER, true,  1.0f, 65535.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 16. EtherNet/IP (Developer)
+    // 15. EtherNet/IP (Developer)
     // ========================================================================
     {"eip_en",        "EIP Scanner Enable","EtherNet/IP",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"eip_x_en",      "X Axis EIP Enable", "EtherNet/IP",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},

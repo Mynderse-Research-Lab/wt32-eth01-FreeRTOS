@@ -90,13 +90,6 @@ struct AppConfigData {
     int32_t pick_vision_latency_ms = 40;
     int32_t pick_valve_ms = 30;
     int32_t pick_valve_on_ms = 8;
-    int32_t pick_valve_off_ms = 17;
-    int32_t pick_trim_von_ms = 0;
-    int32_t pick_trim_voff_ms = 0;
-    int32_t pick_trim_close_ms = 0;
-    int32_t pick_trim_z_ms = 0;
-    int32_t pick_trim_grip_ms = 0;
-    int32_t pick_trim_hold_ms = 0;
     int32_t pick_offset_plunge_ms = 0;
     int32_t pick_offset_close_ms = 0;
     // 1: vision detections take x_across from batt_x (fixed trigger-sensor frames).
@@ -114,14 +107,10 @@ struct AppConfigData {
     int32_t eip_spi_dma = 0;
     int32_t log_uart_async = 1;  // buffered UART0 log output (driver TX ring)
     int32_t eip_scope_gpio = -1; // Class 1 exchange marker GPIO (-1 off; 17 with TFT off)
-    bool pick_bench_enable = false;
     int32_t pick_jaw_ms[10] = {};  // 0 = derive from jaw travel. One slot per pick class.
     float pick_jaw_offset_deg = 0.0f;
     float pick_dedupe_mm = 40.0f;
     float pick_default_belt_speed_mm_s = 1524.0f;
-    // Length and height labels for classes 1–10. Not a vision fallback.
-    float pick_cell_len_mm[10] = {44.5f, 50.5f, 61.5f, 50.0f, 48.5f, 34.5f, 65.0f, 70.0f, 65.0f, 65.0f};
-    float pick_cell_h_mm[10] = {10.5f, 14.5f, 34.2f, 26.2f, 26.5f, 17.0f, 18.3f, 21.2f, 26.5f, 32.0f};
     float pick_finger_open_mm = 80.0f;
     float pick_finger_thick_mm = 10.0f;
     float pick_finger_width_mm = 50.0f;
@@ -130,8 +119,6 @@ struct AppConfigData {
     bool pick_dropin_enable = false;
     bool pick_drop_any_theta = false;
     float pick_stage_x_mm = 320.0f;
-    int32_t tau_min_us = 100000;
-    int32_t tau_max_us = 5000000;
 
     // 7. Homing & Calibration
     float eip_home_cal_speed_mm_s = 50.0f;

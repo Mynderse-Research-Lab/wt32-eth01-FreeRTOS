@@ -269,7 +269,7 @@ static void test_first_boot_stores_a_full_set(void) {
     const ConfigSetInfo set = AppConfig::instance().activeSet();
     TEST_ASSERT_TRUE(set.valid);
     TEST_ASSERT_EQUAL_UINT32(1, set.seq);
-    TEST_ASSERT_TRUE(set.param_count > 170);
+    TEST_ASSERT_TRUE(set.param_count >= getParamSchemas().size());
 }
 
 // A set must fit a small NVS partition, and each key needs its own record.
@@ -567,7 +567,7 @@ static void test_rename_table_points_at_live_keys(void) {
 }
 
 static void test_pick_sections_are_described(void) {
-    const char* sections[] = {"Conveyor", "Vision", "Gripper", "Cells", "Pick"};
+    const char* sections[] = {"Conveyor", "Vision", "Gripper", "Pick"};
     int described = 0;
     for (const auto& schema : getParamSchemas()) {
         TEST_ASSERT_TRUE_MESSAGE(std::strlen(schema.key) <= 15, schema.key);
@@ -579,7 +579,7 @@ static void test_pick_sections_are_described(void) {
             }
         }
     }
-    TEST_ASSERT_EQUAL_INT(69, described);
+    TEST_ASSERT_EQUAL_INT(39, described);
 }
 
 int main(void) {

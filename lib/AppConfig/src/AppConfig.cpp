@@ -15,33 +15,16 @@
 
 namespace {
 
-struct PickClassKey {
-  const char* jaw;
-  const char* len;
-  const char* height;
-};
-
-// NVS keys are at most 15 characters. Old cv_jaw1_ms / cell1_* keys are not read.
+// NVS keys are at most 15 characters. Old cv_jaw1_ms keys are not read.
 constexpr int kPickClassSlots = 10;
-const PickClassKey kPickClassKeys[kPickClassSlots] = {
-    {"jaw_aaa_ms", "cell_aaa_len_mm", "cell_aaa_h_mm"},
-    {"jaw_aa_ms", "cell_aa_len_mm", "cell_aa_h_mm"},
-    {"jaw_d_ms", "cell_d_len_mm", "cell_d_h_mm"},
-    {"jaw_c_ms", "cell_c_len_mm", "cell_c_h_mm"},
-    {"jaw_9v_ms", "cell_9v_len_mm", "cell_9v_h_mm"},
-    {"jaw_cr123_ms", "cell_cr123_len", "cell_cr123_h_mm"},
-    {"jaw_18650_ms", "cell_18650_len", "cell_18650_h_mm"},
-    {"jaw_21700_ms", "cell_21700_len", "cell_21700_h_mm"},
-    {"jaw_26650_ms", "cell_26650_len", "cell_26650_h_mm"},
-    {"jaw_32650_ms", "cell_32650_len", "cell_32650_h_mm"},
+const char* const kPickJawKeys[kPickClassSlots] = {
+    "jaw_aaa_ms", "jaw_aa_ms", "jaw_d_ms", "jaw_c_ms", "jaw_9v_ms",
+    "jaw_cr123_ms", "jaw_18650_ms", "jaw_21700_ms", "jaw_26650_ms", "jaw_32650_ms",
 };
 
-int pickKeySlot(const char* key, int field) {
+int pickJawSlot(const char* key) {
   for (int i = 0; i < kPickClassSlots; ++i) {
-    const char* name = field == 0 ? kPickClassKeys[i].jaw
-                       : field == 1 ? kPickClassKeys[i].len
-                                    : kPickClassKeys[i].height;
-    if (std::strcmp(key, name) == 0) {
+    if (std::strcmp(key, kPickJawKeys[i]) == 0) {
       return i;
     }
   }
@@ -529,28 +512,9 @@ void AppConfig::loadDefaults() {
     data_.pick_default_belt_speed_mm_s = 1524.0f;
 #endif
 
-#if defined(CONFIG_TAU_MIN_US)
-    data_.tau_min_us = CONFIG_TAU_MIN_US;
-#else
-    data_.tau_min_us = 100000;
-#endif
-
-#if defined(CONFIG_TAU_MAX_US)
-    data_.tau_max_us = CONFIG_TAU_MAX_US;
-#else
-    data_.tau_max_us = 5000000;
-#endif
-
     data_.pick_vision_latency_ms = 40;
     data_.pick_valve_ms = 30;
     data_.pick_valve_on_ms = 8;
-    data_.pick_valve_off_ms = 17;
-    data_.pick_trim_von_ms = 0;
-    data_.pick_trim_voff_ms = 0;
-    data_.pick_trim_close_ms = 0;
-    data_.pick_trim_z_ms = 0;
-    data_.pick_trim_grip_ms = 0;
-    data_.pick_trim_hold_ms = 0;
     data_.pick_offset_plunge_ms = 0;
     data_.pick_offset_close_ms = 0;
     data_.vision_x_from_batt = 0;
@@ -561,20 +525,11 @@ void AppConfig::loadDefaults() {
     data_.eip_spi_dma = 0;
     data_.log_uart_async = 1;
     data_.eip_scope_gpio = -1;
-    data_.pick_bench_enable = false;
     for (int i = 0; i < kPickClassSlots; ++i) {
       data_.pick_jaw_ms[i] = 0;
     }
     data_.pick_jaw_offset_deg = 0.0f;
     data_.pick_dedupe_mm = 40.0f;
-    const float len_mm[kPickClassSlots] = {44.5f, 50.5f, 61.5f, 50.0f, 48.5f,
-                                            34.5f, 65.0f, 70.0f, 65.0f, 65.0f};
-    const float height_mm[kPickClassSlots] = {10.5f, 14.5f, 34.2f, 26.2f, 26.5f,
-                                               17.0f, 18.3f, 21.2f, 26.5f, 32.0f};
-    for (int i = 0; i < kPickClassSlots; ++i) {
-      data_.pick_cell_len_mm[i] = len_mm[i];
-      data_.pick_cell_h_mm[i] = height_mm[i];
-    }
     data_.pick_finger_open_mm = 80.0f;
     data_.pick_finger_thick_mm = 10.0f;
     data_.pick_finger_width_mm = 50.0f;
@@ -954,18 +909,9 @@ void AppConfig::readParams(IParamIo& store) {
     io.getFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
     io.getFloat("batt_x", data_.test_battery_x_mm);
     io.getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
-    io.getInt32("cv_tau_min_us", data_.tau_min_us);
-    io.getInt32("cv_tau_max_us", data_.tau_max_us);
     io.getInt32("vis_lat_ms", data_.pick_vision_latency_ms);
     io.getInt32("grp_valve_ms", data_.pick_valve_ms);
     io.getInt32("pk_von_ms", data_.pick_valve_on_ms);
-    io.getInt32("pk_voff_ms", data_.pick_valve_off_ms);
-    io.getInt32("pk_tr_von", data_.pick_trim_von_ms);
-    io.getInt32("pk_tr_voff", data_.pick_trim_voff_ms);
-    io.getInt32("pk_tr_cls", data_.pick_trim_close_ms);
-    io.getInt32("pk_tr_z", data_.pick_trim_z_ms);
-    io.getInt32("pk_tr_grp", data_.pick_trim_grip_ms);
-    io.getInt32("pk_tr_hld", data_.pick_trim_hold_ms);
     io.getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     io.getInt32("pk_off_close", data_.pick_offset_close_ms);
     io.getInt32("vis_batt_x", data_.vision_x_from_batt);
@@ -976,15 +922,12 @@ void AppConfig::readParams(IParamIo& store) {
     io.getInt32("eip_spi_dma", data_.eip_spi_dma);
     io.getInt32("log_uart_async", data_.log_uart_async);
     io.getInt32("eip_scope_gpio", data_.eip_scope_gpio);
-    io.getBool("pk_bench", data_.pick_bench_enable);
     for (int i = 0; i < kPickClassSlots; ++i) {
-      io.getInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+      io.getInt32(kPickJawKeys[i], data_.pick_jaw_ms[i]);
     }
     io.getFloat("jaw_off_deg", data_.pick_jaw_offset_deg);
     io.getFloat("vis_dedupe_mm", data_.pick_dedupe_mm);
     for (int i = 0; i < kPickClassSlots; ++i) {
-      io.getFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
-      io.getFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
     }
     io.getFloat("fin_open_mm", data_.pick_finger_open_mm);
     io.getFloat("fin_wid_mm", data_.pick_finger_thick_mm);
@@ -1122,18 +1065,9 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setFloat("cv_cnv_far_mm", data_.conveyor_frame_far_x_mm);
     io.setFloat("batt_x", data_.test_battery_x_mm);
     io.setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
-    io.setInt32("cv_tau_min_us", data_.tau_min_us);
-    io.setInt32("cv_tau_max_us", data_.tau_max_us);
     io.setInt32("vis_lat_ms", data_.pick_vision_latency_ms);
     io.setInt32("grp_valve_ms", data_.pick_valve_ms);
     io.setInt32("pk_von_ms", data_.pick_valve_on_ms);
-    io.setInt32("pk_voff_ms", data_.pick_valve_off_ms);
-    io.setInt32("pk_tr_von", data_.pick_trim_von_ms);
-    io.setInt32("pk_tr_voff", data_.pick_trim_voff_ms);
-    io.setInt32("pk_tr_cls", data_.pick_trim_close_ms);
-    io.setInt32("pk_tr_z", data_.pick_trim_z_ms);
-    io.setInt32("pk_tr_grp", data_.pick_trim_grip_ms);
-    io.setInt32("pk_tr_hld", data_.pick_trim_hold_ms);
     io.setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     io.setInt32("pk_off_close", data_.pick_offset_close_ms);
     io.setInt32("vis_batt_x", data_.vision_x_from_batt);
@@ -1144,15 +1078,12 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setInt32("eip_spi_dma", data_.eip_spi_dma);
     io.setInt32("log_uart_async", data_.log_uart_async);
     io.setInt32("eip_scope_gpio", data_.eip_scope_gpio);
-    io.setBool("pk_bench", data_.pick_bench_enable);
     for (int i = 0; i < kPickClassSlots; ++i) {
-      io.setInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
+      io.setInt32(kPickJawKeys[i], data_.pick_jaw_ms[i]);
     }
     io.setFloat("jaw_off_deg", data_.pick_jaw_offset_deg);
     io.setFloat("vis_dedupe_mm", data_.pick_dedupe_mm);
     for (int i = 0; i < kPickClassSlots; ++i) {
-      io.setFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
-      io.setFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
     }
     io.setFloat("fin_open_mm", data_.pick_finger_open_mm);
     io.setFloat("fin_wid_mm", data_.pick_finger_thick_mm);
@@ -1389,18 +1320,9 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "th_home_pps") == 0) out_val = data_.axis_theta_homing_speed_pps;
     else if (std::strcmp(key, "grp_open_ms") == 0) out_val = data_.gantry_gripper_open_time_ms;
     else if (std::strcmp(key, "grp_close_ms") == 0) out_val = data_.gantry_gripper_close_time_ms;
-    else if (std::strcmp(key, "cv_tau_min_us") == 0) out_val = data_.tau_min_us;
-    else if (std::strcmp(key, "cv_tau_max_us") == 0) out_val = data_.tau_max_us;
     else if (std::strcmp(key, "vis_lat_ms") == 0) out_val = data_.pick_vision_latency_ms;
     else if (std::strcmp(key, "grp_valve_ms") == 0) out_val = data_.pick_valve_ms;
     else if (std::strcmp(key, "pk_von_ms") == 0) out_val = data_.pick_valve_on_ms;
-    else if (std::strcmp(key, "pk_voff_ms") == 0) out_val = data_.pick_valve_off_ms;
-    else if (std::strcmp(key, "pk_tr_von") == 0) out_val = data_.pick_trim_von_ms;
-    else if (std::strcmp(key, "pk_tr_voff") == 0) out_val = data_.pick_trim_voff_ms;
-    else if (std::strcmp(key, "pk_tr_cls") == 0) out_val = data_.pick_trim_close_ms;
-    else if (std::strcmp(key, "pk_tr_z") == 0) out_val = data_.pick_trim_z_ms;
-    else if (std::strcmp(key, "pk_tr_grp") == 0) out_val = data_.pick_trim_grip_ms;
-    else if (std::strcmp(key, "pk_tr_hld") == 0) out_val = data_.pick_trim_hold_ms;
     else if (std::strcmp(key, "pk_off_plunge") == 0) out_val = data_.pick_offset_plunge_ms;
     else if (std::strcmp(key, "pk_off_close") == 0) out_val = data_.pick_offset_close_ms;
     else if (std::strcmp(key, "vis_batt_x") == 0) out_val = data_.vision_x_from_batt;
@@ -1411,7 +1333,7 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "eip_spi_dma") == 0) out_val = data_.eip_spi_dma;
     else if (std::strcmp(key, "log_uart_async") == 0) out_val = data_.log_uart_async;
     else if (std::strcmp(key, "eip_scope_gpio") == 0) out_val = data_.eip_scope_gpio;
-    else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) out_val = data_.pick_jaw_ms[jaw];
+    else if (const int jaw = pickJawSlot(key); jaw >= 0) out_val = data_.pick_jaw_ms[jaw];
     else if (std::strcmp(key, "pk_guard_ms") == 0) out_val = data_.pick_guard_ms;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) out_val = data_.gantry_calibration_timeout_ms;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) out_val = data_.gantry_travel_measurement_timeout_ms;
@@ -1461,18 +1383,9 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "th_home_pps") == 0) data_.axis_theta_homing_speed_pps = val;
     else if (std::strcmp(key, "grp_open_ms") == 0) data_.gantry_gripper_open_time_ms = val;
     else if (std::strcmp(key, "grp_close_ms") == 0) data_.gantry_gripper_close_time_ms = val;
-    else if (std::strcmp(key, "cv_tau_min_us") == 0) data_.tau_min_us = val;
-    else if (std::strcmp(key, "cv_tau_max_us") == 0) data_.tau_max_us = val;
     else if (std::strcmp(key, "vis_lat_ms") == 0) data_.pick_vision_latency_ms = val;
     else if (std::strcmp(key, "grp_valve_ms") == 0) data_.pick_valve_ms = val;
     else if (std::strcmp(key, "pk_von_ms") == 0) data_.pick_valve_on_ms = val;
-    else if (std::strcmp(key, "pk_voff_ms") == 0) data_.pick_valve_off_ms = val;
-    else if (std::strcmp(key, "pk_tr_von") == 0) data_.pick_trim_von_ms = val;
-    else if (std::strcmp(key, "pk_tr_voff") == 0) data_.pick_trim_voff_ms = val;
-    else if (std::strcmp(key, "pk_tr_cls") == 0) data_.pick_trim_close_ms = val;
-    else if (std::strcmp(key, "pk_tr_z") == 0) data_.pick_trim_z_ms = val;
-    else if (std::strcmp(key, "pk_tr_grp") == 0) data_.pick_trim_grip_ms = val;
-    else if (std::strcmp(key, "pk_tr_hld") == 0) data_.pick_trim_hold_ms = val;
     else if (std::strcmp(key, "pk_off_plunge") == 0) data_.pick_offset_plunge_ms = val;
     else if (std::strcmp(key, "pk_off_close") == 0) data_.pick_offset_close_ms = val;
     else if (std::strcmp(key, "vis_batt_x") == 0) data_.vision_x_from_batt = val;
@@ -1483,7 +1396,7 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "eip_spi_dma") == 0) data_.eip_spi_dma = val;
     else if (std::strcmp(key, "log_uart_async") == 0) data_.log_uart_async = val;
     else if (std::strcmp(key, "eip_scope_gpio") == 0) data_.eip_scope_gpio = val;
-    else if (const int jaw = pickKeySlot(key, 0); jaw >= 0) data_.pick_jaw_ms[jaw] = val;
+    else if (const int jaw = pickJawSlot(key); jaw >= 0) data_.pick_jaw_ms[jaw] = val;
     else if (std::strcmp(key, "pk_guard_ms") == 0) data_.pick_guard_ms = val;
     else if (std::strcmp(key, "cal_timeout_ms") == 0) data_.gantry_calibration_timeout_ms = val;
     else if (std::strcmp(key, "trv_timeout_ms") == 0) data_.gantry_travel_measurement_timeout_ms = val;
@@ -1558,8 +1471,6 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "cv_belt_spd") == 0) out_val = data_.pick_default_belt_speed_mm_s;
     else if (std::strcmp(key, "jaw_off_deg") == 0) out_val = data_.pick_jaw_offset_deg;
     else if (std::strcmp(key, "vis_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
-    else if (const int len = pickKeySlot(key, 1); len >= 0) out_val = data_.pick_cell_len_mm[len];
-    else if (const int height = pickKeySlot(key, 2); height >= 0) out_val = data_.pick_cell_h_mm[height];
     else if (std::strcmp(key, "fin_open_mm") == 0) out_val = data_.pick_finger_open_mm;
     else if (std::strcmp(key, "fin_wid_mm") == 0) out_val = data_.pick_finger_thick_mm;
     else if (std::strcmp(key, "fin_len_mm") == 0) out_val = data_.pick_finger_width_mm;
@@ -1634,8 +1545,6 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_belt_spd") == 0) data_.pick_default_belt_speed_mm_s = val;
     else if (std::strcmp(key, "jaw_off_deg") == 0) data_.pick_jaw_offset_deg = val;
     else if (std::strcmp(key, "vis_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
-    else if (const int len = pickKeySlot(key, 1); len >= 0) data_.pick_cell_len_mm[len] = val;
-    else if (const int height = pickKeySlot(key, 2); height >= 0) data_.pick_cell_h_mm[height] = val;
     else if (std::strcmp(key, "fin_open_mm") == 0) data_.pick_finger_open_mm = val;
     else if (std::strcmp(key, "fin_wid_mm") == 0) data_.pick_finger_thick_mm = val;
     else if (std::strcmp(key, "fin_len_mm") == 0) data_.pick_finger_width_mm = val;
@@ -1672,7 +1581,6 @@ bool AppConfig::getParamBool(const char* key, bool& out_val) const {
     else if (std::strcmp(key, "eip_z_en") == 0) out_val = data_.eip_axis_z;
     else if (std::strcmp(key, "eip_th_en") == 0) out_val = data_.eip_axis_theta;
     else if (std::strcmp(key, "pk_dropin") == 0) out_val = data_.pick_dropin_enable;
-    else if (std::strcmp(key, "pk_bench") == 0) out_val = data_.pick_bench_enable;
     else if (std::strcmp(key, "pk_drop_any_th") == 0) out_val = data_.pick_drop_any_theta;
     else return false;
 
@@ -1697,7 +1605,6 @@ bool AppConfig::setParamBool(const char* key, bool val, bool& out_reboot_require
     else if (std::strcmp(key, "eip_z_en") == 0) data_.eip_axis_z = val;
     else if (std::strcmp(key, "eip_th_en") == 0) data_.eip_axis_theta = val;
     else if (std::strcmp(key, "pk_dropin") == 0) data_.pick_dropin_enable = val;
-    else if (std::strcmp(key, "pk_bench") == 0) data_.pick_bench_enable = val;
     else if (std::strcmp(key, "pk_drop_any_th") == 0) data_.pick_drop_any_theta = val;
     else return false;
 
