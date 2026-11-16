@@ -4,8 +4,9 @@
  *
  * Grouped as in docs/PICK_SCHEDULER_KINEMATICS.md: frames, body, belt odometer,
  * clearance, motion time, then neighbours and the part tracker. Vision Y is
- * camera-relative. Cell angle 0° is the long axis parallel to New +X (across belt);
- * positive rotation turns from New +X toward +Y (downstream). The jaws grip across the cell.
+ * camera-relative. Cell angles are in the vision frame: 0° is the long axis along +Y
+ * (downstream), positive toward −X. The jaw offset maps them to the gantry pose frame
+ * (0° along New +X). The jaws grip across the cell.
  * Fingers go to grasp height early only when the X-projection misses both
  * finger lanes; otherwise Z waits and must still be at grasp height before contact.
  */
@@ -313,10 +314,12 @@ struct JawChoice {
   float travel_deg = 0.0f;
 };
 
-// Theta joint 0°: the pad faces are parallel to New +X (across belt) and the
-// open/close motion runs along ±Y (along belt). The joint matches the cell long
-// axis (side grip). The finger rectangles use the close axis, 90° from this datum. The two equivalent
-// joints differ by 180° and are ranked by linear travel; theta is not modulo.
+// Returns a gantry pose angle, not a joint angle. cell_deg is the vision angle; the
+// jaw offset (cv_jaw_deg, 90° by default) turns it into the pose frame, and
+// Kinematics::inverse gives joint = 90° − pose. Joint 0° holds the pads parallel to +Y
+// and closes across the belt (side grip). The finger rectangles use the close axis, 90°
+// from the pads. The two equivalent poses differ by 180° and are ranked by linear travel;
+// theta is not modulo.
 inline JawChoice chooseSideJaw(float current_deg, float cell_deg, float jaw_offset_deg,
                                float lim_min_deg, float lim_max_deg) {
   const float base = halfTurnDeg(cell_deg) + jaw_offset_deg;
