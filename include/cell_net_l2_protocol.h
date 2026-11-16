@@ -78,7 +78,7 @@ struct L2CellHeader {
 struct L2VisionDetectPayload {
   uint32_t item_id;
   float x_across_mm;       // Centroid across belt (linear X)
-  float y_bat_mm;          // Along belt at capture, relative to camera center (world Y = cv_cam_y_mm + y_bat_mm)
+  float y_bat_mm;          // Along belt at capture, relative to camera center (world Y = vis_cam_y_mm + y_bat_mm)
   float theta_deg;         // Long axis: 0° along +X (across), 90° along +Y (downstream), + about +Z up (-180..+180)
   uint8_t battery_class;   // 1–10 pick, 11–13 pack occupant. Label and jaw-time slot only.
   uint8_t reserved[3];     // reserved[0] bit0: capture_displacement_m is valid and required

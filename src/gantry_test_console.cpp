@@ -2820,6 +2820,11 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     return;
   }
 
+  // Keys renamed on 2026-11-16 still work under their old name.
+  if (const char *renamed = Config::renamedParamKey(token)) {
+    ESP_LOGI(TAG, "%s is now %s", token, renamed);
+    token = const_cast<char *>(renamed);
+  }
   const Config::ParamSchema *schema = Config::findParamSchema(token);
   if (schema == nullptr) {
     ESP_LOGE(TAG, "ERROR: unknown config key '%s'", token);
@@ -2838,6 +2843,9 @@ static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     ESP_LOGI(TAG, "%s (%s) = %s %s%s", token, schema->label, value, schema->units,
              schema->reboot_required ? "  (reboot)" : "");
+    if (schema->description != nullptr) {
+      ESP_LOGI(TAG, "  %s", schema->description);
+    }
     return;
   }
 

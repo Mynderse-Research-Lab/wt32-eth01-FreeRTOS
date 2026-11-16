@@ -29,7 +29,7 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | ID | Waiting on | Holds up |
 |----|------------|----------|
 | [V-3](#vision) | The ML model, from the Computer Science team | All multi-class and multi-cell testing, the camera transform (V-4), and retiring the trigger workaround (V-7) |
-| [G-C3](#g-c-pick-scheduler) | Bench: store `cv_jaw_deg` 0 and check the trigger frame's θ | Every grip after the next flash: a stored 90 or a θ of 0 for a cell along the belt turns the jaws 90° |
+| [G-C3](#g-c-pick-scheduler) | Bench: store `jaw_off_deg` 0 and check the trigger frame's θ | Every grip after the next flash: a stored 90 or a θ of 0 for a cell along the belt turns the jaws 90° |
 | [G-C2](#g-c-pick-scheduler) | **Decision:** is a bottom dwell acceptable now? | Finishing the tuning (G-C1), and with it the detection-rate work (G-C10) |
 | [G-C7](#g-c-pick-scheduler) | **Decision:** a bench speed limit on `move`, or a deliberate exception | Slow console jogs while picks run at pick speed |
 | [G-C11](#g-c-pick-scheduler) | **Decision:** the 15 ms depth cap or the 2 mm entry margin? | Picks of cells lying across the belt (0–35°) |
@@ -73,7 +73,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 |----|------|----------|-----------|
 | G-C1 | Tuning: picks lift, but many grip only half the 9V cell | Confirmed 2026-10-30: 7 of 9 overhanging; offsets were still being tuned | Finish offset tuning; run `cfg export` for current values |
 | G-C2 | Z reverses short of grasp depth: about 1.15 mm at 5000 mm/s² and zero dwell, past the accepted 1 mm | Confirmed: `pick actual` logs | Offsets of −60 / +10 reached 0.1 to 0.4 mm; **Decision:** is bottom dwell acceptable now? |
-| G-C3 | Angle reference decided 2026-11-16 (user): vision θ 0° along +X, 90° along +Y, positive about +Z up; joint = 90° − pose through `GantryKinematics`; `cv_jaw_deg` default 0. The gantry still stores 90, and the trigger frame's θ is unknown | Code and host tests changed in the same commit; not yet run on the gantry | Before picking: `cfg set cv_jaw_deg 0`; read `th=` in a `vision queued` log line (90 for a cell along the belt); watch one small positive θ joint move on the Pi camera (pads turn from +Y toward +X_v) |
+| G-C3 | Angle reference decided 2026-11-16 (user): vision θ 0° along +X, 90° along +Y, positive about +Z up; joint = 90° − pose through `GantryKinematics`; `jaw_off_deg` default 0. The gantry still stores 90, and the trigger frame's θ is unknown | Code and host tests changed in the same commit; not yet run on the gantry | Before picking: `cfg set jaw_off_deg 0`; read `th=` in a `vision queued` log line (90 for a cell along the belt); watch one small positive θ joint move on the Pi camera (pads turn from +Y toward +X_v) |
 | G-C4 | `classifyFollowers()`: 190 ms grip dwell in ready time, no strike lead in the deadline, world X minus joint X, packs 11 to 13 can be pruned (plan P0.3) | Confirmed in code | Fix each with a host test; hidden while only single cells run |
 | G-C5 | Trigger sensor geometry is compile-time: `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` (plan P1.2) | Confirmed: `pick_scheduler.cpp:57,61`; breaks the stored-parameter rule | Add stored keys |
 | G-C6 | `tau_band_s` assumes the object top is crossed while accelerating (plan P2.1) | Confirmed in `strike_plan.h:168`, and not dormant with equal ramps: it is wrong whenever the top lies past mid-plunge. For the bench 9V it is 4.4 ms long at today's 48.4 ceiling (8.4 ms at 35.7). It changes the plan only for cell angles of 33–43° (300 mm/s); at 90°, every bench pick so far, it cancels out (KT 5.3.9) | Compute it from the full profile (`timeAlongProfile`); add a test with the top past mid-plunge |
@@ -82,7 +82,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | G-C9 | The per-pick dwell warning fires every pick while offsets differ (plan M3) | Suggested; console bursts are a known LAN trigger (G-E1) | Warn once per offset change |
 | G-C10 | Detection rate. Demonstrations space vision detections at least 7 s apart so the unoptimized planner completes each pick; the goal is several detections per second | Decision 2026-11-03: a starting point, not a limit | An optimization problem: measure the pick cycle once G-C1 and G-C2 are closed, then shorten the spacing step by step |
 | G-C11 | For cells within 35° of across the belt, the 15 ms depth cap in `StrikePlan::plan` overrides the 2 mm entry margin. At 0° and 300 mm/s the commanded fingertips pass the cell top while the cell is still 1.8 mm short of the upstream pad face | Confirmed by running the code with today's defaults (KT 5.3.9). Not exercised: every bench pick so far had the length along the belt (90°). The drive's 30–35 ms lag probably hides it (assumed) | **Decision:** which constraint wins. Then test a 0° strike at belt speed |
-| G-C13 | The vision contract says capture displacement is required and a latency estimate is no substitute (`pick_intercept.h:218`), but `acceptDetect` accepts any frame without it whenever `cv_vis_ms` > 0, the default (`pick_scheduler.cpp:1151`) | Confirmed in code. Needed today: the trigger stand-in sends no capture displacement | **Decision:** keep the latency fallback only for the stand-in (`vis_batt_x`), or allow it for all frames and fix the comment |
+| G-C13 | The vision contract says capture displacement is required and a latency estimate is no substitute (`pick_intercept.h:218`), but `acceptDetect` accepts any frame without it whenever `vis_lat_ms` > 0, the default (`pick_scheduler.cpp:1151`) | Confirmed in code. Needed today: the trigger stand-in sends no capture displacement | **Decision:** keep the latency fallback only for the stand-in (`vis_batt_x`), or allow it for all frames and fix the comment |
 
 ### G-D Gripper, field I/O and panel
 
@@ -105,7 +105,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| G-F1 | `cfg factory` then `cfg save` installs defaults that do not match this machine: for example `col_z_min_mm` 115 against 122 live, `cv_x_off_mm` 245 against 307.5 | Confirmed from the live config | **Download parameters first.** Consider updating `sdkconfig.defaults` |
+| G-F1 | `cfg factory` then `cfg save` installs defaults that do not match this machine: for example `col_z_min_mm` 115 against 122 live, `vis_x_off_mm` 245 against 307.5 | Confirmed from the live config | **Download parameters first.** Consider updating `sdkconfig.defaults` |
 | G-F2 | About 68 stored keys have no reader, so `cfg` cannot change them (plan P2.2 counts 70) | Confirmed by name search | Wire them up or remove them |
 | G-F3 | The parameter file leaves out the 31 developer-locked keys unless unlocked | Confirmed | Unlock before downloading a full backup |
 | G-F4 | `x_lim_max_mm` also sets X scale at the next `calibrate x` (plan M2) | Suggested, consistent with `x_hard_span_mm` | Separate the soft limit from the span |
@@ -137,6 +137,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
 | S-4 | Download, Upload and Save to NVS have not been clicked in a browser against the gantry | Confirmed: only `cfg export` and `cfg save` were run, from a script. On 2026-11-13 how far the browser test got was not known, and the supervisor does not log these buttons | Try each once with motors off, and note the result here |
+| S-8 | Parameter files from before the 2026-11-16 key rename: the toolbox Upload skips the 16 old names (`cv_cam_y_mm`, `cv_x_off_mm`, `cv_vis_ms`, `cv_dedupe_mm`, `cv_jaw_deg`, `cv_valve_ms`, `cv_jaw_<class>_ms`) as "not on this gantry" | Confirmed in `web/dev.html`: a key missing from `cfg export` is skipped before any `cfg` is sent. The gantry itself still accepts the old names and its stored set carries over | Map the old names in `dev.html` from `getRenamedParamKeys()` in `ConfigSchema.cpp`, or re-download the file after the next flash |
 
 ## Cell transport
 

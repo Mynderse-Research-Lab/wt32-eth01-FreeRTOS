@@ -65,7 +65,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"th_sequential", "Sequential Move",   "Theta Axis",     ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 5. Geometry & Gripper (End-User)
+    // 5. Geometry (End-User)
     // ========================================================================
     {"geom_z_y_mm",   "Z-Col Y Offset",    "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, true,  -1000.0f, 1000.0f, 1.0f, "mm", {}},
     {"geom_th_x_mm",  "Theta X Offset",    "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, true,  -1000.0f, 1000.0f, 1.0f, "mm", {}},
@@ -77,87 +77,168 @@ static const std::vector<ParamSchema> s_schemas = {
     {"geom_cal_th_deg","Bin Drop Theta",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, -180.0f, 180.0f, 1.0f, "deg", {}},
     {"col_x_min_mm",  "Collision X Min",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {}},
     {"col_z_min_mm",  "Collision Z Min",   "Geometry",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 150.0f, 1.0f, "mm", {}},
-    {"grp_open_ms",   "Gripper Open Time", "Geometry",       ParamType::INT,   AccessLevel::END_USER, false, 10.0f, 5000.0f, 10.0f, "ms", {}},
-    {"grp_close_ms",  "Gripper Close Time","Geometry",       ParamType::INT,   AccessLevel::END_USER, false, 10.0f, 5000.0f, 10.0f, "ms", {}},
 
     // ========================================================================
-    // 6. Conveyor Intercept (End-User)
+    // 6. Conveyor: belt and frame, in gantry coordinates (End-User)
     // ========================================================================
-    {"cv_cam_y_mm",   "Camera Y Pos",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -5000.0f, 5000.0f, 1.0f, "mm", {}},
-    {"cv_pick_y_mm",  "Pick Y Pos",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 1.0f, "mm", {}},
-    {"cv_x_off_mm",   "Camera X",          "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -500.0f, 500.0f, 0.5f, "mm", {}},
-    {"cv_belt_w_mm",  "Belt Width",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 50.0f, 800.0f, 1.0f, "mm", {}},
-    {"cv_belt_near_mm","Belt Near Edge X", "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {}},
-    {"cv_belt_far_mm","Belt Far Edge X",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {}},
-    {"cv_cnv_near_mm","Conveyor Near X",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {}},
-    {"cv_cnv_far_mm", "Conveyor Far X",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {}},
-    {"batt_x",        "Test Battery X",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {}},
-    {"cv_belt_spd",   "Default Belt Spd",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 10.0f, "mm/s", {}},
-    {"cv_tau_min_us", "Tau Min",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 10000000.0f, 10000.0f, "us", {}},
-    {"cv_tau_max_us", "Tau Max",           "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 30000000.0f, 50000.0f, "us", {}},
-    {"cv_vis_ms",     "Vision Latency",    "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_valve_ms",   "Grip Valve Delay",  "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_aaa_ms", "Jaw Contact AAA",  "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_aa_ms",  "Jaw Contact AA",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_d_ms",   "Jaw Contact D",    "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_c_ms",   "Jaw Contact C",    "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_9v_ms",  "Jaw Contact 9V",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_cr123_ms","Jaw Contact CR123A","Conveyor",     ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_18650_ms","Jaw Contact 18650","Conveyor",      ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_21700_ms","Jaw Contact 21700","Conveyor",      ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_26650_ms","Jaw Contact 26650","Conveyor",      ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_32650_ms","Jaw Contact 32650","Conveyor",      ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {}},
-    {"cv_jaw_deg",    "Jaw Angle Offset",  "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, -180.0f, 180.0f, 1.0f, "deg", {}},
-    {"cv_dedupe_mm",  "Detect Dedupe",     "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 5.0f, 200.0f, 1.0f, "mm", {}},
+    {"cv_pick_y_mm",   "Pick Y Pos",         "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 1.0f, "mm", {},
+     "World Y of the jaw line (+Y downstream). A cell arrives when the belt has carried it from camera Y + y_bat_mm to here."},
+    {"cv_belt_w_mm",   "Belt Width",         "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 50.0f, 800.0f, 1.0f, "mm", {},
+     "Belt width. 'beltcal apply' stores it from the two belt edges; the intercept does not read it."},
+    {"cv_belt_near_mm", "Belt Near Edge X",   "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {},
+     "Joint X of the belt's near edge ('beltcal near'). 'beltcal apply' takes the width and centre from the two edges."},
+    {"cv_belt_far_mm", "Belt Far Edge X",    "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {},
+     "Joint X of the belt's far edge ('beltcal far')."},
+    {"cv_cnv_near_mm", "Conveyor Near X",    "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {},
+     "Joint X of the conveyor frame's near edge ('beltcal cnvyr near'). 'beltcal apply' copies it to col_x_min_mm."},
+    {"cv_cnv_far_mm",  "Conveyor Far X",     "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 600.0f, 0.5f, "mm", {},
+     "Joint X of the conveyor frame's far edge ('beltcal cnvyr far'). Shown by 'beltcal'; no motion reads it."},
+    {"cv_belt_spd",    "Default Belt Spd",   "Conveyor", ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 5000.0f, 10.0f, "mm/s", {},
+     "Belt speed 'pickcover' uses when no conveyor frame is current."},
+    {"cv_tau_min_us",  "Tau Min",            "Conveyor", ParamType::INT, AccessLevel::END_USER, false, 1000.0f, 10000000.0f, 10000.0f, "us", {},
+     "Stored only; no firmware code reads it."},
+    {"cv_tau_max_us",  "Tau Max",            "Conveyor", ParamType::INT, AccessLevel::END_USER, false, 1000.0f, 30000000.0f, 50000.0f, "us", {},
+     "Stored only; no firmware code reads it."},
 
     // ========================================================================
-    // 6b. Side-grip pick (End-User)
+    // 7. Vision: detections into gantry coordinates (End-User)
     // ========================================================================
-    {"cell_aaa_len_mm", "AAA Length",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_aa_len_mm",  "AA Length",       "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_d_len_mm",   "D Length",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_c_len_mm",   "C Length",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_9v_len_mm",  "9V Length",       "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_cr123_len",  "CR123A Length",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_18650_len",  "18650 Length",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_21700_len",  "21700 Length",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_26650_len",  "26650 Length",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_32650_len",  "32650 Length",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {}},
-    {"cell_aaa_h_mm",   "AAA Height",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_aa_h_mm",    "AA Height",       "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_d_h_mm",     "D Height",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_c_h_mm",     "C Height",        "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_9v_h_mm",    "9V Height",       "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_cr123_h_mm", "CR123A Height",   "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_18650_h_mm", "18650 Height",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_21700_h_mm", "21700 Height",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_26650_h_mm", "26650 Height",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"cell_32650_h_mm", "32650 Height",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {}},
-    {"fin_open_mm",   "Finger Opening",    "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 200.0f, 0.5f, "mm", {}},
-    {"fin_wid_mm",    "Finger Width",      "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 40.0f, 0.5f, "mm", {}},
-    {"fin_len_mm",    "Finger Length",     "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 120.0f, 0.5f, "mm", {}},
-    {"pk_von_ms",     "Valve On",          "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {}},
-    {"pk_voff_ms",    "Valve Off",         "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {}},
-    {"pk_tr_von",     "Trim Valve On",     "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
-    {"pk_tr_voff",    "Trim Valve Off",    "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
-    {"pk_tr_cls",     "Trim Close",        "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
-    {"pk_tr_z",       "Trim Z",            "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
-    {"pk_tr_grp",     "Trim Grip",         "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
-    {"pk_tr_hld",     "Trim Hold",         "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {}},
+    {"vis_cam_y_mm",   "Camera Y Pos",       "Vision",   ParamType::FLOAT, AccessLevel::END_USER, false, -5000.0f, 5000.0f, 1.0f, "mm", {},
+     "World Y of the camera's optical centre (+Y downstream). A detection's world Y is this plus y_bat_mm. 'pickcal cam mark' sets it."},
+    {"vis_x_off_mm",   "Camera X",           "Vision",   ParamType::FLOAT, AccessLevel::END_USER, false, -500.0f, 500.0f, 0.5f, "mm", {},
+     "Gantry pose X of vision x = 0: pose X = x_across_mm + this. 'beltcal apply center' sets it to the belt centre."},
+    {"vis_lat_ms",     "Vision Latency",     "Vision",   ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Exposure-to-receipt time. A detection without a valid capture displacement is placed on the belt at receipt minus this."},
+    {"vis_dedupe_mm",  "Detect Dedupe",      "Vision",   ParamType::FLOAT, AccessLevel::END_USER, false, 5.0f, 200.0f, 1.0f, "mm", {},
+     "Detections with the same item_id, or closer than this both along and across the belt, are one cell. Under 5 mm means 40."},
+    {"vis_batt_x",     "Vision X = batt_x",  "Vision",   ParamType::INT, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
+     "1: each vision frame takes x_across from batt_x and y_bat from the trigger sensor position (fixed trigger-sensor frames)."},
+    {"batt_x",         "Test Battery X",     "Vision",   ParamType::FLOAT, AccessLevel::END_USER, false, -100.0f, 600.0f, 0.5f, "mm", {},
+     "Joint X of the test battery ('beltcal batt'). With vis_batt_x = 1 every vision frame takes its X from here."},
+
+    // ========================================================================
+    // 8. Gripper: jaws, fingers and valve (End-User)
+    // ========================================================================
+    {"jaw_off_deg",    "Jaw Angle Offset",   "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, -180.0f, 180.0f, 1.0f, "deg", {},
+     "Pad direction relative to the cell's long axis, added before the theta joint conversion. 0: pads along the long axis (side grip)."},
+    {"jaw_aaa_ms",     "Jaw Contact AAA",    "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for AAA in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_aa_ms",      "Jaw Contact AA",     "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for AA in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_d_ms",       "Jaw Contact D",      "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for D in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_c_ms",       "Jaw Contact C",      "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for C in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_9v_ms",      "Jaw Contact 9V",     "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for 9V in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_cr123_ms",   "Jaw Contact CR123A", "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for CR123A in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_18650_ms",   "Jaw Contact 18650",  "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for 18650 in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_21700_ms",   "Jaw Contact 21700",  "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for 21700 in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_26650_ms",   "Jaw Contact 26650",  "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for 26650 in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"jaw_32650_ms",   "Jaw Contact 32650",  "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Jaw close time for 32650 in the strike timing. 0: side gap / fin_spd_mm_s."},
+    {"grp_valve_ms",   "Grip Valve Delay",   "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 0.0f, 500.0f, 5.0f, "ms", {},
+     "Valve-to-jaw-motion delay in the strike timing: the grip command leads contact by this plus the jaw close time."},
+    {"grp_open_ms",    "Gripper Open Time",  "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 10.0f, 5000.0f, 10.0f, "ms", {},
+     "Time the gripper takes to open. The bin drop waits this long, and the post-pick cycle estimate includes it."},
+    {"grp_close_ms",   "Gripper Close Time", "Gripper",  ParamType::INT, AccessLevel::END_USER, false, 10.0f, 5000.0f, 10.0f, "ms", {},
+     "Time the gripper takes to close. The post-pick cycle estimate and the console 'grip' wait use it."},
+    {"fin_open_mm",    "Finger Opening",     "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 200.0f, 0.5f, "mm", {},
+     "Gap between the open fingers. Wider detections are rejected; the side gap and lane clearance use it."},
+    {"fin_wid_mm",     "Finger Width",       "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 40.0f, 0.5f, "mm", {},
+     "Finger size along the closing direction (the finger thickness; field pick_finger_thick_mm). Sets the lane clearance."},
+    {"fin_len_mm",     "Finger Length",      "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 120.0f, 0.5f, "mm", {},
+     "Finger size across the closing direction (field pick_finger_width_mm). Sets the finger rectangles in the clearance test."},
+    {"fin_spd_mm_s",   "Jaw Speed",          "Gripper",  ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 2000.0f, 5.0f, "mm/s", {},
+     "Speed of each jaw while closing (SCHUNK KGG 100-80: 40 mm in 0.19 s at 6 bar). Sets the close time when the class time is 0."},
+
+    // ========================================================================
+    // 9. Cells: class size labels (End-User)
+    // ========================================================================
+    {"cell_aaa_len_mm", "AAA Length",         "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_aa_len_mm", "AA Length",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_d_len_mm",  "D Length",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_c_len_mm",  "C Length",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_9v_len_mm", "9V Length",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_cr123_len", "CR123A Length",      "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_18650_len", "18650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_21700_len", "21700 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_26650_len", "26650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_32650_len", "32650 Length",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 300.0f, 0.5f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_aaa_h_mm",  "AAA Height",         "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_aa_h_mm",   "AA Height",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_d_h_mm",    "D Height",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_c_h_mm",    "C Height",           "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_9v_h_mm",   "9V Height",          "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_cr123_h_mm", "CR123A Height",      "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_18650_h_mm", "18650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_21700_h_mm", "21700 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_26650_h_mm", "26650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+    {"cell_32650_h_mm", "32650 Height",       "Cells",    ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 100.0f, 0.1f, "mm", {},
+     "Size label only; the pick code takes sizes from the detection and does not read it."},
+
+    // ========================================================================
+    // 10. Pick: strike timing and cycle (End-User)
+    // ========================================================================
+    {"pk_von_ms",      "Valve On",           "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
+     "Valve delay the strike planner allows before the jaws move (strike_plan valve_delay_s)."},
+    {"pk_voff_ms",     "Valve Off",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_von",      "Trim Valve On",      "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_voff",     "Trim Valve Off",     "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_cls",      "Trim Close",         "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_z",        "Trim Z",             "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_grp",      "Trim Grip",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_tr_hld",      "Trim Hold",          "Pick",     ParamType::INT, AccessLevel::END_USER, false, -50.0f, 50.0f, 1.0f, "ms", {},
+     "Stored only; no firmware code reads it."},
     // Strike plan offsets (strike_plan.h). Each moves only its own event.
-    {"pk_off_plunge", "Z Plunge Offset",   "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
-    {"pk_off_close",  "Grip Close Offset", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
-    {"vis_batt_x",    "Vision X = batt_x", "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
-    {"pk_off_retract","Z Retract Offset",  "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {}},
-    {"pk_bench",      "Bench Pick",        "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
-    {"fin_spd_mm_s",  "Jaw Speed",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 10.0f, 2000.0f, 5.0f, "mm/s", {}},
-    {"pk_guard_ms",   "Timing Guard",      "Conveyor",       ParamType::INT,   AccessLevel::END_USER, false, 0.0f, 200.0f, 1.0f, "ms", {}},
-    {"pk_dropin",     "Drop-in Strike",    "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
-    {"pk_drop_any_th","Bin Any Theta",     "Conveyor",       ParamType::BOOL,  AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {}},
-    {"pk_stage_x_mm", "Staging X",         "Conveyor",       ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {}},
+    {"pk_off_plunge",  "Z Plunge Offset",    "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
+     "Moves the strike plan's Z plunge by this many ms; the other events stay where they are."},
+    {"pk_off_close",   "Grip Close Offset",  "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
+     "Moves the strike plan's grip close by this many ms; the other events stay where they are."},
+    {"pk_off_retract", "Z Retract Offset",   "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
+     "Moves the strike plan's Z retract by this many ms; the other events stay where they are."},
+    {"pk_bench",       "Bench Pick",         "Pick",     ParamType::BOOL, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
+     "Stored only; no firmware code reads it."},
+    {"pk_guard_ms",    "Timing Guard",       "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 200.0f, 1.0f, "ms", {},
+     "Z must reach grasp depth this long before jaw contact; the late-Z window check adds it too."},
+    {"pk_dropin",      "Drop-in Strike",     "Pick",     ParamType::BOOL, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
+     "1 allows late-Z strikes, where Z is released after the upstream finger clears the cell. 0 skips them ('late Z off')."},
+    {"pk_drop_any_th", "Bin Any Theta",      "Pick",     ParamType::BOOL, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {},
+     "1 drops in the bin at the pick theta; 0 turns to geom_cal_th_deg first."},
+    {"pk_stage_x_mm",  "Staging X",          "Pick",     ParamType::FLOAT, AccessLevel::END_USER, false, 0.0f, 550.0f, 1.0f, "mm", {},
+     "Joint X where the gantry waits between picks, at SAFE_Z with theta 0."},
 
     // ========================================================================
-    // 7. Homing & Calibration (End-User)
+    // 11. Homing & Calibration (End-User)
     // ========================================================================
     {"cal_spd_mm_s",  "Search Speed",      "Homing & Cal",   ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 200.0f, 1.0f, "mm/s", {}},
     {"cal_th_spd_deg","Theta Search Spd",  "Homing & Cal",   ParamType::FLOAT, AccessLevel::END_USER, false, 1.0f, 360.0f, 1.0f, "deg/s", {}},
@@ -167,7 +248,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"trv_timeout_ms","Travel Timeout",    "Homing & Cal",   ParamType::INT,   AccessLevel::END_USER, false, 1000.0f, 300000.0f, 5000.0f, "ms", {}},
 
     // ========================================================================
-    // 8. Network (LAN8720) (End-User)
+    // 12. Network (LAN8720) (End-User)
     // ========================================================================
     {"eth_static",    "Use Static IP",     "Network",        ParamType::BOOL,   AccessLevel::END_USER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"eth_ip",        "Static IP",         "Network",        ParamType::STRING, AccessLevel::END_USER, true,  0.0f, 0.0f, 0.0f, "", {}},
@@ -177,7 +258,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"eth_timeout_ms","Link Timeout",      "Network",        ParamType::INT,    AccessLevel::END_USER, true,  100.0f, 60000.0f, 500.0f, "ms", {}},
 
     // ========================================================================
-    // 9. Display (End-User)
+    // 13. Display (End-User)
     // ========================================================================
     {"disp_orient",   "Orientation",       "Display",        ParamType::CHOICE, AccessLevel::END_USER, false, 0.0f, 1.0f, 1.0f, "", {"Landscape", "Portrait"}},
     {"disp_bright",   "Brightness",        "Display",        ParamType::INT,    AccessLevel::END_USER, false, 0.0f, 100.0f, 5.0f, "%", {}},
@@ -185,7 +266,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"disp_tft_en",   "TFT UI Enabled",    "Display",        ParamType::INT,    AccessLevel::END_USER, true,  0.0f, 1.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 10. Console Security (Developer)
+    // 14. Console Security (Developer)
     // ========================================================================
     {"con_auth",      "TCP Auth Enable",   "Console Sec",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"con_pw",        "TCP Password",      "Console Sec",    ParamType::STRING, AccessLevel::DEVELOPER, true,  0.0f, 0.0f, 0.0f, "", {}},
@@ -194,7 +275,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"con_max_peers", "Max Remembered",    "Console Sec",    ParamType::INT,    AccessLevel::DEVELOPER, false, 1.0f, 16.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 11. Console Options (Developer)
+    // 15. Console Options (Developer)
     // ========================================================================
     {"con_tcp_en",    "TCP Console En",    "Console Opt",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"con_uart_en",   "UART Console En",   "Console Opt",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
@@ -204,7 +285,7 @@ static const std::vector<ParamSchema> s_schemas = {
     {"ota_port",      "OTA Server Port",   "Console Opt",    ParamType::INT,    AccessLevel::DEVELOPER, true,  1.0f, 65535.0f, 1.0f, "", {}},
 
     // ========================================================================
-    // 12. EtherNet/IP (Developer)
+    // 16. EtherNet/IP (Developer)
     // ========================================================================
     {"eip_en",        "EIP Scanner Enable","EtherNet/IP",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
     {"eip_x_en",      "X Axis EIP Enable", "EtherNet/IP",    ParamType::BOOL,   AccessLevel::DEVELOPER, true,  0.0f, 1.0f, 1.0f, "", {}},
@@ -233,6 +314,27 @@ static const std::vector<ParamSchema> s_schemas = {
     {"eip_scope_gpio","Class 1 Scope GPIO","EtherNet/IP",    ParamType::INT,    AccessLevel::END_USER, true,  -1.0f, 39.0f, 1.0f, "", {}},
 };
 
+// Stored sets and parameter files from before 2026-11-16 use the old names.
+// AppConfig reads both and writes only the new one.
+static const std::vector<RenamedParamKey> s_renamed = {
+    {"cv_cam_y_mm", "vis_cam_y_mm"},
+    {"cv_x_off_mm", "vis_x_off_mm"},
+    {"cv_vis_ms", "vis_lat_ms"},
+    {"cv_dedupe_mm", "vis_dedupe_mm"},
+    {"cv_jaw_deg", "jaw_off_deg"},
+    {"cv_valve_ms", "grp_valve_ms"},
+    {"cv_jaw_aaa_ms", "jaw_aaa_ms"},
+    {"cv_jaw_aa_ms", "jaw_aa_ms"},
+    {"cv_jaw_d_ms", "jaw_d_ms"},
+    {"cv_jaw_c_ms", "jaw_c_ms"},
+    {"cv_jaw_9v_ms", "jaw_9v_ms"},
+    {"cv_jaw_cr123_ms", "jaw_cr123_ms"},
+    {"cv_jaw_18650_ms", "jaw_18650_ms"},
+    {"cv_jaw_21700_ms", "jaw_21700_ms"},
+    {"cv_jaw_26650_ms", "jaw_26650_ms"},
+    {"cv_jaw_32650_ms", "jaw_32650_ms"},
+};
+
 const std::vector<ParamSchema>& getParamSchemas() {
     return s_schemas;
 }
@@ -243,6 +345,26 @@ const ParamSchema* findParamSchema(const char* key) {
         if (std::strcmp(s.key, key) == 0) {
             return &s;
         }
+    }
+    return nullptr;
+}
+
+const std::vector<RenamedParamKey>& getRenamedParamKeys() {
+    return s_renamed;
+}
+
+const char* renamedParamKey(const char* old_key) {
+    if (old_key == nullptr) return nullptr;
+    for (const auto& r : s_renamed) {
+        if (std::strcmp(r.old_key, old_key) == 0) return r.new_key;
+    }
+    return nullptr;
+}
+
+const char* legacyParamKey(const char* new_key) {
+    if (new_key == nullptr) return nullptr;
+    for (const auto& r : s_renamed) {
+        if (std::strcmp(r.new_key, new_key) == 0) return r.old_key;
     }
     return nullptr;
 }

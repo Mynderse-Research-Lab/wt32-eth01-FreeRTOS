@@ -769,7 +769,7 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
 
 - **Side grip only.** Cell angle 0° is the long axis along +X (across the belt), 90° along
   +Y, positive about +Z up. The theta joint turns about the downward joint Z and holds the pads along +Y at 0°:
-  joint = 90° − (fold(θ) + `cv_jaw_deg`), with `cv_jaw_deg` 0° by default. Of the two equivalent
+  joint = 90° − (fold(θ) + `jaw_off_deg`), with `jaw_off_deg` 0° by default. Of the two equivalent
   angles the one with less linear theta travel inside `thetalim` is used, else skip
   `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
   to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.
@@ -796,7 +796,7 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
 - After the drop the gantry retracts at the bin, then goes to the next tracked cell, or waits
   at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0). `pk_drop_any_th` skips the turn
   to `geom_cal_th_deg` at the bin.
-- Belt clock: gantry X is vision \(x\) plus `cv_x_off_mm` (default 245, the 95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is not read by the intercept, so changing the width does not move the camera. A repeated conveyor sequence is ignored. The epoch restarts on a sequence jump above 32, a displacement step backward of more than 5 mm, or a conveyor-time step backward of more than 500 ms. Three unchanged displacement samples while speed stays positive integrate the previous speed. Stale is gantry receipt age above `kStaleAfterUs` (500 ms, two configured 250 ms periods), not the live gap between conveyor timestamps.
+- Belt clock: gantry X is vision \(x\) plus `vis_x_off_mm` (default 245, the 95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is not read by the intercept, so changing the width does not move the camera. A repeated conveyor sequence is ignored. The epoch restarts on a sequence jump above 32, a displacement step backward of more than 5 mm, or a conveyor-time step backward of more than 500 ms. Three unchanged displacement samples while speed stays positive integrate the previous speed. Stale is gantry receipt age above `kStaleAfterUs` (500 ms, two configured 250 ms periods), not the live gap between conveyor timestamps.
 - The pick scheduler has no motion parameters of its own. The active approach and the transfer
   to the bin run on the global profile: `spd_mm_s`, `th_spd_deg_s` (capped by `th_spd_max`),
   `acc_mm_s2`, `dec_mm_s2`, `th_acc_deg_s2`, and `th_dec_deg_s2`. A following part uses the speed
@@ -805,7 +805,7 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   retract use `AXIS_Z_PICK_SPEED_FRACTION` of the stored ballscrew cap (950 mm/s from `z_crit_rpm` and `z_lead_mm`). Safe Z comes from
   `Gantry::traverseClearanceZMm()`; tick, preload, settle, and arrival values come from
   `GantryControlPeriod.h`, `GantryLinearPhases.h`, `GantryRotaryPhases.h`, and
-  `GantryPathProfile.h`. `cv_valve_ms` and `cv_jaw_aaa_ms`…`cv_jaw_32650_ms`
+  `GantryPathProfile.h`. `grp_valve_ms` and `jaw_aaa_ms`…`jaw_32650_ms`
   (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable.
 
 For real-time protocol specs, see
@@ -940,6 +940,7 @@ Per-key values left by older firmware merge into the set at boot, before Class 1
 
 | Command | Effect |
 |---------|--------|
+| `cfg <key>` | Shows the value, its label and what it does (the schema description). The 16 keys renamed on 2026-11-16 (`cv_cam_y_mm` → `vis_cam_y_mm`, `cv_x_off_mm` → `vis_x_off_mm`, `cv_vis_ms` → `vis_lat_ms`, `cv_dedupe_mm` → `vis_dedupe_mm`, `cv_jaw_deg` → `jaw_off_deg`, `cv_valve_ms` → `grp_valve_ms`, `cv_jaw_<class>_ms` → `jaw_<class>_ms`) still work under the old name, and a stored set keeps their values. |
 | `cfg save` | Stores the running values, as above. The toolbox **Save to NVS** button and the TFT **Save Parameters** item do the same. |
 | `cfg export` | Prints every visible parameter as `PARAM key=value`. Passwords are left out. |
 | `cfg factory` | Puts compile-time defaults in RAM. `cfg save` stores them over the set, so download the file first. A reboot without saving brings the stored set back. |

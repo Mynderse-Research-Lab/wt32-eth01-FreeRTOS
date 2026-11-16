@@ -55,7 +55,7 @@ bool pickSchedulerVisMark(bool on, char* out, size_t out_len);
 // far" the conveyor frame edges (cv_cnv_near_mm / cv_cnv_far_mm), "batt" the
 // test battery (batt_x), "z" the joint Z with the open jaw tips on the belt.
 // "apply" derives cv_belt_w_mm and col_x_min_mm (plus col_z_min_mm when z was
-// recorded); "apply center" also sets cv_x_off_mm to the belt centre's
+// recorded); "apply center" also sets vis_x_off_mm to the belt centre's
 // end-effector X (theta 0).
 bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len);
 // CellNet receive counters and EMAC drop counters (netstat); reset zeroes them.

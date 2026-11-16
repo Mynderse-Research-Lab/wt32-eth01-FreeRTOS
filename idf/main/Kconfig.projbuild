@@ -346,7 +346,7 @@ menu "Gantry kinematics"
                 Gantry X of the camera. Vision x_across is measured from the
                 camera, and gantry X is x_across plus this value. The camera
                 sits at the belt center: 150 mm past the conveyor edge at
-                95 mm. Runtime key cv_x_off_mm, no reboot.
+                95 mm. Runtime key vis_x_off_mm, no reboot.
 
         config CONVEYOR_BELT_WIDTH_MM
             float "Belt width across X (mm)"

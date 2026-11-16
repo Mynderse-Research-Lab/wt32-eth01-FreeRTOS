@@ -228,10 +228,10 @@ $$s_a = s_c + y_{pick} - (y_{cam} + y_{bat}) \tag{4}$$
 
 $$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
 
-- **Latency:** $\Delta_{vis}$ is `cv_vis_ms`. The contract comment says capture displacement is required, but any `cv_vis_ms` above 0 lets every frame use the second line of (3) (G-C13).
+- **Latency:** $\Delta_{vis}$ is `vis_lat_ms`. The contract comment says capture displacement is required, but any `vis_lat_ms` above 0 lets every frame use the second line of (3) (G-C13).
 - **Trigger stand-in (`vis_batt_x` = 1):** $x$ comes from `batt_x` through forward kinematics, and $y_{bat} = -130 - 6 = -136$ mm, from compile-time constants (G-C5). The frame has no capture displacement, so (3) back-dates the capture by $\Delta_{vis}$. With the compiled defaults, $s_a - s_c$ = 847 mm, which is 2.82 s at 300 mm/s.
-- **Gantry X:** the target is the inverse kinematics of $x$ + `cv_x_off_mm`.
-- **Repeats:** a detection of the same cell (same id, or within `cv_dedupe_mm` in both $x$ and $s_a$) updates $s_a$. An armed strike then moves only its arrival.
+- **Gantry X:** the target is the inverse kinematics of $x$ + `vis_x_off_mm`.
+- **Repeats:** a detection of the same cell (same id, or within `vis_dedupe_mm` in both $x$ and $s_a$) updates $s_a$. An armed strike then moves only its arrival.
 - **Tracking:** up to 16 cells, while $-25 < s_a - s < 1500$ mm.
 
 #### 5.3.4 Grip geometry
@@ -240,7 +240,7 @@ The pads run along the long axis and the jaws close across the width (`chooseSid
 
 $$\theta_j = 90^\circ - \operatorname{fold}(\theta) - \theta_{off} + k \cdot {180^{\circ}} \tag{6}$$
 
-Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `cv_jaw_deg` (0°; the joint turns about the downward joint Z, so joint = 90° − pose), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
+Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `jaw_off_deg` (0°; the joint turns about the downward joint Z, so joint = 90° − pose), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
 
 $$c = \tfrac{1}{2}(o - w) \tag{7}$$
 
@@ -356,7 +356,7 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | $v_j$ | Jaw speed | `fin_spd_mm_s` | 210 mm/s |
 | $t_{valve}$ | Valve delay | `pk_von_ms` | 8 ms |
 | $\Delta_p, \Delta_c, \Delta_r$ | Operator offsets | `pk_off_plunge`, `pk_off_close`, `pk_off_retract` | 0 ms |
-| $\theta_{off}$ | Jaw angle offset | `cv_jaw_deg` | 0° |
+| $\theta_{off}$ | Jaw angle offset | `jaw_off_deg` | 0° |
 | $z_b$ | Belt surface, joint Z | `col_z_min_mm` | 115 mm (122 live, G-F1) |
 | — | Conveyor box edge, X | `col_x_min_mm` | 95 mm |
 | $z_{safe} - z_{min}$ | Traverse ceiling | stored `geom_safe_z_mm`, applied at boot | 48.4 mm by default |
@@ -365,10 +365,10 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | — | Approach speed | `spd_mm_s` | 50 mm/s (750 live, G-C7) |
 | — | Fast approach speed | `ceil_spd_mm_s` | 2000 mm/s |
 | — | Theta speed, accel, decel | `th_spd_deg_s` (capped by `th_spd_max`), `th_acc_deg_s2`, `th_dec_deg_s2` | 30°/s, 180°/s², 180°/s² |
-| $\Delta_{vis}$ | Vision latency | `cv_vis_ms` | 40 ms |
-| $y_{cam}, y_{pick}$ | Camera centre, pick plane | `cv_cam_y_mm`, `cv_pick_y_mm` | −711, 0 mm |
-| — | Vision X to gantry X | `cv_x_off_mm` | 245 mm (307.5 live, G-F1) |
-| — | Duplicate radius | `cv_dedupe_mm` | 40 mm |
+| $\Delta_{vis}$ | Vision latency | `vis_lat_ms` | 40 ms |
+| $y_{cam}, y_{pick}$ | Camera centre, pick plane | `vis_cam_y_mm`, `cv_pick_y_mm` | −711, 0 mm |
+| — | Vision X to gantry X | `vis_x_off_mm` | 245 mm (307.5 live, G-F1) |
+| — | Duplicate radius | `vis_dedupe_mm` | 40 mm |
 | — | Bin pose | `geom_cal_x_mm`, `geom_cal_z_mm`, `geom_cal_th_deg` | 10 mm, 90.8 mm, 90° |
 | $t_{close}, t_{open}$ | Grip close and open dwell | `grp_close_ms`, `grp_open_ms` | 190 ms each |
 | — | Trigger stand-in | `vis_batt_x`, `batt_x` | 0, 382.5 mm |
@@ -420,7 +420,7 @@ The ML model is not ready yet. So that development does not stall, the Gantry te
 | Trigger sensor (Gantry team workaround) | Sharp GP2Y0A21YK0F on an Arduino, 130 mm upstream of camera centre | On the rig |
 | Frame sender (Gantry team workaround) | Reads the Arduino over serial and sends the frame | `~/vision_sim/simulate-vision-output.py` |
 
-**Trigger sensor workaround.** Chain latency is set in `cv_vis_ms`, measured with a Saleae capture: about 36 ms with the sensor delay. Rig offsets sit in code (G-C5).
+**Trigger sensor workaround.** Chain latency is set in `vis_lat_ms`, measured with a Saleae capture: about 36 ms with the sensor delay. Rig offsets sit in code (G-C5).
 
 **Read:** [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
 

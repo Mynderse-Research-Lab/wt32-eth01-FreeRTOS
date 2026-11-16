@@ -77,7 +77,7 @@ struct CellCmd {
 struct VisionItem {
   L2VisionDetectPayload detect;
   int64_t receipt_us;
-  int64_t latency_us;  // < 0: cv_vis_ms
+  int64_t latency_us;  // < 0: vis_lat_ms
   uint32_t epoch;
   bool capture_valid;
   bool simulated;
@@ -192,7 +192,7 @@ static std::atomic<int64_t> s_retract_done_us{0};
 static std::atomic<bool> s_grip_mark{false};
 // Vision receipt marker (vismark), same pin: high when the CellNetL2 callback
 // stamps receipt_us, low when acceptDetect() takes the item. A Saleae on the
-// trigger sensor and GPIO17 gives sensor-to-receipt latency (cv_vis_ms).
+// trigger sensor and GPIO17 gives sensor-to-receipt latency (vis_lat_ms).
 static std::atomic<bool> s_vis_mark{false};
 
 static void gripMark(uint32_t level) {
@@ -1413,7 +1413,7 @@ bool pickSchedulerCalibrate(const char* args, char* out, size_t out_len) {
   if (std::strncmp(args, "valve ", 6) == 0) {
     int ms = 0;
     if (std::sscanf(args, "valve %d", &ms) != 1 ||
-        !app.setParamInt("cv_valve_ms", ms, reboot)) {
+        !app.setParamInt("grp_valve_ms", ms, reboot)) {
       std::snprintf(out, out_len, "usage: pickcal valve <ms>");
       return false;
     }
@@ -1424,9 +1424,9 @@ bool pickSchedulerCalibrate(const char* args, char* out, size_t out_len) {
     int cls = 0;
     int ms = 0;
     const char* keys[PickIntercept::kClassCount] = {
-        "cv_jaw_aaa_ms", "cv_jaw_aa_ms", "cv_jaw_d_ms", "cv_jaw_c_ms", "cv_jaw_9v_ms",
-        "cv_jaw_cr123_ms", "cv_jaw_18650_ms", "cv_jaw_21700_ms", "cv_jaw_26650_ms",
-        "cv_jaw_32650_ms"};
+        "jaw_aaa_ms", "jaw_aa_ms", "jaw_d_ms", "jaw_c_ms", "jaw_9v_ms",
+        "jaw_cr123_ms", "jaw_18650_ms", "jaw_21700_ms", "jaw_26650_ms",
+        "jaw_32650_ms"};
     if (std::sscanf(args, "jaw %d %d", &cls, &ms) != 2 || cls < 1 ||
         cls > PickIntercept::kClassCount || !app.setParamInt(keys[cls - 1], ms, reboot)) {
       std::snprintf(out, out_len, "usage: pickcal jaw <class 1-10> <ms, 0 = from jaw travel>");
@@ -1439,7 +1439,7 @@ bool pickSchedulerCalibrate(const char* args, char* out, size_t out_len) {
   if (std::strncmp(args, "jawoff ", 7) == 0) {
     float deg = 0.0f;
     if (std::sscanf(args, "jawoff %f", &deg) != 1 ||
-        !app.setParamFloat("cv_jaw_deg", deg, reboot)) {
+        !app.setParamFloat("jaw_off_deg", deg, reboot)) {
       std::snprintf(out, out_len, "usage: pickcal jawoff <deg>");
       return false;
     }
@@ -1476,7 +1476,7 @@ bool pickSchedulerCalibrate(const char* args, char* out, size_t out_len) {
     }
     const float y_pick = app.data().conveyor_y_pick_mm;
     const float y_cam = y_pick - static_cast<float>(travel);
-    if (!app.setParamFloat("cv_cam_y_mm", y_cam, reboot)) {
+    if (!app.setParamFloat("vis_cam_y_mm", y_cam, reboot)) {
       std::snprintf(out, out_len, "camera Y %.1f rejected", static_cast<double>(y_cam));
       return false;
     }
@@ -2512,7 +2512,7 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
 
     const float width = std::fabs(c.conveyor_belt_far_x_mm - c.conveyor_belt_near_x_mm);
     const float centre = 0.5f * (c.conveyor_belt_near_x_mm + c.conveyor_belt_far_x_mm);
-    // Vision and picksim x are end-effector X (tcp_x = cv_x_off_mm + x_across);
+    // Vision and picksim x are end-effector X (tcp_x = vis_x_off_mm + x_across);
     // the recorded X are joint X. Picks run at theta 0 here, as when jogging.
     const auto tcpX = [](float joint_x) {
         return s_gantry != nullptr
@@ -2525,7 +2525,7 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
         int len =
             snprintf(out, out_len,
                      "belt joint X %.1f..%.1f: width %.1f centre %.1f (cv_belt_w_mm %.1f, "
-                     "cv_x_off_mm %.1f) | conveyor joint X %.1f..%.1f (col_x_min_mm %.1f)",
+                     "vis_x_off_mm %.1f) | conveyor joint X %.1f..%.1f (col_x_min_mm %.1f)",
                      static_cast<double>(c.conveyor_belt_near_x_mm),
                      static_cast<double>(c.conveyor_belt_far_x_mm), static_cast<double>(width),
                      static_cast<double>(centre), static_cast<double>(c.conveyor_belt_width_mm),
@@ -2533,7 +2533,7 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
                      static_cast<double>(c.conveyor_frame_near_x_mm),
                      static_cast<double>(c.conveyor_frame_far_x_mm),
                      static_cast<double>(c.gantry_conveyor_collision_x_min_mm));
-        // picksim x is across the belt from the camera: batt_x - cv_x_off_mm.
+        // picksim x is across the belt from the camera: batt_x - vis_x_off_mm.
         if (len > 0 && static_cast<size_t>(len) < out_len) {
             len += snprintf(out + len, out_len - len, " | batt_x %.1f (picksim x %.1f)",
                             static_cast<double>(c.test_battery_x_mm),
@@ -2566,7 +2566,7 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
         }
         // The camera sits at the belt centre (Kconfig CONVEYOR_X_OFFSET), so
         // vision x_across = 0 maps to the midpoint. Opt-in: it moves every pick.
-        if (with_centre && !app.setParamFloat("cv_x_off_mm", centre_tcp, reboot)) {
+        if (with_centre && !app.setParamFloat("vis_x_off_mm", centre_tcp, reboot)) {
             snprintf(out, out_len, "width saved; camera X %.1f rejected",
                      static_cast<double>(centre_tcp));
             return false;
@@ -2585,7 +2585,7 @@ bool pickSchedulerBeltCal(const char* args, char* out, size_t out_len) {
                            static_cast<double>(old_w), static_cast<double>(width),
                            static_cast<double>(old_cx), static_cast<double>(cnv_near));
         if (with_centre && len > 0 && static_cast<size_t>(len) < out_len) {
-            len += snprintf(out + len, out_len - len, ", cv_x_off_mm %.1f -> %.1f",
+            len += snprintf(out + len, out_len - len, ", vis_x_off_mm %.1f -> %.1f",
                             static_cast<double>(old_x), static_cast<double>(centre_tcp));
         }
         if (s_belt_z_set && len > 0 && static_cast<size_t>(len) < out_len) {

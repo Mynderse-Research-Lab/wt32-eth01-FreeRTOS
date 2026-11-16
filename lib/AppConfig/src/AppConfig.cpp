@@ -24,16 +24,16 @@ struct PickClassKey {
 // NVS keys are at most 15 characters. Old cv_jaw1_ms / cell1_* keys are not read.
 constexpr int kPickClassSlots = 10;
 const PickClassKey kPickClassKeys[kPickClassSlots] = {
-    {"cv_jaw_aaa_ms", "cell_aaa_len_mm", "cell_aaa_h_mm"},
-    {"cv_jaw_aa_ms", "cell_aa_len_mm", "cell_aa_h_mm"},
-    {"cv_jaw_d_ms", "cell_d_len_mm", "cell_d_h_mm"},
-    {"cv_jaw_c_ms", "cell_c_len_mm", "cell_c_h_mm"},
-    {"cv_jaw_9v_ms", "cell_9v_len_mm", "cell_9v_h_mm"},
-    {"cv_jaw_cr123_ms", "cell_cr123_len", "cell_cr123_h_mm"},
-    {"cv_jaw_18650_ms", "cell_18650_len", "cell_18650_h_mm"},
-    {"cv_jaw_21700_ms", "cell_21700_len", "cell_21700_h_mm"},
-    {"cv_jaw_26650_ms", "cell_26650_len", "cell_26650_h_mm"},
-    {"cv_jaw_32650_ms", "cell_32650_len", "cell_32650_h_mm"},
+    {"jaw_aaa_ms", "cell_aaa_len_mm", "cell_aaa_h_mm"},
+    {"jaw_aa_ms", "cell_aa_len_mm", "cell_aa_h_mm"},
+    {"jaw_d_ms", "cell_d_len_mm", "cell_d_h_mm"},
+    {"jaw_c_ms", "cell_c_len_mm", "cell_c_h_mm"},
+    {"jaw_9v_ms", "cell_9v_len_mm", "cell_9v_h_mm"},
+    {"jaw_cr123_ms", "cell_cr123_len", "cell_cr123_h_mm"},
+    {"jaw_18650_ms", "cell_18650_len", "cell_18650_h_mm"},
+    {"jaw_21700_ms", "cell_21700_len", "cell_21700_h_mm"},
+    {"jaw_26650_ms", "cell_26650_len", "cell_26650_h_mm"},
+    {"jaw_32650_ms", "cell_32650_len", "cell_32650_h_mm"},
 };
 
 int pickKeySlot(const char* key, int field) {
@@ -102,6 +102,45 @@ private:
 
     IParamIo& inner_;
     std::vector<std::string> keys_;
+};
+
+// A renamed key is read under its old name first, so a set stored by older
+// firmware keeps its value; the new name wins when both are present.
+class RenamedKeys : public IParamIo {
+public:
+    explicit RenamedKeys(IParamIo& inner) : inner_(inner) {}
+
+    bool getInt32(const char* key, int32_t& out_val) override {
+        const bool old = readOld(key, [&](const char* k) { return inner_.getInt32(k, out_val); });
+        return inner_.getInt32(key, out_val) || old;
+    }
+    bool getFloat(const char* key, float& out_val) override {
+        const bool old = readOld(key, [&](const char* k) { return inner_.getFloat(k, out_val); });
+        return inner_.getFloat(key, out_val) || old;
+    }
+    bool getBool(const char* key, bool& out_val) override {
+        const bool old = readOld(key, [&](const char* k) { return inner_.getBool(k, out_val); });
+        return inner_.getBool(key, out_val) || old;
+    }
+    bool getString(const char* key, char* out_buf, size_t max_len) override {
+        const bool old =
+            readOld(key, [&](const char* k) { return inner_.getString(k, out_buf, max_len); });
+        return inner_.getString(key, out_buf, max_len) || old;
+    }
+
+    bool setInt32(const char*, int32_t) override { return false; }
+    bool setFloat(const char*, float) override { return false; }
+    bool setBool(const char*, bool) override { return false; }
+    bool setString(const char*, const char*) override { return false; }
+
+private:
+    template <typename Read>
+    static bool readOld(const char* key, Read read) {
+        const char* old = legacyParamKey(key);
+        return old != nullptr && read(old);
+    }
+
+    IParamIo& inner_;
 };
 
 }  // namespace
@@ -842,7 +881,8 @@ bool AppConfig::init(std::unique_ptr<IConfigStorage> storage) {
     return load();
 }
 
-void AppConfig::readParams(IParamIo& io) {
+void AppConfig::readParams(IParamIo& store) {
+    RenamedKeys io(store);
     io.getInt32("spd_mm_s", data_.gantry_default_speed_mm_per_s);
     io.getInt32("acc_mm_s2", data_.gantry_default_accel_mm_per_s2);
     io.getInt32("dec_mm_s2", data_.gantry_default_decel_mm_per_s2);
@@ -904,9 +944,9 @@ void AppConfig::readParams(IParamIo& io) {
     io.getInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
     io.getInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
 
-    io.getFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
+    io.getFloat("vis_cam_y_mm", data_.conveyor_y_cam_mm);
     io.getFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
-    io.getFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    io.getFloat("vis_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
     io.getFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
     io.getFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
     io.getFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
@@ -916,8 +956,8 @@ void AppConfig::readParams(IParamIo& io) {
     io.getFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     io.getInt32("cv_tau_min_us", data_.tau_min_us);
     io.getInt32("cv_tau_max_us", data_.tau_max_us);
-    io.getInt32("cv_vis_ms", data_.pick_vision_latency_ms);
-    io.getInt32("cv_valve_ms", data_.pick_valve_ms);
+    io.getInt32("vis_lat_ms", data_.pick_vision_latency_ms);
+    io.getInt32("grp_valve_ms", data_.pick_valve_ms);
     io.getInt32("pk_von_ms", data_.pick_valve_on_ms);
     io.getInt32("pk_voff_ms", data_.pick_valve_off_ms);
     io.getInt32("pk_tr_von", data_.pick_trim_von_ms);
@@ -940,8 +980,8 @@ void AppConfig::readParams(IParamIo& io) {
     for (int i = 0; i < kPickClassSlots; ++i) {
       io.getInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
     }
-    io.getFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
-    io.getFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    io.getFloat("jaw_off_deg", data_.pick_jaw_offset_deg);
+    io.getFloat("vis_dedupe_mm", data_.pick_dedupe_mm);
     for (int i = 0; i < kPickClassSlots; ++i) {
       io.getFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
       io.getFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
@@ -1072,9 +1112,9 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setInt32("grp_open_ms", data_.gantry_gripper_open_time_ms);
     io.setInt32("grp_close_ms", data_.gantry_gripper_close_time_ms);
 
-    io.setFloat("cv_cam_y_mm", data_.conveyor_y_cam_mm);
+    io.setFloat("vis_cam_y_mm", data_.conveyor_y_cam_mm);
     io.setFloat("cv_pick_y_mm", data_.conveyor_y_pick_mm);
-    io.setFloat("cv_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
+    io.setFloat("vis_x_off_mm", data_.conveyor_x_across_to_gantry_x_offset_mm);
     io.setFloat("cv_belt_w_mm", data_.conveyor_belt_width_mm);
     io.setFloat("cv_belt_near_mm", data_.conveyor_belt_near_x_mm);
     io.setFloat("cv_belt_far_mm", data_.conveyor_belt_far_x_mm);
@@ -1084,8 +1124,8 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setFloat("cv_belt_spd", data_.pick_default_belt_speed_mm_s);
     io.setInt32("cv_tau_min_us", data_.tau_min_us);
     io.setInt32("cv_tau_max_us", data_.tau_max_us);
-    io.setInt32("cv_vis_ms", data_.pick_vision_latency_ms);
-    io.setInt32("cv_valve_ms", data_.pick_valve_ms);
+    io.setInt32("vis_lat_ms", data_.pick_vision_latency_ms);
+    io.setInt32("grp_valve_ms", data_.pick_valve_ms);
     io.setInt32("pk_von_ms", data_.pick_valve_on_ms);
     io.setInt32("pk_voff_ms", data_.pick_valve_off_ms);
     io.setInt32("pk_tr_von", data_.pick_trim_von_ms);
@@ -1108,8 +1148,8 @@ void AppConfig::writeParams(IParamIo& io) const {
     for (int i = 0; i < kPickClassSlots; ++i) {
       io.setInt32(kPickClassKeys[i].jaw, data_.pick_jaw_ms[i]);
     }
-    io.setFloat("cv_jaw_deg", data_.pick_jaw_offset_deg);
-    io.setFloat("cv_dedupe_mm", data_.pick_dedupe_mm);
+    io.setFloat("jaw_off_deg", data_.pick_jaw_offset_deg);
+    io.setFloat("vis_dedupe_mm", data_.pick_dedupe_mm);
     for (int i = 0; i < kPickClassSlots; ++i) {
       io.setFloat(kPickClassKeys[i].len, data_.pick_cell_len_mm[i]);
       io.setFloat(kPickClassKeys[i].height, data_.pick_cell_h_mm[i]);
@@ -1351,8 +1391,8 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "grp_close_ms") == 0) out_val = data_.gantry_gripper_close_time_ms;
     else if (std::strcmp(key, "cv_tau_min_us") == 0) out_val = data_.tau_min_us;
     else if (std::strcmp(key, "cv_tau_max_us") == 0) out_val = data_.tau_max_us;
-    else if (std::strcmp(key, "cv_vis_ms") == 0) out_val = data_.pick_vision_latency_ms;
-    else if (std::strcmp(key, "cv_valve_ms") == 0) out_val = data_.pick_valve_ms;
+    else if (std::strcmp(key, "vis_lat_ms") == 0) out_val = data_.pick_vision_latency_ms;
+    else if (std::strcmp(key, "grp_valve_ms") == 0) out_val = data_.pick_valve_ms;
     else if (std::strcmp(key, "pk_von_ms") == 0) out_val = data_.pick_valve_on_ms;
     else if (std::strcmp(key, "pk_voff_ms") == 0) out_val = data_.pick_valve_off_ms;
     else if (std::strcmp(key, "pk_tr_von") == 0) out_val = data_.pick_trim_von_ms;
@@ -1423,8 +1463,8 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "grp_close_ms") == 0) data_.gantry_gripper_close_time_ms = val;
     else if (std::strcmp(key, "cv_tau_min_us") == 0) data_.tau_min_us = val;
     else if (std::strcmp(key, "cv_tau_max_us") == 0) data_.tau_max_us = val;
-    else if (std::strcmp(key, "cv_vis_ms") == 0) data_.pick_vision_latency_ms = val;
-    else if (std::strcmp(key, "cv_valve_ms") == 0) data_.pick_valve_ms = val;
+    else if (std::strcmp(key, "vis_lat_ms") == 0) data_.pick_vision_latency_ms = val;
+    else if (std::strcmp(key, "grp_valve_ms") == 0) data_.pick_valve_ms = val;
     else if (std::strcmp(key, "pk_von_ms") == 0) data_.pick_valve_on_ms = val;
     else if (std::strcmp(key, "pk_voff_ms") == 0) data_.pick_valve_off_ms = val;
     else if (std::strcmp(key, "pk_tr_von") == 0) data_.pick_trim_von_ms = val;
@@ -1506,9 +1546,9 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "geom_cal_th_deg") == 0) out_val = data_.gantry_cal_theta_park_deg;
     else if (std::strcmp(key, "col_x_min_mm") == 0) out_val = data_.gantry_conveyor_collision_x_min_mm;
     else if (std::strcmp(key, "col_z_min_mm") == 0) out_val = data_.gantry_conveyor_collision_z_min_mm;
-    else if (std::strcmp(key, "cv_cam_y_mm") == 0) out_val = data_.conveyor_y_cam_mm;
+    else if (std::strcmp(key, "vis_cam_y_mm") == 0) out_val = data_.conveyor_y_cam_mm;
     else if (std::strcmp(key, "cv_pick_y_mm") == 0) out_val = data_.conveyor_y_pick_mm;
-    else if (std::strcmp(key, "cv_x_off_mm") == 0) out_val = data_.conveyor_x_across_to_gantry_x_offset_mm;
+    else if (std::strcmp(key, "vis_x_off_mm") == 0) out_val = data_.conveyor_x_across_to_gantry_x_offset_mm;
     else if (std::strcmp(key, "cv_belt_w_mm") == 0) out_val = data_.conveyor_belt_width_mm;
     else if (std::strcmp(key, "cv_belt_near_mm") == 0) out_val = data_.conveyor_belt_near_x_mm;
     else if (std::strcmp(key, "cv_belt_far_mm") == 0) out_val = data_.conveyor_belt_far_x_mm;
@@ -1516,8 +1556,8 @@ bool AppConfig::getParamFloat(const char* key, float& out_val) const {
     else if (std::strcmp(key, "cv_cnv_far_mm") == 0) out_val = data_.conveyor_frame_far_x_mm;
     else if (std::strcmp(key, "batt_x") == 0) out_val = data_.test_battery_x_mm;
     else if (std::strcmp(key, "cv_belt_spd") == 0) out_val = data_.pick_default_belt_speed_mm_s;
-    else if (std::strcmp(key, "cv_jaw_deg") == 0) out_val = data_.pick_jaw_offset_deg;
-    else if (std::strcmp(key, "cv_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
+    else if (std::strcmp(key, "jaw_off_deg") == 0) out_val = data_.pick_jaw_offset_deg;
+    else if (std::strcmp(key, "vis_dedupe_mm") == 0) out_val = data_.pick_dedupe_mm;
     else if (const int len = pickKeySlot(key, 1); len >= 0) out_val = data_.pick_cell_len_mm[len];
     else if (const int height = pickKeySlot(key, 2); height >= 0) out_val = data_.pick_cell_h_mm[height];
     else if (std::strcmp(key, "fin_open_mm") == 0) out_val = data_.pick_finger_open_mm;
@@ -1582,9 +1622,9 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "geom_cal_th_deg") == 0) data_.gantry_cal_theta_park_deg = val;
     else if (std::strcmp(key, "col_x_min_mm") == 0) data_.gantry_conveyor_collision_x_min_mm = val;
     else if (std::strcmp(key, "col_z_min_mm") == 0) data_.gantry_conveyor_collision_z_min_mm = val;
-    else if (std::strcmp(key, "cv_cam_y_mm") == 0) data_.conveyor_y_cam_mm = val;
+    else if (std::strcmp(key, "vis_cam_y_mm") == 0) data_.conveyor_y_cam_mm = val;
     else if (std::strcmp(key, "cv_pick_y_mm") == 0) data_.conveyor_y_pick_mm = val;
-    else if (std::strcmp(key, "cv_x_off_mm") == 0) data_.conveyor_x_across_to_gantry_x_offset_mm = val;
+    else if (std::strcmp(key, "vis_x_off_mm") == 0) data_.conveyor_x_across_to_gantry_x_offset_mm = val;
     else if (std::strcmp(key, "cv_belt_w_mm") == 0) data_.conveyor_belt_width_mm = val;
     else if (std::strcmp(key, "cv_belt_near_mm") == 0) data_.conveyor_belt_near_x_mm = val;
     else if (std::strcmp(key, "cv_belt_far_mm") == 0) data_.conveyor_belt_far_x_mm = val;
@@ -1592,8 +1632,8 @@ bool AppConfig::setParamFloat(const char* key, float val, bool& out_reboot_requi
     else if (std::strcmp(key, "cv_cnv_far_mm") == 0) data_.conveyor_frame_far_x_mm = val;
     else if (std::strcmp(key, "batt_x") == 0) data_.test_battery_x_mm = val;
     else if (std::strcmp(key, "cv_belt_spd") == 0) data_.pick_default_belt_speed_mm_s = val;
-    else if (std::strcmp(key, "cv_jaw_deg") == 0) data_.pick_jaw_offset_deg = val;
-    else if (std::strcmp(key, "cv_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
+    else if (std::strcmp(key, "jaw_off_deg") == 0) data_.pick_jaw_offset_deg = val;
+    else if (std::strcmp(key, "vis_dedupe_mm") == 0) data_.pick_dedupe_mm = val;
     else if (const int len = pickKeySlot(key, 1); len >= 0) data_.pick_cell_len_mm[len] = val;
     else if (const int height = pickKeySlot(key, 2); height >= 0) data_.pick_cell_h_mm[height] = val;
     else if (std::strcmp(key, "fin_open_mm") == 0) data_.pick_finger_open_mm = val;

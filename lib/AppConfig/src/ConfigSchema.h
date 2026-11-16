@@ -31,10 +31,22 @@ struct ParamSchema {
     float step;                  // Step increment for rotary editor
     const char* units;           // Display units ("mm", "mm/s", "deg", etc.)
     std::vector<const char*> choices; // Options for CHOICE type
+    const char* description = nullptr;  // What the value does; shown by 'cfg <key>'
 };
 
 const std::vector<ParamSchema>& getParamSchemas();
 const ParamSchema* findParamSchema(const char* key);
+
+/// Keys renamed on 2026-11-16: camera, vision and jaw keys left the cv_ conveyor prefix.
+struct RenamedParamKey {
+    const char* old_key;
+    const char* new_key;
+};
+const std::vector<RenamedParamKey>& getRenamedParamKeys();
+/// New name for a renamed key, or nullptr.
+const char* renamedParamKey(const char* old_key);
+/// Name a key had before it was renamed, or nullptr.
+const char* legacyParamKey(const char* new_key);
 
 } // namespace Config
 

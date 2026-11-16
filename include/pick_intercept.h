@@ -318,7 +318,7 @@ struct JawChoice {
 };
 
 // Side grip: the pads run along the cell's long axis, so the pad direction in the pose
-// frame is fold(cell_deg) + jaw_offset_deg (cv_jaw_deg, 0° by default). The joint is
+// frame is fold(cell_deg) + jaw_offset_deg (jaw_off_deg, 0° by default). The joint is
 // 90° - pose (GantryKinematics): joint 0° holds the pads along +Y. current_deg and the
 // limits are joint angles. The two equivalent joints differ by 180° and are ranked by
 // linear travel; theta is not modulo.
