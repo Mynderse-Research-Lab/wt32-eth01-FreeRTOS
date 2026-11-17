@@ -28,23 +28,23 @@ BasicTestSummary runBasicTests() {
     }
   };
 
-  // Coordinate frame: X = horizontal traverse, Y = along-belt (no actuator;
-  // +Y = downstream), Z = vertical (+Z = down). Joint z=0 is A015 retract.
-  // therefore carries z_axis_y_offset_mm (along-belt offset of the Z column)
-  // instead of the pre-2026-05 y_axis_z_offset_mm.
+  // Coordinate frame (pose): +X across belt (x_home = x_max), +Y downstream,
+  // +Z up from belt (z=0 belt, z=z_max retracted), theta 0 deg along +X,
+  // +90 deg along +Y (pose.theta = joint.theta + 90 deg).
   Gantry::KinematicParameters params;
   params.theta_x_offset_mm  = -55.0f;
   params.z_axis_y_offset_mm =  80.0f;
+  params.x_stroke_mm        = 550.0f;
+  params.z_stroke_mm        = 150.0f;
 
   // Forward kinematics sanity.
   // JointConfig(x_mm, z_mm, theta_deg); pose carries x/y(=along-belt)/z/theta.
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, params);
-  check(nearlyEqual(pose.x, 45.0f), "forward: x includes theta offset");
+  check(nearlyEqual(pose.x, 505.0f), "forward: x = x_stroke - (joint.x + theta_x_offset)");
   check(nearlyEqual(pose.y, 80.0f), "forward: y fixed from z_axis_y_offset_mm");
-  check(nearlyEqual(pose.z, 25.0f + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM),
-        "forward: pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM");
-  check(nearlyEqual(pose.theta, 30.0f), "forward: theta passthrough");
+  check(nearlyEqual(pose.z, 125.0f), "forward: pose.z = z_stroke - joint.z");
+  check(nearlyEqual(pose.theta, 120.0f), "forward: pose.theta = joint.theta + 90");
 
   // Inverse kinematics round-trip (pose.y is dropped - no Y actuator).
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
