@@ -50,6 +50,8 @@ namespace Constants {
  */
 struct RuntimeParams {
     float z_speed_cap_mm_s = static_cast<float>(AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S);
+    float z_accel_cap_mm_s2 = 0.0f;
+    float z_decel_cap_mm_s2 = 0.0f;
     float theta_max_speed_deg_s = AXIS_THETA_MAX_SPEED_DEG_PER_S;
     float theta_accel_deg_s2 = AXIS_THETA_ACCEL_DEG_PER_S2;
     float theta_decel_deg_s2 = AXIS_THETA_DECEL_DEG_PER_S2;

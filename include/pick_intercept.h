@@ -38,7 +38,10 @@ constexpr float kPreloadS = Gantry::LinearPhase::kPreloadS;
 constexpr float kSettleS = Gantry::LinearPhase::kArrivalSettleS;
 constexpr float kThetaStartS = Gantry::RotaryPhase::kStartMaxS;
 constexpr float kArriveEpsMm = Gantry::Path::kArriveEpsMm;
-constexpr float kArriveEpsDeg = Gantry::Constants::EIP_THETA_SETTLED_TOL_DEG;
+// Arrival check tolerance for pre-position / staging. HCS01 S-0-0057 stops at
+// 0.10 deg and can coast 0.03-0.06 deg on AF -> AH; 1.0 deg is < 0.3 mm across
+// the jaw pads and avoids false aborts at -45.14 deg.
+constexpr float kArriveEpsDeg = 1.0f;
 constexpr int64_t kConveyorPeriodUs = 250000;
 constexpr int64_t kStaleAfterUs = 2 * kConveyorPeriodUs;
 constexpr int kFlatFramesForFallback = 3;
@@ -847,18 +850,32 @@ inline GripGeometry classifyClearance(float cell_deg, float jaw_deg, const CellG
 
 // Filled from the global gantry settings (pickConfig in pick_scheduler.cpp).
 // `speed` is the normal approach; `fast_speed` is used only when a later
-// tracked part would otherwise be missed. Z does not use either.
+// tracked part would otherwise be missed. Z uses `z_cap` / `z_accel` / `z_decel`.
 struct MotionLimits {
   float speed = 0.0f;
   float fast_speed = 0.0f;
   float accel = 0.0f;
   float decel = 0.0f;
+  float z_accel = 0.0f;
+  float z_decel = 0.0f;
   float theta_cap = 0.0f;
   float theta_accel = 0.0f;
   float theta_decel = 0.0f;
   float z_cap = 0.0f;
   float theta_start_frac = 0.0f;
+  bool theta_full_speed = false;
 };
+
+// Effective Z accel/decel honoring optional per-axis Z cap (<= 0 disables cap).
+inline float effectiveZAccel(float path_accel, float z_accel_cap) {
+  if (!(z_accel_cap > 0.0f)) {
+    return path_accel;
+  }
+  if (!(path_accel > 0.0f) || z_accel_cap < path_accel) {
+    return z_accel_cap;
+  }
+  return path_accel;
+}
 
 // True when finishing this cycle at `free_after_slow_s` and then the later
 // part's own slow approach would pass that part's arrival.
@@ -904,13 +921,15 @@ inline PostBinCycle postBinCycle(float pick_z_mm, float pick_x_mm, float pick_th
   const float z_cap = m.z_cap;
   const float accel = m.accel;
   const float decel = m.decel;
+  const float z_accel = effectiveZAccel(m.accel, m.z_accel);
+  const float z_decel = effectiveZAccel(m.decel, m.z_decel);
   PostBinCycle cycle;
   cycle.grip_dwell_s = grip_dwell_s;
-  cycle.retract_s = profileSeconds(std::fabs(pick_z_mm - z_safe_mm), z_cap, accel, decel) +
+  cycle.retract_s = profileSeconds(std::fabs(pick_z_mm - z_safe_mm), z_cap, z_accel, z_decel) +
                     kPreloadS + kSettleS;
   cycle.transfer_s = approachSeconds(bin_x_mm - pick_x_mm, bin_theta_deg - pick_theta_deg, m.speed,
                                      m.theta_cap, accel, decel, m.theta_accel, m.theta_decel);
-  cycle.descend_s = profileSeconds(std::fabs(bin_z_mm - z_safe_mm), z_cap, accel, decel) +
+  cycle.descend_s = profileSeconds(std::fabs(bin_z_mm - z_safe_mm), z_cap, z_accel, z_decel) +
                     kPreloadS + kSettleS;
   cycle.open_dwell_s = open_dwell_s;
   cycle.bin_retract_s = cycle.descend_s;
@@ -950,35 +969,39 @@ struct MotionBudget {
 
 inline float segmentWallSeconds(float x0, float z0, const Gantry::Path::PathSegment& seg,
                                 float ceiling, float speed, float accel, float decel,
-                                float z_cap) {
+                                float z_cap, float z_accel = 0.0f, float z_decel = 0.0f) {
   const float dx = seg.x_mm - x0;
   const float dz = seg.z_mm - z0;
   const float ax = std::fabs(dx);
   const float az = std::fabs(dz);
   const float z_speed = z_cap > 1.0f ? z_cap : speed;
+  const float za = effectiveZAccel(accel, z_accel);
+  const float zd = effectiveZAccel(decel, z_decel);
   const bool deferred = seg.move_x && !Gantry::Path::zInTraverseBand(z0, ceiling);
 
   if (!seg.move_x && !seg.move_z) {
     return 0.0f;
   }
   if (deferred && seg.move_z) {
-    const float t_z = profileSeconds(az, z_speed, accel, decel) + kPreloadS;
+    const float t_z = profileSeconds(az, z_speed, za, zd) + kPreloadS;
     const float to_band = std::fabs(z0 - ceiling);
     const float t_enter =
-        timeAlongProfile(to_band, az, z_speed, accel, decel) + kPreloadS;
+        timeAlongProfile(to_band, az, z_speed, za, zd) + kPreloadS;
     const float t_x = profileSeconds(ax, speed, accel, decel) + kPreloadS;
     const float done = t_z > (t_enter + t_x) ? t_z : (t_enter + t_x);
     return done + kSettleS;
   }
   if (!seg.move_x) {
-    return profileSeconds(az, z_speed, accel, decel) + kPreloadS + kSettleS;
+    return profileSeconds(az, z_speed, za, zd) + kPreloadS + kSettleS;
   }
   if (!seg.move_z) {
     return profileSeconds(ax, speed, accel, decel) + kPreloadS + kSettleS;
   }
   const float path = std::hypot(ax, az);
   const float v = Gantry::Path::zCappedPathSpeed(speed, dx, dz, z_cap);
-  return profileSeconds(path, v, accel, decel) + kPreloadS + kSettleS;
+  const float a = Gantry::Path::zCappedPathAccel(accel, dx, dz, z_accel);
+  const float d = Gantry::Path::zCappedPathAccel(decel, dx, dz, z_decel);
+  return profileSeconds(path, v, a, d) + kPreloadS + kSettleS;
 }
 
 // Pre-position from (x0, z0, theta0) to (x1, z_safe, theta1), then an optional
@@ -994,6 +1017,9 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
   if (std::fabs(z_safe - z0) <= kArriveEpsMm) {
     z_safe = z0;
   }
+  if (std::fabs(theta1 - theta0) <= kArriveEpsDeg) {
+    theta1 = theta0;
+  }
   MotionBudget b;
   b.approach_speed_mm_s = m.speed;
 
@@ -1007,6 +1033,8 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
   float win_start = 0.0f;
   float win_speed = m.speed;
   bool win_x = false;
+  const float za = effectiveZAccel(m.accel, m.z_accel);
+  const float zd = effectiveZAccel(m.decel, m.z_decel);
   for (size_t i = 0; i < n; ++i) {
     const float dx = segs[i].x_mm - cx;
     const float dz = segs[i].z_mm - cz;
@@ -1015,8 +1043,7 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
     float start = t;
     if (deferred && segs[i].move_z) {
       const float z_speed = m.z_cap > 1.0f ? m.z_cap : m.speed;
-      start += timeAlongProfile(std::fabs(cz - z_safe), std::fabs(dz), z_speed, m.accel,
-                                m.decel) +
+      start += timeAlongProfile(std::fabs(cz - z_safe), std::fabs(dz), z_speed, za, zd) +
                kPreloadS;
     }
     if (segs[i].move_z &&
@@ -1033,7 +1060,8 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
                       ? Gantry::Path::zCappedPathSpeed(m.speed, dx, dz, m.z_cap)
                       : m.speed;
     }
-    t += segmentWallSeconds(cx, cz, segs[i], z_safe, m.speed, m.accel, m.decel, m.z_cap);
+    t += segmentWallSeconds(cx, cz, segs[i], z_safe, m.speed, m.accel, m.decel, m.z_cap,
+                            m.z_accel, m.z_decel);
     cx = segs[i].x_mm;
     cz = segs[i].z_mm;
   }
@@ -1045,10 +1073,12 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
     float v_th = m.theta_cap;
     float start = 0.0f;
     if (win < n && win_len > Gantry::Path::kAxisEpsMm) {
-      const Gantry::Path::ThetaWindow w =
-          Gantry::Path::planThetaWindow(win_len, m.speed, dth, m.theta_cap, m.theta_start_frac);
-      if (w.runnable) {
-        v_th = w.speed_deg_per_s;
+      if (!m.theta_full_speed) {
+        const Gantry::Path::ThetaWindow w =
+            Gantry::Path::planThetaWindow(win_len, m.speed, dth, m.theta_cap, m.theta_start_frac);
+        if (w.runnable) {
+          v_th = w.speed_deg_per_s;
+        }
       }
       start = win_start + timeAlongProfile(m.theta_start_frac * win_len, win_len, win_speed,
                                            m.accel, m.decel);
@@ -1068,13 +1098,12 @@ inline MotionBudget budgetPick(float x0, float z0, float theta0, float x1, float
   }
   float z_from = z_safe;
   if (z_hover > z_safe + kArriveEpsMm) {
-    b.hover_s = profileSeconds(z_hover - z_safe, b.descend_speed_mm_s, m.accel, m.decel) +
+    b.hover_s = profileSeconds(z_hover - z_safe, b.descend_speed_mm_s, za, zd) +
                 kPreloadS + kSettleS;
     b.approach_s += b.hover_s;
     z_from = z_hover;
   }
-  b.z_motion_s = profileSeconds(std::fabs(z_pick - z_from), b.descend_speed_mm_s, m.accel,
-                                m.decel);
+  b.z_motion_s = profileSeconds(std::fabs(z_pick - z_from), b.descend_speed_mm_s, za, zd);
   return b;
 }
 
@@ -1226,6 +1255,70 @@ inline Retime retimeArrival(const StrikeTiming& t, const BeltClock& belt, int64_
         now_us + static_cast<int64_t>(remain / static_cast<double>(belt.speed_mm_s) * 1.0e6);
     r.ok = true;
     return r;
+}
+
+// Armed strike event schedule for retimeStrikeEvents().
+// Preserves physical invariants once ballistic phases begin:
+//   - Before Z fires: Z, grip, and retract track arrive_us together.
+//   - After Z fires (before grip): retract never moves before Z finishes its
+//     physical plunge (z_fired_us + min_z_to_retract_us), and grip stays at
+//     the fixed planned spacing before retract.
+//   - After grip fires: both Z and the pneumatic jaws are ballistic, so retract
+//     locks to the later of plunge completion and full jaw close spacing.
+struct ArmedStrikeTimes {
+    bool z_pending = false;
+    bool grip_pending = false;
+    bool retract_pending = false;
+    int64_t z_at_us = 0;
+    int64_t grip_at_us = 0;
+    int64_t retract_at_us = 0;
+    int64_t z_rel_us = 0;
+    int64_t close_rel_us = 0;
+    int64_t retract_rel_us = 0;
+    int64_t min_z_to_retract_us = 0;
+    int64_t z_fired_us = 0;
+    int64_t grip_fired_us = 0;
+};
+
+inline void retimeStrikeEvents(ArmedStrikeTimes& st, int64_t arrive_us) {
+    const int64_t close_to_retract_us = st.retract_rel_us - st.close_rel_us;
+    if (st.z_pending) {
+        st.z_at_us = arrive_us + st.z_rel_us;
+        if (st.grip_pending) {
+            st.grip_at_us = arrive_us + st.close_rel_us;
+        }
+        if (st.retract_pending) {
+            st.retract_at_us = arrive_us + st.retract_rel_us;
+        }
+        return;
+    }
+
+    const int64_t z_anchor_us = st.z_fired_us > 0 ? st.z_fired_us : st.z_at_us;
+    const int64_t z_floor_us = z_anchor_us + st.min_z_to_retract_us;
+
+    if (st.grip_pending) {
+        int64_t target_retract_us = arrive_us + st.retract_rel_us;
+        if (target_retract_us < z_floor_us) {
+            target_retract_us = z_floor_us;
+        }
+        if (st.retract_pending) {
+            st.retract_at_us = target_retract_us;
+        }
+        st.grip_at_us = target_retract_us - close_to_retract_us;
+        return;
+    }
+
+    if (st.retract_pending) {
+        const int64_t grip_anchor_us = st.grip_fired_us > 0 ? st.grip_fired_us : st.grip_at_us;
+        const int64_t grip_floor_us = grip_anchor_us + close_to_retract_us;
+        st.retract_at_us = z_floor_us > grip_floor_us ? z_floor_us : grip_floor_us;
+    }
+}
+
+/// True when the scheduled plunge release has already slipped past the allowed
+/// late margin; aborting at hover avoids blind punches and mid-plunge timeouts.
+inline bool isPlungeOverdue(int64_t now_us, int64_t z_at_us, int64_t max_late_us) {
+    return (now_us - z_at_us) > max_late_us;
 }
 
 // ---------------------------------------------------------------------------

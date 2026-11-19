@@ -155,6 +155,10 @@ public:
     void setRuntimeParams(const RuntimeParams& params);
     /// Ballscrew speed cap in force (mm/s), from the stored critical RPM and lead.
     float zSpeedCapMmS() const;
+    /// Z acceleration cap in force (mm/s^2); 0 disables the cap.
+    float zAccelCapMmS2() const;
+    /// Z deceleration cap in force (mm/s^2); 0 disables the cap.
+    float zDecelCapMmS2() const;
     /// Absolute joint-Z band ceiling for X traverse / coordinated X+Z
     /// (= z_min + Z− margin).
     float traverseClearanceZMm() const;
@@ -215,6 +219,8 @@ public:
     /// and the 0.5° deadband. >= 0 is a pick: theta starts at that fraction,
     /// any |dθ| >= 0.1° is commanded and quantized to 0.1°, and a waiting
     /// gantry still turns. SAFE_Z still blocks theta below the band.
+    /// theta_full_speed runs theta at full capped speed_deg_per_s instead of
+    /// throttling to the path window.
     GantryError moveTo(const JointConfig& joint,
                        uint32_t speed_mm_per_s        = 50,
                        uint32_t speed_deg_per_s       = 30,
@@ -222,7 +228,8 @@ public:
                        uint32_t deceleration_mm_per_s2 = 0,
                        uint32_t acceleration_deg_per_s2 = 0,
                        uint32_t deceleration_deg_per_s2 = 0,
-                       float theta_start_frac = -1.0f);
+                       float theta_start_frac = -1.0f,
+                       bool theta_full_speed = false);
 
     GantryError moveTo(const EndEffectorPose& pose,
                        uint32_t speed_mm_per_s        = 50,
@@ -252,6 +259,24 @@ public:
     GantryError queueRetractToSafeZ(uint32_t speed_mm_per_s,
                                     uint32_t acceleration_mm_per_s2,
                                     uint32_t deceleration_mm_per_s2);
+
+    /// Chain a joint move directly onto an in-flight Z retract (once its
+    /// StartMotion edge has fired). Keeps Z moving to SAFE_Z, launches X and
+    /// theta on the first tick Z enters the SAFE_Z band, and descends to
+    /// joint.z afterward if below SAFE_Z. Returns false if no released retract
+    /// is active or preconditions fail (leaving the retract untouched).
+    bool chainMoveAfterRetract(const JointConfig& joint,
+                               uint32_t speed_mm_per_s,
+                               uint32_t speed_deg_per_s = Constants::DEFAULT_SPEED_DEG_PER_S,
+                               uint32_t acceleration_mm_per_s2 = 0,
+                               uint32_t deceleration_mm_per_s2 = 0,
+                               uint32_t acceleration_deg_per_s2 = 0,
+                               uint32_t deceleration_deg_per_s2 = 0,
+                               float theta_start_frac = 0.0f,
+                               bool theta_full_speed = true);
+
+    /// True once a chained retract has handed off to X/next segment or gone idle.
+    bool isRetractHandedOff() const;
 
     bool isBusy() const;
     bool isEnabled() const;
@@ -410,6 +435,7 @@ private:
     bool thetaHoldsDescent_ = false;
     float thetaStartFrac_ = -1.0f;
     float thetaWindowStartFrac_ = Path::kThetaStartFrac;
+    bool thetaFullSpeed_ = false;
     // retractToSafeZ in progress: X / theta alarms do not abort it.
     bool retractOnly_ = false;
     // PnP: after path to pick completes, run gripper then retract to clearance.
@@ -459,7 +485,8 @@ private:
     void processSequentialMotion();
     /// Arm X Absolute with explicit path-component profile (mm units).
     bool startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_s2,
-                          float decel_mm_s2);
+                          float decel_mm_s2, bool allow_retract_lead = false);
+    bool retractLeadReady(float lead_s) const;
 
     bool planPathTo(float x0, float z0, float x1, float z1);
     bool armCurrentPathSegment();

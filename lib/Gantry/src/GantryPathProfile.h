@@ -185,10 +185,51 @@ inline bool zInTraverseBand(float z_mm, float band_ceiling_mm,
     return z_mm <= (band_ceiling_mm + eps_mm);
 }
 
-/// Largest path speed <= requested whose Z component |dz|/L stays within
-/// z_cap (ballscrew critical speed). Lowering the resultant keeps the move
-/// straight. z_cap <= 0 disables the cap.
-inline float zCappedPathSpeed(float requested, float dx, float dz, float z_cap) {
+/// Time lead (seconds) before Z finishes retracting to SAFE_Z at which a
+/// pick/transfer deferred X move is armed. Covers GantryUpdate tick latency
+/// (~5 ms), Kinetix preload (20 ms), Kinetix cmd-to-motion dead time (~42 ms),
+/// plus ~93 ms of physical X acceleration while Z finishes its top decel and
+/// S-curve settle so X sweeps out of the retract visibly before Z stops.
+inline constexpr float kRetractXLeadS = 0.160f;
+/// Time lead (seconds) for deferred theta during an active retract — matches
+/// X lead while HCS01 command-to-motion startup (~50 ms) keeps the shaft clear
+/// of belt/bin until Z is well above the belt (>50 mm).
+inline constexpr float kRetractThetaLeadS = 0.160f;
+/// Hard physical ceiling (mm) below SAFE_Z where early X/theta arming is
+/// permitted during an active upward retract.
+inline constexpr float kMaxRetractXLeadMm = 48.0f;
+/// Maximum fraction of the retract stroke allowed as early lead — ensures Z
+/// has physically climbed at least 22% of the stroke before X/theta arm.
+inline constexpr float kMaxRetractStrokeFrac = 0.78f;
+
+/// Distance below band_ceiling_z_mm at which a deferred axis may be armed early
+/// while Z is actively retracting from start_z_mm toward band_ceiling_z_mm.
+/// Scales with the Z deceleration profile over lead_s and caps at both
+/// max_lead_mm and kMaxRetractStrokeFrac of the retract stroke.
+inline float retractLeadMm(float start_z_mm, float band_ceiling_z_mm,
+                           float z_speed_mm_s, float z_decel_mm_s2,
+                           float lead_s = kRetractXLeadS,
+                           float max_lead_mm = kMaxRetractXLeadMm) {
+    const float stroke = start_z_mm - band_ceiling_z_mm;
+    if (stroke <= kAxisEpsMm || z_speed_mm_s <= 0.0f || z_decel_mm_s2 <= 0.0f ||
+        lead_s <= 0.0f || max_lead_mm <= 0.0f) {
+        return 0.0f;
+    }
+    const float t_decel = z_speed_mm_s / z_decel_mm_s2;
+    const float dist = (lead_s <= t_decel)
+                           ? (0.5f * z_decel_mm_s2 * lead_s * lead_s)
+                           : (z_speed_mm_s * lead_s - 0.5f * z_speed_mm_s * t_decel);
+    const float max_stroke_lead = kMaxRetractStrokeFrac * stroke;
+    float lead = dist < max_stroke_lead ? dist : max_stroke_lead;
+    if (lead > max_lead_mm) {
+        lead = max_lead_mm;
+    }
+    return lead > 0.0f ? lead : 0.0f;
+}
+
+/// Largest path scalar <= requested whose Z component |dz|/L stays within
+/// z_cap. Lowering the resultant keeps the X-Z path straight. z_cap <= 0 disables.
+inline float zCappedPathValue(float requested, float dx, float dz, float z_cap) {
     if (requested <= 0.0f || z_cap <= 0.0f) {
         return requested;
     }
@@ -198,6 +239,20 @@ inline float zCappedPathSpeed(float requested, float dx, float dz, float z_cap) 
     }
     const float max_v = z_cap * std::hypot(dx, dz) / az;
     return requested < max_v ? requested : max_v;
+}
+
+/// Largest path speed <= requested whose Z component |dz|/L stays within
+/// z_cap (ballscrew critical speed). Lowering the resultant keeps the move
+/// straight. z_cap <= 0 disables the cap.
+inline float zCappedPathSpeed(float requested, float dx, float dz, float z_cap) {
+    return zCappedPathValue(requested, dx, dz, z_cap);
+}
+
+/// Largest path accel or decel <= requested whose Z component |dz|/L stays
+/// within z_accel_cap. Lowering the resultant keeps coordinated X+Z straight.
+/// z_accel_cap <= 0 disables the cap.
+inline float zCappedPathAccel(float requested, float dx, float dz, float z_accel_cap) {
+    return zCappedPathValue(requested, dx, dz, z_accel_cap);
 }
 
 /// Speed for theta to start at start_frac and finish by kThetaEndFrac

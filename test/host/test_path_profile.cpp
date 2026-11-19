@@ -344,6 +344,33 @@ static void test_theta_nearest_equivalent_takes_short_way(void) {
   }
 }
 
+static void test_retract_lead_scales_with_profile_and_caps(void) {
+  using Gantry::Path::kMaxRetractStrokeFrac;
+  using Gantry::Path::kMaxRetractXLeadMm;
+  using Gantry::Path::kRetractXLeadS;
+  using Gantry::Path::retractLeadMm;
+
+  // Fast 5000 mm/s^2 belt retract from 119 -> 48.4 mm: 0.5*5000*0.160^2 = 64.0 mm,
+  // 0.78*70.6 = 55.07 mm -> capped at kMaxRetractXLeadMm (48.0 mm).
+  const float fast = retractLeadMm(119.0f, 48.4f, 900.0f, 5000.0f, kRetractXLeadS);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, kMaxRetractXLeadMm, fast);
+
+  // Bin retract from 90.8 -> 48.4 mm (42.4 mm stroke): capped at 78% stroke (33.07 mm).
+  const float bin = retractLeadMm(90.8f, 48.4f, 900.0f, 5000.0f, kRetractXLeadS);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, kMaxRetractStrokeFrac * 42.4f, bin);
+
+  // Slow 50 mm/s retract keeps tight lead (v*lead - 0.5*v^2/d = 7.583 mm).
+  const float slow = retractLeadMm(119.0f, 48.4f, 50.0f, 3000.0f, kRetractXLeadS);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 7.583f, slow);
+
+  // Capped at kMaxRetractStrokeFrac of retract stroke (short 10 mm retract -> 7.8 mm).
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, kMaxRetractStrokeFrac * 10.0f,
+                           retractLeadMm(58.4f, 48.4f, 900.0f, 5000.0f, kRetractXLeadS));
+
+  // Already in-band -> 0.
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, retractLeadMm(48.4f, 48.4f, 900.0f, 5000.0f));
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_decompose_pure_x);
@@ -373,5 +400,6 @@ int main(void) {
   RUN_TEST(test_theta_origin_unaligned_shrinks_positive_travel);
   RUN_TEST(test_theta_window_no_divide_by_zero);
   RUN_TEST(test_theta_nearest_equivalent_takes_short_way);
+  RUN_TEST(test_retract_lead_scales_with_profile_and_caps);
   return UNITY_END();
 }

@@ -133,6 +133,9 @@ public:
     bool isEnabled() const override { return enabled; }
 
     bool reject_move = false;
+    bool start_held = false;
+    bool queued_held = false;
+    float queued_target_mm = 0.0f;
 
     TimedMove timed;
 
@@ -140,18 +143,51 @@ public:
         if (reject_move) return false;
         moves.push_back({target, speed, accel, decel});
         target_mm = target;
+        start_held = false;
+        queued_held = false;
         busy = std::fabs(target - mm) > 1.0e-4f;
         if (timed.enabled) {
             timed.begin(mm, speed, accel, decel);
         }
         return true;
     }
+    bool moveToMmHeld(float target, float speed, float accel, float decel) override {
+        if (reject_move) return false;
+        moves.push_back({target, speed, accel, decel});
+        target_mm = target;
+        start_held = true;
+        queued_held = false;
+        busy = true;
+        return true;
+    }
+    bool queueHeldMm(float target, float speed, float accel, float decel) override {
+        if (reject_move || !busy || start_held) return false;
+        moves.push_back({target, speed, accel, decel});
+        queued_target_mm = target;
+        queued_held = true;
+        return true;
+    }
+    bool releaseStartMotion() override {
+        if (queued_held) {
+            target_mm = queued_target_mm;
+            queued_held = false;
+            return true;
+        }
+        if (start_held) {
+            start_held = false;
+            return true;
+        }
+        return false;
+    }
+    bool isStartHeld() const override { return start_held || queued_held; }
     bool moveRelativeMm(float delta, float speed, float accel, float decel) override {
         return moveToMm(mm + delta, speed, accel, decel);
     }
     bool stopMotion() override {
         ++stop_count;
         busy = false;
+        start_held = false;
+        queued_held = false;
         target_mm = mm;
         return true;
     }

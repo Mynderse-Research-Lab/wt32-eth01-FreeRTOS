@@ -61,6 +61,8 @@ struct Inputs {
     double valve_delay_s = 0.0;      // close command to jaw motion
     double valve_tau_s = kValveTauS;
     double jaw_speed_mm_s = kJawSpeedMmS;
+    double z_plunge_dead_s = 0.0;    // Z plunge StartMotion edge to physical motion start
+    double z_retract_dead_s = 0.0;   // Z retract StartMotion edge to physical reversal start
     int plunge_offset_ms = 0;        // moves only the Z release
     int close_offset_ms = 0;         // moves only the grip close
     int retract_offset_ms = 0;       // moves only the Z retract
@@ -72,16 +74,21 @@ struct Plan {
     const char* reason = "ok";
     double z_hover_mm = 0.0;
     double z_grasp_mm = 0.0;
-    double tau_plunge_s = 0.0;       // hover to grasp depth
+    double tau_plunge_s = 0.0;       // hover to grasp depth (kinematic)
     double tau_band_s = 0.0;         // part of the plunge below the object top
     double tau_full_close_s = 0.0;   // close command to jaws on the width faces
+    double z_plunge_dead_s = 0.0;    // clamped Z plunge start deadtime applied
+    double z_retract_dead_s = 0.0;   // clamped Z retract start deadtime applied
+    double z_to_retract_floor_s = 0.0;  // minimum retract_cmd - z_cmd for zero mid-air reversal
+    double t_z_done_s = 0.0;         // target physical grasp-depth arrival (relative to belt arrival)
+    double t_top_s = 0.0;            // target physical top crossing (t_z_done_s - tau_band_s)
     double t_z_nominal_s = 0.0;
     double t_close_nominal_s = 0.0;
     double t_retract_nominal_s = 0.0;
     double t_z_s = 0.0;              // release the held Z plunge
     double t_close_s = 0.0;          // fire the grip valve
     double t_retract_s = 0.0;        // start the Z retract
-    double dwell_s = 0.0;            // bottom dwell the offsets ask for, signed
+    double dwell_s = 0.0;            // physical bottom dwell the offsets ask for, signed
 };
 
 /// Time-optimal trapezoid/triangle duration (physics_engines.trapezoid_duration)
@@ -97,6 +104,40 @@ inline double trapezoidSeconds(double distance_mm, double v_max, double a_max, d
         return v_peak / a_max + v_peak / d_max;
     }
     return v_max / a_max + v_max / d_max + (dist - d_ramps) / v_max;
+}
+
+/// Exact elapsed time to reach distance s_mm along a trapezoid/triangle profile
+/// of total length total_dist_mm with separate accel and decel ramps.
+inline double trapezoidTimeToDistance(double s_mm, double total_dist_mm, double v_max, double a_max,
+                                      double d_max) {
+    const double dist = std::fabs(total_dist_mm);
+    if (s_mm <= 0.0 || dist < 1e-6 || v_max <= 0.0 || a_max <= 0.0 || d_max <= 0.0) {
+        return 0.0;
+    }
+    if (s_mm >= dist) {
+        return trapezoidSeconds(dist, v_max, a_max, d_max);
+    }
+    const double d_ramps = 0.5 * v_max * v_max * (1.0 / a_max + 1.0 / d_max);
+    if (dist < d_ramps) {
+        const double v_peak = std::sqrt(2.0 * dist * a_max * d_max / (a_max + d_max));
+        const double d_acc = 0.5 * v_peak * v_peak / a_max;
+        const double total_s = v_peak / a_max + v_peak / d_max;
+        if (s_mm <= d_acc) {
+            return std::sqrt(2.0 * s_mm / a_max);
+        }
+        return total_s - std::sqrt(2.0 * (dist - s_mm) / d_max);
+    }
+    const double d_acc = 0.5 * v_max * v_max / a_max;
+    const double d_dec = 0.5 * v_max * v_max / d_max;
+    const double t_acc = v_max / a_max;
+    const double total_s = t_acc + v_max / d_max + (dist - d_ramps) / v_max;
+    if (s_mm <= d_acc) {
+        return std::sqrt(2.0 * s_mm / a_max);
+    }
+    if (s_mm <= dist - d_dec) {
+        return t_acc + (s_mm - d_acc) / v_max;
+    }
+    return total_s - std::sqrt(2.0 * (dist - s_mm) / d_max);
 }
 
 /// Time for one jaw to travel stroke_mm after valve opening:
@@ -164,8 +205,13 @@ inline Plan plan(const Inputs& in) {
 
     const double to_top = (z_top - zh) > kMinTopMm ? (z_top - zh) : kMinTopMm;
     const double dz = in.dz_mm_s2 > 0.0 ? in.dz_mm_s2 : in.az_mm_s2;
+    const double z_plunge_dead = in.z_plunge_dead_s > 0.0 ? in.z_plunge_dead_s : 0.0;
+    const double z_retract_dead = in.z_retract_dead_s > 0.0 ? in.z_retract_dead_s : 0.0;
     p.tau_plunge_s = trapezoidSeconds(zg - zh, in.vz_mm_s, in.az_mm_s2, dz);
-    p.tau_band_s = p.tau_plunge_s - std::sqrt(2.0 * to_top / in.az_mm_s2);
+    const double tau_to_top = trapezoidTimeToDistance(to_top, zg - zh, in.vz_mm_s, in.az_mm_s2, dz);
+    p.tau_band_s = p.tau_plunge_s - tau_to_top;
+    p.z_plunge_dead_s = z_plunge_dead;
+    p.z_retract_dead_s = z_retract_dead;
 
     double q_full = in.pad_half_open_mm - 0.5 * in.width_mm;
     if (q_full < kMinStrokeMm) {
@@ -204,9 +250,15 @@ inline Plan plan(const Inputs& in) {
         t_z_done = 0.0;
     }
 
-    p.t_z_nominal_s = t_z_done - p.tau_plunge_s;
-    p.t_retract_nominal_s = t_z_done;  // zero dwell at depth
-    p.t_close_nominal_s = p.t_retract_nominal_s - dt_retract_from_close;
+    // Physical targets: Z reaches depth at t_z_done, retract begins lifting at
+    // t_z_done, and jaws close onto the cell at t_z_done + kRetractLeadS.
+    // Subtract each actuator's start deadtime so physical motion hits the target
+    // independent of conveyor speed.
+    p.t_z_done_s = t_z_done;
+    p.t_top_s = t_z_done - p.tau_band_s;
+    p.t_z_nominal_s = t_z_done - p.tau_plunge_s - z_plunge_dead;
+    p.t_retract_nominal_s = t_z_done - z_retract_dead;
+    p.t_close_nominal_s = t_z_done - dt_retract_from_close;
 
     bool clamped = false;
     const int plunge_ms = clampOffsetMs(in.plunge_offset_ms, clamped);
@@ -217,13 +269,25 @@ inline Plan plan(const Inputs& in) {
     p.t_retract_s = p.t_retract_nominal_s + retract_ms * 0.001;
 
     // Full plunge (no mid-air reversal) and plunge < close < retract.
-    const double retract_floor = p.t_z_s + p.tau_plunge_s;
-    // Retract minus plunge end as asked: retract offset minus plunge offset.
+    // Physical plunge ends at t_z_s + z_plunge_dead + tau_plunge_s; physical
+    // retract begins at t_retract_s + z_retract_dead.
+    double min_z_to_retract = z_plunge_dead + p.tau_plunge_s - z_retract_dead;
+    if (min_z_to_retract < 2.0 * kMinGapS) {
+        min_z_to_retract = 2.0 * kMinGapS;
+    }
+    p.z_to_retract_floor_s = min_z_to_retract;
+    const double retract_floor = p.t_z_s + min_z_to_retract;
+    // Physical bottom dwell as asked: retract offset minus plunge offset.
     // A negative dwell is not applied; the floor below holds the retract.
+    // Allow 1 ns tolerance so 1-ULP IEEE-754 rounding at 0/0/0 offsets does not
+    // report a false clamp.
     p.dwell_s = p.t_retract_s - retract_floor;
-    if (p.t_retract_s < retract_floor) {
+    if (p.t_retract_s < retract_floor - 1e-9) {
         p.t_retract_s = retract_floor;
         clamped = true;
+    } else if (p.t_retract_s < retract_floor) {
+        p.t_retract_s = retract_floor;
+        p.dwell_s = 0.0;
     }
     if (p.t_close_s < p.t_z_s + kMinGapS) {
         p.t_close_s = p.t_z_s + kMinGapS;

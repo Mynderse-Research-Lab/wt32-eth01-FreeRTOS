@@ -471,9 +471,9 @@
 #define AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
     (((double)AXIS_Z_CRITICAL_RPM / 60.0) * (double)AXIS_Z_LEAD_MM_PER_REV)
 
-/* Z: pick moves run this fraction of the stored whip ceiling, deliberately 5 %
- * under it. */
-#define AXIS_Z_PICK_SPEED_FRACTION 0.95f
+/* Z: pick moves run this fraction of the stored whip ceiling, deliberately 10 %
+ * under it (90% operational safety margin). */
+#define AXIS_Z_PICK_SPEED_FRACTION 0.90f
 
 /* Theta: rotary encoder pulses per degree */
 #define AXIS_THETA_PULSES_PER_DEG \

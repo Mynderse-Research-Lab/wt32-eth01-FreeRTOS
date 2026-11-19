@@ -515,6 +515,8 @@ void AppConfig::loadDefaults() {
     data_.pick_vision_latency_ms = 40;
     data_.pick_valve_ms = 30;
     data_.pick_valve_on_ms = 8;
+    data_.pick_z_plunge_dead_ms = 30;
+    data_.pick_z_retract_dead_ms = 22;
     data_.pick_offset_plunge_ms = 0;
     data_.pick_offset_close_ms = 0;
     data_.vision_x_from_batt = 0;
@@ -912,6 +914,8 @@ void AppConfig::readParams(IParamIo& store) {
     io.getInt32("vis_lat_ms", data_.pick_vision_latency_ms);
     io.getInt32("grp_valve_ms", data_.pick_valve_ms);
     io.getInt32("pk_von_ms", data_.pick_valve_on_ms);
+    io.getInt32("pk_z_dead_ms", data_.pick_z_plunge_dead_ms);
+    io.getInt32("pk_z_ret_ms", data_.pick_z_retract_dead_ms);
     io.getInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     io.getInt32("pk_off_close", data_.pick_offset_close_ms);
     io.getInt32("vis_batt_x", data_.vision_x_from_batt);
@@ -1068,6 +1072,8 @@ void AppConfig::writeParams(IParamIo& io) const {
     io.setInt32("vis_lat_ms", data_.pick_vision_latency_ms);
     io.setInt32("grp_valve_ms", data_.pick_valve_ms);
     io.setInt32("pk_von_ms", data_.pick_valve_on_ms);
+    io.setInt32("pk_z_dead_ms", data_.pick_z_plunge_dead_ms);
+    io.setInt32("pk_z_ret_ms", data_.pick_z_retract_dead_ms);
     io.setInt32("pk_off_plunge", data_.pick_offset_plunge_ms);
     io.setInt32("pk_off_close", data_.pick_offset_close_ms);
     io.setInt32("vis_batt_x", data_.vision_x_from_batt);
@@ -1323,6 +1329,8 @@ bool AppConfig::getParamInt(const char* key, int32_t& out_val) const {
     else if (std::strcmp(key, "vis_lat_ms") == 0) out_val = data_.pick_vision_latency_ms;
     else if (std::strcmp(key, "grp_valve_ms") == 0) out_val = data_.pick_valve_ms;
     else if (std::strcmp(key, "pk_von_ms") == 0) out_val = data_.pick_valve_on_ms;
+    else if (std::strcmp(key, "pk_z_dead_ms") == 0) out_val = data_.pick_z_plunge_dead_ms;
+    else if (std::strcmp(key, "pk_z_ret_ms") == 0) out_val = data_.pick_z_retract_dead_ms;
     else if (std::strcmp(key, "pk_off_plunge") == 0) out_val = data_.pick_offset_plunge_ms;
     else if (std::strcmp(key, "pk_off_close") == 0) out_val = data_.pick_offset_close_ms;
     else if (std::strcmp(key, "vis_batt_x") == 0) out_val = data_.vision_x_from_batt;
@@ -1386,6 +1394,8 @@ bool AppConfig::setParamInt(const char* key, int32_t val, bool& out_reboot_requi
     else if (std::strcmp(key, "vis_lat_ms") == 0) data_.pick_vision_latency_ms = val;
     else if (std::strcmp(key, "grp_valve_ms") == 0) data_.pick_valve_ms = val;
     else if (std::strcmp(key, "pk_von_ms") == 0) data_.pick_valve_on_ms = val;
+    else if (std::strcmp(key, "pk_z_dead_ms") == 0) data_.pick_z_plunge_dead_ms = val;
+    else if (std::strcmp(key, "pk_z_ret_ms") == 0) data_.pick_z_retract_dead_ms = val;
     else if (std::strcmp(key, "pk_off_plunge") == 0) data_.pick_offset_plunge_ms = val;
     else if (std::strcmp(key, "pk_off_close") == 0) data_.pick_offset_close_ms = val;
     else if (std::strcmp(key, "vis_batt_x") == 0) data_.vision_x_from_batt = val;

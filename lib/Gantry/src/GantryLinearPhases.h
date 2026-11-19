@@ -14,7 +14,7 @@
 namespace Gantry {
 namespace LinearPhase {
 
-inline constexpr uint8_t kPreloadTicks = 4;
+inline constexpr uint8_t kPreloadTicks = 2;
 inline constexpr uint8_t kStartMotionTicks = 5;
 inline constexpr uint8_t kArrivalStableTicks = 3;
 /// From moveToMm() until the StartMotion edge.

@@ -333,6 +333,16 @@ float Gantry::zSpeedCapMmS() const {
     return runtime_.z_speed_cap_mm_s;
 }
 
+float Gantry::zAccelCapMmS2() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return runtime_.z_accel_cap_mm_s2;
+}
+
+float Gantry::zDecelCapMmS2() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return runtime_.z_decel_cap_mm_s2;
+}
+
 float Gantry::traverseClearanceZMm() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     // Bottom-band ceiling: coordinated X+Z only while Z <= z_min + margin.
@@ -399,6 +409,7 @@ void Gantry::moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed) {
     deceleration_deg_per_s2_ = 0;
     jointDirectMove_ = true;
     thetaStartFrac_ = -1.0f;
+    thetaFullSpeed_ = false;
 
     startSequentialMotion();
 }
@@ -410,7 +421,8 @@ GantryError Gantry::moveTo(const JointConfig& joint,
                            uint32_t deceleration_mm_per_s2,
                            uint32_t acceleration_deg_per_s2,
                            uint32_t deceleration_deg_per_s2,
-                           float theta_start_frac) {
+                           float theta_start_frac,
+                           bool theta_full_speed) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     GANTRY_CHECK_INITIALIZED_RET(GantryError::NOT_INITIALIZED);
     GANTRY_CHECK_ENABLED_RET(GantryError::MOTOR_NOT_ENABLED);
@@ -444,6 +456,7 @@ GantryError Gantry::moveTo(const JointConfig& joint,
     deceleration_deg_per_s2_ = deceleration_deg_per_s2;
     jointDirectMove_ = true;
     thetaStartFrac_ = theta_start_frac;
+    thetaFullSpeed_ = theta_full_speed;
 
     startSequentialMotion();
     return GantryError::OK;
@@ -490,6 +503,7 @@ GantryError Gantry::preloadJointMove(const JointConfig& joint,
     deceleration_deg_per_s2_ = 0;
     jointDirectMove_ = true;
     thetaStartFrac_ = -1.0f;
+    thetaFullSpeed_ = false;
     holdZStart_ = true;
     zStartHeld_ = false;
 
@@ -543,7 +557,7 @@ GantryError Gantry::retractToSafeZ(uint32_t speed_mm_per_s,
     const float x = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
     const float z = axisZ_->getCurrentMm();
     const float ceiling = traverseClearanceZMm();
-    if (z <= ceiling + Path::kAxisEpsMm) {
+    if (Path::zInTraverseBand(z, ceiling)) {
         return GantryError::OK;
     }
 
@@ -553,13 +567,20 @@ GantryError Gantry::retractToSafeZ(uint32_t speed_mm_per_s,
     speed_mm_per_s_ = static_cast<uint32_t>(Path::zCappedPathSpeed(
         static_cast<float>(speed_mm_per_s), 0.0f, ceiling - z,
         runtime_.z_speed_cap_mm_s));
+    const float z_accel = Path::zCappedPathAccel(
+        static_cast<float>(acceleration_mm_per_s2), 0.0f, ceiling - z,
+        runtime_.z_accel_cap_mm_s2);
+    const float z_decel = Path::zCappedPathAccel(
+        static_cast<float>(deceleration_mm_per_s2), 0.0f, ceiling - z,
+        runtime_.z_decel_cap_mm_s2);
     speed_deg_per_s_ = 0;
-    acceleration_mm_per_s2_ = acceleration_mm_per_s2;
-    deceleration_mm_per_s2_ = deceleration_mm_per_s2;
+    acceleration_mm_per_s2_ = static_cast<uint32_t>(z_accel);
+    deceleration_mm_per_s2_ = static_cast<uint32_t>(z_decel);
     acceleration_deg_per_s2_ = 0;
     deceleration_deg_per_s2_ = 0;
     jointDirectMove_ = true;
     thetaStartFrac_ = -1.0f;
+    thetaFullSpeed_ = false;
     thetaPending_ = false;
     pathSegments_[0] = Path::PathSegment{x, ceiling, false, true};
     pathSegmentCount_ = 1;
@@ -570,15 +591,13 @@ GantryError Gantry::retractToSafeZ(uint32_t speed_mm_per_s,
     pathSegZArmed_ = false;
     retractOnly_ = true;
 
-    ESP_LOGW(TAG, "[RETRACT] Z %.2f -> %.2f mm (Z only)", z, ceiling);
-    if (!moveZAxisTo(ceiling, static_cast<float>(speed_mm_per_s_),
-                     static_cast<float>(acceleration_mm_per_s2),
-                     static_cast<float>(deceleration_mm_per_s2))) {
+    if (!moveZAxisTo(ceiling, static_cast<float>(speed_mm_per_s_), z_accel, z_decel)) {
         stopAllMotion();
         return GantryError::TIMEOUT;
     }
     pathSegZArmed_ = true;
     motionState_ = MotionState::Z_RETRACTING;
+    ESP_LOGD(TAG, "[RETRACT] Z %.2f -> %.2f mm (Z only)", z, ceiling);
     return GantryError::OK;
 }
 
@@ -607,8 +626,13 @@ GantryError Gantry::queueRetractToSafeZ(uint32_t speed_mm_per_s,
     const float speed = Path::zCappedPathSpeed(
         static_cast<float>(speed_mm_per_s), 0.0f, ceiling - z_from,
         runtime_.z_speed_cap_mm_s);
-    if (!axisZ_->queueHeldMm(ceiling, speed, static_cast<float>(acceleration_mm_per_s2),
-                             static_cast<float>(deceleration_mm_per_s2))) {
+    const float z_accel = Path::zCappedPathAccel(
+        static_cast<float>(acceleration_mm_per_s2), 0.0f, ceiling - z_from,
+        runtime_.z_accel_cap_mm_s2);
+    const float z_decel = Path::zCappedPathAccel(
+        static_cast<float>(deceleration_mm_per_s2), 0.0f, ceiling - z_from,
+        runtime_.z_decel_cap_mm_s2);
+    if (!axisZ_->queueHeldMm(ceiling, speed, z_accel, z_decel)) {
         return GantryError::TIMEOUT;
     }
 
@@ -616,8 +640,8 @@ GantryError Gantry::queueRetractToSafeZ(uint32_t speed_mm_per_s,
     targetX_mm_ = x;
     targetZ_mm_ = ceiling;
     speed_mm_per_s_ = static_cast<uint32_t>(speed);
-    acceleration_mm_per_s2_ = acceleration_mm_per_s2;
-    deceleration_mm_per_s2_ = deceleration_mm_per_s2;
+    acceleration_mm_per_s2_ = static_cast<uint32_t>(z_accel);
+    deceleration_mm_per_s2_ = static_cast<uint32_t>(z_decel);
     thetaPending_ = false;
     pathSegments_[0] = Path::PathSegment{x, ceiling, false, true};
     pathSegmentCount_ = 1;
@@ -628,9 +652,99 @@ GantryError Gantry::queueRetractToSafeZ(uint32_t speed_mm_per_s,
     pathSegZArmed_ = true;
     retractOnly_ = true;
     motionState_ = MotionState::Z_RETRACTING;
-    ESP_LOGI(TAG, "[RETRACT] queued Z %.2f -> %.2f mm behind the plunge (held)", z_from,
+    ESP_LOGD(TAG, "[RETRACT] queued Z %.2f -> %.2f mm behind the plunge (held)", z_from,
              ceiling);
     return GantryError::OK;
+}
+
+bool Gantry::chainMoveAfterRetract(const JointConfig& joint,
+                                   uint32_t speed_mm_per_s,
+                                   uint32_t speed_deg_per_s,
+                                   uint32_t acceleration_mm_per_s2,
+                                   uint32_t deceleration_mm_per_s2,
+                                   uint32_t acceleration_deg_per_s2,
+                                   uint32_t deceleration_deg_per_s2,
+                                   float theta_start_frac,
+                                   bool theta_full_speed) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!initialized_ || !enabled_ || !workspaceCalibrated_ || !axisZ_) {
+        return false;
+    }
+    if (motionState_ != MotionState::Z_RETRACTING || !retractOnly_) {
+        return false;
+    }
+    // Only chain once the retract StartMotion edge has fired and Z is moving up.
+    if (!axisZ_->isBusy() || axisZ_->isStartHeld()) {
+        return false;
+    }
+    if (axisZ_->isAlarmActive() ||
+        (axisX_ && axisX_->isAlarmActive()) ||
+        (axisTheta_ && axisTheta_->isAlarmActive())) {
+        return false;
+    }
+
+    JointConfig goal = joint;
+    if (theta_start_frac >= 0.0f) {
+        const float cur = axisTheta_ ? axisTheta_->getCurrentDeg()
+                                     : static_cast<float>(currentTheta_);
+        goal.theta = Path::commandThetaDeg(cur, joint.theta);
+    }
+    if (!Kinematics::validate(goal, config_.limits)) {
+        return false;
+    }
+
+    const float curX = axisX_ ? axisX_->getCurrentMm() : currentX_mm_;
+    const float curZ = axisZ_->getCurrentMm();
+    const float ceiling = traverseClearanceZMm();
+    const bool needX = std::fabs(goal.x - curX) > Path::kAxisEpsMm;
+    const float seg0X = needX ? goal.x : curX;
+
+    targetX_mm_ = goal.x;
+    targetZ_mm_ = goal.z;
+    targetTheta_deg_ = goal.theta;
+    speed_mm_per_s_ = speed_mm_per_s;
+    speed_deg_per_s_ = speed_deg_per_s;
+    acceleration_mm_per_s2_ = acceleration_mm_per_s2;
+    deceleration_mm_per_s2_ = deceleration_mm_per_s2;
+    acceleration_deg_per_s2_ = acceleration_deg_per_s2;
+    deceleration_deg_per_s2_ = deceleration_deg_per_s2;
+    jointDirectMove_ = true;
+    thetaStartFrac_ = theta_start_frac;
+    thetaFullSpeed_ = theta_full_speed;
+    pathDoGripperAfter_ = false;
+    retractOnly_ = false;
+
+    pathSegments_[0] = Path::PathSegment{seg0X, ceiling, needX, true};
+    pathSegmentCount_ = 1;
+    if (std::fabs(goal.z - ceiling) > Path::kAxisEpsMm) {
+        pathSegments_[1] = Path::PathSegment{seg0X, goal.z, false, true};
+        pathSegmentCount_ = 2;
+    }
+    pathSegmentIndex_ = 0;
+    pathSegStartX_mm_ = curX;
+    // Keep the higher Z start so retractLeadMm sees the full retract stroke.
+    pathSegStartZ_mm_ = curZ > pathSegStartZ_mm_ ? curZ : pathSegStartZ_mm_;
+    pathSegXArmed_ = false;
+    pathSegZArmed_ = true;
+
+    if (axisTheta_) {
+#if !CONFIG_GANTRY_THETA_SEQUENTIAL
+        scheduleThetaForPath();
+#endif
+        currentTheta_ = static_cast<int32_t>(axisTheta_->getCurrentDeg());
+    } else {
+        currentTheta_ = static_cast<int32_t>(targetTheta_deg_);
+    }
+
+    // If Z already entered the SAFE_Z band, arm X and theta immediately.
+    tryArmDeferredPathX();
+    tryStartPendingTheta();
+    return true;
+}
+
+bool Gantry::isRetractHandedOff() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return pathSegXArmed_ || (pathSegmentIndex_ > 0) || !isBusy();
 }
 
 GantryError Gantry::moveTo(const EndEffectorPose& pose,
@@ -664,6 +778,7 @@ GantryError Gantry::moveTo(const EndEffectorPose& pose,
     deceleration_deg_per_s2_ = deceleration_deg_per_s2;
     jointDirectMove_ = false;
     thetaStartFrac_ = -1.0f;
+    thetaFullSpeed_ = false;
 
     startSequentialMotion();
     return GantryError::OK;
@@ -840,7 +955,9 @@ bool Gantry::thetaSettledAt(float target_deg) const {
     if (!axisTheta_ || axisTheta_->isBusy() || axisTheta_->isAlarmActive()) {
         return false;
     }
-    return std::fabs(axisTheta_->getCurrentDeg() - target_deg) <= EIP_THETA_SETTLED_TOL_DEG;
+    // Accept up to 0.5 deg so stiction-settled stops (<= 0.30 deg) pass bring-up orient.
+    constexpr float kBringUpThetaTolDeg = 0.5f;
+    return std::fabs(axisTheta_->getCurrentDeg() - target_deg) <= kBringUpThetaTolDeg;
 }
 
 void Gantry::softHomeJointDatum() {
@@ -1492,18 +1609,25 @@ uint32_t Gantry::getHomingSpeed() const {
 
 bool Gantry::moveZAxisTo(float targetZ, float speed, float accel, float decel) {
     if (axisZ_) {
-        ESP_LOGI(TAG,
-                 "[Z_MOVE] current=%.3f mm target=%.3f mm pulses=%lu "
-                 "speed=%.1f accel=%.1f decel=%.1f",
-                 axisZ_->getCurrentMm(), targetZ,
-                 (unsigned long)axisZ_->getCurrentPulses(), speed, accel, decel);
+        const float curMm = axisZ_->getCurrentMm();
         if (holdZStart_) {
             holdZStart_ = false;
             const bool ok = axisZ_->moveToMmHeld(targetZ, speed, accel, decel);
             zStartHeld_ = ok && axisZ_->isStartHeld();
+            ESP_LOGD(TAG,
+                     "[Z_MOVE] current=%.3f mm target=%.3f mm pulses=%lu "
+                     "speed=%.1f accel=%.1f decel=%.1f (held)",
+                     curMm, targetZ,
+                     (unsigned long)axisZ_->getCurrentPulses(), speed, accel, decel);
             return ok;
         }
-        return axisZ_->moveToMm(targetZ, speed, accel, decel);
+        const bool ok = axisZ_->moveToMm(targetZ, speed, accel, decel);
+        ESP_LOGD(TAG,
+                 "[Z_MOVE] current=%.3f mm target=%.3f mm pulses=%lu "
+                 "speed=%.1f accel=%.1f decel=%.1f",
+                 curMm, targetZ,
+                 (unsigned long)axisZ_->getCurrentPulses(), speed, accel, decel);
+        return ok;
     }
     currentZ_ = (int32_t)targetZ;
     return true;
@@ -1631,6 +1755,7 @@ void Gantry::stopAllMotion() {
     thetaPendingSpeedDegS_ = 0.0f;
     thetaWindowSegIndex_   = 0;
     thetaHoldsDescent_     = false;
+    thetaFullSpeed_        = false;
     holdZStart_            = false;
     zStartHeld_            = false;
     retractOnly_           = false;
@@ -2562,25 +2687,20 @@ bool Gantry::armCurrentPathSegment() {
     const float dz = seg.z_mm - pathSegStartZ_mm_;
     const bool x_unlocked = !seg.move_x || zInTraverseBand();
     const bool together = seg.move_x && seg.move_z && x_unlocked;
+    const float cap_dx = together ? dx : 0.0f;
+    const float cap_dz = seg.move_z ? dz : 0.0f;
     const Path::PathProfile profile{
         Path::zCappedPathSpeed(static_cast<float>(speed_mm_per_s_),
-                               together ? dx : 0.0f, seg.move_z ? dz : 0.0f,
-                               runtime_.z_speed_cap_mm_s),
-        static_cast<float>(acceleration_mm_per_s2_),
-        static_cast<float>(deceleration_mm_per_s2_),
+                               cap_dx, cap_dz, runtime_.z_speed_cap_mm_s),
+        Path::zCappedPathAccel(static_cast<float>(acceleration_mm_per_s2_),
+                               cap_dx, cap_dz, runtime_.z_accel_cap_mm_s2),
+        Path::zCappedPathAccel(static_cast<float>(deceleration_mm_per_s2_),
+                               cap_dx, cap_dz, runtime_.z_decel_cap_mm_s2),
     };
     const Path::AxisComponents c = together
         ? Path::decompose(dx, dz, profile)
         : Path::decompose((seg.move_x && x_unlocked) ? dx : 0.0f,
                           seg.move_z ? dz : 0.0f, profile);
-
-    ESP_LOGI(TAG,
-             "[PATH] seg %u/%u -> (%.3f, %.3f) move_x=%d move_z=%d "
-             "vx=%.1f vz=%.1f ax=%.1f az=%.1f%s",
-             (unsigned)(pathSegmentIndex_ + 1), (unsigned)pathSegmentCount_,
-             seg.x_mm, seg.z_mm, (int)seg.move_x, (int)seg.move_z,
-             c.x_speed, c.z_speed, c.x_accel, c.z_accel,
-             (seg.move_x && !x_unlocked) ? " (X deferred until SAFE_Z)" : "");
 
     pathSegXArmed_ = false;
     pathSegZArmed_ = false;
@@ -2602,6 +2722,14 @@ bool Gantry::armCurrentPathSegment() {
         pathSegXArmed_ = true;
     }
 
+    ESP_LOGD(TAG,
+             "[PATH] seg %u/%u -> (%.3f, %.3f) move_x=%d move_z=%d "
+             "vx=%.1f vz=%.1f ax=%.1f az=%.1f%s",
+             (unsigned)(pathSegmentIndex_ + 1), (unsigned)pathSegmentCount_,
+             seg.x_mm, seg.z_mm, (int)seg.move_x, (int)seg.move_z,
+             c.x_speed, c.z_speed, c.x_accel, c.z_accel,
+             (seg.move_x && !x_unlocked) ? " (X deferred until SAFE_Z)" : "");
+
     if (pathSegXArmed_ && pathSegZArmed_) {
         motionState_ = MotionState::XZ_MOVING;
     } else if (pathSegXArmed_) {
@@ -2616,12 +2744,44 @@ bool Gantry::armCurrentPathSegment() {
     return true;
 }
 
+bool Gantry::retractLeadReady(float lead_s) const {
+    if (thetaStartFrac_ < 0.0f || pathSegmentIndex_ >= pathSegmentCount_) {
+        return false;
+    }
+    const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
+    const float ceiling = traverseClearanceZMm();
+    if (!seg.move_z || !pathSegZArmed_ || seg.z_mm > ceiling + Path::kAxisEpsMm) {
+        return false;
+    }
+    if (!axisZ_ || !axisZ_->isBusy() || axisZ_->isStartHeld() || axisZ_->isAlarmActive()) {
+        return false;
+    }
+    const float dz = pathSegStartZ_mm_ - ceiling;
+    if (dz <= Path::kAxisEpsMm) {
+        return false;
+    }
+    const float z_speed = Path::zCappedPathSpeed(
+        static_cast<float>(speed_mm_per_s_), 0.0f, dz, runtime_.z_speed_cap_mm_s);
+    const float z_decel = Path::zCappedPathAccel(
+        static_cast<float>(deceleration_mm_per_s2_), 0.0f, dz, runtime_.z_decel_cap_mm_s2);
+    const float lead_mm = Path::retractLeadMm(pathSegStartZ_mm_, ceiling, z_speed, z_decel, lead_s);
+    if (lead_mm <= 0.0f) {
+        return false;
+    }
+    return axisZ_->getCurrentMm() <= (ceiling + lead_mm);
+}
+
 void Gantry::tryArmDeferredPathX() {
     if (pathSegmentIndex_ >= pathSegmentCount_) {
         return;
     }
     const Path::PathSegment& seg = pathSegments_[pathSegmentIndex_];
-    if (!seg.move_x || pathSegXArmed_ || !zInTraverseBand()) {
+    if (!seg.move_x || pathSegXArmed_) {
+        return;
+    }
+    const bool in_band = zInTraverseBand();
+    const bool early_lead = !in_band && retractLeadReady(Path::kRetractXLeadS);
+    if (!in_band && !early_lead) {
         return;
     }
 
@@ -2632,9 +2792,7 @@ void Gantry::tryArmDeferredPathX() {
         static_cast<float>(deceleration_mm_per_s2_),
     };
     const Path::AxisComponents c = Path::decompose(dx, 0.0f, profile);
-    ESP_LOGI(TAG, "[PATH] X unlocked (Z in SAFE_Z band) -> %.3f mm vx=%.1f",
-             seg.x_mm, c.x_speed);
-    if (!startXAxisMotion(seg.x_mm, c.x_speed, c.x_accel, c.x_decel)) {
+    if (!startXAxisMotion(seg.x_mm, c.x_speed, c.x_accel, c.x_decel, early_lead)) {
         ESP_LOGE(TAG, "[PATH] deferred X arm failed");
         failPath("deferred X arm failed");
         return;
@@ -2645,6 +2803,10 @@ void Gantry::tryArmDeferredPathX() {
     } else {
         motionState_ = MotionState::X_MOVING;
     }
+    ESP_LOGD(TAG, "[PATH] X unlocked (%s, Z=%.2f) -> %.3f mm vx=%.1f",
+             early_lead ? "retract lead" : "SAFE_Z band",
+             axisZ_ ? axisZ_->getCurrentMm() : static_cast<float>(currentZ_),
+             seg.x_mm, c.x_speed);
 }
 
 float Gantry::thetaAccelDegPerS2() const {
@@ -2775,6 +2937,17 @@ void Gantry::scheduleThetaForPath() {
             cap = static_cast<float>(speed_deg_per_s_);
         }
     }
+    if (thetaFullSpeed_) {
+        thetaPending_ = true;
+        thetaPendingSpeedDegS_ = cap > 0.0f ? cap : static_cast<float>(speed_deg_per_s_);
+        thetaWindowSegIndex_ = pick;
+        thetaWindowStartFrac_ = start_frac;
+        ESP_LOGD(TAG,
+                 "[THETA] pending full-speed seg %u/%u start=%.0f%% speed=%.1f deg/s dtheta=%.2f",
+                 (unsigned)(pick + 1), (unsigned)pathSegmentCount_,
+                 start_frac * 100.0f, thetaPendingSpeedDegS_, dth);
+        return;
+    }
     const Path::ThetaWindow w = Path::planThetaWindow(
         pick_len,
         static_cast<float>(speed_mm_per_s_),
@@ -2795,7 +2968,7 @@ void Gantry::scheduleThetaForPath() {
     thetaPendingSpeedDegS_ = w.speed_deg_per_s;
     thetaWindowSegIndex_ = pick;
     thetaWindowStartFrac_ = start_frac;
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "[THETA] pending window seg %u/%u start=%.0f%% speed=%.1f deg/s "
              "clamped=%d dtheta=%.2f",
              (unsigned)(pick + 1), (unsigned)pathSegmentCount_,
@@ -2810,22 +2983,25 @@ void Gantry::tryStartPendingTheta() {
     if (pathSegmentIndex_ != thetaWindowSegIndex_) {
         return;
     }
-    if (!zInTraverseBand()) {
+    const bool in_band = zInTraverseBand();
+    const bool early_lead = !in_band && retractLeadReady(Path::kRetractThetaLeadS);
+    if (!in_band && !early_lead) {
         return;
     }
     if (pathSegProgressFrac() < thetaWindowStartFrac_) {
         return;
     }
-    if (!requireThetaTraverseInterlock("path theta")) {
+    if (!early_lead && !requireThetaTraverseInterlock("path theta")) {
         thetaPending_ = false;
         return;
     }
+    const float speed = thetaPendingSpeedDegS_;
     thetaPending_ = false;
-    ESP_LOGI(TAG, "[THETA] window start at %.0f%% of in-band seg %u (%.1f deg/s)",
+    (void)commandThetaMove(speed);
+    ESP_LOGD(TAG, "[THETA] window start at %.0f%% of in-band seg %u (%.1f deg/s)",
              pathSegProgressFrac() * 100.0f,
              (unsigned)(thetaWindowSegIndex_ + 1),
-             thetaPendingSpeedDegS_);
-    (void)commandThetaMove(thetaPendingSpeedDegS_);
+             speed);
 }
 
 void Gantry::startThetaOrIdle() {
@@ -2884,7 +3060,7 @@ void Gantry::finishPathOrAdvance() {
             if (axisTheta_ && axisTheta_->isMotionActive()) {
                 if (!thetaHoldsDescent_) {
                     thetaHoldsDescent_ = true;
-                    ESP_LOGI(TAG,
+                    ESP_LOGD(TAG,
                              "[THETA] holding descent until theta completes "
                              "(speed clamped)");
                 }
@@ -2950,14 +3126,14 @@ void Gantry::startSequentialMotion() {
     pathDoGripperAfter_ = false;
 
     if (jointDirectMove_) {
-        ESP_LOGI(TAG,
+        ESP_LOGD(TAG,
                  "[JOINT_DIRECT] path (%.3f,%.3f) -> (%.3f,%.3f) SAFE_Z "
                  "ceiling=%.1f (z_min=%.1f margin=%.1f)",
                  currentX, currentZ, targetX_mm_, targetZ_mm_,
                  traverseClearanceZMm(), config_.limits.z_min,
                  safeZMarginFromMaxMm_);
         if (!planPathTo(currentX, currentZ, targetX_mm_, targetZ_mm_)) {
-            ESP_LOGI(TAG,
+            ESP_LOGD(TAG,
                      "[JOINT_DIRECT] linear already at target (%.3f,%.3f); "
                      "theta %.2f -> %.2f",
                      currentX, currentZ,
@@ -2994,6 +3170,9 @@ void Gantry::startSequentialMotion() {
 #if !CONFIG_GANTRY_THETA_SEQUENTIAL
         if (pathSegmentCount_ > 0) {
             scheduleThetaForPath();
+            if (thetaPending_ && thetaWindowStartFrac_ <= 0.0f && zInTraverseBand()) {
+                tryStartPendingTheta();
+            }
         }
 #endif
         currentTheta_ = (int32_t)axisTheta_->getCurrentDeg();
@@ -3081,11 +3260,11 @@ void Gantry::processSequentialMotion() {
 }
 
 bool Gantry::startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_s2,
-                              float decel_mm_s2) {
+                              float decel_mm_s2, bool allow_retract_lead) {
     if (!axisX_) {
         return false;
     }
-    if (!requireXTraverseInterlock("path X Absolute")) {
+    if (!allow_retract_lead && !requireXTraverseInterlock("path X Absolute")) {
         return false;
     }
 
@@ -3096,31 +3275,8 @@ bool Gantry::startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_
     const int32_t encoderPulses        = axisX_->getEncoderPulses();
     const int32_t targetPulses         = (int32_t)(target_mm * xPpm);
 
-    if (axisX_->isEncoderFeedbackEnabled()) {
-        const int32_t encDrvMismatch = encoderPulses - driverReportedPulses;
-        if (encDrvMismatch > 10 || encDrvMismatch < -10) {
-            ESP_LOGW(TAG,
-                     "[X_MOVE] encoder/driver mismatch: encoder=%ld driver=%ld mismatch=%ld (planning uses driver)",
-                     (long)encoderPulses, (long)driverReportedPulses, (long)encDrvMismatch);
-        }
-    }
-
-    const int32_t trackedMismatch = trackedPulses - driverReportedPulses;
-    if (trackedMismatch > 10 || trackedMismatch < -10) {
-        ESP_LOGW(TAG,
-                 "[X_MOVE] tracked/driver mismatch: tracked=%ld driver=%ld mismatch=%ld",
-                 (long)trackedPulses, (long)driverReportedPulses, (long)trackedMismatch);
-    }
-
     axisX_->setCurrentPulses((uint32_t)driverReportedPulses);
     const int32_t deltaX = targetPulses - driverReportedPulses;
-
-    ESP_LOGI(TAG,
-             "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld "
-             "speed=%.1f accel=%.1f decel=%.1f",
-             (long)driverReportedPulses, (long)trackedPulses, (long)driverReportedPulses,
-             (long)encoderPulses, (long)targetPulses, (long)deltaX,
-             speed_mm_s, accel_mm_s2, decel_mm_s2);
 
     if (deltaX == 0) {
         return true;  // already there; caller still owns motionState_
@@ -3142,6 +3298,29 @@ bool Gantry::startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_
                  (unsigned long)accel_pps, (unsigned long)decel_pps);
         return false;
     }
+
+    if (axisX_->isEncoderFeedbackEnabled()) {
+        const int32_t encDrvMismatch = encoderPulses - driverReportedPulses;
+        if (encDrvMismatch > 10 || encDrvMismatch < -10) {
+            ESP_LOGD(TAG,
+                     "[X_MOVE] encoder/driver mismatch: encoder=%ld driver=%ld mismatch=%ld (planning uses driver)",
+                     (long)encoderPulses, (long)driverReportedPulses, (long)encDrvMismatch);
+        }
+    }
+
+    const int32_t trackedMismatch = trackedPulses - driverReportedPulses;
+    if (trackedMismatch > 10 || trackedMismatch < -10) {
+        ESP_LOGD(TAG,
+                 "[X_MOVE] tracked/driver mismatch: tracked=%ld driver=%ld mismatch=%ld",
+                 (long)trackedPulses, (long)driverReportedPulses, (long)trackedMismatch);
+    }
+
+    ESP_LOGD(TAG,
+             "[X_MOVE] current=%ld tracked=%ld driver=%ld encoder=%ld target=%ld delta=%ld "
+             "speed=%.1f accel=%.1f decel=%.1f",
+             (long)driverReportedPulses, (long)trackedPulses, (long)driverReportedPulses,
+             (long)encoderPulses, (long)targetPulses, (long)deltaX,
+             speed_mm_s, accel_mm_s2, decel_mm_s2);
     return true;
 }
 

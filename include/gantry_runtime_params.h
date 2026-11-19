@@ -18,6 +18,8 @@ inline Gantry::RuntimeParams gantryRuntimeParams(const Config::AppConfigData& c)
     Gantry::RuntimeParams p;
     p.z_speed_cap_mm_s =
         (static_cast<float>(c.axis_z_critical_rpm) / 60.0f) * c.axis_z_lead_mm_per_rev;
+    p.z_accel_cap_mm_s2 = c.axis_z_accel_mm_per_s2;
+    p.z_decel_cap_mm_s2 = c.axis_z_decel_mm_per_s2;
     p.theta_max_speed_deg_s = c.axis_theta_max_speed_deg_per_s;
     p.theta_accel_deg_s2 = c.axis_theta_accel_deg_per_s2;
     p.theta_decel_deg_s2 = c.axis_theta_decel_deg_per_s2;

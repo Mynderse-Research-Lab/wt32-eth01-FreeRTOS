@@ -7,13 +7,13 @@ static const std::vector<ParamSchema> s_schemas = {
     // ========================================================================
     // 1. Motion Profile (End-User)
     // ========================================================================
-    {"spd_mm_s",      "Default Speed",     "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 2000.0f, 5.0f, "mm/s", {}},
+    {"spd_mm_s",      "Default Speed",     "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 3333.0f, 5.0f, "mm/s", {}},
     {"acc_mm_s2",     "Default Accel",     "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
     {"dec_mm_s2",     "Default Decel",     "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
     {"th_spd_deg_s",  "Theta Speed",       "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 7200.0f, 5.0f, "deg/s", {}},
     {"th_acc_deg_s2", "Theta Accel",       "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 10.0f, 18000.0f, 10.0f, "deg/s2", {}},
     {"th_dec_deg_s2", "Theta Decel",       "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 10.0f, 18000.0f, 10.0f, "deg/s2", {}},
-    {"ceil_spd_mm_s", "Speed Ceiling",    "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 2000.0f, 10.0f, "mm/s", {}},
+    {"ceil_spd_mm_s", "Speed Ceiling",    "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 1.0f, 3333.0f, 10.0f, "mm/s", {}},
     {"ceil_acc_mm_s2","Accel Ceiling",    "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
     {"ceil_dec_mm_s2","Decel Ceiling",    "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 100.0f, 50000.0f, 100.0f, "mm/s2", {}},
     {"eip_stop_dec",  "EIP Stop Decel",    "Motion Profile", ParamType::INT,   AccessLevel::END_USER, false, 50.0f, 5000.0f, 10.0f, "mm/s2", {}},
@@ -158,6 +158,10 @@ static const std::vector<ParamSchema> s_schemas = {
     // ========================================================================
     {"pk_von_ms",      "Valve On",           "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
      "Valve delay the strike planner allows before the jaws move (strike_plan valve_delay_s)."},
+    {"pk_z_dead_ms",   "Z Plunge Dead",      "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
+     "Measured Kinetix Z start deadtime from StartMotion edge to plunge motion (strike_plan z_plunge_dead_s)."},
+    {"pk_z_ret_ms",    "Z Retract Dead",     "Pick",     ParamType::INT, AccessLevel::END_USER, false, 0.0f, 100.0f, 1.0f, "ms", {},
+     "Measured Kinetix Z retract deadtime from queued retract edge to upward reversal (strike_plan z_retract_dead_s)."},
     // Strike plan offsets (strike_plan.h). Each moves only its own event.
     {"pk_off_plunge",  "Z Plunge Offset",    "Pick",     ParamType::INT, AccessLevel::END_USER, false, -100.0f, 100.0f, 1.0f, "ms", {},
      "Moves the strike plan's Z plunge by this many ms; the other events stay where they are."},

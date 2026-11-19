@@ -429,9 +429,10 @@ static void test_slow_approach_unless_a_later_part_is_at_risk(void) {
 }
 
 static void test_arrival_uses_the_gantry_settle_tolerances(void) {
-  // Theta inside the drive's settled deadband (0.1 deg) has arrived.
-  TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.08f));
-  TEST_ASSERT_FALSE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.2f));
+  // Theta tolerates AF->AH coast past S-0-0057 (0.10 deg), up to 1.0 deg.
+  TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.15f));
+  TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 90.9f));
+  TEST_ASSERT_FALSE(PickIntercept::jointsArrived(10.0f, 20.0f, 90.0f, 10.0f, 20.0f, 91.1f));
   TEST_ASSERT_TRUE(PickIntercept::jointsArrived(10.9f, 20.0f, 90.0f, 10.0f, 20.0f, 90.0f));
   TEST_ASSERT_FALSE(PickIntercept::jointsArrived(11.1f, 20.0f, 90.0f, 10.0f, 20.0f, 90.0f));
 }
@@ -921,6 +922,124 @@ static void test_neighbour_occupancy_covers_the_retract(void) {
                            PickIntercept::fingersFreeFromS(&occ, 1, 0.0f, f, 200.0f, 0.0f, 2.0f));
 }
 
+static void test_budget_uses_z_accel_cap_separately_from_x(void) {
+  auto m = limits(3000.0f, 18000.0f, 900.0f);
+  m.z_accel = 5000.0f;
+  m.z_decel = 5000.0f;
+  m.theta_cap = 3240.0f;
+  m.theta_accel = 16200.0f;
+  m.theta_decel = 16200.0f;
+
+  const auto budget =
+      PickIntercept::budgetPick(0.0f, 48.4f, 0.0f, 137.5f, 48.4f, 48.4f, 119.0f, 0.0f, m);
+  const float expected_x =
+      PickIntercept::profileSeconds(137.5f, 3000.0f, 18000.0f, 18000.0f) +
+      PickIntercept::kPreloadS + PickIntercept::kSettleS;
+  const float expected_z =
+      PickIntercept::profileSeconds(119.0f - 48.4f, 900.0f, 5000.0f, 5000.0f);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, expected_x, budget.linear_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, expected_z, budget.z_motion_s);
+
+  const auto cyc =
+      PickIntercept::postBinCycle(119.0f, 382.5f, 0.0f, 10.0f, 48.4f, 90.8f, 90.0f, 0.0f, 0.19f, m);
+  const float expected_retract =
+      PickIntercept::profileSeconds(119.0f - 48.4f, 900.0f, 5000.0f, 5000.0f) +
+      PickIntercept::kPreloadS + PickIntercept::kSettleS;
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, expected_retract, cyc.retract_s);
+}
+
+static void test_retime_strike_events_preserves_ballistic_invariants(void) {
+  PickIntercept::ArmedStrikeTimes st;
+  st.z_pending = true;
+  st.grip_pending = true;
+  st.retract_pending = true;
+  st.z_rel_us = -268000;
+  st.close_rel_us = -164000;
+  st.retract_rel_us = -22000;
+  st.min_z_to_retract_us = 246000;  // 30 + 238 - 22 ms
+  const int64_t close_to_retract = st.retract_rel_us - st.close_rel_us;  // 142000 us
+
+  // 1. Pre-Z: all three track arrive_us together.
+  PickIntercept::retimeStrikeEvents(st, 1000000);
+  TEST_ASSERT_EQUAL_INT64(732000, st.z_at_us);
+  TEST_ASSERT_EQUAL_INT64(836000, st.grip_at_us);
+  TEST_ASSERT_EQUAL_INT64(978000, st.retract_at_us);
+
+  // 2. Z fires at 732500 us. Belt slows (+20 ms arrive shift) before grip fires:
+  //    retract shifts +20 ms and grip shifts with it so retract - grip stays constant.
+  st.z_pending = false;
+  st.z_fired_us = 732500;
+  PickIntercept::retimeStrikeEvents(st, 1020000);
+  TEST_ASSERT_EQUAL_INT64(732000, st.z_at_us);
+  TEST_ASSERT_EQUAL_INT64(998000, st.retract_at_us);
+  TEST_ASSERT_EQUAL_INT64(998000 - close_to_retract, st.grip_at_us);
+
+  // 3. Belt speeds up (-30 ms arrive shift) while Z is in flight and grip still pending:
+  //    retract clamps to z_fired + min_z_to_retract (no mid-air reversal), grip follows.
+  PickIntercept::retimeStrikeEvents(st, 970000);
+  TEST_ASSERT_EQUAL_INT64(732500 + 246000, st.retract_at_us);
+  TEST_ASSERT_EQUAL_INT64(st.retract_at_us - close_to_retract, st.grip_at_us);
+
+  // 4. Grip fires late at 860000 us; belt jitter (-25 ms or +25 ms) cannot shrink
+  //    or stretch the ballistic close->retract duration.
+  st.grip_pending = false;
+  st.grip_fired_us = 860000;
+  PickIntercept::retimeStrikeEvents(st, 945000);
+  TEST_ASSERT_EQUAL_INT64(860000 + close_to_retract, st.retract_at_us);
+  PickIntercept::retimeStrikeEvents(st, 1050000);
+  TEST_ASSERT_EQUAL_INT64(860000 + close_to_retract, st.retract_at_us);
+}
+
+static void test_plunge_overdue_guard_blocks_late_release(void) {
+  constexpr int64_t kMaxLate = 15000;
+  TEST_ASSERT_FALSE(PickIntercept::isPlungeOverdue(1000000, 1050000, kMaxLate));
+  TEST_ASSERT_FALSE(PickIntercept::isPlungeOverdue(1015000, 1000000, kMaxLate));
+  TEST_ASSERT_TRUE(PickIntercept::isPlungeOverdue(1015001, 1000000, kMaxLate));
+  TEST_ASSERT_TRUE(PickIntercept::isPlungeOverdue(1060000, 1000000, kMaxLate));
+}
+
+static void test_budget_skips_theta_when_already_within_arrival_tolerance(void) {
+  const auto m = limits();
+  // Theta settled at -44.89 deg vs -45.00 deg (0.11 deg <= kArriveEpsDeg=1.0):
+  // runPick will not command another theta move, so approach_s must stay 0.
+  const auto settled =
+      PickIntercept::budgetPick(382.5f, 48.4f, -44.89f, 382.5f, 48.4f, 48.4f, 119.0f, -45.0f, m);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, settled.theta_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, settled.approach_s);
+
+  // Beyond kArriveEpsDeg (2.0 deg), theta start + profile + settle is budgeted.
+  const auto needs_turn =
+      PickIntercept::budgetPick(382.5f, 48.4f, -43.0f, 382.5f, 48.4f, 48.4f, 119.0f, -45.0f, m);
+  TEST_ASSERT_TRUE(needs_turn.theta_s > PickIntercept::kThetaStartS);
+  TEST_ASSERT_TRUE(needs_turn.approach_s >= needs_turn.theta_s + PickIntercept::kSettleS);
+}
+
+static void test_budget_theta_full_speed_uses_theta_cap(void) {
+  auto m_win = limits();
+  m_win.speed = 1330.0f;
+  m_win.theta_cap = 1000.0f;
+  m_win.theta_accel = 3600.0f;
+  m_win.theta_decel = 3600.0f;
+  m_win.theta_full_speed = false;
+  auto m_full = m_win;
+  m_full.theta_full_speed = true;
+
+  const auto b_win =
+      PickIntercept::budgetPick(10.0f, 48.4f, 90.0f, 382.5f, 48.4f, 48.4f, 119.0f, 0.0f, m_win);
+  const auto b_full =
+      PickIntercept::budgetPick(10.0f, 48.4f, 90.0f, 382.5f, 48.4f, 48.4f, 119.0f, 0.0f, m_full);
+  const auto w = Gantry::Path::planThetaWindow(372.5f, m_win.speed, 90.0f, m_win.theta_cap, 0.0f);
+  const float expected_win = PickIntercept::kTickS + PickIntercept::kThetaStartS +
+                             PickIntercept::profileSeconds(90.0f, w.speed_deg_per_s,
+                                                           m_win.theta_accel, m_win.theta_decel);
+  const float expected_full = PickIntercept::kTickS + PickIntercept::kThetaStartS +
+                              PickIntercept::profileSeconds(90.0f, m_full.theta_cap,
+                                                            m_full.theta_accel, m_full.theta_decel);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, expected_win, b_win.theta_s);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, expected_full, b_full.theta_s);
+  TEST_ASSERT_TRUE(b_full.theta_s < b_win.theta_s);
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_position_reanchors_on_displacement);
@@ -949,12 +1068,17 @@ int main(void) {
   RUN_TEST(test_in_band_budget_matches_path_segment);
   RUN_TEST(test_retract_into_band_defers_x);
   RUN_TEST(test_z_cap_slows_combined_segments);
+  RUN_TEST(test_budget_uses_z_accel_cap_separately_from_x);
   RUN_TEST(test_theta_budget_counts_rotary_phases_from_move_start);
   RUN_TEST(test_theta_budget_uses_linear_delta);
   RUN_TEST(test_hover_is_budgeted_before_the_dropin_tail);
   RUN_TEST(test_jaw_is_frozen_once_z_leaves_the_band);
   RUN_TEST(test_lane_strike_slack_and_dropin_release);
   RUN_TEST(test_retime_follows_a_speed_change);
+  RUN_TEST(test_retime_strike_events_preserves_ballistic_invariants);
+  RUN_TEST(test_plunge_overdue_guard_blocks_late_release);
+  RUN_TEST(test_budget_skips_theta_when_already_within_arrival_tolerance);
+  RUN_TEST(test_budget_theta_full_speed_uses_theta_cap);
   RUN_TEST(test_epoch_rejects_parts_and_strikes_from_before_a_restart);
   RUN_TEST(test_arrival_is_camera_relative);
   RUN_TEST(test_zero_speed_does_not_invent_an_arrival);

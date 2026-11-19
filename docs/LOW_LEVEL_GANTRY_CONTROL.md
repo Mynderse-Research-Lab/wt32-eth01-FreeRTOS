@@ -773,7 +773,10 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   0° by default. Of the two equivalent
   angles the one with less linear theta travel inside `thetalim` is used, else skip
   `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
-  to 0.1°; a smaller change is left in place. Theta still cannot move below the SAFE_Z band.
+  to 0.1°; a change of 1.0° or less is left in place (`budgetPick`). On a pick or transfer retract, X and theta
+  may start up to 160 ms before Z reaches the SAFE_Z band, at most 48 mm below it and within 78 % of the stroke
+  (`Path::retractLeadMm`, `Gantry::retractLeadReady`); console moves still wait for the band. The early start does
+  not check the conveyor frame's collision zone (G-C14).
 - **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm: Z goes to the
   grasp right after the pre-position, and only the grip is timed. Grasp height is
   \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top. Width, length, and

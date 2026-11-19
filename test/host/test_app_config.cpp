@@ -131,10 +131,15 @@ static void test_set_get_int_with_bounds(void) {
     TEST_ASSERT_TRUE(ok);
     TEST_ASSERT_EQUAL_INT(120, val);
 
-    // Reject out of bounds (< 1 or > 2000)
+    // Accept 90% X physical speed (3000) and reject out of bounds (< 1 or > 3333)
+    ok = AppConfig::instance().setParamInt("spd_mm_s", 3000, reboot);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL_INT(3000, AppConfig::instance().data().gantry_default_speed_mm_per_s);
+    ok = AppConfig::instance().setParamInt("spd_mm_s", 120, reboot);
+    TEST_ASSERT_TRUE(ok);
     ok = AppConfig::instance().setParamInt("spd_mm_s", 0, reboot);
     TEST_ASSERT_FALSE(ok);
-    ok = AppConfig::instance().setParamInt("spd_mm_s", 2500, reboot);
+    ok = AppConfig::instance().setParamInt("spd_mm_s", 3500, reboot);
     TEST_ASSERT_FALSE(ok);
     TEST_ASSERT_EQUAL_INT(120, AppConfig::instance().data().gantry_default_speed_mm_per_s);
 }
@@ -237,25 +242,41 @@ static void test_strike_offsets_apply_live_and_persist(void) {
     TEST_ASSERT_EQUAL_INT32(0, d.pick_offset_plunge_ms);
     TEST_ASSERT_EQUAL_INT32(0, d.pick_offset_close_ms);
     TEST_ASSERT_EQUAL_INT32(0, d.pick_offset_retract_ms);
+    TEST_ASSERT_EQUAL_INT32(30, d.pick_z_plunge_dead_ms);
+    TEST_ASSERT_EQUAL_INT32(22, d.pick_z_retract_dead_ms);
 
     bool reboot = true;
     TEST_ASSERT_TRUE(AppConfig::instance().isParamVisible("pk_off_plunge"));
+    TEST_ASSERT_TRUE(AppConfig::instance().isParamVisible("pk_z_dead_ms"));
+    TEST_ASSERT_TRUE(AppConfig::instance().isParamVisible("pk_z_ret_ms"));
     TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("pk_off_plunge", "-12", reboot));
     TEST_ASSERT_FALSE(reboot);
     TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("pk_off_close", "7", reboot));
     TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("pk_off_retract", "100", reboot));
+    TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("pk_z_dead_ms", "31", reboot));
+    TEST_ASSERT_FALSE(reboot);
+    TEST_ASSERT_TRUE(AppConfig::instance().applyParamText("pk_z_ret_ms", "25", reboot));
+    TEST_ASSERT_FALSE(reboot);
     TEST_ASSERT_EQUAL_INT32(-12, d.pick_offset_plunge_ms);
     TEST_ASSERT_EQUAL_INT32(7, d.pick_offset_close_ms);
     TEST_ASSERT_EQUAL_INT32(100, d.pick_offset_retract_ms);
+    TEST_ASSERT_EQUAL_INT32(31, d.pick_z_plunge_dead_ms);
+    TEST_ASSERT_EQUAL_INT32(25, d.pick_z_retract_dead_ms);
 
     TEST_ASSERT_FALSE(AppConfig::instance().applyParamText("pk_off_retract", "101", reboot));
     TEST_ASSERT_FALSE(AppConfig::instance().applyParamText("pk_off_close", "2.5", reboot));
+    TEST_ASSERT_FALSE(AppConfig::instance().applyParamText("pk_z_dead_ms", "-1", reboot));
+    TEST_ASSERT_FALSE(AppConfig::instance().applyParamText("pk_z_ret_ms", "101", reboot));
     TEST_ASSERT_EQUAL_INT32(100, d.pick_offset_retract_ms);
     TEST_ASSERT_EQUAL_INT32(7, d.pick_offset_close_ms);
+    TEST_ASSERT_EQUAL_INT32(31, d.pick_z_plunge_dead_ms);
+    TEST_ASSERT_EQUAL_INT32(25, d.pick_z_retract_dead_ms);
 
     char shown[16];
     TEST_ASSERT_TRUE(AppConfig::instance().formatParamValue("pk_off_plunge", shown, sizeof(shown)));
     TEST_ASSERT_EQUAL_STRING("-12", shown);
+    TEST_ASSERT_TRUE(AppConfig::instance().formatParamValue("pk_z_dead_ms", shown, sizeof(shown)));
+    TEST_ASSERT_EQUAL_STRING("31", shown);
 
     // Saved values come back after a reload from the same storage.
     TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
@@ -263,6 +284,8 @@ static void test_strike_offsets_apply_live_and_persist(void) {
     TEST_ASSERT_EQUAL_INT32(-12, d.pick_offset_plunge_ms);
     TEST_ASSERT_EQUAL_INT32(7, d.pick_offset_close_ms);
     TEST_ASSERT_EQUAL_INT32(100, d.pick_offset_retract_ms);
+    TEST_ASSERT_EQUAL_INT32(31, d.pick_z_plunge_dead_ms);
+    TEST_ASSERT_EQUAL_INT32(25, d.pick_z_retract_dead_ms);
 }
 
 static void test_first_boot_stores_a_full_set(void) {
@@ -437,10 +460,14 @@ static void test_gantry_runtime_params_follow_the_stored_values(void) {
     TEST_ASSERT_TRUE(AppConfig::instance().setParamFloat("z_lead_mm", 10.0f, reboot));
     TEST_ASSERT_TRUE(AppConfig::instance().setParamInt("grp_close_ms", 210, reboot));
     TEST_ASSERT_TRUE(AppConfig::instance().setParamFloat("cal_spd_mm_s", 50.0f, reboot));
+    TEST_ASSERT_TRUE(AppConfig::instance().setParamFloat("z_acc_mm_s2", 5500.0f, reboot));
+    TEST_ASSERT_TRUE(AppConfig::instance().setParamFloat("z_dec_mm_s2", 5400.0f, reboot));
 
     const Gantry::RuntimeParams p = gantryRuntimeParams(AppConfig::instance().data());
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 900.0f, p.theta_max_speed_deg_s);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 450.0f, p.z_speed_cap_mm_s);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 5500.0f, p.z_accel_cap_mm_s2);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 5400.0f, p.z_decel_cap_mm_s2);
     TEST_ASSERT_EQUAL_UINT32(210, p.gripper_close_ms);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 50.0f, p.home_speed_mm_s);
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 550.0f, p.x_hard_span_mm);
@@ -579,7 +606,7 @@ static void test_pick_sections_are_described(void) {
             }
         }
     }
-    TEST_ASSERT_EQUAL_INT(39, described);
+    TEST_ASSERT_EQUAL_INT(41, described);
 }
 
 int main(void) {

@@ -56,22 +56,23 @@ void assertPlan(const StrikePlan::Plan& p, double tau_plunge, double tau_band, d
 
 }  // namespace
 
-// Crossing belt (theta 0): the plunge waits for the cell to enter the gap.
+// Crossing belt (theta 0): exact trapezoid top-crossing (G-C6 fix) places
+// tau_band at 37.881 ms (previously over-predicted as 44.614 ms by accel-only formula).
 static void test_matches_sim_nine_volt_flatface_600_at_90(void) {
-    assertPlan(StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 600.0, 99.0)), 0.107725, 0.044614,
-               -0.107611, -0.085280, 0.000114);
+    assertPlan(StrikePlan::plan(simInputs(26.6, 17.3, 0.0, 600.0, 99.0)), 0.107725, 0.037881,
+               -0.107725, -0.085394, 0.000000);
 }
 
 // Belt along the jaws (theta 90): no crossing, depth reached at arrival.
 static void test_matches_sim_nine_volt_shortface_1500_at_0(void) {
-    assertPlan(StrikePlan::plan(simInputs(17.3, 26.6, 90.0, 1500.0, 99.0)), 0.107725, 0.052471,
+    assertPlan(StrikePlan::plan(simInputs(17.3, 26.6, 90.0, 1500.0, 99.0)), 0.107725, 0.049563,
                -0.107725, -0.095752, 0.000000);
 }
 
-// Slow belt: depth is reached at the 15 ms cap after arrival.
+// Slow belt: depth is reached 12.968 ms after arrival using exact tau_band.
 static void test_matches_sim_pack_300_at_45(void) {
-    assertPlan(StrikePlan::plan(simInputs(68.3, 26.7, 45.0, 300.0, 99.0)), 0.107725, 0.052562,
-               -0.092725, -0.022913, 0.015000);
+    assertPlan(StrikePlan::plan(simInputs(68.3, 26.7, 45.0, 300.0, 99.0)), 0.107725, 0.049688,
+               -0.094757, -0.024945, 0.012968);
 }
 
 static void test_matches_sim_power_tool_makita_1000_at_30(void) {
@@ -205,6 +206,91 @@ static void test_jaw_stroke_solves_pneumatic_model(void) {
     ASSERT_NEAR(1e-6, 31.7, q);
 }
 
+static void test_trapezoid_time_to_distance_accel_cruise_decel(void) {
+    // Trapezoidal stroke: D=300, v=800, a=5000 (d_acc=64, t_acc=0.16), d=10000 (d_dec=32, t_dec=0.08).
+    // Total duration = 0.16 + 0.08 + (300 - 96)/800 = 0.495 s.
+    ASSERT_NEAR(1e-6, 0.0, StrikePlan::trapezoidTimeToDistance(0.0, 300.0, 800.0, 5000.0, 10000.0));
+    ASSERT_NEAR(1e-6, std::sqrt(2.0 * 25.0 / 5000.0),
+                StrikePlan::trapezoidTimeToDistance(25.0, 300.0, 800.0, 5000.0, 10000.0));
+    ASSERT_NEAR(1e-6, 0.16 + (164.0 - 64.0) / 800.0,
+                StrikePlan::trapezoidTimeToDistance(164.0, 300.0, 800.0, 5000.0, 10000.0));
+    ASSERT_NEAR(1e-6, 0.495 - std::sqrt(2.0 * 18.0 / 10000.0),
+                StrikePlan::trapezoidTimeToDistance(282.0, 300.0, 800.0, 5000.0, 10000.0));
+    ASSERT_NEAR(1e-6, 0.495,
+                StrikePlan::trapezoidTimeToDistance(300.0, 300.0, 800.0, 5000.0, 10000.0));
+
+    // Triangular stroke (live 9V plunge: 70.6 mm at vz=900, az=dz=5000; to_top=47.1 mm > 35.3 mm mid).
+    const double total = StrikePlan::trapezoidSeconds(70.6, 900.0, 5000.0, 5000.0);
+    const double t_top = StrikePlan::trapezoidTimeToDistance(47.1, 70.6, 900.0, 5000.0, 5000.0);
+    const double expected_band = std::sqrt(2.0 * 23.5 / 5000.0);
+    ASSERT_NEAR(1e-6, expected_band, total - t_top);
+}
+
+static void test_z_deadtime_keeps_physical_events_invariant_across_speeds(void) {
+    // Live rig 9V at 45 deg across 300..600 mm/s: modeling Z plunge/retract
+    // deadtime shifts command times earlier while physical top crossing, grasp
+    // arrival, lift start, and jaw contact stay identical to zero-deadtime physics.
+    const double speeds[] = {300.0, 400.0, 500.0, 600.0};
+    for (double v : speeds) {
+        StrikePlan::Inputs ideal;
+        ideal.width_mm = 17.5;
+        ideal.height_mm = 26.5;
+        ideal.theta_deg = 45.0;
+        ideal.belt_mm_s = v;
+        ideal.z_belt_mm = 122.0;
+        ideal.z_ceiling_mm = 48.4;
+        ideal.z_min_mm = 0.0;
+        ideal.z_grasp_mm = 119.0;
+        ideal.pad_half_open_mm = 40.0;
+        ideal.vz_mm_s = 900.0;
+        ideal.az_mm_s2 = 5000.0;
+        ideal.dz_mm_s2 = 5000.0;
+        ideal.valve_delay_s = 0.030;
+        ideal.jaw_speed_mm_s = 210.0;
+
+        StrikePlan::Inputs with_dead = ideal;
+        with_dead.z_plunge_dead_s = 0.030;
+        with_dead.z_retract_dead_s = 0.022;
+
+        const StrikePlan::Plan p0 = StrikePlan::plan(ideal);
+        const StrikePlan::Plan pd = StrikePlan::plan(with_dead);
+        TEST_ASSERT_TRUE(p0.ok);
+        TEST_ASSERT_TRUE(pd.ok);
+        TEST_ASSERT_FALSE(pd.clamped);
+
+        // Command timestamps advance by exactly each axis's deadtime.
+        ASSERT_NEAR(kTolS, p0.t_z_s - 0.030, pd.t_z_s);
+        ASSERT_NEAR(kTolS, p0.t_retract_s - 0.022, pd.t_retract_s);
+        ASSERT_NEAR(kTolS, p0.t_close_s, pd.t_close_s);
+
+        // Physical event timestamps are 100% invariant to actuator deadtime.
+        ASSERT_NEAR(kTolS, p0.t_z_done_s, pd.t_z_s + pd.z_plunge_dead_s + pd.tau_plunge_s);
+        ASSERT_NEAR(kTolS, p0.t_z_done_s, pd.t_retract_s + pd.z_retract_dead_s);
+        ASSERT_NEAR(kTolS, p0.t_top_s,
+                    pd.t_z_s + pd.z_plunge_dead_s + (pd.tau_plunge_s - pd.tau_band_s));
+        ASSERT_NEAR(kTolS, 0.0, pd.dwell_s);
+    }
+}
+
+static void test_z_deadtime_retract_floor_prevents_midair_reversal(void) {
+    StrikePlan::Inputs in = simInputs(17.5, 26.5, 45.0, 500.0, 99.0);
+    in.az_mm_s2 = 5000.0;
+    in.dz_mm_s2 = 5000.0;
+    in.z_plunge_dead_s = 0.030;
+    in.z_retract_dead_s = 0.022;
+    in.retract_offset_ms = -15;
+
+    const StrikePlan::Plan p = StrikePlan::plan(in);
+    TEST_ASSERT_TRUE(p.ok);
+    TEST_ASSERT_TRUE(p.clamped);
+    ASSERT_NEAR(kTolS, -0.015, p.dwell_s);
+    // Physical retract start (t_retract_s + z_retract_dead) is held to physical plunge end.
+    ASSERT_NEAR(kTolS, p.t_z_s + p.z_plunge_dead_s + p.tau_plunge_s,
+                p.t_retract_s + p.z_retract_dead_s);
+    ASSERT_NEAR(kTolS, p.z_plunge_dead_s + p.tau_plunge_s - p.z_retract_dead_s,
+                p.z_to_retract_floor_s);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_matches_sim_nine_volt_flatface_600_at_90);
@@ -220,5 +306,8 @@ int main(void) {
     RUN_TEST(test_plunge_time_uses_the_z_decel);
     RUN_TEST(test_rejects_unpickable_inputs);
     RUN_TEST(test_jaw_stroke_solves_pneumatic_model);
+    RUN_TEST(test_trapezoid_time_to_distance_accel_cruise_decel);
+    RUN_TEST(test_z_deadtime_keeps_physical_events_invariant_across_speeds);
+    RUN_TEST(test_z_deadtime_retract_floor_prevents_midair_reversal);
     return UNITY_END();
 }

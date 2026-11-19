@@ -47,8 +47,11 @@ constexpr uint8_t kStrikeRetract = 8;
 // Timer bits earlier than this before their (re-timed) target are stale.
 constexpr int64_t kEarlyUs = 1000;
 constexpr int64_t kPreloadDeadlineUs = 20000;
+constexpr int64_t kMaxLatePlungeUs = 15000;
 constexpr int64_t kGripDeadlineUs = 30000;
 constexpr int64_t kRetractDeadlineUs = 30000;
+// Skip a redundant moveZ(hover) when Z is already within this band of hover.
+constexpr float kHoverAlreadyEpsMm = 0.25f;
 // Retract to the SAFE_Z ceiling must finish within this after it fires.
 constexpr int64_t kRetractDoneUs = 2000000;
 // Deepest Z reached this far short of the grasp depth is logged.
@@ -91,6 +94,8 @@ struct PickConfig {
   float guard_s = 0.0f;
   float close_s = 0.0f;
   float valve_on_s = 0.0f;
+  float z_plunge_dead_s = 0.0f;
+  float z_retract_dead_s = 0.0f;
   int off_plunge_ms = 0;
   int off_close_ms = 0;
   int off_retract_ms = 0;
@@ -144,6 +149,9 @@ struct StrikeCtl {
   int64_t z_rel_us = 0;
   int64_t close_rel_us = 0;
   int64_t retract_rel_us = 0;
+  int64_t min_z_to_retract_us = 0;
+  int64_t z_fired_us = 0;
+  int64_t grip_fired_us = 0;
   float retract_mm_s = 0.0f;
   float accel_mm_s2 = 0.0f;
   float decel_mm_s2 = 0.0f;
@@ -253,6 +261,7 @@ struct ZTrace {
     float az_mm_s2 = 0.0f;
     float belt_mm_s = 0.0f;
     float tau_plunge_s = 0.0f;
+    float z_plunge_dead_s = 0.0f;
     int32_t t_us[kTraceCap];
     float z_mm[kTraceCap];
 };
@@ -362,6 +371,9 @@ static void armStrike(const PickIntercept::StrikeTiming& timing, float jaw_world
     s_ctl.z_rel_us = secondsToUs(sim.t_z_s);
     s_ctl.close_rel_us = secondsToUs(sim.t_close_s);
     s_ctl.retract_rel_us = secondsToUs(sim.t_retract_s);
+    s_ctl.min_z_to_retract_us = secondsToUs(sim.z_to_retract_floor_s);
+    s_ctl.z_fired_us = 0;
+    s_ctl.grip_fired_us = 0;
     s_ctl.arrive_us = arrive_at;
     s_ctl.z_at_us = arrive_at + s_ctl.z_rel_us;
     s_ctl.grip_at_us = arrive_at + s_ctl.close_rel_us;
@@ -378,7 +390,25 @@ static void armStrike(const PickIntercept::StrikeTiming& timing, float jaw_world
     armPending(ctl);
 }
 
-// Only the arrival moves with the belt; pending events keep their offsets.
+static PickIntercept::ArmedStrikeTimes toArmedTimes(const StrikeCtl& ctl) {
+    PickIntercept::ArmedStrikeTimes st;
+    st.z_pending = ctl.z_pending;
+    st.grip_pending = ctl.grip_pending;
+    st.retract_pending = ctl.retract_pending;
+    st.z_at_us = ctl.z_at_us;
+    st.grip_at_us = ctl.grip_at_us;
+    st.retract_at_us = ctl.retract_at_us;
+    st.z_rel_us = ctl.z_rel_us;
+    st.close_rel_us = ctl.close_rel_us;
+    st.retract_rel_us = ctl.retract_rel_us;
+    st.min_z_to_retract_us = ctl.min_z_to_retract_us;
+    st.z_fired_us = ctl.z_fired_us;
+    st.grip_fired_us = ctl.grip_fired_us;
+    return st;
+}
+
+// Moves arrival with the belt while preserving ballistic plunge/grip invariants
+// once Z or the pneumatic valve has fired (retimeStrikeEvents).
 static void retimeArmed(int64_t now) {
     StrikeCtl ctl = copyCtl();
     if (!ctl.z_pending && !ctl.grip_pending && !ctl.retract_pending) {
@@ -391,15 +421,11 @@ static void retimeArmed(int64_t now) {
     }
     portENTER_CRITICAL(&s_strike_mux);
     s_ctl.arrive_us = r.arrive_us;
-    if (s_ctl.z_pending) {
-        s_ctl.z_at_us = r.arrive_us + s_ctl.z_rel_us;
-    }
-    if (s_ctl.grip_pending) {
-        s_ctl.grip_at_us = r.arrive_us + s_ctl.close_rel_us;
-    }
-    if (s_ctl.retract_pending) {
-        s_ctl.retract_at_us = r.arrive_us + s_ctl.retract_rel_us;
-    }
+    PickIntercept::ArmedStrikeTimes st = toArmedTimes(s_ctl);
+    PickIntercept::retimeStrikeEvents(st, r.arrive_us);
+    s_ctl.z_at_us = st.z_at_us;
+    s_ctl.grip_at_us = st.grip_at_us;
+    s_ctl.retract_at_us = st.retract_at_us;
     ctl = s_ctl;
     portEXIT_CRITICAL(&s_strike_mux);
     armPending(ctl);
@@ -460,11 +486,19 @@ static void strikeTask(void*) {
                 }
             }
             if ((bits & kStrikeZ) != 0 && takeDue(StrikeEvent::Z, now)) {
+                const StrikeCtl snap = copyCtl();
+                if (PickIntercept::isPlungeOverdue(now, snap.z_at_us, kMaxLatePlungeUs)) {
+                    strikeAbort("late before plunge");
+                    continue;
+                }
                 if (s_gantry->releasePreloadedMotion()) {
                     s_z_fired_us.store(now, std::memory_order_release);
+                    portENTER_CRITICAL(&s_strike_mux);
+                    s_ctl.z_fired_us = now;
+                    const StrikeCtl ctl = s_ctl;
+                    portEXIT_CRITICAL(&s_strike_mux);
                     // Queue the retract behind the plunge now; its edge fires at
                     // t_retract and the drive starts it as the plunge completes.
-                    const StrikeCtl ctl = copyCtl();
                     const auto err = s_gantry->queueRetractToSafeZ(
                         static_cast<uint32_t>(ctl.retract_mm_s + 0.5f),
                         static_cast<uint32_t>(ctl.accel_mm_s2 + 0.5f),
@@ -477,13 +511,26 @@ static void strikeTask(void*) {
                 }
             }
             if ((bits & kStrikeGrip) != 0 && takeDue(StrikeEvent::Grip, now)) {
-                s_grip_cmd_us.store(esp_timer_get_time(), std::memory_order_release);
+                const int64_t cmd_us = esp_timer_get_time();
+                s_grip_cmd_us.store(cmd_us, std::memory_order_release);
                 gripMark(1);
                 const bool gripped = s_gantry->grip(true);
                 gripMark(0);
                 if (gripped) {
                     s_cell_in_jaws.store(true, std::memory_order_release);
                     s_grip_fired_us.store(esp_timer_get_time(), std::memory_order_release);
+                    // Lock pending retract to the actual valve fire timestamp so
+                    // pneumatic close duration stays constant despite belt jitter.
+                    portENTER_CRITICAL(&s_strike_mux);
+                    s_ctl.grip_fired_us = cmd_us;
+                    PickIntercept::ArmedStrikeTimes st = toArmedTimes(s_ctl);
+                    PickIntercept::retimeStrikeEvents(st, s_ctl.arrive_us);
+                    s_ctl.retract_at_us = st.retract_at_us;
+                    const StrikeCtl ctl = s_ctl;
+                    portEXIT_CRITICAL(&s_strike_mux);
+                    if (ctl.retract_pending) {
+                        armOne(s_retract_timer, ctl.retract_at_us, kStrikeRetract);
+                    }
                 } else {
                     strikeAbort("grip write failed");
                 }
@@ -626,6 +673,7 @@ static void traceFinish(const PickEval& eval, float vz_mm_s, float az_mm_s2, flo
     s_trace.az_mm_s2 = az_mm_s2;
     s_trace.belt_mm_s = belt_mm_s;
     s_trace.tau_plunge_s = static_cast<float>(eval.sim.tau_plunge_s);
+    s_trace.z_plunge_dead_s = static_cast<float>(eval.sim.z_plunge_dead_s);
     s_trace.complete = true;
     const int64_t from = s_trace.retract_cmd_us != 0 ? s_trace.retract_cmd_us
                                                      : esp_timer_get_time();
@@ -659,6 +707,8 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   p.limits.fast_speed = static_cast<float>(c.gantry_path_max_speed_mm_per_s);
   p.limits.accel = static_cast<float>(c.gantry_default_accel_mm_per_s2);
   p.limits.decel = static_cast<float>(c.gantry_default_decel_mm_per_s2);
+  p.limits.z_accel = c.axis_z_accel_mm_per_s2;
+  p.limits.z_decel = c.axis_z_decel_mm_per_s2;
   p.limits.theta_cap = static_cast<float>(c.gantry_default_speed_deg_per_s);
   if (c.axis_theta_max_speed_deg_per_s > 0.0f &&
       c.axis_theta_max_speed_deg_per_s < p.limits.theta_cap) {
@@ -668,10 +718,13 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   p.limits.theta_decel = static_cast<float>(c.gantry_default_decel_deg_per_s2);
   p.limits.z_cap = AXIS_Z_PICK_SPEED_FRACTION * s_gantry->zSpeedCapMmS();
   p.limits.theta_start_frac = 0.0f;
+  p.limits.theta_full_speed = true;
   p.valve_s = static_cast<float>(c.pick_valve_ms) * 0.001f;
   p.guard_s = static_cast<float>(c.pick_guard_ms) * 0.001f;
   p.close_s = static_cast<float>(c.gantry_gripper_close_time_ms) * 0.001f;
   p.valve_on_s = static_cast<float>(c.pick_valve_on_ms) * 0.001f;
+  p.z_plunge_dead_s = static_cast<float>(c.pick_z_plunge_dead_ms) * 0.001f;
+  p.z_retract_dead_s = static_cast<float>(c.pick_z_retract_dead_ms) * 0.001f;
   p.off_plunge_ms = static_cast<int>(c.pick_offset_plunge_ms);
   p.off_close_ms = static_cast<int>(c.pick_offset_close_ms);
   p.off_retract_ms = static_cast<int>(c.pick_offset_retract_ms);
@@ -692,6 +745,14 @@ static PickConfig pickConfig(const Gantry::JointLimits& lim) {
   p.cam_y = c.conveyor_y_cam_mm;
   p.pick_y = c.conveyor_y_pick_mm;
   return p;
+}
+
+static float zAccel(const PickConfig& p) {
+  return PickIntercept::effectiveZAccel(p.limits.accel, p.limits.z_accel);
+}
+
+static float zDecel(const PickConfig& p) {
+  return PickIntercept::effectiveZAccel(p.limits.decel, p.limits.z_decel);
 }
 
 // Grasp: a cell under 30 mm tall is gripped 3 mm above the belt; a taller one
@@ -715,10 +776,12 @@ static ZPlan zPlan(const PickConfig& p, float object_h_mm, float tallest_mm,
     z.hover = p.z_safe;
   }
   const float v = p.limits.z_cap > 1.0f ? p.limits.z_cap : p.limits.speed;
+  const float za = zAccel(p);
+  const float zd = zDecel(p);
   z.top_s = PickIntercept::kTickS +
-            PickIntercept::zToTopS(z.hover, z.top, z.grip, v, p.limits.accel, p.limits.decel);
+            PickIntercept::zToTopS(z.hover, z.top, z.grip, v, za, zd);
   z.tail_s = PickIntercept::kTickS +
-             PickIntercept::profileSeconds(z.grip - z.hover, v, p.limits.accel, p.limits.decel);
+             PickIntercept::profileSeconds(z.grip - z.hover, v, za, zd);
   return z;
 }
 
@@ -738,9 +801,11 @@ static StrikePlan::Plan strikePlan(const PickConfig& p, const Gantry::JointLimit
     in.z_grasp_mm = z_grasp_mm;
     in.pad_half_open_mm = 0.5 * p.fingers.open_mm;
     in.vz_mm_s = p.limits.z_cap;
-    in.az_mm_s2 = p.limits.accel;
-    in.dz_mm_s2 = p.limits.decel;
+    in.az_mm_s2 = zAccel(p);
+    in.dz_mm_s2 = zDecel(p);
     in.valve_delay_s = p.valve_on_s;
+    in.z_plunge_dead_s = p.z_plunge_dead_s;
+    in.z_retract_dead_s = p.z_retract_dead_s;
     // fin_spd_mm_s: 210 mm/s = SCHUNK KGG 100-80 datasheet, 40 mm per jaw in
     // 0.19 s at 6 bar (movement only; valve and hose time are not included).
     in.jaw_speed_mm_s = p.fingers.jaw_mm_s;
@@ -768,11 +833,13 @@ static PickIntercept::StrikeSchedule simSchedule(float arrive_s, float belt_mm_s
         s.reason = sim.reason;
         return s;
     }
-    s.z_motion_s = static_cast<float>(sim.tau_plunge_s);
+    s.z_motion_s = static_cast<float>(sim.tau_plunge_s + sim.z_plunge_dead_s);
     s.z_start_s = arrive_s + static_cast<float>(sim.t_z_s);
     s.z_done_s = s.z_start_s + s.z_motion_s;
     s.grip_s = arrive_s + static_cast<float>(sim.t_close_s);
-    s.slack_s = s.z_start_s - (budget.approach_s + PickIntercept::kPreloadS + PickIntercept::kSettleS);
+    // Preloading Z holds StartMotion=0 without moving, so it needs kPreloadS
+    // only (approach_s already includes arrival settle for the pre-position).
+    s.slack_s = s.z_start_s - (budget.approach_s + PickIntercept::kPreloadS);
     if (belt_mm_s <= 0.0f || arrive_s >= PickIntercept::kWaitS) {
         s.reason = "belt stopped";
         return s;
@@ -961,7 +1028,7 @@ static PickEval evaluate(const PickConfig& p, const Gantry::JointConfig& pose,
   // Neighbours must stay out of the finger lanes from the plunge until Z is up.
   const float retract_s =
       PickIntercept::profileSeconds(std::fabs(eval.pick.z - eval.hover.z), p.limits.z_cap,
-                                    p.limits.accel, p.limits.decel) +
+                                    zAccel(p), zDecel(p)) +
       PickIntercept::kPreloadS + PickIntercept::kSettleS;
   const float t_up = arrive_s + static_cast<float>(eval.sim.t_retract_s) + retract_s;
   const float free_s = PickIntercept::fingersFreeFromS(
@@ -1566,27 +1633,31 @@ static bool waitMotion(PickSchedulerTaskConfig *cfg) {
       cfg->gantry->requestAbort();
       return false;
     }
-    idleSlice(cfg, 10);
+    idleSlice(cfg, 2);
   }
   return running();
 }
 
-static bool moveJoint(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint,
-                      float speed, float accel, float decel, float theta_speed,
-                      float theta_accel, float theta_start_frac) {
+static bool startJointMove(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint,
+                           float speed, float accel, float decel, float theta_speed,
+                           float theta_accel, float theta_start_frac, bool theta_full_speed) {
   if (cfg->gantry->isAlarmActive()) {
     ESP_LOGW(TAG, "axis alarm — move skipped");
     return false;
   }
   const auto err = cfg->gantry->moveTo(joint, u32(speed), u32(theta_speed), u32(accel),
                                        u32(decel), u32(theta_accel), u32(theta_accel),
-                                       theta_start_frac);
-    if (err != Gantry::GantryError::OK) {
+                                       theta_start_frac, theta_full_speed);
+  if (err != Gantry::GantryError::OK) {
     ESP_LOGW(TAG, "joint move rejected (%d) x=%.2f z=%.2f th=%.2f", static_cast<int>(err),
              static_cast<double>(joint.x), static_cast<double>(joint.z),
              static_cast<double>(joint.theta));
     return false;
   }
+  return true;
+}
+
+static bool finishJointMove(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint) {
   if (!waitMotion(cfg)) {
     return false;
   }
@@ -1601,21 +1672,30 @@ static bool moveJoint(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& j
   return true;
 }
 
+static bool moveJoint(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint,
+                      float speed, float accel, float decel, float theta_speed,
+                      float theta_accel, float theta_start_frac,
+                      bool theta_full_speed = false) {
+  return startJointMove(cfg, joint, speed, accel, decel, theta_speed, theta_accel,
+                        theta_start_frac, theta_full_speed) &&
+         finishJointMove(cfg, joint);
+}
+
 static bool moveApproach(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint,
                          const PickConfig& p, float x_mm_s, float theta_deg_s) {
   return moveJoint(cfg, joint, x_mm_s, p.limits.accel, p.limits.decel, theta_deg_s,
-                   p.limits.theta_accel, p.limits.theta_start_frac);
+                   p.limits.theta_accel, p.limits.theta_start_frac, p.limits.theta_full_speed);
 }
 
 static bool moveZ(PickSchedulerTaskConfig* cfg, const Gantry::JointConfig& joint,
                   const PickConfig& p, float z_mm_s) {
-  return moveJoint(cfg, joint, z_mm_s, p.limits.accel, p.limits.decel, p.limits.theta_cap,
-                   p.limits.theta_accel, 0.0f);
+  return moveJoint(cfg, joint, z_mm_s, zAccel(p), zDecel(p), p.limits.theta_cap,
+                   p.limits.theta_accel, 0.0f, p.limits.theta_full_speed);
 }
 
 static bool retract(PickSchedulerTaskConfig* cfg, const PickConfig& p) {
-  const auto err = cfg->gantry->retractToSafeZ(u32(p.limits.z_cap), u32(p.limits.accel),
-                                               u32(p.limits.decel));
+  const auto err = cfg->gantry->retractToSafeZ(u32(p.limits.z_cap), u32(zAccel(p)),
+                                               u32(zDecel(p)));
   if (err != Gantry::GantryError::OK) {
     ESP_LOGE(TAG, "Z retract refused (%d)", static_cast<int>(err));
     return false;
@@ -1642,31 +1722,40 @@ static const char* strikeAbortReason() {
 }
 
 static bool dropHeld(PickSchedulerTaskConfig* cfg, const PickConfig& p, float approach_mm_s,
-                     float approach_deg_s) {
+                     float approach_deg_s,
+                     const Gantry::JointConfig* already_moving_to = nullptr) {
   const auto& c = Config::AppConfig::instance().data();
-  const Gantry::JointConfig here = cfg->gantry->getCurrentJointConfig();
-  const float theta = c.pick_drop_any_theta ? here.theta : c.gantry_cal_theta_park_deg;
-  const Gantry::JointConfig drop_safe(c.gantry_cal_x_park_mm, p.z_safe, theta);
-  const Gantry::JointConfig drop(c.gantry_cal_x_park_mm, c.gantry_cal_z_park_mm, theta);
-  if (PickIntercept::inConveyorCollision(drop.x, drop.z, c.gantry_conveyor_collision_x_min_mm,
-                                         c.gantry_conveyor_collision_z_min_mm)) {
-    ESP_LOGW(TAG, "bin drop violates the conveyor envelope; gripper stays closed");
-    return false;
+  Gantry::JointConfig drop;
+  if (already_moving_to != nullptr) {
+    drop = *already_moving_to;
+    if (!finishJointMove(cfg, drop)) {
+      ESP_LOGW(TAG, "transfer failed; gripper stays closed");
+      return false;
+    }
+  } else {
+    const Gantry::JointConfig here = cfg->gantry->getCurrentJointConfig();
+    const float theta = c.pick_drop_any_theta ? here.theta : c.gantry_cal_theta_park_deg;
+    drop = Gantry::JointConfig(c.gantry_cal_x_park_mm, c.gantry_cal_z_park_mm, theta);
+    if (PickIntercept::inConveyorCollision(drop.x, drop.z, c.gantry_conveyor_collision_x_min_mm,
+                                           c.gantry_conveyor_collision_z_min_mm)) {
+      ESP_LOGW(TAG, "bin drop violates the conveyor envelope; gripper stays closed");
+      return false;
+    }
+    // Single multi-segment move: retracts Z (if below SAFE_Z) with deferred X+theta,
+    // traverses to bin X at SAFE_Z, then descends immediately to drop.z without pause.
+    if (!moveApproach(cfg, drop, p, approach_mm_s, approach_deg_s)) {
+      ESP_LOGW(TAG, "transfer failed; gripper stays closed");
+      return false;
+    }
   }
-  if (!retract(cfg, p) ||
-      !moveApproach(cfg, drop_safe, p, approach_mm_s, approach_deg_s) ||
-      !moveZ(cfg, drop, p, p.limits.z_cap)) {
-    ESP_LOGW(TAG, "transfer failed; gripper stays closed");
-    return false;
-  }
-  ESP_LOGI(TAG, "At bin drop X=%.2f mm Z=%.2f mm theta=%.2f deg. Opening gripper.",
-           static_cast<double>(drop.x), static_cast<double>(drop.z),
-           static_cast<double>(drop.theta));
   if (!cfg->gantry->grip(false)) {
     ESP_LOGE(TAG, "gripper open write failed at the bin");
     return false;
   }
   s_cell_in_jaws.store(false, std::memory_order_release);
+  ESP_LOGI(TAG, "At bin drop X=%.2f mm Z=%.2f mm theta=%.2f deg. Opening gripper.",
+           static_cast<double>(drop.x), static_cast<double>(drop.z),
+           static_cast<double>(drop.theta));
   return delayMs(cfg, c.gantry_gripper_open_time_ms);
 }
 
@@ -1730,9 +1819,17 @@ static PickEval evaluateActive(const PickConfig& p, const Gantry::JointLimits& l
                   esp_timer_get_time(), others, n, frozen_joint);
 }
 
-// Waits for plunge, close and retract to fire and for the retract to finish.
-// False on halt, abort, or an event that did not fire in time.
-static bool waitStrikeDone(PickSchedulerTaskConfig* cfg) {
+// Waits for plunge, close and retract to fire and for the retract to finish
+// (or hand off to a chained bin drop once Z enters SAFE_Z). False on halt,
+// abort, or an event that did not fire in time.
+static bool waitStrikeDone(PickSchedulerTaskConfig* cfg, const PickConfig* p = nullptr,
+                           const Gantry::JointConfig* chain_drop = nullptr,
+                           float approach_mm_s = 0.0f, float approach_deg_s = 0.0f,
+                           bool* out_chained = nullptr) {
+    bool chained = false;
+    if (out_chained != nullptr) {
+        *out_chained = false;
+    }
     while (true) {
         if (!running()) {
             disarmStrike();
@@ -1762,7 +1859,17 @@ static bool waitStrikeDone(PickSchedulerTaskConfig* cfg) {
         }
         const int64_t retract_us = s_retract_fired_us.load(std::memory_order_acquire);
         if (retract_us != 0) {
-            if (!cfg->gantry->isBusy()) {
+            if (chain_drop != nullptr && p != nullptr && !chained &&
+                !cfg->gantry->isPreloadHeld()) {
+                chained = cfg->gantry->chainMoveAfterRetract(
+                    *chain_drop, u32(approach_mm_s), u32(approach_deg_s), u32(p->limits.accel),
+                    u32(p->limits.decel), u32(p->limits.theta_accel), u32(p->limits.theta_decel),
+                    p->limits.theta_start_frac, p->limits.theta_full_speed);
+                if (out_chained != nullptr) {
+                    *out_chained = chained;
+                }
+            }
+            if (chained ? cfg->gantry->isRetractHandedOff() : !cfg->gantry->isBusy()) {
                 return true;
             }
             if (now > retract_us + kRetractDoneUs) {
@@ -1799,6 +1906,12 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
                  eval.reason);
         return;
     }
+    // Start approach immediately (including deferred-X retract if starting below SAFE_Z)
+    // so UART logging and follower classification run in parallel with axis acceleration.
+    const bool approach_started =
+        startJointMove(cfg, eval.approach, eval.strike.approach_speed_mm_s, p.limits.accel,
+                       p.limits.decel, eval.approach_deg_s, p.limits.theta_accel,
+                       p.limits.theta_start_frac, p.limits.theta_full_speed);
     char plan[512];
     formatEval(eval, plan, sizeof(plan));
     ESP_LOGI(TAG, "pick item=%lu %s", static_cast<unsigned long>(part.item_id), plan);
@@ -1811,8 +1924,7 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
     }
     classifyFollowers(p, lim, part, eval, copyBelt(), esp_timer_get_time());
 
-    if (!retract(cfg, p) ||
-        !moveApproach(cfg, eval.approach, p, eval.strike.approach_speed_mm_s, eval.approach_deg_s)) {
+    if (!approach_started || !finishJointMove(cfg, eval.approach)) {
         return;
     }
     eval = evaluateActive(p, lim, part, nullptr);
@@ -1832,11 +1944,15 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
         return;
     }
 
-    // The hover can sit above the band ceiling for a tall object.
-    const float jaw_joint = cfg->gantry->getCurrentJointConfig().theta;
-    if (!moveZ(cfg, eval.hover, p, eval.strike.descend_speed_mm_s)) {
-        (void)retract(cfg, p);
-        return;
+    // The hover can sit above the band ceiling for a tall object; skip a no-op
+    // Z move when already parked at hover (saves ~120 ms on SAFE_Z picks).
+    const Gantry::JointConfig pre_hover = cfg->gantry->getCurrentJointConfig();
+    const float jaw_joint = pre_hover.theta;
+    if (std::fabs(pre_hover.z - eval.hover.z) > kHoverAlreadyEpsMm) {
+        if (!moveZ(cfg, eval.hover, p, eval.strike.descend_speed_mm_s)) {
+            (void)retract(cfg, p);
+            return;
+        }
     }
     eval = evaluateActive(p, lim, part, &jaw_joint);
     if (!eval.strike.feasible) {
@@ -1844,22 +1960,44 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
         return;
     }
 
-    const int64_t arrive_at =
-        esp_timer_get_time() + static_cast<int64_t>(eval.strike.arrive_s * 1.0e6f);
     const Gantry::JointConfig here = cfg->gantry->getCurrentJointConfig();
     const Gantry::JointConfig strike(here.x, eval.pick.z, here.theta);
+    const float za = zAccel(p);
+    const float zd = zDecel(p);
     const auto pre = cfg->gantry->preloadJointMove(
-        strike, u32(eval.strike.descend_speed_mm_s), u32(p.limits.accel), u32(p.limits.decel));
+        strike, u32(eval.strike.descend_speed_mm_s), u32(za), u32(zd));
     if (pre != Gantry::GantryError::OK || !cfg->gantry->isPreloadHeld()) {
         abortStrike(cfg, p, "Z preload did not hold StartMotion");
         return;
     }
-    armStrike(eval.timing, eval.jaw_world_deg, part.battery_class, eval.sim, arrive_at,
-              p.limits.z_cap, p.limits.accel, p.limits.decel);
+    const int64_t now_pre = esp_timer_get_time();
+    const PickIntercept::Retime pre_retime =
+        PickIntercept::retimeArrival(eval.timing, copyBelt(), now_pre);
+    if (!pre_retime.ok) {
+        abortStrike(cfg, p, pre_retime.reason);
+        return;
+    }
+    const int64_t z_target_us = pre_retime.arrive_us + secondsToUs(eval.sim.t_z_s);
+    if (PickIntercept::isPlungeOverdue(now_pre, z_target_us, kMaxLatePlungeUs)) {
+        abortStrike(cfg, p, "late after preload");
+        return;
+    }
+    armStrike(eval.timing, eval.jaw_world_deg, part.battery_class, eval.sim, pre_retime.arrive_us,
+              p.limits.z_cap, za, zd);
     traceStart(part.item_id);
 
-    const bool struck = waitStrikeDone(cfg);
-    traceFinish(eval, eval.strike.descend_speed_mm_s, p.limits.accel, copyBelt().speed_mm_s);
+    const auto& c = Config::AppConfig::instance().data();
+    const float bin_theta = c.pick_drop_any_theta ? here.theta : c.gantry_cal_theta_park_deg;
+    const Gantry::JointConfig drop(c.gantry_cal_x_park_mm, c.gantry_cal_z_park_mm, bin_theta);
+    const Gantry::JointConfig* chain_drop =
+        PickIntercept::inConveyorCollision(drop.x, drop.z, c.gantry_conveyor_collision_x_min_mm,
+                                           c.gantry_conveyor_collision_z_min_mm)
+            ? nullptr
+            : &drop;
+    bool chained = false;
+    const bool struck = waitStrikeDone(cfg, &p, chain_drop, eval.strike.approach_speed_mm_s,
+                                       eval.approach_deg_s, &chained);
+    traceFinish(eval, eval.strike.descend_speed_mm_s, za, copyBelt().speed_mm_s);
     if (!struck) {
         const char* why = strikeAbortReason();
         if (why != nullptr) {
@@ -1880,6 +2018,13 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
     s_active_valid = false;
     portEXIT_CRITICAL(&s_belt_mux);
 
+    bool drop_started = chained;
+    if (!drop_started && chain_drop != nullptr) {
+        drop_started = startJointMove(cfg, drop, eval.strike.approach_speed_mm_s, p.limits.accel,
+                                      p.limits.decel, eval.approach_deg_s, p.limits.theta_accel,
+                                      p.limits.theta_start_frac, p.limits.theta_full_speed);
+    }
+
     ESP_LOGI(TAG,
              "pick actual item=%lu plunge_err_ms=%.1f close_err_ms=%.1f retract_err_ms=%.1f "
              "retract_call_ms=%.1f z_at_retract_edge %.2f deepest %.2f/%.2f mm "
@@ -1895,7 +2040,8 @@ static void runPick(PickSchedulerTaskConfig* cfg, const PickIntercept::TrackedPa
                  static_cast<double>(eval.pick.z - depth_mm));
     }
 
-    if (!dropHeld(cfg, p, eval.strike.approach_speed_mm_s, eval.approach_deg_s)) {
+    if (!dropHeld(cfg, p, eval.strike.approach_speed_mm_s, eval.approach_deg_s,
+                  drop_started ? &drop : nullptr)) {
         return;
     }
     s_last_cycle_ms = static_cast<float>(esp_timer_get_time() - started) / 1000.0f;
@@ -2011,8 +2157,9 @@ static void goToStaging(PickSchedulerTaskConfig* cfg) {
     return;
   }
   const PickConfig stage_cfg = pickConfig(lim);
-  if (!retract(cfg, stage_cfg) ||
-      !moveApproach(cfg, stage, stage_cfg, stage_cfg.limits.speed, stage_cfg.limits.theta_cap)) {
+  // Single deferred-X move: retracts Z (if below SAFE_Z) and launches X+theta
+  // on the exact tick Z enters the SAFE_Z band with no pause between Z and X.
+  if (!moveApproach(cfg, stage, stage_cfg, stage_cfg.limits.speed, stage_cfg.limits.theta_cap)) {
     vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
@@ -2330,14 +2477,15 @@ static void traceSummary(char* out, size_t out_len) {
     };
     snprintf(out, out_len,
              "ztrace item=%lu n=%d belt=%.0f vz=%.0f az=%.0f hover=%.2f grasp=%.2f "
-             "z_fire_err=%.1f plunge_start=%.1f reach=%.1f (plan %.1f) peak=%.2f@%.1f "
+             "z_fire_err=%.1f plunge_start=%.1f reach=%.1f (plan %.1f+%.0fd) peak=%.2f@%.1f "
              "retract_cmd=%.1f z_at_cmd=%.2f retract_start=%.1f call=%.1f "
              "grip_cmd=%.1f grip_write=%.1f [ms from z fire]",
              static_cast<unsigned long>(t.item_id), t.n, static_cast<double>(t.belt_mm_s),
              static_cast<double>(t.vz_mm_s), static_cast<double>(t.az_mm_s2),
              static_cast<double>(t.z_hover_mm), static_cast<double>(t.z_grasp_mm),
              traceMs(t.z_fired_us, t.ctl.z_at_us), relMs(i_move, z_rel), relMs(i_reach, z_rel),
-             static_cast<double>(t.tau_plunge_s) * 1000.0, static_cast<double>(t.z_mm[i_peak]),
+             static_cast<double>(t.tau_plunge_s) * 1000.0,
+             static_cast<double>(t.z_plunge_dead_s) * 1000.0, static_cast<double>(t.z_mm[i_peak]),
              relMs(i_peak, z_rel), traceMs(t.retract_cmd_us, t.z_fired_us),
              static_cast<double>(z_at_r), relMs(i_rev, z_rel),
              traceMs(t.retract_done_us, t.retract_cmd_us), traceMs(t.grip_cmd_us, t.z_fired_us),

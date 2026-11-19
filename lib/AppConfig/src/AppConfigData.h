@@ -90,6 +90,8 @@ struct AppConfigData {
     int32_t pick_vision_latency_ms = 40;
     int32_t pick_valve_ms = 30;
     int32_t pick_valve_on_ms = 8;
+    int32_t pick_z_plunge_dead_ms = 30;
+    int32_t pick_z_retract_dead_ms = 22;
     int32_t pick_offset_plunge_ms = 0;
     int32_t pick_offset_close_ms = 0;
     // 1: vision detections take x_across from batt_x (fixed trigger-sensor frames).
