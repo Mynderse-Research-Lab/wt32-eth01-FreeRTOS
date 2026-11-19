@@ -299,6 +299,10 @@ public:
     // Z feedback without the gantry mutex (process-image lock only), for the
     // 1 kHz strike trace. False when the Z link is offline.
     bool    sampleZFeedbackMm(float& mm) const;
+    // Theta feedback and the last theta move stamp without the gantry mutex,
+    // for the 1 kHz theta trace. False when there is no live theta axis.
+    bool    sampleThetaTrace(RotaryTraceSample& out) const;
+    bool    getThetaMoveStamp(RotaryMoveStamp& out) const;
     int32_t getZEncoderPulses() const;
     float   getZPulsesPerMm() const;
     int     getCurrentTheta() const;

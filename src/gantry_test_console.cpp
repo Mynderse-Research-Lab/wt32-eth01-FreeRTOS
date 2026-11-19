@@ -33,6 +33,7 @@
 #include "gantry_net_console.h"
 #include "gantry_ota.h"
 #include "pick_scheduler.h"
+#include "theta_trace.h"
 #include "boot_log_ring.h"
 #include "AppConfig.h"
 #include "gantry_runtime_params.h"
@@ -4146,6 +4147,17 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
       return;
     }
     ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "thtrace", 7) == 0) {
+    const char* args = cmdLower + 7;
+    while (*args == ' ') {
+      ++args;
+    }
+    char line[768];
+    if (!thetaTraceCommand(cfg->gantry, args, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strncmp(cmdLower, "beltcal", 7) == 0) {
     const char* arg = cmdLower + 7;
     while (*arg == ' ') {
@@ -4330,6 +4342,7 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  pickplan <x> <y> <t> <class> <id> <w> <len> <h> - dry-run the vision contract");
   ESP_LOGI(TAG, "  beltsim <mm_s>                - synthetic conveyor clock (0 = off)");
   ESP_LOGI(TAG, "  ztrace [raw <start> <count>]  - last strike's 1 kHz Z trace");
+  ESP_LOGI(TAG, "  thtrace [arm|off|raw <start> <count>] - 1 kHz trace of the next theta move");
   ESP_LOGI(TAG, "  netcon                        - TCP console send counters");
   ESP_LOGI(TAG, "  gripmark on|off               - grip timing marker on GPIO17 (TFT backlight off)");
   ESP_LOGI(TAG, "  vismark on|off                - vision frame receipt marker on GPIO17 (TFT backlight off)");

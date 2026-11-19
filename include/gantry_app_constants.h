@@ -119,5 +119,9 @@
 #define PICK_TRACE_TASK_STACK       3072
 #define PICK_TRACE_TASK_PRIORITY       4
 #define PICK_TRACE_TASK_CORE           0
+// 1 kHz theta sampler for `thtrace` (HCS01 tuning). Core 0, like PickTrace.
+#define THETA_TRACE_TASK_STACK      3072
+#define THETA_TRACE_TASK_PRIORITY      4
+#define THETA_TRACE_TASK_CORE          0
 
 #endif  // GANTRY_APP_CONSTANTS_H

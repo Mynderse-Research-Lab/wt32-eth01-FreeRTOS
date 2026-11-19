@@ -13,6 +13,36 @@
 
 namespace Gantry {
 
+/// One drive feedback read for the 1 kHz theta trace.
+struct RotaryTraceSample {
+    double deg = 0.0;        // actual position, axis degrees
+    float vel_deg_s = 0.0f;  // actual velocity
+    uint16_t status = 0;     // drive status word
+};
+
+/// How the axis ended its last move.
+enum class RotaryMoveEnd : uint8_t {
+    kNone = 0,      // still running
+    kExact = 1,     // in the position window with the drive's reached bit
+    kStiction = 2,  // stationary inside the wider stiction window
+    kTimeout = 3,
+    kAbort = 4,     // stopMotion or link loss
+};
+
+/// The last commanded move, as the axis sent it. seq changes on every move.
+struct RotaryMoveStamp {
+    uint32_t seq = 0;
+    int64_t cmd_us = 0;    // move commanded (target preloaded)
+    int64_t start_us = 0;  // start edge sent to the drive; 0 = not yet
+    int64_t done_us = 0;   // axis ended the move; 0 = not yet
+    RotaryMoveEnd end = RotaryMoveEnd::kNone;
+    float start_deg = 0.0f;
+    float target_deg = 0.0f;
+    float vel_deg_s = 0.0f;  // after the drive caps
+    float acc_deg_s2 = 0.0f;
+    float dec_deg_s2 = 0.0f;
+};
+
 /**
  * @class GantryRotaryAxis
  * @brief Rotary axis interface (unit: degrees).
@@ -82,6 +112,18 @@ public:
     virtual void update() = 0;
 
     virtual void setAngleRange(float min_deg, float max_deg) = 0;
+
+    // ---------- Trace (lock-free, any task) ----------
+    /// Live feedback for the 1 kHz theta trace. False when not available.
+    virtual bool sampleTrace(RotaryTraceSample& out) const {
+        (void)out;
+        return false;
+    }
+    /// Last move stamp. False when the axis does not stamp moves.
+    virtual bool getMoveStamp(RotaryMoveStamp& out) const {
+        (void)out;
+        return false;
+    }
 
     // ---------- Motion logging ----------
     /// @brief Set the short human-readable axis tag used in MOVE log lines.

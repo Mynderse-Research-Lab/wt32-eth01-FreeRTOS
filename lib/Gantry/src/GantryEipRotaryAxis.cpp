@@ -228,7 +228,8 @@ bool GantryEipRotaryAxis::publishMove(bool start_edge) {
   return publishCommand(buildMoveCommand(start_edge));
 }
 
-void GantryEipRotaryAxis::finishMoveHold() {
+void GantryEipRotaryAxis::finishMoveHold(RotaryMoveEnd end) {
+  stampEnd(end);
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
   arrival_stable_us_ = 0;
@@ -276,6 +277,7 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
     const double eff_speed_deg_s =
         static_cast<double>(cmd_vel_puu_) / kHcs01VelocityUnitsPerDegS;
     move_timeout_us_ = thetaMoveTimeoutUs(target_deg - start_deg_, eff_speed_deg_s);
+    stampMove();
 
     // Preload S-0-0282 while AH (Drive Halt). Next ticks: halt 0→1 (AF),
     // then bit0 toggle. Combining those edges dropped the drive to Ab.
@@ -305,6 +307,9 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
 }
 
 bool GantryEipRotaryAxis::stopMotion() {
+  if (motion_active_) {
+    stampEnd(RotaryMoveEnd::kAbort);
+  }
   stop_requested_ = true;
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
@@ -463,6 +468,9 @@ void GantryEipRotaryAxis::update() {
     if (motion_active_ || arm_phase_ != ArmPhase::kIdle) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : "EipRotary";
       ESP_LOGW(tag, "EIP connection offline — aborting motion and disarming");
+      if (motion_active_) {
+        stampEnd(RotaryMoveEnd::kAbort);
+      }
       motion_active_ = false;
       stop_requested_ = false;
       move_phase_ = MovePhase::kIdle;
@@ -545,6 +553,7 @@ void GantryEipRotaryAxis::update() {
       move_phase_us_ = legacyTicksUs(kMoveStartTicks);
       command_accept_level_ = !command_accept_level_;
       (void)publishMove(/*start_edge=*/true);
+      stamp_start_us_.store(esp_timer_get_time(), std::memory_order_release);
     }
     return;
   }
@@ -606,7 +615,7 @@ void GantryEipRotaryAxis::update() {
     accrueUs(arrival_stable_us_, legacyTicksUs(kArrivalStableTicks));
     if (arrival_stable_us_ >= legacyTicksUs(kArrivalStableTicks)) {
       ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
-      finishMoveHold();
+      finishMoveHold(RotaryMoveEnd::kExact);
       return;
     }
   } else {
@@ -617,7 +626,7 @@ void GantryEipRotaryAxis::update() {
     accrueUs(stiction_stable_us_, legacyTicksUs(kStictionStableTicks));
     if (stiction_stable_us_ >= legacyTicksUs(kStictionStableTicks)) {
       ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
-      finishMoveHold();
+      finishMoveHold(RotaryMoveEnd::kStiction);
       return;
     }
   } else {
@@ -629,7 +638,7 @@ void GantryEipRotaryAxis::update() {
     ESP_LOGW(tag(),
              "[THETA] move timeout (current=%.3f target=%.3f) — halt",
              static_cast<double>(now_deg), static_cast<double>(target_deg_));
-    finishMoveHold();
+    finishMoveHold(RotaryMoveEnd::kTimeout);
     return;
   }
 
@@ -686,6 +695,74 @@ DrivePositionRef GantryEipRotaryAxis::getDrivePositionRef() const {
   }
   return fb.status.in_reference ? DrivePositionRef::kHomed
                                 : DrivePositionRef::kLost;
+}
+
+// S-0-0040 is read with the S-0-0259 scaling (S-0-0044..0046, 0.0001 rpm).
+// Assumed from the shared velocity scaling; check against the position slope.
+bool GantryEipRotaryAxis::sampleTrace(RotaryTraceSample& out) const {
+  if (!image_.isOnline() || config_.puu_per_deg <= 0.0) return false;
+  eip::hcs01::Hcs01PositioningActual fb;
+  if (!readFeedback(fb)) return false;
+  out.deg = static_cast<double>(fb.position_feedback) / config_.puu_per_deg;
+  out.vel_deg_s = static_cast<float>(static_cast<double>(fb.velocity_feedback) /
+                                     kHcs01VelocityUnitsPerDegS);
+  out.status = fb.status.encode();
+  return true;
+}
+
+bool GantryEipRotaryAxis::getMoveStamp(RotaryMoveStamp& out) const {
+  for (int tries = 0; tries < 8; ++tries) {
+    const uint32_t s1 = stamp_seq_.load(std::memory_order_acquire);
+    if ((s1 & 1u) != 0) continue;
+    out.cmd_us = stamp_cmd_us_.load(std::memory_order_relaxed);
+    out.start_us = stamp_start_us_.load(std::memory_order_relaxed);
+    out.done_us = stamp_done_us_.load(std::memory_order_relaxed);
+    out.end = static_cast<RotaryMoveEnd>(stamp_end_.load(std::memory_order_relaxed));
+    out.start_deg = stamp_start_deg_.load(std::memory_order_relaxed);
+    out.target_deg = stamp_target_deg_.load(std::memory_order_relaxed);
+    out.vel_deg_s = stamp_vel_deg_s_.load(std::memory_order_relaxed);
+    out.acc_deg_s2 = stamp_acc_deg_s2_.load(std::memory_order_relaxed);
+    out.dec_deg_s2 = stamp_dec_deg_s2_.load(std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (stamp_seq_.load(std::memory_order_relaxed) == s1) {
+      out.seq = s1 / 2u;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Stamps the move as sent: speed and accel after the drive-unit caps.
+void GantryEipRotaryAxis::stampMove() {
+  constexpr double kAccelUnitsPerDegS2 = 1000.0 * 3.141592653589793 / 180.0;
+  const uint32_t seq = stamp_seq_.load(std::memory_order_relaxed);
+  stamp_seq_.store(seq + 1u, std::memory_order_relaxed);
+  std::atomic_thread_fence(std::memory_order_release);
+  stamp_cmd_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
+  stamp_start_us_.store(0, std::memory_order_relaxed);
+  stamp_done_us_.store(0, std::memory_order_relaxed);
+  stamp_end_.store(static_cast<uint8_t>(RotaryMoveEnd::kNone), std::memory_order_relaxed);
+  stamp_start_deg_.store(start_deg_, std::memory_order_relaxed);
+  stamp_target_deg_.store(target_deg_, std::memory_order_relaxed);
+  stamp_vel_deg_s_.store(
+      static_cast<float>(static_cast<double>(cmd_vel_puu_) / kHcs01VelocityUnitsPerDegS),
+      std::memory_order_relaxed);
+  stamp_acc_deg_s2_.store(
+      static_cast<float>(static_cast<double>(cmd_acc_puu_) / kAccelUnitsPerDegS2),
+      std::memory_order_relaxed);
+  stamp_dec_deg_s2_.store(
+      static_cast<float>(static_cast<double>(cmd_dec_puu_) / kAccelUnitsPerDegS2),
+      std::memory_order_relaxed);
+  stamp_seq_.store(seq + 2u, std::memory_order_release);
+}
+
+void GantryEipRotaryAxis::stampEnd(RotaryMoveEnd end) {
+  if (stamp_seq_.load(std::memory_order_acquire) == 0 ||
+      stamp_done_us_.load(std::memory_order_acquire) != 0) {
+    return;
+  }
+  stamp_end_.store(static_cast<uint8_t>(end), std::memory_order_relaxed);
+  stamp_done_us_.store(esp_timer_get_time(), std::memory_order_release);
 }
 
 }  // namespace Gantry

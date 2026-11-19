@@ -22,6 +22,7 @@
 #include "GantryUtils.h"
 #include "Hcs01Assembly.h"
 #include "Kinetix5100Assembly.h"
+#include "host_test_clock.h"
 #include "KinetixFaultCodes.h"
 #include "axis_drivetrain_params.h"
 
@@ -1265,6 +1266,77 @@ static void test_rotary_offline_aborts_move(void) {
   axis.update();
   TEST_ASSERT_FALSE(axis.isBusy());
 }
+// The theta trace reads the move stamp and feedback from another task.
+static void test_rotary_move_stamp_and_trace_sample(void) {
+  HostTest::setUs(5000000);
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 10000.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+  image.setFeedback(makeHcs01Input102(100000, false, true));
+
+  Gantry::RotaryMoveStamp st;
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_EQUAL_UINT32(0, st.seq);
+
+  // velocity_feedback 100 = 0.01 rpm = 0.06 deg/s.
+  Gantry::RotaryTraceSample smp;
+  TEST_ASSERT_TRUE(axis.sampleTrace(smp));
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 10.0f, static_cast<float>(smp.deg));
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.06f, smp.vel_deg_s);
+  TEST_ASSERT_EQUAL_HEX16(0xC410, smp.status);
+
+  TEST_ASSERT_TRUE(axis.moveToDeg(-35.0f, 1980.0f, 9900.0f, 9900.0f));
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_EQUAL_UINT32(1, st.seq);
+  TEST_ASSERT_EQUAL_INT64(5000000, st.cmd_us);
+  TEST_ASSERT_EQUAL_INT64(0, st.start_us);
+  TEST_ASSERT_EQUAL_INT64(0, st.done_us);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Gantry::RotaryMoveEnd::kNone),
+                          static_cast<uint8_t>(st.end));
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 10.0f, st.start_deg);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, -35.0f, st.target_deg);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1980.0f, st.vel_deg_s);
+  TEST_ASSERT_FLOAT_WITHIN(0.1f, 9900.0f, st.acc_deg_s2);
+  TEST_ASSERT_FLOAT_WITHIN(0.1f, 9900.0f, st.dec_deg_s2);
+
+  for (int i = 0; i < 16; ++i) {
+    HostTest::advanceMs(1);
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_TRUE(st.start_us > st.cmd_us);
+  TEST_ASSERT_EQUAL_INT64(0, st.done_us);
+
+  for (int i = 0; i < 4; ++i) {
+    HostTest::advanceMs(1);
+    image.setFeedback(makeHcs01Input102(-350000, false, true));
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_TRUE(st.done_us > st.start_us);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Gantry::RotaryMoveEnd::kExact),
+                          static_cast<uint8_t>(st.end));
+
+  // A stop while idle keeps the finished move's end; a stop mid-move is an abort.
+  const int64_t done_us = st.done_us;
+  TEST_ASSERT_TRUE(axis.stopMotion());
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_EQUAL_INT64(done_us, st.done_us);
+  TEST_ASSERT_TRUE(axis.moveToDeg(0.0f, 1980.0f, 9900.0f, 9900.0f));
+  HostTest::advanceMs(1);
+  TEST_ASSERT_TRUE(axis.stopMotion());
+  TEST_ASSERT_TRUE(axis.getMoveStamp(st));
+  TEST_ASSERT_EQUAL_UINT32(2, st.seq);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Gantry::RotaryMoveEnd::kAbort),
+                          static_cast<uint8_t>(st.end));
+  HostTest::resetClock();
+}
+
 static void test_rotary_consecutive_move_ignores_stale_in_pos(void) {
   // Live test_cycle I: H leaves bit4=1 at ~179°, then 179→0 must stay busy
   // until the new target, not halt at the previous pose.
@@ -1728,6 +1800,7 @@ int main(void) {
   RUN_TEST(test_rotary_alarm);
   RUN_TEST(test_rotary_thetalim_cannot_expand_past_offset_envelope);
   RUN_TEST(test_rotary_alarm_summary_and_cip_status);
+  RUN_TEST(test_rotary_move_stamp_and_trace_sample);
   RUN_TEST(test_axis_log_due_period);
   RUN_TEST(test_scanner_process_image_exchange);
   return UNITY_END();

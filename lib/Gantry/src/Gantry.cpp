@@ -1350,6 +1350,15 @@ bool Gantry::sampleZFeedbackMm(float& mm) const {
     return true;
 }
 
+bool Gantry::sampleThetaTrace(RotaryTraceSample& out) const {
+    // axisTheta_ is set by the constructor and never reseated.
+    return axisTheta_ && axisTheta_->sampleTrace(out);
+}
+
+bool Gantry::getThetaMoveStamp(RotaryMoveStamp& out) const {
+    return axisTheta_ && axisTheta_->getMoveStamp(out);
+}
+
 int32_t Gantry::getZEncoderPulses() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || !axisZ_) return 0;

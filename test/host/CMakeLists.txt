@@ -105,6 +105,8 @@ endfunction()
 
 add_host_test(test_kinematics)
 add_host_test(test_trajectory)
+# thtrace summary of one HCS01 move (header-only, reuses TrajectoryPlanner)
+add_host_test(test_theta_trace_analysis)
 
 # EtherNet/IP encoding tests link the ethernet_ip lib instead of gantry_logic.
 add_executable(test_eip_encoding "test_eip_encoding.cpp")

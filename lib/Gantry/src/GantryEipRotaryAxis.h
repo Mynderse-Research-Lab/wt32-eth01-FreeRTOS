@@ -13,6 +13,7 @@
 #include "EipProcessImage.h"
 #include "Hcs01Assembly.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 
@@ -136,6 +137,8 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
   DrivePositionRef getDrivePositionRef() const override;
+  bool sampleTrace(RotaryTraceSample& out) const override;
+  bool getMoveStamp(RotaryMoveStamp& out) const override;
 
  private:
   enum class MovePhase : uint8_t {
@@ -155,7 +158,9 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   bool publishHold();
   bool publishClearFaults();
   bool publishMove(bool start_edge);
-  void finishMoveHold();
+  void finishMoveHold(RotaryMoveEnd end);
+  void stampMove();
+  void stampEnd(RotaryMoveEnd end);
   const char* tag() const;
   void logAfStatus(const char* why, const eip::hcs01::Hcs01PositioningActual& fb) const;
 
@@ -192,6 +197,18 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   uint32_t stiction_stable_us_ = 0;
   uint32_t run_us_;
   uint32_t move_timeout_us_ = kThetaMoveTimeoutMinUs;
+  // Move stamp for the theta trace, read lock-free from another task.
+  // stamp_seq_ is odd while stampMove() rewrites the move fields.
+  std::atomic<uint32_t> stamp_seq_{0};
+  std::atomic<int64_t> stamp_cmd_us_{0};
+  std::atomic<int64_t> stamp_start_us_{0};
+  std::atomic<int64_t> stamp_done_us_{0};
+  std::atomic<uint8_t> stamp_end_{0};
+  std::atomic<float> stamp_start_deg_{0.0f};
+  std::atomic<float> stamp_target_deg_{0.0f};
+  std::atomic<float> stamp_vel_deg_s_{0.0f};
+  std::atomic<float> stamp_acc_deg_s2_{0.0f};
+  std::atomic<float> stamp_dec_deg_s2_{0.0f};
 };
 
 }  // namespace Gantry
