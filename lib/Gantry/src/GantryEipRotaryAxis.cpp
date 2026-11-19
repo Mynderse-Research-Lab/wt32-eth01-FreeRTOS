@@ -33,8 +33,15 @@ constexpr uint8_t kMoveStartTicks = RotaryPhase::kStartAckTicks;
 constexpr uint8_t kClearFaultTicks = 10;     // hold P-0-4077 bit5 (C0500)
 constexpr uint16_t kWaitAfTicks = 100;       // 1 s @ 100 Hz
 constexpr uint8_t kArrivalStableTicks = 3;   // ~30 ms @ 100 Hz at target
-// Theta positioning tolerance: 0.01 deg
-constexpr float kArrivalEpsDeg = 0.01f;
+// Exact drive arrival matches HCS01 S-0-0057 (0.1000 deg) with reached=1.
+constexpr float kArrivalEpsDeg = Constants::EIP_THETA_SETTLED_TOL_DEG;
+// Stiction fallback: HCS01 in_standstill asserts even during slow 30 deg/s
+// bring-up moves, so require truly stationary feedback (<= 0.015 deg/tick)
+// for 50 ms inside 0.30 deg to break +290 ms S-0-0104=1.00 integrator stalls
+// without prematurely halting slow calibration moves.
+constexpr float kStictionArrivalEpsDeg = 0.30f;
+constexpr float kStictionStepEpsDeg = 0.015f;
+constexpr uint8_t kStictionStableTicks = 5;  // ~50 ms @ 100 Hz stationary
 
 const char* readyLabel(const eip::hcs01::Hcs01StatusWord& st) {
   using eip::hcs01::ReadyForOperation;
@@ -225,6 +232,7 @@ void GantryEipRotaryAxis::finishMoveHold() {
   motion_active_ = false;
   move_phase_ = MovePhase::kIdle;
   arrival_stable_us_ = 0;
+  stiction_stable_us_ = 0;
   run_us_ = 0;
   (void)publishHold();
 }
@@ -247,10 +255,12 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
     }
     target_deg_ = target_deg;
     start_deg_ = getCurrentDeg();
+    prev_deg_ = start_deg_;
     stop_requested_ = false;
     stuck_log_div_ = 0;
-    in_pos_armed_ = false;
+    in_pos_armed_ = (std::fabs(target_deg_ - start_deg_) <= kArrivalEpsDeg);
     arrival_stable_us_ = 0;
+    stiction_stable_us_ = 0;
     run_us_ = 0;
     arm_phase_ = ArmPhase::kHolding;
     arm_phase_us_ = 0;
@@ -274,6 +284,8 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
     move_phase_ = MovePhase::kPreload;
     move_phase_us_ = legacyTicksUs(kMovePreloadTicks);
     motion_active_ = true;
+    // Publish immediately so Class 1 starts preloading before UART logs drain.
+    const bool ok = publishMove(/*start_edge=*/false);
     ESP_LOGI(tag(),
              "[THETA] START current=%.2f target=%.2f cmd_puu=%ld vel=%ld acc=%ld dec=%ld "
              "timeout=%lu ms (scale=%.1f PUU/deg)",
@@ -282,15 +294,14 @@ bool GantryEipRotaryAxis::moveToDeg(float target_deg, float speed_deg_per_s,
              static_cast<long>(cmd_acc_puu_), static_cast<long>(cmd_dec_puu_),
              static_cast<unsigned long>(move_timeout_us_ / 1000u), config_.puu_per_deg);
     eip::hcs01::Hcs01PositioningActual fb;
-    if (readFeedback(fb)) {
+    if (readFeedback(fb) &&
+        fb.status.ready != eip::hcs01::ReadyForOperation::kInOperation) {
         logAfStatus("move-start", fb);
-        if (fb.status.ready != eip::hcs01::ReadyForOperation::kInOperation) {
-            ESP_LOGW(tag(),
-                     "[THETA] not AH/AF (ready=%u, want 3) — Drive ON not accepted",
-                     static_cast<unsigned>(fb.status.ready));
-        }
+        ESP_LOGW(tag(),
+                 "[THETA] not AH/AF (ready=%u, want 3) — Drive ON not accepted",
+                 static_cast<unsigned>(fb.status.ready));
     }
-    return publishMove(/*start_edge=*/false);
+    return ok;
 }
 
 bool GantryEipRotaryAxis::stopMotion() {
@@ -550,6 +561,8 @@ void GantryEipRotaryAxis::update() {
       move_phase_ = MovePhase::kRun;
       run_us_ = 0;
       arrival_stable_us_ = 0;
+      stiction_stable_us_ = 0;
+      prev_deg_ = getCurrentDeg();
     }
     return;
   }
@@ -579,10 +592,17 @@ void GantryEipRotaryAxis::update() {
       std::fabs(now_deg - start_deg_) > kArrivalEpsDeg) {
     in_pos_armed_ = true;
   }
-  const bool at_target = std::fabs(now_deg - target_deg_) <= kArrivalEpsDeg &&
-                         (fb.status.command_value_reached ||
-                          fb.status.in_standstill);
-  if (in_pos_armed_ && at_target) {
+  const float err_deg = std::fabs(now_deg - target_deg_);
+  const float step_deg = std::fabs(now_deg - prev_deg_);
+  prev_deg_ = now_deg;
+
+  const bool at_target_exact =
+      err_deg <= kArrivalEpsDeg && fb.status.command_value_reached;
+  const bool at_target_stiction =
+      err_deg <= kStictionArrivalEpsDeg && fb.status.in_standstill &&
+      step_deg <= kStictionStepEpsDeg;
+
+  if (in_pos_armed_ && at_target_exact) {
     accrueUs(arrival_stable_us_, legacyTicksUs(kArrivalStableTicks));
     if (arrival_stable_us_ >= legacyTicksUs(kArrivalStableTicks)) {
       ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
@@ -591,6 +611,17 @@ void GantryEipRotaryAxis::update() {
     }
   } else {
     arrival_stable_us_ = 0;
+  }
+
+  if (in_pos_armed_ && at_target_stiction) {
+    accrueUs(stiction_stable_us_, legacyTicksUs(kStictionStableTicks));
+    if (stiction_stable_us_ >= legacyTicksUs(kStictionStableTicks)) {
+      ESP_LOGI(tag(), "[THETA] END current=%.3f", static_cast<double>(now_deg));
+      finishMoveHold();
+      return;
+    }
+  } else {
+    stiction_stable_us_ = 0;
   }
 
   accrueUs(run_us_, move_timeout_us_);

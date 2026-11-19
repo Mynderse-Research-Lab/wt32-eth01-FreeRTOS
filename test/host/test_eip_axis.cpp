@@ -1608,6 +1608,77 @@ static void test_scanner_process_image_exchange(void) {
   TEST_ASSERT_FALSE(image.isOnline());
 }
 
+static void test_rotary_settles_within_hcs01_window_and_sub_window_move(void) {
+  eip::EipProcessImage image;
+  image.setOnline(true);
+  Gantry::EipRotaryAxisConfig cfg;
+  cfg.puu_per_deg = 10000.0;
+  Gantry::GantryEipRotaryAxis axis(image, cfg);
+  TEST_ASSERT_TRUE(axis.begin());
+  TEST_ASSERT_TRUE(axis.enable());
+
+  // 1. Move 0 -> 45 deg: settle cleanly once drive reports reached=1 at 44.94 deg
+  //    (within HCS01 S-0-0057 = 0.1 deg window, no stall waiting for 0.01 deg).
+  image.setFeedback(makeHcs01Input102(0, false, true));
+  TEST_ASSERT_TRUE(axis.moveToDeg(45.0f, 1440.0f, 7200.0f, 7200.0f));
+  for (int i = 0; i < 18; ++i) {
+    axis.update();
+  }
+  image.setFeedback(makeHcs01Input102(200000, false, false));
+  axis.update();
+  for (int i = 0; i < 4; ++i) {
+    image.setFeedback(makeHcs01Input102(449400, false, true));
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  // 2. Sub-window move (89.994 -> 90.000 deg): reached stays 1, must finish
+  //    promptly instead of hanging until the 15 s timeout.
+  image.setFeedback(makeHcs01Input102(899940, false, true));
+  TEST_ASSERT_TRUE(axis.moveToDeg(90.0f, 30.0f, 1800.0f, 1800.0f));
+  for (int i = 0; i < 24; ++i) {
+    image.setFeedback(makeHcs01Input102(899940, false, true));
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+
+  // 3. Stiction standstill at 0.15 deg short of target (reached=0, standstill=1):
+  //    stays busy at 0.60 deg away AND while still creeping at 30 deg/s (0.30 deg/tick),
+  //    then settles cleanly once truly stationary inside 0.30 deg for 50 ms.
+  auto makeStandstill = [](int32_t puu) {
+    Bytes frame;
+    eip::ByteWriter w(frame);
+    w.u16(0xC80Eu);  // ready=3 AF, in_standstill=1, command_value_reached=0
+    w.i32(puu);
+    w.i32(0);
+    w.u32(0);
+    return frame;
+  };
+  image.setFeedback(makeHcs01Input102(0, false, true));
+  TEST_ASSERT_TRUE(axis.moveToDeg(-45.0f, 1000.0f, 3600.0f, 3600.0f));
+  for (int i = 0; i < 18; ++i) {
+    axis.update();
+  }
+  // Stationary at -44.40 deg (0.60 deg away): stays busy.
+  image.setFeedback(makeStandstill(-444000));
+  for (int i = 0; i < 8; ++i) {
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(axis.isBusy());
+  // Passing through [-44.75 .. -45.25] at 0.10 deg/tick (slow bring-up cruise): stays busy.
+  for (int i = 0; i < 6; ++i) {
+    image.setFeedback(makeStandstill(-447500 - i * 1000));
+    axis.update();
+  }
+  TEST_ASSERT_TRUE(axis.isBusy());
+  // Stationary in stiction at -44.85 deg (0.15 deg away): settles after 5 stable ticks.
+  image.setFeedback(makeStandstill(-448500));
+  for (int i = 0; i < 6; ++i) {
+    axis.update();
+  }
+  TEST_ASSERT_FALSE(axis.isBusy());
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_process_image_command_feedback);
@@ -1648,6 +1719,7 @@ int main(void) {
   RUN_TEST(test_theta_ah_times_out_when_ready_stays_below_operation);
   RUN_TEST(test_rotary_offline_aborts_move);
   RUN_TEST(test_rotary_consecutive_move_ignores_stale_in_pos);
+  RUN_TEST(test_rotary_settles_within_hcs01_window_and_sub_window_move);
   RUN_TEST(test_rotary_unaligned_home_offsets_and_clamps_to_drive_travel);
   RUN_TEST(test_rotary_aligned_home_is_drive_identity);
   RUN_TEST(test_rotary_unaligned_small_delta_keeps_offset_command);

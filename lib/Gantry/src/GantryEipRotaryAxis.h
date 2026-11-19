@@ -186,8 +186,10 @@ class GantryEipRotaryAxis : public GantryRotaryAxis {
   int32_t cmd_dec_puu_;
   uint8_t stuck_log_div_;
   float start_deg_;
+  float prev_deg_ = 0.0f;
   bool in_pos_armed_;
   uint32_t arrival_stable_us_;
+  uint32_t stiction_stable_us_ = 0;
   uint32_t run_us_;
   uint32_t move_timeout_us_ = kThetaMoveTimeoutMinUs;
 };
