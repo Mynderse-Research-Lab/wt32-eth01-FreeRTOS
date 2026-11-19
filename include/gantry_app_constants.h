@@ -107,9 +107,11 @@
 #define TFT_UI_TASK_PRIORITY           2
 #define TFT_UI_TASK_CORE               0
 
+// Core 0 (above PickTrace=4, Console=3, TftUiTask=2): Core 1 is dedicated to
+// Class 1 EipScannerM (prio 6), PickStrike (prio 6), and GantryUpdate (prio 5).
 #define PICK_SCHEDULER_TASK_STACK   8192
-#define PICK_SCHEDULER_TASK_PRIORITY   4
-#define PICK_SCHEDULER_TASK_CORE       1
+#define PICK_SCHEDULER_TASK_PRIORITY   5
+#define PICK_SCHEDULER_TASK_CORE       0
 #define PICK_STRIKE_TASK_STACK      4096
 #define PICK_STRIKE_TASK_PRIORITY      6
 #define PICK_STRIKE_TASK_CORE          1

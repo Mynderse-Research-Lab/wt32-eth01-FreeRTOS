@@ -91,8 +91,9 @@ static constexpr uint32_t kKeepaliveExitWaitMs = 50;
 
 // Tick-aligned Class 1 cadence. xTaskDelayUntil always blocks when on time so
 // IDLE1 can feed the task WDT. Sub-ms RPI fraction (if any) is paced after
-// that block. On overrun, catch up without reseeding last_wake; yield one tick
-// every N consecutive overruns (TWDT safety if exchange > RPI).
+// that block. On a single-period overrun, catch up on the period grid; on a
+// multi-period stall or after yielding a tick every N consecutive overruns,
+// reseed last_wake to now so tick debt cannot lock Core 1 in nonstop catch-up.
 void paceClass1RemainderUs(uint32_t rem_us) {
   if (rem_us == 0) return;
   // Fractional top-up only (< 1 FreeRTOS tick). DelayUntil already blocked.
@@ -116,6 +117,14 @@ void paceClass1Cycle(TickType_t& last_wake, uint32_t rpi_us) {
     if (class1OverrunAction(overrun_streak) == Class1OverrunAction::kYieldTick) {
       class1TimingStats().notePaceYield();
       vTaskDelay(1);
+      last_wake = xTaskGetTickCount();
+      return;
+    }
+    const TickType_t now = xTaskGetTickCount();
+    if (class1ShouldReseedWake(static_cast<uint32_t>(now),
+                               static_cast<uint32_t>(last_wake),
+                               static_cast<uint32_t>(period))) {
+      last_wake = now;
     }
     return;
   }

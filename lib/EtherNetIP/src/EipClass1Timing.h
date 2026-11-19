@@ -56,6 +56,16 @@ inline Class1OverrunAction class1OverrunAction(uint32_t& streak,
   return Class1OverrunAction::kCatchUp;
 }
 
+// True when last_wake (already advanced by one period by xTaskDelayUntil) still
+// trails now by at least one full period. Reseeding last_wake = now prevents a
+// stall from triggering back-to-back zero-sleep catch-up bursts that starve
+// lower-priority Core 1 tasks and SPI3 Class 1 idle waits.
+inline bool class1ShouldReseedWake(uint32_t now_ticks, uint32_t last_wake_ticks,
+                                   uint32_t period_ticks) {
+  if (period_ticks == 0) return false;
+  return static_cast<uint32_t>(now_ticks - last_wake_ticks) >= period_ticks;
+}
+
 // Soft-miss policy: allow a few T->O misses while O->T keeps running before
 // tearing down dual Class 1 (avoids cascading E602 on a single dropped UDP).
 inline bool shouldTeardownAfterInputMisses(uint32_t consecutive_misses,

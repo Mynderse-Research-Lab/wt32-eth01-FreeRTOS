@@ -99,6 +99,20 @@ static void test_likely_limit_stop_heuristic(void) {
   TEST_ASSERT_FALSE(fb.isReady());
 }
 
+static void test_class1_reseed_wake_only_on_multi_period_lag(void) {
+  // Exact boundary (lag 0) and single-tick slip (< period 2): stay on grid.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(102u, 102u, 2u));
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(103u, 102u, 2u));
+  // Full period behind (lag >= period): reseed to avoid catch-up spin.
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(104u, 102u, 2u));
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(110u, 102u, 2u));
+  // Modular 32-bit tick wraparound safety.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(0u, 0xFFFFFFFFu, 2u));
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(1u, 0xFFFFFFFFu, 2u));
+  // Zero period guard.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(200u, 100u, 0u));
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_busy_poll_us_immediate_success);
@@ -110,5 +124,6 @@ int main(void) {
   RUN_TEST(test_soft_miss_warn_gate);
   RUN_TEST(test_reliability_counters);
   RUN_TEST(test_likely_limit_stop_heuristic);
+  RUN_TEST(test_class1_reseed_wake_only_on_multi_period_lag);
   return UNITY_END();
 }
