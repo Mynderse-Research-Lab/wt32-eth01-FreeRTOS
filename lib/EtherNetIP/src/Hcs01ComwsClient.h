@@ -44,8 +44,16 @@ public:
     // Read an IDN value. Returns the value string in out_buf.
     bool getVar(const char* idn, char* out_buf, size_t max_len);
 
-    // Write an IDN value.
+    // Write an IDN value. Rejects protected CIP/engineering IP IDNs.
     bool setVar(const char* idn, const char* value);
+
+    // Write via .7 (operating data) first, falling back to bare IDN on error.
+    // Returns true only when the drive replies without an error token.
+    bool setVarElement7(const char* idn, const char* value,
+                        char* out_reply = nullptr, size_t max_len = 0);
+
+    // Returns true for CIP/engineering IP IDNs that must never be overwritten.
+    static bool isProtectedIdn(const char* idn);
 
     // Execute a SERCOS procedure command (e.g., P-0-0162 for C1800).
     // Polls .8 status until completion or timeout.
