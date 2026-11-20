@@ -4,7 +4,7 @@
 
 A comprehensive architectural and code-quality review of the WT32-ETH01 gantry firmware was conducted. Key vulnerabilities identified included concurrent shadow register corruption in the MCP23S17 expander driver, un-synchronized access to the `Gantry::Gantry` motion controller across FreeRTOS task cores, large stack allocations in EtherNet/IP communications, CPU busy-spin remainder delays, and un-guarded trajectory divisions.
 
-All issues were resolved across three structured phases, validated against 19 native host regression unit tests, compiled under ESP-IDF v6.0, flashed to the WT32-ETH01 hardware target on `COM9`, and verified using an expanded 8-stage holistic automated test cycle (`test_cycle`).
+All issues were resolved across three structured phases, validated against 28 native host regression unit tests, compiled under ESP-IDF v6.0, flashed to the WT32-ETH01 hardware target on `COM9`, and verified using an expanded 8-stage holistic automated test cycle (`test_cycle`).
 
 ---
 
@@ -65,6 +65,29 @@ All issues were resolved across three structured phases, validated against 19 na
 
 ---
 
+### Phase 4: Mathematical Modeling, Strike Kinetics & Multi-Cell Queueing
+
+1. **Option-A Frame Transformation & Velocity Projection Reconciliation**:
+   - **Problem**: Vision packets broadcast object orientation in the camera frame (\(\theta_{\mathrm{vis}} = 0^\circ\) downstream along +Y, positive toward -X). Ingesting \(\theta_{\mathrm{vis}}\) directly into geometric strike routines inverted the along-belt contact factor (\(\mathrm{alongFactor} = |\sin\theta_{\mathrm{close}}| = |\cos\theta_{\mathrm{world}}|\)) and entry crossing velocity calculations.
+   - **Solution**: Implemented strict Option-A world frame mapping (\(\theta_{\mathrm{world}} = \mathrm{halfTurnDeg}(90.0^\circ + \theta_{\mathrm{vis}})\)) and theta joint mapping (\(\theta_{\mathrm{joint}} = 90.0^\circ - \theta_{\mathrm{world}} = -\theta_{\mathrm{vis}}\)). Proved entry crossing velocity \(v_{\mathrm{cross}} = v_{\mathrm{belt}} |\cos\theta_{\mathrm{world}}|\), pad sliding velocity \(v_{\mathrm{along}} = v_{\mathrm{belt}} |\sin\theta_{\mathrm{world}}|\), and close-axis contact factor \(f = |\cos\theta_{\mathrm{world}}|\).
+
+2. **Exact Piecewise Vertical Strike Kinetics (\(\tau_{\mathrm{band}}\))**:
+   - **Problem**: Prior strike timing assumed vertical descent below the object top was governed purely by constant acceleration, resulting in a 6.73 ms (2.02 mm) timing mismatch during high-speed plunge.
+   - **Solution**: Derived exact closed-form piecewise kinetics for \(\tau_{\mathrm{band}}\) across acceleration, cruise, and deceleration phases for asymmetric \(a_z \neq d_z\).
+
+3. **Dedicated Pick Approach Speed Decoupling**:
+   - **Problem**: Pick approach speed was coupled to manual console jog speed (`spd_mm_s`), forcing picking to either crawl at 50 mm/s or creating safety risks during manual jog operations.
+   - **Solution**: Decoupled pick approach parameters in `AppConfig` (`pk_app_spd_mm_s = 750`, `pk_app_th_deg_s = 90`) while maintaining conservative manual jog limits (`spd_mm_s = 50`, `th_spd_deg_s = 30`).
+
+4. **Multi-Cell Follower Queueing Physics**:
+   - **Problem**: Follower feasibility evaluation included redundant 190 ms grip close dwell in \(T_{\mathrm{ready}}\), omitted pre-arrival strike lead time (\(T_{\mathrm{lead}} \approx 160\text{--}360\,\mathrm{ms}\)), subtracted World TCP coordinates directly from Joint park positions, and purged non-pick battery packs (classes 11–13) from tracking.
+   - **Solution**: Removed redundant close dwell from \(T_{\mathrm{ready}} = t_{\mathrm{retract}} + T_{\mathrm{post\_bin}}\), deducted pre-arrival strike lead from follower deadlines, calculated follower travel distance in Joint space via inverse kinematics, and preserved obstacle packs in the tracking queue.
+
+5. **Stored Runtime Configuration Architecture**:
+   - **Solution**: Bound all conveyor trigger geometry (`cv_trig_y_mm`, `cv_trig_off_mm`) and EtherNet/IP drive target IP addresses directly to `AppConfig` runtime storage, persisting via single-transaction `cfg save`. Added 20 ms pacing to `ztrace raw` dumps to eliminate UART TX FIFO starvation.
+
+---
+
 ## 3. Holistic Multi-Stage Test Cycle (`test_cycle`)
 
 The serial test console command `test_cycle` in [`src/gantry_test_console.cpp`](file:///d:/Projects/wt32-eth01-base/src/gantry_test_console.cpp) was redesigned into a comprehensive 8-stage automated qualification suite:
@@ -97,7 +120,7 @@ The serial test console command `test_cycle` in [`src/gantry_test_console.cpp`](
 ```powershell
 cmake -S test/host -B build/host && cmake --build build/host && ctest --test-dir build/host --output-on-failure
 ```
-**Results**: **19 of 19 tests passed (100%)**.
+**Results**: **28 of 28 tests passed (100%)**.
 
 ### Firmware Target Build
 ```powershell
@@ -234,5 +257,5 @@ OK test_cycle PASS
 OK test_cycle PASS
 ```
 - Final Pose Accuracy: $\Theta = -0.003^\circ$ (error $0.003^\circ \le 0.01^\circ$), $X = 0.000\text{ mm}$, $Z = -0.000\text{ mm}$.
-- Class 1 Timing: $\text{p50} = 808\text{ }\mu\text{s}$, $\text{p99} = 1172\text{ }\mu\text{s}$ ($\text{budget} < 2000\text{ }\mu\text{s}$). All 21/21 host unit tests passing 100%.
+- Class 1 Timing: $\text{p50} = 808\text{ }\mu\text{s}$, $\text{p99} = 1172\text{ }\mu\text{s}$ ($\text{budget} < 2000\text{ }\mu\text{s}$). All 28/28 host unit tests passing 100%.
 
