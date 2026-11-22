@@ -217,31 +217,46 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 
 ## 2. Coordinate frame and two datums
 
-| Symbol | Meaning |
-|--------|---------|
-| X | Across belt (sign unchanged) |
-| Y | Along belt; **+Y downstream**; **no joint** |
-| Z | Vertical; **+Z down** (toward belt) |
-| Theta | Rotation about Z (right-handed about +Z) |
+Measured values for these frames are in
+[frame_and_geometry_measurements.md](captures/frame_and_geometry_measurements.md).
 
+**Vision frame** (right-handed). The origin is the bottom-right corner of the camera
+image, with the camera looking down at the conveyor.
+
+| Axis | Direction |
+|------|-----------|
+| +X_v | Toward the image top: across the belt |
+| +Y_v | Toward the image left: along the belt, downstream |
+| +Z_v | Out of the image: up from the belt toward the camera |
+
+**Gantry frame:** X_g = −X_v, Y_g = +Y_v, Z_g = −Z_v, so +Z_g points down toward the
+belt. This is the vision frame turned 180° about Y, so it is right-handed too. Y has
+no joint; the belt carries the part along it.
+
+- **Z datum:** the belt surface is Z = 0 for every subsystem.
+- **Heights** (safe Z, clearances, part heights) are stated in the vision frame,
+  positive above the belt. The gantry converts them to its own frame internally.
+- **Vision output** is published in the vision frame; the gantry transforms it.
+- **Not yet decided:** the offset between the vision and gantry origins (see
+  [G-A5](OPEN_ITEMS.md#g-a-axes-and-mechanics)) and the joint-to-frame map, sign and
+  zero, for each axis.
 - **Joint:** `(x, z, theta)`. Joint Z=0 is the firmware soft-home datum (`zero_puu_`).
-- **Pose:** `(x, y, z, theta)` with `pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`.
 - MQTT / pick planner owns belt **Y**; Gantry does not.
 
-### 2.1 Option-A World Frame vs Vision Frame vs Joint Angle
-- **Option-A World Frame:** Right-handed: +X across belt, +Y downstream, +Z down. Angle \(\theta_{\mathrm{world}} = 0^\circ\) is oriented along **New +X** (across belt); \(\theta_{\mathrm{world}} = +90^\circ\) is oriented along **+Y** (downstream).
-- **Vision Wire Frame (\(\theta_{\mathrm{vis}}\)):** Camera broadcasts orientation with \(0^\circ\) along downstream +Y, rotating positive toward \(-X\).
-- **Transformation to World Frame:**
-  \[
-  \theta_{\mathrm{world}} = \mathrm{halfTurnDeg}(90.0^\circ + \theta_{\mathrm{vis}})
-  \]
-- **Theta Joint Command (\(\theta_{\mathrm{joint}}\)):** Physical rotary joint \(0^\circ\) aligns finger pads with the gantry beam (+Y), requiring:
-  \[
-  \theta_{\mathrm{joint}} = 90.0^\circ - \theta_{\mathrm{world}} = -\theta_{\mathrm{vis}}
-  \]
-  Folded into \([-90^\circ, 90^\circ)\) to select the minimum linear rotary travel.
+### 2.1 Theta
 
-**Two datums (do not conflate):**
+- **Vision angle:** θ_v = 0° along +X_v and 90° along +Y_v, positive about +Z_v
+  (counter-clockwise seen from the camera), as decided under
+  [G-C3](OPEN_ITEMS.md#g-c-pick-scheduler).
+- **Gantry angle and theta joint map:** not yet decided for the frames above. The
+  current code converts with joint = pose − 90° (`thetaJointFromPoseDeg` in
+  `GantryKinematics`); a positive joint turns counter-clockwise seen from above (G-C3).
+- **Superseded:** the Option-A world frame (+Z down, θ_joint = −θ_vis) and the earlier
+  vision angle (0° along +Y, positive toward −X). Older entries in `DEV_TRACKER.md` and
+  [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) still
+  use them.
+
+### 2.2 Two homing datums (do not conflate)
 
 | Mechanism | Who sets it | Effect |
 |-----------|-------------|--------|

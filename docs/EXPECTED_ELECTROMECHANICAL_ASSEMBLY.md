@@ -68,15 +68,17 @@ flowchart TB
 
 
 
-**Coordinate frame (right-handed):**
+**Coordinate frames (right-handed):** the vision frame's origin is the bottom-right
+corner of the camera image, and the belt surface is Z = 0 for every subsystem.
+Details in [LOW_LEVEL_GANTRY_CONTROL.md §2](LOW_LEVEL_GANTRY_CONTROL.md#2-coordinate-frame-and-two-datums).
 
 
-| Axis  | Meaning                       | Actuator        |
-| ----- | ----------------------------- | --------------- |
-| X     | Across belt (sign unchanged)     | Beta 100-ZRS    |
-| Y     | Along belt, **+Y downstream**    | None (conveyor) |
-| Z     | Vertical, **+Z down** (belt)     | Beta 80-SRS     |
-| Theta | About Z                       | ERD 04-40       |
+| Axis  | Vision frame                                      | Gantry frame                    | Actuator        |
+| ----- | ------------------------------------------------- | ------------------------------- | --------------- |
+| X     | Across belt, toward the image top                 | X_g = −X_v                      | Beta 100-ZRS    |
+| Y     | Along belt, **+Y downstream** (image left)        | Y_g = +Y_v                      | None (conveyor) |
+| Z     | Up from the belt toward the camera                | Z_g = −Z_v (**+Z down**)        | Beta 80-SRS     |
+| Theta | About Z                                           | Not yet decided                 | ERD 04-40       |
 
 
 Joint space is `(x, z, theta)`. Soft-home zeros the **firmware** joint frame;
