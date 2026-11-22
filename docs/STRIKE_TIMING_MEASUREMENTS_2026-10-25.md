@@ -153,7 +153,7 @@ Depth accuracy under 1 mm is enough for now. The queued retract runs with zero d
 compensation and no command dwell. Revisit if the requirement tightens; the options
 are commanding the plunge deeper by the measured lag, or drive tuning.
 
-The offsets stay independent; the planner does not force zero dwell. Since `f861a8f`
+The offsets stay independent; the planner does not force zero dwell. Since `812ae52`
 each strike warns when the offsets ask for any (`pk_off_retract − pk_off_plunge` ≠ 0):
 a positive dwell is applied, and a negative one is not, because the queued retract
 waits for the plunge end. `pickplan` and the pick log show `dwell N ms`.
@@ -228,7 +228,7 @@ prints `BATTERY_IN` on USB serial, and `~/vision_sim/simulate-vision-output.py`
 displacement, so the gantry back-dates the capture from receipt by `cv_vis_ms`.
 
 **Setup**
-- Firmware `d3f75f4`: `vismark on` drives GPIO17 high when the CellNetL2 vision
+- Firmware `fa22a79`: `vismark on` drives GPIO17 high when the CellNetL2 vision
   callback stamps `receipt_us` and low when `acceptDetect()` takes the item.
 - Saleae on the same capture: `SHARP_A0` (the sensor's analog output at the Arduino,
   1.5625 MS/s) and `Wt32_IO17`. `UNO_TX` stayed at 0 for the whole capture, so the
@@ -275,7 +275,7 @@ synchronised to the sensor, so the delay is spread over about 0–43 ms, mean ab
 22 ms. This cancels out of the trigger-to-centre interval below, because entry, exit
 and trigger are all seen through the same delay.
 
-**Second capture:** 91 triggers over 214 s on the `d3f75f4` build (`vismark`), the
+**Second capture:** 91 triggers over 214 s on the `fa22a79` build (`vismark`), the
 belt speed logged from the supervisor's `/api/state` during the capture
 (304 ± 8 mm/s, 286–323). The battery kept the same pose for every pass.
 
@@ -293,7 +293,7 @@ belt speed logged from the supervisor's `/api/state` during the capture
   entry-to-exit interval, a median 20.8 ms after the trigger, which is 6.3 mm at
   304 mm/s. A static hand-push test is not possible on the rig. The first capture gave
   20 ms, about 6 mm at an assumed 300 mm/s. The offset depends on the battery's pose.
-- **Y override `y_bat` = −130 − 6 = −136 mm** for `vis_batt_x` frames (`85861e3`,
+- **Y override `y_bat` = −130 − 6 = −136 mm** for `vis_batt_x` frames (`f79ef12`,
   `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` in `src/pick_scheduler.cpp`).
   It was −114 mm. The frame's own y is a fixed placeholder from the vision script.
 - **Scatter:** the chain's sd (about 10 ms) and the sensor's update steps together
