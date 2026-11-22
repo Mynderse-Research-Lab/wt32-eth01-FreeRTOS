@@ -32,6 +32,11 @@ separate measurements. Open checks are tracked in
 |------|-------|
 | Conveyor centre line, gantry X | 363 mm |
 | Belt edges, gantry X (*derived*, with the stored 300 mm width) | 213 mm and 513 mm |
+| Encoder measuring wheel diameter | 95.3 mm |
+| Wheel circumference (*derived*, π × 95.3) | 299.39 mm |
+| Encoder scale (*derived*, 500 PPR × 4 = 2000 counts per revolution) | 0.14970 mm per count |
+| Conveyor firmware's scale (`wt32-eth01-velmeter`, `testing`, `src/main.cpp`) | 0.299708 m per revolution (95.4 mm wheel): 0.105 % above the measured wheel |
+| Rolling diameter on the belt | Not measured: a belt-run check (counts over a measured length) settles it |
 
 ## Battery trigger (stand-in for the detection model)
 
@@ -52,6 +57,30 @@ separate measurements. Open checks are tracked in
 |------|-------|
 | Jaw centre offset from the theta rotation axis | 0 mm |
 | Jaw closing direction at theta joint 0, against the gantry beam | 0° (180° also given as possible) |
+| Fingers | Identical (shape and pads) |
+| Gap between the pad faces, jaws fully closed, no part | 17.6 mm |
+| Gap between the pad faces, jaws fully open | 97.6 mm |
+| Finger travel, open to closed (*derived*) | 80.0 mm total, 40.0 mm per jaw |
+| Pad contact length, along the cell's long axis | 50 mm |
+| Pad contact height, from the tip up | 5 mm |
+| Lead-in (chamfer or radius) at the tips | 0 |
+| Finger thickness in the closing direction | 28 mm (a sloping feature; may need adjustment) |
+
+## Gripper timing (slow-motion video)
+
+Times are from the solenoid valve's LED lighting up (t = 0). The firmware grip
+command reaches the valve output within about 5 ms
+([STRIKE_TIMING_MEASUREMENTS_2026-10-25.md](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md),
+Grip command electrical timing).
+
+| Item | Value |
+|------|-------|
+| Recording | 240 (reported as "240p"; read here as 240 frames per second, about 4.2 ms per frame) |
+| Jaws start to move | About 70 ms |
+| Jaws completely closed | 118 ms |
+| Jaw travel time (*derived*) | About 48 ms |
+| Average jaw speed (*derived*, assuming the full 40 mm stroke per jaw) | About 833 mm/s |
+| Number of closings filmed, with or without a cell | Not recorded |
 
 ## Beam squareness to belt travel
 
