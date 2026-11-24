@@ -58,7 +58,7 @@
 |------|------------------|-----------|----------------|
 | `lib/Gantry/src/GantryPathProfile.h:178` `bandCeilingFromZMinus`, `:232`–`:254` `zCappedPath*` | Safe-Z band ceiling; path speed/accel capped by the Z limits | `test_path_profile` | none |
 | `lib/Gantry/src/GantryPathProfile.h:35`–`:44` theta window and `commandThetaDeg`; `:193`–`:203` retract leads (160 ms, 48 mm, 0.78 stroke) | When theta may turn during a path; early X/theta on a retract | `test_path_profile` | none |
-| `lib/Gantry/src/Gantry.cpp:346` `traverseClearanceZMm`, `:2645` `planPathTo`, `:2756` `retractLeadReady`, `:2861` `pathSegProgressFrac`, `:2884` `scheduleThetaForPath` | Live path planning, retract lead gate (G-C14), theta start in a segment | `test_gantry_orchestration` | none |
+| `lib/Gantry/src/Gantry.cpp:337` `traverseClearanceZMm`, `GantryPath.cpp:28` `planPathTo`, `:139` `retractLeadReady`, `GantryPathTheta.cpp:68` `pathSegProgressFrac`, `:91` `scheduleThetaForPath` | Live path planning, retract lead gate (G-C14), theta start in a segment | `test_gantry_orchestration` | none |
 | `include/pick_intercept.h:870` `effectiveZAccel`, `:891` `approachSeconds`, `:970` `segmentWallSeconds`, `:1011` `budgetPick` | Planner's time budget for approach, strike and retract | `test_pick_intercept` | none |
 
 ## 6. Clearance and collision geometry

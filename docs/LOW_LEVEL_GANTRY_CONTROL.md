@@ -346,7 +346,7 @@ Pass requires linear pose error within 1.5 mm (typical $< 1\text{ }\mu\text{m}$)
 
 ### Orchestration state machine
 
-Private `MotionState` in [`Gantry.cpp`](../lib/Gantry/src/Gantry.cpp):
+Private `MotionState` in [`Gantry.h`](../lib/Gantry/src/Gantry.h), driven from [`GantryPath.cpp`](../lib/Gantry/src/GantryPath.cpp), [`GantryPathTheta.cpp`](../lib/Gantry/src/GantryPathTheta.cpp), [`GantrySequential.cpp`](../lib/Gantry/src/GantrySequential.cpp) and [`GantryMotion.cpp`](../lib/Gantry/src/GantryMotion.cpp):
 
 | State | Role |
 |-------|------|

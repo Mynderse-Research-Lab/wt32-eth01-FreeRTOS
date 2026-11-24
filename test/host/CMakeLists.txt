@@ -155,7 +155,7 @@ target_include_directories(test_eip_axis PRIVATE
 target_link_libraries(test_eip_axis PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_axis COMMAND test_eip_axis)
 
-# EIP home/cal phase helpers (header-only policy shared with Gantry.cpp)
+# EIP home/cal phase helpers (header-only policy shared with the Gantry class)
 add_executable(test_eip_limit_sequence "test_eip_limit_sequence.cpp")
 target_include_directories(test_eip_limit_sequence PRIVATE
     "${REPO_ROOT}/lib/Gantry/src"
@@ -225,6 +225,14 @@ add_test(NAME test_w5500_poll COMMAND test_w5500_poll)
 # --- Gantry orchestration (Gantry.cpp + fakes, ESP-IDF stubs) ---------------
 set(GANTRY_ORCH_SRCS
     "${REPO_ROOT}/lib/Gantry/src/Gantry.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryAxisState.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipBringUp.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipHomeCal.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryHoming.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryMotion.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryPath.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryPathTheta.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantrySequential.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryLimitSwitch.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEndEffector.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"

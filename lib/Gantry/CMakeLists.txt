@@ -9,6 +9,14 @@ set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 idf_component_register(
     SRCS
         "src/Gantry.cpp"
+        "src/GantryAxisState.cpp"
+        "src/GantryEipBringUp.cpp"
+        "src/GantryEipHomeCal.cpp"
+        "src/GantryHoming.cpp"
+        "src/GantryMotion.cpp"
+        "src/GantryPath.cpp"
+        "src/GantryPathTheta.cpp"
+        "src/GantrySequential.cpp"
         "src/GantryConfig.cpp"
         "src/GantryEndEffector.cpp"
         "src/GantryKinematics.cpp"
