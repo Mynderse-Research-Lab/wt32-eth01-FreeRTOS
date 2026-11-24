@@ -911,7 +911,7 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
 2. **Execute OTA update**. On START the firmware disables enabled-but-idle motors itself, and again just before the reboot in case a supervisor START re-enabled them mid-upload. It still replies `ERR SAFETY` while a move, home or pick is running. Re-enable after the reboot:
    - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
    - CLI, PC on the cell switch: `py tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin`
-   - CLI, no switch cable: `py tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin` (`PI_USER` / `PI_PASS`).
+   - CLI, through the supervisor on the cell switch: `py tools/supervisor_ota.py idf/build/wt32_eth01_gantry.bin --host 10.42.0.1` (`ADSB_DEV_PASS`; CellNet L2 by default, `--transport tcp` for the TCP route).
 3. **Console commands:**
    - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, rollback status, and `Last Reset` (`esp_reset_reason`: `SW` after an OTA/restart, `PANIC` / `*_WDT` after a crash, `BROWNOUT` on a supply dip) with uptime. `status` prints the same reset reason and uptime, so an unexpected reboot is visible over the LAN console without the UART boot log.
 
