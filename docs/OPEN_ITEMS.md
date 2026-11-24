@@ -37,7 +37,7 @@ These items stop other work, or need a call before anyone starts. The full rows 
 | [G-B7](#g-b-motion-bus-w5500-ethernetip) | **Decision:** does the strike timing need a 2 ms RPI? | A wider Class 1 timeout margin |
 | [G-D3](#g-d-gripper-field-io-and-panel) | **Decision:** approve the SPI3 priority ceiling | Ending the MCP23S17 lock failures. The gripper write takes the same lock |
 | [C-2](#conveyor) | A conveyor firmware change, flashed over USB (it can carry the N-2 receiver too) | Any IP access to the conveyor, OTA included: today it has no address |
-| [X-1](#repository-and-documentation) | A push of this branch | Anyone else building on its work since 2026-09-18 |
+| [X-1](#repository-and-documentation) | **Decision:** merge this branch into `main` | `main` as a base: it lacks all work since 2026-08-21 |
 
 ## Gantry
 
@@ -153,7 +153,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| X-1 | `feat/conveyor-traffic-debug` is unpushed past `74be86b` (2026-09-18), the `upstream` tip: 75 commits up to `48f2c57`. `main` has 9 commits this branch lacks | Confirmed 2026-11-05 against `upstream` | Push; expect a conflict in `PICK_SCHEDULER_KINEMATICS.md` |
+| X-1 | `feat/conveyor-traffic-debug` and `docs/math-foundations` are pushed (2026-11-24, fast-forward from `74be86b`). `main` lacks this branch's 137 commits, and has 9 this branch lacks (2026-08-21 to 08-25: URDF/SDF generators, math rendering fixes) | Confirmed 2026-11-24 against `upstream` | **Decision:** merge into `main`; expect a conflict in `PICK_SCHEDULER_KINEMATICS.md` |
 | X-2 | **Uncommitted doc edits describe fixes that are not in the code.** `DEV_TRACKER.md` lists `pk_app_spd_mm_s`, `cv_trig_y_mm` and the follower fixes as done. Four more docs carry uncommitted edits (kinematics, pickup, protocol, firmware review), and some of these describe a theta mapping at ingestion. `DEV_TRACKER.md` itself has never been committed, yet `AGENTS.md` and `INDEX.md` list it | Confirmed 2026-11-05: none of those keys are in `src`, `lib`, `include` or `sdkconfig.defaults`, and git has no history for the tracker | Review before committing. Trust the code. Then commit the tracker, or drop it from `AGENTS.md` and `INDEX.md` |
 | X-4 | Stale or broken links and claims. `LOW_LEVEL_GANTRY_CONTROL.md` links the missing `MQTT_comms_subsys.md`. `FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md` has `file:///` URIs. The [roadmap](DEVELOPMENT_ROADMAP.md) says the gripper is not assembled and still plans the Zenoh migration retired by S-5. `EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` still lists a conveyor-height sensor as future work, against G-A3's closing decision. The documentation plan also flags spaces in schematic links | Confirmed 2026-11-05, except the schematic links, which are Suggested | Apply the plan's link fixes, and correct the roadmap and assembly lines |
 | X-5 | Scratch files and logs clutter the repo root, some tracked | Confirmed 2026-11-05: `fix_math.py` to `fix_math3.py`, `pktmon.txt` and a screenshot are tracked at the root, and `lib/CellNetL2/Untitled` is untracked | Remove from tracking and ignore |
