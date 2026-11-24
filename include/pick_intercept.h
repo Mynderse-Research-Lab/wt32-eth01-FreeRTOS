@@ -848,7 +848,7 @@ inline GripGeometry classifyClearance(float cell_deg, float jaw_deg, const CellG
   return g;
 }
 
-// Filled from the global gantry settings (pickConfig in pick_scheduler.cpp).
+// Filled from the global gantry settings (pickConfig in pick_eval.cpp).
 // `speed` is the normal approach; `fast_speed` is used only when a later
 // tracked part would otherwise be missed. Z uses `z_cap` / `z_accel` / `z_decel`.
 struct MotionLimits {

@@ -18,7 +18,7 @@
 | `include/pick_intercept.h:328` `chooseSideJaw` | Jaw joint angle from the cell angle, nearest of the 180°-equivalents within limits | `test_pick_intercept` | none |
 | `include/pick_intercept.h:350` `closeAxisDeg` | Close direction perpendicular to the pads | `test_pick_intercept` | none |
 | `lib/Gantry/src/GantryThetaOrigin.h:65` `nearestEquivalentDeg` | Nearest 360°-equivalent theta target | `test_eip_axis` | none |
-| `src/pick_scheduler.cpp:744`, `:970`, `:1196` `acceptDetect` | Vision across-belt X → gantry TCP X (`vis_x_off_mm` / `conveyor_x_across_to_gantry_x_offset_mm`), trigger-sensor X substitute | `test_pick_intercept` (parts) | none |
+| `src/pick_eval.cpp:74`, `:300`, `src/pick_belt.cpp:212` `acceptDetect` | Vision across-belt X → gantry TCP X (`vis_x_off_mm` / `conveyor_x_across_to_gantry_x_offset_mm`), trigger-sensor X substitute | `test_pick_intercept` (parts) | none |
 
 ## 2. Cell body, grip geometry and grasp depth
 
@@ -29,7 +29,7 @@
 | `include/pick_intercept.h:95` `jawCloseTravelMm` | Jaw travel from open width to cell width | `test_pick_intercept` | none |
 | `include/pick_intercept.h:108` `gripAcrossWidth` | Which cell axis the jaws close on | `test_pick_intercept` | none |
 | `include/pick_intercept.h:216` `cellFromVision`, `:258` `applyVisionSize`, `:124` `visionSizeReject`, `:238` `visionContractReject` | Cell geometry from vision sizes and the acceptance limits | `test_pick_intercept` | none |
-| `src/pick_scheduler.cpp:762` `zPlan` | Hover, top and grasp Z for one cell (half-height and small-cell rules) | `test_pick_intercept` (parts) | none |
+| `src/pick_eval.cpp:92` `zPlan` | Hover, top and grasp Z for one cell (half-height and small-cell rules) | `test_pick_intercept` (parts) | none |
 | `include/coordinated_grasp.h:131` `zHover`, `:136` `zTop`, `:138` `zGrasp` | Same quantities in the coordinated-grasp model | `test_coordinated_grasp` | none |
 
 ## 3. Belt clock and odometer
@@ -38,7 +38,7 @@
 |------|------------------|-----------|----------------|
 | `include/pick_intercept.h:368` `BeltClock`, `:404` `alignConveyorUs`, `:417` `pushMinDelay`, `:434` `anchorFrame`, `:471` `noteConveyor` | Conveyor time → gantry time alignment (minimum-delay filter), anchoring frames | `test_pick_intercept` | `pick_intercept.h:5` → deleted `PICK_SCHEDULER_KINEMATICS.md` |
 | `include/pick_intercept.h:497` `beltStale`, `:504` `beltPositionMm`, `:512` `capturePositionMm`, `:526` `arriveBeltMm`, `:530` `secondsToPlane` | Belt position now / at capture, arrival at the pick plane, time to plane | `test_pick_intercept` | same |
-| `src/pick_scheduler.cpp:557` `noteBelt`, `:592` `beltSimCb` | Live frame intake; synthetic belt for bench tests | — | none |
+| `src/pick_belt.cpp:37` `noteBelt`, `:72` `beltSimCb` | Live frame intake; synthetic belt for bench tests | — | none |
 
 ## 4. Point-to-point motion profiles (trapezoid / triangle)
 
@@ -78,7 +78,7 @@
 | `include/strike_plan.h:171` `plan`, `:145` `jawStrokeSeconds`, `:159` `clampOffsetMs` | Plunge/grip/retract instants from Z profile, jaw and valve model, offsets | `test_strike_plan` | none |
 | `include/pick_intercept.h:766` `beltContactLeadS`, `:780` `strikeLeads` | Lead times from belt contact geometry | `test_pick_intercept` | none |
 | `include/pick_intercept.h:1134` `planPick`, `:1198` `retimePick`, `:1235` `retimeArrival`, `:1283` `retimeStrikeEvents`, `:1320` `isPlungeOverdue` | Strike schedule and re-timing from the belt clock (`planPick`/`retimePick` are host-only, G-C8) | `test_pick_intercept` | none |
-| `src/pick_scheduler.cpp:790` `strikePlan`, `:875` `strikeTiming`, `:903` `evaluate`, `:355` `armStrike`, `:412` `retimeArmed` | Live strike planning, arming and re-timing | — | none |
+| `src/pick_eval.cpp:120` `strikePlan`, `:205` `strikeTiming`, `:233` `evaluate`, `src/pick_strike.cpp:145` `armStrike`, `:202` `retimeArmed` | Live strike planning, arming and re-timing | — | none |
 | `include/coordinated_grasp.h:72` `jawA`, `:157` `makePlant`, `:467` `armPair`, `:482` `fireDue` | Jaw opening over time, grasp plant, firing | `test_coordinated_grasp` | none |
 
 ## 8. Multi-part scheduling
@@ -113,7 +113,7 @@
 | Code | What it computes | Host test |
 |------|------------------|-----------|
 | `include/theta_trace_analysis.h` `analyze` | Ideal trapezoid alignment, latency, overshoot, following error, settling (`thtrace`) | `test_theta_trace_analysis` |
-| `src/pick_scheduler.cpp:2441` `traceSummary` | Strike trace events: plunge start, reach, peak, retract (`ztrace`) | — |
+| `src/pick_trace.cpp:144` `traceSummary` | Strike trace events: plunge start, reach, peak, retract (`ztrace`) | — |
 
 ## 12. Outside the firmware (tools and simulation)
 

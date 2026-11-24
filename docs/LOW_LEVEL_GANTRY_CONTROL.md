@@ -924,8 +924,8 @@ At runtime the stored parameters are the only source. `main.cpp` and the console
 NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time it was saved, and a hash. Boot loads it. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
 
 Notes on what is and is not stored:
-- **Pick approach motion** has no keys of its own. Picks use the global profile: `spd_mm_s`, `ceil_spd_mm_s` only when a later part would otherwise be missed, and `th_spd_deg_s` capped by `th_spd_max` (`pickConfig()` in `pick_scheduler.cpp`; G-C7).
-- **Trigger sensor geometry** is still compile-time: `kTriggerSensorYFromCamMm` (−130 mm) and `kTriggerCentreBehindMm` (6 mm) in `pick_scheduler.cpp` (G-C5).
+- **Pick approach motion** has no keys of its own. Picks use the global profile: `spd_mm_s`, `ceil_spd_mm_s` only when a later part would otherwise be missed, and `th_spd_deg_s` capped by `th_spd_max` (`pickConfig()` in `pick_eval.cpp`; G-C7).
+- **Trigger sensor geometry** is still compile-time: `kTriggerSensorYFromCamMm` (−130 mm) and `kTriggerCentreBehindMm` (6 mm) in `pick_belt.cpp` (G-C5).
 - **Drive IP addresses** are stored: `eip_ip_x`, `eip_ip_z`, `eip_ip_th` (developer keys, applied after a reboot).
 
 | Step | What happens |

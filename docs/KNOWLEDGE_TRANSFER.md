@@ -191,7 +191,7 @@ The other ODVA documents in `driver_datasheets_and_calculations` are overviews o
 
 ### 5.3 Pick scheduler
 
-Turns detections into timed strikes. Code: `src/pick_scheduler.cpp`, `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`).
+Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them), `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`).
 
 The model below was read from the code at `e4d64ad` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
 
@@ -373,7 +373,7 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | $t_{close}, t_{open}$ | Grip close and open dwell | `grp_close_ms`, `grp_open_ms` | 190 ms each |
 | — | Trigger stand-in | `vis_batt_x`, `batt_x` | 0, 382.5 mm |
 
-Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clearance 6 mm, entry margin 2 mm, entry guard 5 ms, depth cap 15 ms or 20 mm of belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rule 3 mm, 30 mm and 25.4 mm (`zPlan`). Frame period 250 ms, stale after 500 ms, 8-frame delay window (`pick_intercept.h`). Trigger geometry −130 and 6 mm (`pick_scheduler.cpp:57,61`).
+Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clearance 6 mm, entry margin 2 mm, entry guard 5 ms, depth cap 15 ms or 20 mm of belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rule 3 mm, 30 mm and 25.4 mm (`zPlan`). Frame period 250 ms, stale after 500 ms, 8-frame delay window (`pick_intercept.h`). Trigger geometry −130 and 6 mm (`pick_belt.cpp:15,20`).
 
 #### 5.3.11 Limits of the model
 
