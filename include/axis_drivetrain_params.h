@@ -32,7 +32,7 @@
  *                                  actual limit-switch positions and may be
  *                                  tighter than the hard envelope. See
  *                                  Gantry::calibrate() and the homing task in
- *                                  src/gantry_test_console.cpp.
+ *                                  src/gantry_console_homing.cpp.
  *
  * Scope of this header: kinematic lead, hard-limit envelope, motion caps,
  * position tolerance, kinematic offsets, gripper timing, default profile.
