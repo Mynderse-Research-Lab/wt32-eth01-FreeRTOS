@@ -1,6 +1,6 @@
 # Math Relink Inventory
 
-**Status:** working list, 2026-11-19, read from the code at `18a2863`. Not committed.
+**Status:** working list, 2026-11-19, read from the code at `abb8c96`. Not committed.
 **Purpose:** every piece of code that implements system mathematics, grouped by topic, so each can be linked to a section of the new canonical mathematical foundation document. This list names *what* the code computes; it contains no derivations or equations.
 
 **How to use it:** give each topic a section with a stable anchor in the new document, then add one comment per function, for example `// Math: <doc>#belt-odometer`. The "Doc link today" column shows what has to be repointed.
