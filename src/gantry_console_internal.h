@@ -184,4 +184,35 @@ void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd);
 // gantry_console_commands.cpp
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd);
 
+// Console command handlers (one table entry each in gantry_console_commands.cpp).
+// gantry_console_cmd_motion.cpp
+void cmdFaults(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdEnable(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdDisable(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdTestCycle(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdTestThetaPath(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdMove(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdGrip(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdStop(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdAlarmReset(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+// gantry_console_cmd_profile.cpp
+void cmdSpeed(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdAccel(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdUnits(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdRangeLimit(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdLivePos(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdAxisLog(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+// gantry_console_cmd_pick.cpp
+void cmdNetStat(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdVisMark(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdGripMark(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdPickSim(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdPickPlan(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdPickCover(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdPickCal(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdBeltSim(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdZTrace(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdThTrace(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+void cmdBeltCal(const GantryTestConsoleConfig *cfg, const char *cmd, const char *cmdLower);
+
 }  // namespace GantryConsoleImpl
