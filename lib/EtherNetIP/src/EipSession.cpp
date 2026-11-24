@@ -107,6 +107,19 @@ bool EipSession::unregisterSession() {
   return sent == static_cast<ssize_t>(request.size());
 }
 
+bool EipSession::sendNop() {
+    if (!isRegistered()) {
+        return false;
+    }
+    EncapHeader header;
+    header.setCommand(EncapCommand::kNop);
+    header.session_handle = session_handle_;
+    header.sender_context = sender_context_;
+    const Bytes frame = encodeEncapsulation(header, Bytes{});
+    return tcp_.sendNoWait(frame.data(), frame.size()) ==
+           static_cast<ssize_t>(frame.size());
+}
+
 bool EipSession::transact(const Bytes& request, Bytes& out_response,
                           uint16_t timeout_ms) {
 #ifdef ESP_PLATFORM

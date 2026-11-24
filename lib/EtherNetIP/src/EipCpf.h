@@ -15,7 +15,7 @@
 
 namespace eip {
 
-// CPF item type IDs (ODVA Vol 2, Table 2-6.1).
+// CPF item type IDs (ODVA Vol 2, Table 2-6.3).
 enum class CpfItemType : uint16_t {
   kNullAddress = 0x0000,
   kListIdentityResponse = 0x000C,

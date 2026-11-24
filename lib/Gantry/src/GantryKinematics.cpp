@@ -1,13 +1,13 @@
 /**
  * @file GantryKinematics.cpp
  * @brief Forward and inverse kinematics implementation.
- * @version 2.0.0
+ * @version 2.1.0
  *
- * Coordinate convention:
- *   X = horizontal traverse, Y = along-belt (no actuator; +Y = downstream),
- *   Z = vertical (+Z = down). pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
- *   (TCP height above physical belt/bed; see axis_drivetrain_params.h).
- *   Theta = rotation about Z.
+ * Coordinate convention (transformed frame):
+ *   New +X = horizontal traverse across belt (inverted: x_home = x_max).
+ *   New +Y = along-belt (no actuator; +Y = downstream, unchanged).
+ *   New +Z = vertical height above conveyor (inverted: z=0 conveyor, z=z_max retracted).
+ *   Theta  = 0° along New +X, +90° along +Y (from new +X to unchanged +Y).
  */
 
 #include "GantryKinematics.h"
@@ -18,10 +18,13 @@ EndEffectorPose Kinematics::forward(const JointConfig& joints,
                                      const KinematicParameters& params) {
     EndEffectorPose pose;
 
-    pose.x     = joints.x + params.theta_x_offset_mm;
+    // Invert X: x_home = x_max, so when joint.x = 0, pose.x = x_max
+    pose.x     = params.x_stroke_mm - (joints.x + params.theta_x_offset_mm);
     pose.y     = params.z_axis_y_offset_mm;
-    pose.z     = joints.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM;
-    pose.theta = joints.theta;
+    // Invert Z: z_home = z_max (complete retraction), z=0 is conveyor surface
+    pose.z     = params.z_stroke_mm - joints.z;
+    // Theta: 0° is along New +X, +90° is along +Y
+    pose.theta = thetaPoseFromJointDeg(joints.theta);
 
     return pose;
 }
@@ -30,9 +33,12 @@ JointConfig Kinematics::inverse(const EndEffectorPose& pose,
                                  const KinematicParameters& params) {
     JointConfig joints;
 
-    joints.x     = pose.x - params.theta_x_offset_mm;
-    joints.z     = pose.z - GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM;
-    joints.theta = pose.theta;
+    // Invert X: joint.x = x_max - pose.x - theta_x_offset
+    joints.x     = params.x_stroke_mm - pose.x - params.theta_x_offset_mm;
+    // Invert Z: joint.z = z_max - pose.z
+    joints.z     = params.z_stroke_mm - pose.z;
+    // Theta: joint.theta = pose.theta - 90°
+    joints.theta = thetaJointFromPoseDeg(pose.theta);
 
     return joints;
 }

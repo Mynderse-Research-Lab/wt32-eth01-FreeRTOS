@@ -60,5 +60,8 @@ void gantryConsoleDetachLogSink(void);
 
 void gantryTestConsoleTask(void *param);
 void gantryTestPrintHelp();
+/** Load the console move profile from the stored parameters. Call once after
+ *  AppConfig::init(); a 'cfg' change to the profile reloads it. */
+void gantryConsoleLoadStoredProfile();
 
 #endif  // GANTRY_TEST_CONSOLE_H

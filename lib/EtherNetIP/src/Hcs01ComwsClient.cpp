@@ -4,6 +4,7 @@
  */
 
 #include "Hcs01ComwsClient.h"
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -112,6 +113,7 @@ bool Hcs01ComwsClient::httpGet(const char* path, char* out_body, size_t max_len)
         path, host_);
 
     if (tcp_.send(reinterpret_cast<const uint8_t*>(req), req_len) != req_len) {
+        tcp_.close();
         return false;
     }
 
@@ -123,6 +125,7 @@ bool Hcs01ComwsClient::httpGet(const char* path, char* out_body, size_t max_len)
         total_recv += n;
     }
     resp[total_recv] = '\0';
+    tcp_.close();
 
     char* body = std::strstr(resp, "\r\n\r\n");
     if (body) {
@@ -157,6 +160,7 @@ bool Hcs01ComwsClient::httpPost(const char* path, const char* post_data, char* o
         path, host_, data_len, post_data);
 
     if (tcp_.send(reinterpret_cast<const uint8_t*>(req), req_len) != req_len) {
+        tcp_.close();
         return false;
     }
 
@@ -168,6 +172,7 @@ bool Hcs01ComwsClient::httpPost(const char* path, const char* post_data, char* o
         total_recv += n;
     }
     resp[total_recv] = '\0';
+    tcp_.close();
 
     char* body = std::strstr(resp, "\r\n\r\n");
     if (body) {
@@ -179,6 +184,53 @@ bool Hcs01ComwsClient::httpPost(const char* path, const char* post_data, char* o
     
     return false;
 }
+
+bool Hcs01ComwsClient::isProtectedIdn(const char* idn) {
+    if (!idn) return true;
+    char norm[64];
+    normalizeIdn(idn, norm, sizeof(norm));
+    static const char* const kProtected[] = {
+        "P-0-4089.0.13",
+        "P-0-4089.0.14",
+        "P-0-4089.0.15",
+        "S-0-1020",
+        "S-0-1021",
+        "S-0-1022",
+    };
+    for (const char* prefix : kProtected) {
+        if (std::strncmp(norm, prefix, std::strlen(prefix)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace {
+
+bool replyHasError(const char* s) {
+    if (!s) return true;
+    for (const char* p = s; *p != '\0'; ++p) {
+        if (std::tolower(static_cast<unsigned char>(p[0])) == 'e' &&
+            std::tolower(static_cast<unsigned char>(p[1])) == 'r' &&
+            std::tolower(static_cast<unsigned char>(p[2])) == 'r' &&
+            std::tolower(static_cast<unsigned char>(p[3])) == 'o' &&
+            std::tolower(static_cast<unsigned char>(p[4])) == 'r') {
+            return true;
+        }
+    }
+    return false;
+}
+
+void trimTrailing(char* s) {
+    if (!s) return;
+    size_t len = std::strlen(s);
+    while (len > 0 && (s[len - 1] == '\r' || s[len - 1] == '\n' || s[len - 1] == ' ')) {
+        s[len - 1] = '\0';
+        --len;
+    }
+}
+
+} // namespace
 
 bool Hcs01ComwsClient::getVar(const char* idn, char* out_buf, size_t max_len) {
     char norm[64];
@@ -199,26 +251,65 @@ bool Hcs01ComwsClient::getVar(const char* idn, char* out_buf, size_t max_len) {
         std::strncpy(out_buf, body, max_len - 1);
     }
     out_buf[max_len - 1] = '\0';
-    
-    // Trim trailing whitespace/newlines
-    size_t len = std::strlen(out_buf);
-    while (len > 0 && (out_buf[len - 1] == '\r' || out_buf[len - 1] == '\n' || out_buf[len - 1] == ' ')) {
-        out_buf[len - 1] = '\0';
-        len--;
-    }
+    trimTrailing(out_buf);
     
     return true;
 }
 
 bool Hcs01ComwsClient::setVar(const char* idn, const char* value) {
+    if (isProtectedIdn(idn)) {
+        ESP_LOGE(TAG, "Refusing to write protected IP IDN: %s", idn ? idn : "(null)");
+        return false;
+    }
     char norm[64];
     normalizeIdn(idn, norm, sizeof(norm));
     
     char post_data[256];
     std::snprintf(post_data, sizeof(post_data), "var=0,1,%s&value=%s", norm, value);
     
-    char body[128];
+    char body[128] = {0};
     return httpPost("/setvar.cgi", post_data, body, sizeof(body));
+}
+
+bool Hcs01ComwsClient::setVarElement7(const char* idn, const char* value,
+                                      char* out_reply, size_t max_len) {
+    if (isProtectedIdn(idn)) {
+        ESP_LOGE(TAG, "Refusing to write protected IP IDN: %s", idn ? idn : "(null)");
+        if (out_reply && max_len > 0) {
+            std::snprintf(out_reply, max_len, "BLOCKED: protected IP IDN");
+        }
+        return false;
+    }
+    char norm[64];
+    normalizeIdn(idn, norm, sizeof(norm));
+
+    char idn7[72];
+    const size_t nlen = std::strlen(norm);
+    if (nlen > 2 && norm[nlen - 2] == '.' && norm[nlen - 1] == '7') {
+        std::strncpy(idn7, norm, sizeof(idn7) - 1);
+        idn7[sizeof(idn7) - 1] = '\0';
+    } else {
+        std::snprintf(idn7, sizeof(idn7), "%s.7", norm);
+    }
+
+    char post_data[256];
+    char body[128] = {0};
+    std::snprintf(post_data, sizeof(post_data), "var=0,1,%s&value=%s", idn7, value);
+    bool ok = httpPost("/setvar.cgi", post_data, body, sizeof(body));
+    trimTrailing(body);
+
+    if (!ok || replyHasError(body)) {
+        std::snprintf(post_data, sizeof(post_data), "var=0,1,%s&value=%s", norm, value);
+        body[0] = '\0';
+        ok = httpPost("/setvar.cgi", post_data, body, sizeof(body));
+        trimTrailing(body);
+    }
+
+    if (out_reply && max_len > 0) {
+        std::strncpy(out_reply, body, max_len - 1);
+        out_reply[max_len - 1] = '\0';
+    }
+    return ok && !replyHasError(body);
 }
 
 bool Hcs01ComwsClient::runCommand(const char* idn, uint32_t timeout_ms) {

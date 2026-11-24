@@ -105,17 +105,17 @@
 #if defined(CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #define AXIS_X_MAX_SPEED_MM_PER_S          ((float)CONFIG_AXIS_X_MAX_SPEED_MM_PER_S)
 #else
-#define AXIS_X_MAX_SPEED_MM_PER_S          500.0f  /* placeholder; refine from Trap Moves */
+#define AXIS_X_MAX_SPEED_MM_PER_S          3333.3f  /* Maximum permissible: MPL-A320P 5000 rpm / 5:1 reducer * 200 mm/rev lead */
 #endif
 #if defined(CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #define AXIS_X_ACCEL_MM_PER_S2             ((float)CONFIG_AXIS_X_ACCEL_MM_PER_S2)
 #else
-#define AXIS_X_ACCEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
+#define AXIS_X_ACCEL_MM_PER_S2             20000.0f  /* Maximum permissible: AB MPL-A320P + Kinetix 5100 throughput (20 m/s^2) */
 #endif
 #if defined(CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #define AXIS_X_DECEL_MM_PER_S2             ((float)CONFIG_AXIS_X_DECEL_MM_PER_S2)
 #else
-#define AXIS_X_DECEL_MM_PER_S2             3000.0f  /* placeholder; not a console ceiling */
+#define AXIS_X_DECEL_MM_PER_S2             20000.0f  /* Maximum permissible: AB MPL-A320P + Kinetix 5100 throughput (20 m/s^2) */
 #endif
 #if defined(CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
 #define AXIS_X_POSITION_TOLERANCE_MM       ((float)CONFIG_AXIS_X_POSITION_TOLERANCE_MM)
@@ -319,7 +319,7 @@
 #if defined(CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #define GANTRY_SAFE_Z_HEIGHT_MM            ((float)CONFIG_GANTRY_SAFE_Z_HEIGHT_MM)
 #else
-#define GANTRY_SAFE_Z_HEIGHT_MM            35.7f  /* 4.5 inches (114.3 mm) above 150.0 mm Z lowest drop limit */
+#define GANTRY_SAFE_Z_HEIGHT_MM            48.4f  /* 4.0 inches (101.6 mm) above Z=0 conveyor bed (150.0 mm - 101.6 mm) */
 #endif
 
 /* After X home/cal during bring-up, park here before seeking Z+ (joint mm). */
@@ -327,6 +327,25 @@
 #define GANTRY_CAL_X_PARK_MM               ((float)CONFIG_GANTRY_CAL_X_PARK_MM)
 #else
 #define GANTRY_CAL_X_PARK_MM               35.0f
+#endif
+
+/* Conveyor collision avoidance limits for current gripper jaws.
+ * With the current gripper jaws attached:
+ * When X >= GANTRY_CONVEYOR_COLLISION_X_MIN_MM (95.0 mm), the gripper extends
+ * over the conveyor belt / frame.
+ * When Z >= GANTRY_CONVEYOR_COLLISION_Z_MIN_MM (115.0 mm) while in this X zone,
+ * the gripper jaws will collide with the conveyor belt/frame.
+ * Simultaneous X >= 95.0mm and Z >= 115.0mm is prohibited. */
+#if defined(CONFIG_GANTRY_CONVEYOR_COLLISION_X_MIN_MM)
+#define GANTRY_CONVEYOR_COLLISION_X_MIN_MM ((float)CONFIG_GANTRY_CONVEYOR_COLLISION_X_MIN_MM)
+#else
+#define GANTRY_CONVEYOR_COLLISION_X_MIN_MM 95.0f
+#endif
+
+#if defined(CONFIG_GANTRY_CONVEYOR_COLLISION_Z_MIN_MM)
+#define GANTRY_CONVEYOR_COLLISION_Z_MIN_MM ((float)CONFIG_GANTRY_CONVEYOR_COLLISION_Z_MIN_MM)
+#else
+#define GANTRY_CONVEYOR_COLLISION_Z_MIN_MM 115.0f
 #endif
 
 /* Pneumatic gripper (SCHUNK KGG 100-80). Open/close times from datasheet. */
@@ -338,7 +357,7 @@
 #if defined(CONFIG_GANTRY_GRIPPER_CLOSE_TIME_MS)
 #define GANTRY_GRIPPER_CLOSE_TIME_MS       ((uint32_t)CONFIG_GANTRY_GRIPPER_CLOSE_TIME_MS)
 #else
-#define GANTRY_GRIPPER_CLOSE_TIME_MS       150u
+#define GANTRY_GRIPPER_CLOSE_TIME_MS       190u
 #endif
 
 
@@ -385,17 +404,17 @@
 #if defined(CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
 #define GANTRY_PATH_MAX_SPEED_MM_PER_S         ((uint32_t)CONFIG_GANTRY_PATH_MAX_SPEED_MM_PER_S)
 #else
-#define GANTRY_PATH_MAX_SPEED_MM_PER_S         500u
+#define GANTRY_PATH_MAX_SPEED_MM_PER_S         3333u
 #endif
 #if defined(CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
 #define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_ACCEL_MM_PER_S2)
 #else
-#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        3000u
+#define GANTRY_PATH_MAX_ACCEL_MM_PER_S2        40000u
 #endif
 #if defined(CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
 #define GANTRY_PATH_MAX_DECEL_MM_PER_S2        ((uint32_t)CONFIG_GANTRY_PATH_MAX_DECEL_MM_PER_S2)
 #else
-#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        3000u
+#define GANTRY_PATH_MAX_DECEL_MM_PER_S2        40000u
 #endif
 
 /* ---------------------------------------------------------------------------
@@ -451,6 +470,10 @@
  * speed that would put the screw above this RPM. */
 #define AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S \
     (((double)AXIS_Z_CRITICAL_RPM / 60.0) * (double)AXIS_Z_LEAD_MM_PER_REV)
+
+/* Z: pick moves run this fraction of the stored whip ceiling, deliberately 10 %
+ * under it (90% operational safety margin). */
+#define AXIS_Z_PICK_SPEED_FRACTION 0.90f
 
 /* Theta: rotary encoder pulses per degree */
 #define AXIS_THETA_PULSES_PER_DEG \

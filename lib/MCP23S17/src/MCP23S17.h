@@ -108,6 +108,23 @@ esp_err_t mcp23s17_write_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin, uint8
 uint8_t mcp23s17_read_pin(mcp23s17_handle_t handle, mcp23s17_pin_t pin);
 
 /**
+ * @brief Read a port's output latch (OLATA/OLATB): what the chip holds as written.
+ *
+ * SPI has no acknowledgement, so this is the only proof a write landed.
+ */
+esp_err_t mcp23s17_read_latch(mcp23s17_handle_t handle, mcp23s17_port_t port, uint8_t *value);
+
+/**
+ * @brief Read back IOCON and IODIRA/IODIRB and compare with what the driver wrote.
+ *
+ * @return ESP_OK when they match, ESP_ERR_INVALID_RESPONSE when they differ (chip
+ *         not answering, reset or corrupted), or the SPI error. The read values are
+ *         returned for the log either way.
+ */
+esp_err_t mcp23s17_verify_config(mcp23s17_handle_t handle, uint8_t *iocon,
+                                 uint8_t *iodira, uint8_t *iodirb);
+
+/**
  * @brief Write port (all 8 pins of port A or B)
  * 
  * @param handle MCP23S17 handle

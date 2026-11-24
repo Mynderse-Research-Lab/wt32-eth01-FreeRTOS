@@ -8,6 +8,8 @@ idf_component_register(
         "src/EipEncapsulation.cpp"
         "src/EipCpf.cpp"
         "src/CipMessageRouter.cpp"
+        "src/CipEthernetLink.cpp"
+        "src/CipTcpIpInterface.cpp"
         "src/EipConnectionManager.cpp"
         "src/Kinetix5100Assembly.cpp"
         "src/Kinetix5100ParamAccess.cpp"
@@ -22,6 +24,7 @@ idf_component_register(
         "src/EipProcessImage.cpp"
         "src/EipSocketW5500.cpp"
         "src/EipScannerTask.cpp"
+        "src/EipRunTimeTrace.cpp"
         "src/EipClass1TimingStats.cpp"
         "src/EipReliabilityStats.cpp"
     INCLUDE_DIRS
@@ -31,6 +34,7 @@ idf_component_register(
         esp_netif
         W5500
         Spi3Bus
+        esp_driver_gpio
         freertos
         log
         esp_timer

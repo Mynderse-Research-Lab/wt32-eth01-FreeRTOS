@@ -62,6 +62,9 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/EipEncapsulation.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipCpf.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/CipEthernetLink.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/CipTcpIpInterface.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipRunTimeTrace.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100ParamAccess.cpp"
@@ -81,6 +84,17 @@ target_include_directories(ethernet_ip PUBLIC
 )
 # Reliability + timing helpers are header/cpp already in ethernet_ip SRCS via EipReliabilityStats
 
+# --- AppConfig layer under test ------------------------------------------------
+add_library(app_config STATIC
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfig.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/ConfigSchema.cpp"
+)
+target_include_directories(app_config PUBLIC
+    "${REPO_ROOT}/lib/AppConfig/src"
+    "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/include"
+)
+
 # --- Test executables ---------------------------------------------------------
 # Each test file is its own Unity runner registered with CTest.
 function(add_host_test name)
@@ -91,11 +105,21 @@ endfunction()
 
 add_host_test(test_kinematics)
 add_host_test(test_trajectory)
+# thtrace summary of one HCS01 move (header-only, reuses TrajectoryPlanner)
+add_host_test(test_theta_trace_analysis)
 
 # EtherNet/IP encoding tests link the ethernet_ip lib instead of gantry_logic.
 add_executable(test_eip_encoding "test_eip_encoding.cpp")
 target_link_libraries(test_eip_encoding PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_encoding COMMAND test_eip_encoding)
+
+add_executable(test_cip_ethernet_link "test_cip_ethernet_link.cpp")
+target_link_libraries(test_cip_ethernet_link PRIVATE ethernet_ip unity)
+add_test(NAME test_cip_ethernet_link COMMAND test_cip_ethernet_link)
+
+add_executable(test_eip_run_time_trace "test_eip_run_time_trace.cpp")
+target_link_libraries(test_eip_run_time_trace PRIVATE ethernet_ip unity)
+add_test(NAME test_eip_run_time_trace COMMAND test_eip_run_time_trace)
 
 add_executable(test_k5100_param_access "test_k5100_param_access.cpp")
 target_link_libraries(test_k5100_param_access PRIVATE ethernet_ip unity)
@@ -112,6 +136,10 @@ add_test(NAME test_hcs01_comws_client COMMAND test_hcs01_comws_client)
 add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
+
+add_executable(test_app_config "test_app_config.cpp")
+target_link_libraries(test_app_config PRIVATE app_config unity)
+add_test(NAME test_app_config COMMAND test_app_config)
 
 add_executable(test_eip_axis "test_eip_axis.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
@@ -143,6 +171,15 @@ target_include_directories(test_path_profile PRIVATE
 target_link_libraries(test_path_profile PRIVATE unity)
 add_test(NAME test_path_profile COMMAND test_path_profile)
 
+# W5500 deferred log for real-time paths (G-B13)
+add_executable(test_w5500_deferred_log
+    "test_w5500_deferred_log.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500DeferredLog.cpp"
+)
+target_include_directories(test_w5500_deferred_log PRIVATE "${REPO_ROOT}/lib/W5500/src")
+target_link_libraries(test_w5500_deferred_log PRIVATE unity)
+add_test(NAME test_w5500_deferred_log COMMAND test_w5500_deferred_log)
+
 # W5500 SPI frame encoding test (pure C++ constexpr logic, no ESP-IDF)
 add_executable(test_w5500_spi "test_w5500_spi.cpp")
 target_include_directories(test_w5500_spi PRIVATE
@@ -155,6 +192,7 @@ add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
 add_executable(test_w5500_socket_fastpath
     "test_w5500_socket_fastpath.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
 target_include_directories(test_w5500_socket_fastpath PRIVATE
@@ -162,6 +200,18 @@ target_include_directories(test_w5500_socket_fastpath PRIVATE
 )
 target_link_libraries(test_w5500_socket_fastpath PRIVATE unity)
 add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
+
+# W5500 dropout diagnostics (failure snapshot + SPI read-back check)
+add_executable(test_w5500_diag
+    "test_w5500_diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+)
+target_include_directories(test_w5500_diag PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+)
+target_link_libraries(test_w5500_diag PRIVATE unity)
+add_test(NAME test_w5500_diag COMMAND test_w5500_diag)
 
 # W5500 poll helper + soft-miss gate + reliability counters
 add_executable(test_w5500_poll "test_w5500_poll.cpp")
@@ -212,6 +262,22 @@ target_include_directories(test_console_parse PRIVATE "${REPO_ROOT}/src")
 target_link_libraries(test_console_parse PRIVATE unity)
 add_test(NAME test_console_parse COMMAND test_console_parse)
 
+add_executable(test_pick_intercept "test_pick_intercept.cpp")
+target_include_directories(test_pick_intercept PRIVATE
+    "${REPO_ROOT}/include"
+    "${REPO_ROOT}/lib/Gantry/src")
+target_link_libraries(test_pick_intercept PRIVATE unity)
+add_test(NAME test_pick_intercept COMMAND test_pick_intercept)
+
+add_executable(test_coordinated_grasp "test_coordinated_grasp.cpp")
+target_include_directories(test_coordinated_grasp PRIVATE
+    "${REPO_ROOT}/include"
+    "${REPO_ROOT}/lib/Gantry/src")
+target_compile_definitions(test_coordinated_grasp PRIVATE
+    COORDINATED_JSON="${REPO_ROOT}/test/host/data/coordinated_grasp_reference.json")
+target_link_libraries(test_coordinated_grasp PRIVATE unity)
+add_test(NAME test_coordinated_grasp COMMAND test_coordinated_grasp)
+
 # Limit-switch debounce / pin encoding + end-effector polarity
 add_executable(test_limit_switch_policy "test_limit_switch_policy.cpp")
 target_include_directories(test_limit_switch_policy PRIVATE
@@ -242,6 +308,7 @@ add_executable(test_eip_socket_w5500
     "test_eip_socket_w5500.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipSocketW5500.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
 target_include_directories(test_eip_socket_w5500 PRIVATE
@@ -272,6 +339,14 @@ target_include_directories(test_cell_net_l2 PRIVATE
 target_link_libraries(test_cell_net_l2 PRIVATE unity)
 add_test(NAME test_cell_net_l2 COMMAND test_cell_net_l2)
 
+add_executable(test_cellnet_ota_receiver
+    "test_cellnet_ota_receiver.cpp"
+    "${REPO_ROOT}/lib/CellNetL2/src/CellNetOtaReceiver.cpp"
+)
+target_include_directories(test_cellnet_ota_receiver PRIVATE "${REPO_ROOT}/lib/CellNetL2/src")
+target_link_libraries(test_cellnet_ota_receiver PRIVATE unity)
+add_test(NAME test_cellnet_ota_receiver COMMAND test_cellnet_ota_receiver)
+
 
 # Optional gcovr report: cmake -S test/host -B build/host -DGANTRY_HOST_COVERAGE=ON
 # then cmake --build build/host --target coverage
@@ -295,3 +370,9 @@ if(GANTRY_HOST_COVERAGE)
 endif()
 
 
+
+# Simulation strike planner port (strike_plan.h) against gantry_twin.py values
+add_executable(test_strike_plan "test_strike_plan.cpp")
+target_include_directories(test_strike_plan PRIVATE "${REPO_ROOT}/include")
+target_link_libraries(test_strike_plan PRIVATE unity)
+add_test(NAME test_strike_plan COMMAND test_strike_plan)

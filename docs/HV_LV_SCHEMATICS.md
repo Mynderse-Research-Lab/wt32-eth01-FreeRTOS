@@ -23,7 +23,7 @@
 | Control power | 1606-XLE240E 24 VDC; Phoenix 5 V for WT32 box |
 | Motion control | **EtherNet/IP only** — no PTI/opto production harness |
 | Endstops | Drive TBIO / HCS01 X31 (NC sinking) |
-| Gripper | MCP23S17 PA0 (Field DOUT0) → 24 V interface relay → valve coil |
+| Gripper | MCP23S17 PA0 (Field DOUT0) → R16 220 Ω → U11 VO14642AT solid-state relay (high side: 24VDC on S/S′, DC → FDO0) → valve coil. Turn-on 370 µs typ / 800 µs max at 30 V, 200 mA (Vishay doc 81646, Switching Characteristics). R14 10 kΩ pulls PA0 low. |
 | Networks | W5500 EIP daisy-chain **separate** from LAN8720 MQTT |
 
 Authoritative BOM / wire sizes: regenerate from
@@ -72,7 +72,7 @@ the generated BOM / wire schedule and the electrical-review register below.
 
 | From | To | Medium |
 |------|----|--------|
-| Utility | DISC1 → CB0 → PDB | Feeder / #8 class per BOM |
+| Utility | CB0 → PDB (the three phases go straight to CB0; no separate disconnect) | Feeder / #8 class per BOM |
 | CB1/K1/LF1 | X drive L1/L2/L3 | Branch AC |
 | CB2/K2/LF2 | Z drive | Branch AC |
 | CB3/K3/LF3 | HCS01 | Branch AC (theta deferred) |

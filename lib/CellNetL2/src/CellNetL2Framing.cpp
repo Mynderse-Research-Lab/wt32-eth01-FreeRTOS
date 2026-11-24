@@ -42,7 +42,6 @@ inline void setCellHeader(L2CellHeader& cell, CellMsgType msg_type,
 }  // namespace
 
 size_t CellNetL2Framing::expectedFrameLength(CellMsgType type) {
-  constexpr size_t kHdrLen = sizeof(L2EthernetHeader) + sizeof(L2CellHeader);
   switch (type) {
     case CellMsgType::HEARTBEAT:
       return sizeof(L2HeartbeatFrame);
@@ -54,6 +53,16 @@ size_t CellNetL2Framing::expectedFrameLength(CellMsgType type) {
       return sizeof(L2GantryStatusFrame);
     case CellMsgType::CELL_COMMAND:
       return sizeof(L2CellCommandFrame);
+    case CellMsgType::OTA_BEGIN:
+      return sizeof(L2OtaBeginFrame);
+    case CellMsgType::OTA_DATA:
+      return sizeof(L2OtaDataFrameHeader);  // minimum: data follows
+    case CellMsgType::OTA_STATUS:
+      return sizeof(L2OtaStatusFrame);
+    case CellMsgType::OTA_END:
+      return sizeof(L2OtaEndFrame);
+    case CellMsgType::OTA_RESULT:
+      return sizeof(L2OtaResultFrame);
     default:
       return 0;
   }
@@ -88,16 +97,18 @@ bool CellNetL2Framing::parseFrame(const uint8_t* buffer, size_t length,
     return false;
   }
 
-  // 4. Verify Exact Message Length
+  // 4. Verify Message Length (Ethernet minimum-size padding may follow the payload)
   const auto msg_type = static_cast<CellMsgType>(out.cell.msg_type);
   const size_t expected_len = expectedFrameLength(msg_type);
-  if (expected_len == 0 || length != expected_len) {
+  const size_t max_len =
+      (msg_type == CellMsgType::OTA_DATA) ? kMaxOtaDataFrameLen : kMaxPaddedRxLen;
+  if (expected_len == 0 || length < expected_len || length > max_len) {
     return false;
   }
 
   // 5. Extract Payload
   const uint8_t* payload_ptr = buffer + kMinHdrLen;
-  const size_t payload_len = length - kMinHdrLen;
+  const size_t payload_len = expected_len - kMinHdrLen;
 
   switch (msg_type) {
     case CellMsgType::HEARTBEAT:
@@ -114,6 +125,26 @@ bool CellNetL2Framing::parseFrame(const uint8_t* buffer, size_t length,
       break;
     case CellMsgType::CELL_COMMAND:
       std::memcpy(&out.payload.cell_command, payload_ptr, payload_len);
+      break;
+    case CellMsgType::OTA_BEGIN:
+      std::memcpy(&out.payload.ota_begin, payload_ptr, payload_len);
+      break;
+    case CellMsgType::OTA_DATA:
+      std::memcpy(&out.payload.ota_data, payload_ptr, payload_len);
+      if (out.payload.ota_data.data_len == 0 ||
+          expected_len + out.payload.ota_data.data_len > length) {
+        return false;
+      }
+      out.ota_data = buffer + expected_len;
+      break;
+    case CellMsgType::OTA_STATUS:
+      std::memcpy(&out.payload.ota_status, payload_ptr, payload_len);
+      break;
+    case CellMsgType::OTA_END:
+      std::memcpy(&out.payload.ota_end, payload_ptr, payload_len);
+      break;
+    case CellMsgType::OTA_RESULT:
+      std::memcpy(&out.payload.ota_result, payload_ptr, payload_len);
       break;
     default:
       return false;
@@ -186,6 +217,63 @@ std::vector<uint8_t> CellNetL2Framing::buildCellCommandFrame(
 
   const auto* ptr = reinterpret_cast<const uint8_t*>(&frame);
   return std::vector<uint8_t>(ptr, ptr + sizeof(frame));
+}
+
+namespace {
+
+template <typename FrameT, typename PayloadT>
+std::vector<uint8_t> buildFixed(CellMsgType type, const uint8_t src_mac[6],
+                                CellNodeId sender_id, uint8_t sequence,
+                                uint32_t timestamp_us, const PayloadT& payload,
+                                const uint8_t dest_mac[6]) {
+  FrameT frame{};
+  setEthHeader(frame.eth, src_mac, dest_mac);
+  setCellHeader(frame.cell, type, sender_id, sequence, timestamp_us);
+  frame.payload = payload;
+  const auto* ptr = reinterpret_cast<const uint8_t*>(&frame);
+  return std::vector<uint8_t>(ptr, ptr + sizeof(frame));
+}
+
+}  // namespace
+
+std::vector<uint8_t> CellNetL2Framing::buildOtaBeginFrame(
+    const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+    uint32_t timestamp_us, const L2OtaBeginPayload& payload, const uint8_t dest_mac[6]) {
+  return buildFixed<L2OtaBeginFrame>(CellMsgType::OTA_BEGIN, src_mac, sender_id, sequence,
+                                     timestamp_us, payload, dest_mac);
+}
+
+std::vector<uint8_t> CellNetL2Framing::buildOtaDataFrame(
+    const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+    uint32_t timestamp_us, const L2OtaDataHeader& header, const uint8_t* data,
+    const uint8_t dest_mac[6]) {
+  std::vector<uint8_t> frame = buildFixed<L2OtaDataFrameHeader>(
+      CellMsgType::OTA_DATA, src_mac, sender_id, sequence, timestamp_us, header, dest_mac);
+  if (data != nullptr && header.data_len > 0) {
+    frame.insert(frame.end(), data, data + header.data_len);
+  }
+  return frame;
+}
+
+std::vector<uint8_t> CellNetL2Framing::buildOtaStatusFrame(
+    const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+    uint32_t timestamp_us, const L2OtaStatusPayload& payload, const uint8_t dest_mac[6]) {
+  return buildFixed<L2OtaStatusFrame>(CellMsgType::OTA_STATUS, src_mac, sender_id, sequence,
+                                      timestamp_us, payload, dest_mac);
+}
+
+std::vector<uint8_t> CellNetL2Framing::buildOtaEndFrame(
+    const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+    uint32_t timestamp_us, const L2OtaEndPayload& payload, const uint8_t dest_mac[6]) {
+  return buildFixed<L2OtaEndFrame>(CellMsgType::OTA_END, src_mac, sender_id, sequence,
+                                   timestamp_us, payload, dest_mac);
+}
+
+std::vector<uint8_t> CellNetL2Framing::buildOtaResultFrame(
+    const uint8_t src_mac[6], CellNodeId sender_id, uint8_t sequence,
+    uint32_t timestamp_us, const L2OtaResultPayload& payload, const uint8_t dest_mac[6]) {
+  return buildFixed<L2OtaResultFrame>(CellMsgType::OTA_RESULT, src_mac, sender_id, sequence,
+                                      timestamp_us, payload, dest_mac);
 }
 
 }  // namespace CellNet

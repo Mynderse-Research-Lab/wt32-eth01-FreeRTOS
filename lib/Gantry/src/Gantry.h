@@ -60,6 +60,7 @@ enum class GantryError {
     OK,
     NOT_INITIALIZED,
     MOTOR_NOT_ENABLED,
+    NOT_CALIBRATED,
     ALREADY_MOVING,
     INVALID_POSITION,
     INVALID_PARAMETER,
@@ -150,12 +151,27 @@ public:
     JointLimits getJointLimits() const { return config_.limits; }
     void setEndEffectorPin(int pin, bool activeHigh = true);
     void setSafeZHeight(float safeHeight_mm);
+    /// Apply the stored motion, timing and geometry parameters.
+    void setRuntimeParams(const RuntimeParams& params);
+    /// Ballscrew speed cap in force (mm/s), from the stored critical RPM and lead.
+    float zSpeedCapMmS() const;
+    /// Z acceleration cap in force (mm/s^2); 0 disables the cap.
+    float zAccelCapMmS2() const;
+    /// Z deceleration cap in force (mm/s^2); 0 disables the cap.
+    float zDecelCapMmS2() const;
     /// Absolute joint-Z band ceiling for X traverse / coordinated X+Z
     /// (= z_min + Z− margin).
     float traverseClearanceZMm() const;
     /// True when current joint Z is in the SAFE_Z retract/traverse band
     /// (X Absolute and theta allowed).
     bool zInTraverseBand() const;
+
+    /// Workspace envelope is valid. Latched true after X+Z stroke (bring-up
+    /// or both axis cals). Cleared when a live drive reports lost
+    /// position-ref (24 V / encoder), not on disable/stop/Class 1 gaps.
+    /// Not kept across an ESP reboot: the X/Z joint zero is RAM-only.
+    bool isWorkspaceCalibrated() const;
+    void setWorkspaceCalibrated(bool on);
 
     // ---------- Motion ----------
     /// @brief Home X (Z/Theta: call homeZ / homeTheta separately; console `all` sequences).
@@ -177,6 +193,10 @@ public:
     void homeX();
     void homeZ();
     bool homeTheta();
+    /// True when theta is idle, not alarmed, and within
+    /// EIP_THETA_SETTLED_TOL_DEG of target_deg. homeTheta() only starts the
+    /// return to 0; use this once isBusy() clears to see whether it arrived.
+    bool thetaSettledAt(float target_deg) const;
     int  calibrateX();
     int  calibrateZ();
     int  calibrateTheta();
@@ -195,13 +215,21 @@ public:
 
     void moveTo(int32_t x, int32_t z, int32_t theta, uint32_t speed);
 
+    /// theta_start_frac < 0 keeps the console window (25%, axis-max cap)
+    /// and the 0.5° deadband. >= 0 is a pick: theta starts at that fraction,
+    /// any |dθ| >= 0.1° is commanded and quantized to 0.1°, and a waiting
+    /// gantry still turns. SAFE_Z still blocks theta below the band.
+    /// theta_full_speed runs theta at full capped speed_deg_per_s instead of
+    /// throttling to the path window.
     GantryError moveTo(const JointConfig& joint,
                        uint32_t speed_mm_per_s        = 50,
                        uint32_t speed_deg_per_s       = 30,
                        uint32_t acceleration_mm_per_s2 = 0,
                        uint32_t deceleration_mm_per_s2 = 0,
                        uint32_t acceleration_deg_per_s2 = 0,
-                       uint32_t deceleration_deg_per_s2 = 0);
+                       uint32_t deceleration_deg_per_s2 = 0,
+                       float theta_start_frac = -1.0f,
+                       bool theta_full_speed = false);
 
     GantryError moveTo(const EndEffectorPose& pose,
                        uint32_t speed_mm_per_s        = 50,
@@ -211,12 +239,53 @@ public:
                        uint32_t acceleration_deg_per_s2 = 0,
                        uint32_t deceleration_deg_per_s2 = 0);
 
+    /// Z-only Absolute with StartMotion held until releasePreloadedMotion().
+    GantryError preloadJointMove(const JointConfig& joint,
+                                 uint32_t speed_mm_per_s,
+                                 uint32_t acceleration_mm_per_s2,
+                                 uint32_t deceleration_mm_per_s2);
+    bool releasePreloadedMotion();
+    bool isPreloadHeld() const;
+
+    /// Z-only lift to the SAFE_Z band ceiling. Stops any motion first and is
+    /// allowed while X or theta is alarmed; refused only on a Z alarm.
+    GantryError retractToSafeZ(uint32_t speed_mm_per_s,
+                               uint32_t acceleration_mm_per_s2,
+                               uint32_t deceleration_mm_per_s2);
+
+    /// Zero-dwell strike retract: queue the SAFE_Z ceiling behind the released
+    /// Z plunge, StartMotion held. releasePreloadedMotion() fires its edge and
+    /// the drive starts it as the plunge completes. No stop, no preload ticks.
+    GantryError queueRetractToSafeZ(uint32_t speed_mm_per_s,
+                                    uint32_t acceleration_mm_per_s2,
+                                    uint32_t deceleration_mm_per_s2);
+
+    /// Chain a joint move directly onto an in-flight Z retract (once its
+    /// StartMotion edge has fired). Keeps Z moving to SAFE_Z, launches X and
+    /// theta on the first tick Z enters the SAFE_Z band, and descends to
+    /// joint.z afterward if below SAFE_Z. Returns false if no released retract
+    /// is active or preconditions fail (leaving the retract untouched).
+    bool chainMoveAfterRetract(const JointConfig& joint,
+                               uint32_t speed_mm_per_s,
+                               uint32_t speed_deg_per_s = Constants::DEFAULT_SPEED_DEG_PER_S,
+                               uint32_t acceleration_mm_per_s2 = 0,
+                               uint32_t deceleration_mm_per_s2 = 0,
+                               uint32_t acceleration_deg_per_s2 = 0,
+                               uint32_t deceleration_deg_per_s2 = 0,
+                               float theta_start_frac = 0.0f,
+                               bool theta_full_speed = true);
+
+    /// True once a chained retract has handed off to X/next segment or gone idle.
+    bool isRetractHandedOff() const;
+
     bool isBusy() const;
     bool isEnabled() const;
     void update();
 
     // ---------- Gripper ----------
-    void grip(bool active);
+    /// False when no gripper is configured or the output write failed.
+    bool grip(bool active);
+    bool isGripperActive() const { return gripperActive_; }
 
     // ---------- Position accessors ----------
     int     getXEncoder() const;
@@ -227,6 +296,13 @@ public:
     int     getCurrentZ() const;
     float   getZCommandedMm() const;
     float   getZEncoderMm() const;
+    // Z feedback without the gantry mutex (process-image lock only), for the
+    // 1 kHz strike trace. False when the Z link is offline.
+    bool    sampleZFeedbackMm(float& mm) const;
+    // Theta feedback and the last theta move stamp without the gantry mutex,
+    // for the 1 kHz theta trace. False when there is no live theta axis.
+    bool    sampleThetaTrace(RotaryTraceSample& out) const;
+    bool    getThetaMoveStamp(RotaryMoveStamp& out) const;
     int32_t getZEncoderPulses() const;
     float   getZPulsesPerMm() const;
     int     getCurrentTheta() const;
@@ -241,6 +317,13 @@ public:
 
     // ---------- Diagnostics ----------
     bool isAlarmActive() const;
+    /// Every configured drive's cyclic link is up. While false, positions
+    /// read 0 and the SAFE_Z band test is meaningless: plan nothing.
+    bool drivesOnline() const;
+    /// First configured axis whose servo is not on ("X", "Z", "theta"), or
+    /// nullptr when every servo is on. A drive trip (e.g. E602) drops the servo
+    /// and alarmreset alone does not bring it back: 'enable' does.
+    const char* inactiveServoAxis() const;
     bool clearAlarm();
     /// @brief Print X/Z/theta EIP fault/warning summaries (no-op if no codes).
     void logDriveAlarmSummaries() const;
@@ -285,6 +368,7 @@ private:
     bool abortRequested_;
     bool homingInProgress_;
     bool calibrationInProgress_;
+    bool workspaceCalibrated_;
     bool gripperActive_;
 
     // Position tracking (mirrored from axis wrappers for cheap access)
@@ -298,6 +382,7 @@ private:
 
     GantryConfig         config_;
     KinematicParameters  kinematicParams_;
+    RuntimeParams        runtime_;
     float                stepsPerRev_;
 
     // Sequential / path motion state machine. +Z = down (toward belt):
@@ -334,6 +419,8 @@ private:
     float       xPulsesPerMmOverride_;
     // Console/joint moves: path to joint target (no gripper). Pose/pick keeps gripper.
     bool        jointDirectMove_;
+    bool        holdZStart_ = false;
+    bool        zStartHeld_ = false;
 
     // Planned 2-D path Absolute segments (max 3).
     static constexpr size_t kMaxPathSegments = 3;
@@ -344,11 +431,17 @@ private:
     float pathSegStartZ_mm_ = 0.0f;
     bool pathSegXArmed_ = false;
     bool pathSegZArmed_ = false;
-    // Theta: wait for 25% of the in-band X+Z segment, then run at window speed.
+    // Theta: wait for the start fraction of the in-band X+Z segment (25% for
+    // console moves), then run at window speed.
     bool thetaPending_ = false;
     float thetaPendingSpeedDegS_ = 0.0f;
     size_t thetaWindowSegIndex_ = 0;
     bool thetaHoldsDescent_ = false;
+    float thetaStartFrac_ = -1.0f;
+    float thetaWindowStartFrac_ = Path::kThetaStartFrac;
+    bool thetaFullSpeed_ = false;
+    // retractToSafeZ in progress: X / theta alarms do not abort it.
+    bool retractOnly_ = false;
     // PnP: after path to pick completes, run gripper then retract to clearance.
     bool pathDoGripperAfter_ = false;
 
@@ -378,6 +471,7 @@ private:
         kXCalCreep,
         kXCalSettle,
         kXPark,
+        kThetaOrient,
         kZPlusSeek,
         kZPlusCreep,
         kZPlusSettle,
@@ -385,6 +479,7 @@ private:
     };
     BringUpPhase bringUpPhase_ = BringUpPhase::kIdle;
     float calXParkMm_ = GANTRY_CAL_X_PARK_MM;
+    float thetaOrientDeg_ = 0.0f;
 
     // Helpers
     float   pulsesToMm(int32_t pulses) const;
@@ -394,7 +489,8 @@ private:
     void processSequentialMotion();
     /// Arm X Absolute with explicit path-component profile (mm units).
     bool startXAxisMotion(float target_mm, float speed_mm_s, float accel_mm_s2,
-                          float decel_mm_s2);
+                          float decel_mm_s2, bool allow_retract_lead = false);
+    bool retractLeadReady(float lead_s) const;
 
     bool planPathTo(float x0, float z0, float x1, float z1);
     bool armCurrentPathSegment();
@@ -419,6 +515,10 @@ private:
     bool     moveZAxisTo(float targetZ, float speed, float accel, float decel);
     void     updateAxisPositions();
     void     stopAllMotion();
+    /// Pause Lost polling during home/cal/bring-up (Home34 flicker).
+    bool     driveRefPollPaused() const;
+    void     pollDrivePositionLoss();
+    void     tryLatchWorkspaceFromStrokes();
 
     GantryLinearAxis* eipLimitActiveAxis();
     const GantryLinearAxis* eipLimitActiveAxis() const;

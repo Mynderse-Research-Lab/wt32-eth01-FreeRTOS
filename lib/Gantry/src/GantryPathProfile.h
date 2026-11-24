@@ -27,11 +27,26 @@ namespace Gantry {
 namespace Path {
 
 inline constexpr float kAxisEpsMm = 0.05f;
+/// A move has reached its target within this. Wider than the drive's 0.5 mm
+/// arrival band, to catch a timeout or abort that clears busy far from it.
+inline constexpr float kArriveEpsMm = 1.0f;
 
 /// Theta starts at this fraction of the in-band X+Z traverse segment.
 inline constexpr float kThetaStartFrac = 0.25f;
 /// Theta is scheduled to finish by this fraction of that same segment.
 inline constexpr float kThetaEndFrac   = 0.75f;
+/// Pick path: command any |dθ| at least this large, quantized to this step.
+/// Smaller changes are left where they are. Console moves keep a 0.5° deadband.
+inline constexpr float kThetaCommandMinDeg = 0.1f;
+
+/// Pick command: no move when |target − current| < kThetaCommandMinDeg,
+/// otherwise the nearest 0.1° step.
+inline float commandThetaDeg(float current_deg, float target_deg) {
+    if (std::fabs(target_deg - current_deg) < kThetaCommandMinDeg) {
+        return current_deg;
+    }
+    return std::round(target_deg / kThetaCommandMinDeg) * kThetaCommandMinDeg;
+}
 
 struct PathProfile {
     float speed_mm_per_s;
@@ -91,8 +106,9 @@ inline AxisComponents decompose(float dx, float dz, const PathProfile& p) {
  *    (x1, z1). Runtime defers X until Z is in-band; Z does not stop at ceiling.
  *  - In-band: one X+Z (or X-only / Z-only) segment to (x1, min(z1, ceiling)).
  *  - End above the band: Z-alone after X is at x1.
- *  - Start and end both above, need X: Z-alone into the band, X at ceiling,
- *    Z-alone to z1 (X cannot run until Z is in-band).
+ *  - Start and end both above, need X: first segment targets (x1, ceiling)
+ *    with X deferred until Z enters the band (so there is no hard dwell at
+ *    SAFE_Z), then Z-alone to z1.
  *
  * band_ceiling_z_mm is typically z_min + GANTRY_SAFE_Z_HEIGHT_MM (e.g. 30
  * when z_min=0 and margin=30).
@@ -136,7 +152,10 @@ inline size_t planSegments(float x0, float z0, float x1, float z1,
     float cur_z = z0;
 
     if (start_above) {
-        push(cur_x, band_ceiling_z_mm, false, true);
+        // Keep one retract segment and defer X until runtime sees in-band.
+        // This avoids a hard stop at SAFE_Z before starting X.
+        push(x1, band_ceiling_z_mm, true, true);
+        cur_x = x1;
         cur_z = band_ceiling_z_mm;
     }
 
@@ -166,19 +185,90 @@ inline bool zInTraverseBand(float z_mm, float band_ceiling_mm,
     return z_mm <= (band_ceiling_mm + eps_mm);
 }
 
-/// Speed for theta to start at kThetaStartFrac and finish by kThetaEndFrac
+/// Time lead (seconds) before Z finishes retracting to SAFE_Z at which a
+/// pick/transfer deferred X move is armed. Covers GantryUpdate tick latency
+/// (~5 ms), Kinetix preload (20 ms), Kinetix cmd-to-motion dead time (~42 ms),
+/// plus ~93 ms of physical X acceleration while Z finishes its top decel and
+/// S-curve settle so X sweeps out of the retract visibly before Z stops.
+inline constexpr float kRetractXLeadS = 0.160f;
+/// Time lead (seconds) for deferred theta during an active retract — matches
+/// X lead while HCS01 command-to-motion startup (~50 ms) keeps the shaft clear
+/// of belt/bin until Z is well above the belt (>50 mm).
+inline constexpr float kRetractThetaLeadS = 0.160f;
+/// Hard physical ceiling (mm) below SAFE_Z where early X/theta arming is
+/// permitted during an active upward retract.
+inline constexpr float kMaxRetractXLeadMm = 48.0f;
+/// Maximum fraction of the retract stroke allowed as early lead — ensures Z
+/// has physically climbed at least 22% of the stroke before X/theta arm.
+inline constexpr float kMaxRetractStrokeFrac = 0.78f;
+
+/// Distance below band_ceiling_z_mm at which a deferred axis may be armed early
+/// while Z is actively retracting from start_z_mm toward band_ceiling_z_mm.
+/// Scales with the Z deceleration profile over lead_s and caps at both
+/// max_lead_mm and kMaxRetractStrokeFrac of the retract stroke.
+inline float retractLeadMm(float start_z_mm, float band_ceiling_z_mm,
+                           float z_speed_mm_s, float z_decel_mm_s2,
+                           float lead_s = kRetractXLeadS,
+                           float max_lead_mm = kMaxRetractXLeadMm) {
+    const float stroke = start_z_mm - band_ceiling_z_mm;
+    if (stroke <= kAxisEpsMm || z_speed_mm_s <= 0.0f || z_decel_mm_s2 <= 0.0f ||
+        lead_s <= 0.0f || max_lead_mm <= 0.0f) {
+        return 0.0f;
+    }
+    const float t_decel = z_speed_mm_s / z_decel_mm_s2;
+    const float dist = (lead_s <= t_decel)
+                           ? (0.5f * z_decel_mm_s2 * lead_s * lead_s)
+                           : (z_speed_mm_s * lead_s - 0.5f * z_speed_mm_s * t_decel);
+    const float max_stroke_lead = kMaxRetractStrokeFrac * stroke;
+    float lead = dist < max_stroke_lead ? dist : max_stroke_lead;
+    if (lead > max_lead_mm) {
+        lead = max_lead_mm;
+    }
+    return lead > 0.0f ? lead : 0.0f;
+}
+
+/// Largest path scalar <= requested whose Z component |dz|/L stays within
+/// z_cap. Lowering the resultant keeps the X-Z path straight. z_cap <= 0 disables.
+inline float zCappedPathValue(float requested, float dx, float dz, float z_cap) {
+    if (requested <= 0.0f || z_cap <= 0.0f) {
+        return requested;
+    }
+    const float az = std::fabs(dz);
+    if (az <= kAxisEpsMm) {
+        return requested;
+    }
+    const float max_v = z_cap * std::hypot(dx, dz) / az;
+    return requested < max_v ? requested : max_v;
+}
+
+/// Largest path speed <= requested whose Z component |dz|/L stays within
+/// z_cap (ballscrew critical speed). Lowering the resultant keeps the move
+/// straight. z_cap <= 0 disables the cap.
+inline float zCappedPathSpeed(float requested, float dx, float dz, float z_cap) {
+    return zCappedPathValue(requested, dx, dz, z_cap);
+}
+
+/// Largest path accel or decel <= requested whose Z component |dz|/L stays
+/// within z_accel_cap. Lowering the resultant keeps coordinated X+Z straight.
+/// z_accel_cap <= 0 disables the cap.
+inline float zCappedPathAccel(float requested, float dx, float dz, float z_accel_cap) {
+    return zCappedPathValue(requested, dx, dz, z_accel_cap);
+}
+
+/// Speed for theta to start at start_frac and finish by kThetaEndFrac
 /// of a constant-speed in-band traverse of length seg_len_mm.
 struct ThetaWindow {
     bool  runnable;          // in-band segment exists and |dTheta| > eps
-    float start_frac;        // kThetaStartFrac
-    float speed_deg_per_s;   // |dTheta| / (0.5 * T_seg), clamped to cap
+    float start_frac;        // start_frac argument (console default 25%)
+    float speed_deg_per_s;   // |dTheta| / (window * T_seg), clamped to cap
     bool  speed_clamped;     // true when cap forces finish past 75%
 };
 
 inline ThetaWindow planThetaWindow(float seg_len_mm, float path_speed_mm_s,
-                                   float delta_theta_deg, float theta_speed_cap) {
+                                   float delta_theta_deg, float theta_speed_cap,
+                                   float start_frac = kThetaStartFrac) {
     ThetaWindow w{};
-    w.start_frac = kThetaStartFrac;
+    w.start_frac = start_frac;
     w.runnable = false;
     w.speed_deg_per_s = 0.0f;
     w.speed_clamped = false;
@@ -192,7 +282,7 @@ inline ThetaWindow planThetaWindow(float seg_len_mm, float path_speed_mm_s,
     }
 
     const float T_seg = seg_len_mm / path_speed_mm_s;
-    const float window_frac = kThetaEndFrac - kThetaStartFrac;
+    const float window_frac = kThetaEndFrac - start_frac;
     if (T_seg <= 0.0f || window_frac <= 0.0f) {
         return w;
     }

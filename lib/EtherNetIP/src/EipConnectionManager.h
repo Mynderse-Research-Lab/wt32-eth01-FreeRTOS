@@ -80,8 +80,8 @@ Bytes buildAssemblyConnectionPath(uint16_t config_instance,
 uint32_t multicastIpFromConnectionId(uint32_t connection_id);
 
 struct ForwardOpenParams {
-  uint8_t priority_time_tick = 0x0A;   // tick time exponent
-  uint8_t timeout_ticks = 0xFA;        // -> connection timeout
+  uint8_t priority_time_tick = 0x03;   // 2^3 ms tick
+  uint8_t timeout_ticks = 125;         // 125 * 8 ms = 1 s ForwardOpen request
   uint32_t ot_connection_id = 0;       // originator->target (originator chosen)
   uint32_t to_connection_id = 0;       // target->originator (0 -> target picks)
   uint16_t connection_serial = 0x0001;

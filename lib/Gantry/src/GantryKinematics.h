@@ -4,14 +4,10 @@
  * @version 2.0.0
  *
  * Coordinate convention (firmware-wide):
- *   - X: horizontal traverse along the gantry beam.
- *   - Y: along-belt direction; +Y is conveyor downstream. The gantry has no
- *        Y actuator, so JointConfig has no y member; the workspace pose Y
- *        field is filled from kinematic parameters (z_axis_y_offset_mm).
- *   - Z: vertical (+Z = down / toward belt). Joint z = A015 retract datum;
- *        pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM
- *        (see axis_drivetrain_params.h).
- *   - Theta: rotation about Z (right-handed about +Z).
+ *   - X: horizontal traverse along the gantry beam (inverted: x_home = x_max).
+ *   - Y: along-belt direction; +Y is conveyor downstream (unchanged).
+ *   - Z: vertical height above conveyor (inverted: z=0 conveyor, z=z_max complete retraction).
+ *   - Theta: 0° along New +X, +90° along +Y (from new +X to unchanged +Y).
  */
 
 #ifndef GANTRY_KINEMATICS_H
@@ -34,6 +30,14 @@
 
 namespace Gantry {
 
+/// Theta joint to pose angle (pad direction, 0° along +X, 90° along +Y, positive about +Z
+/// up). Joint 0° holds the pads along +Y, and a positive joint turns them counter-clockwise
+/// seen from above (checked on the Pi camera 2026-11-16: at +45° the +X finger moved
+/// downstream). pose = joint + 90°.
+inline float thetaPoseFromJointDeg(float joint_deg) { return joint_deg + 90.0f; }
+/// Inverse of thetaPoseFromJointDeg: joint = pose - 90°.
+inline float thetaJointFromPoseDeg(float pose_deg) { return pose_deg - 90.0f; }
+
 /**
  * @class Kinematics
  * @brief Forward and inverse kinematics for the 3-axis gantry.
@@ -44,11 +48,10 @@ public:
      * @brief Forward kinematics: joint space -> cartesian (workspace) space.
      *
      * For this gantry configuration:
-     *   - pose.x = joint.x + theta_x_offset (theta rotates about Z, doesn't
-     *              change pose.x in the simple TCP model)
+     *   - pose.x = params.x_stroke_mm - (joint.x + theta_x_offset) (x_home = x_max)
      *   - pose.y = z_axis_y_offset_mm (along-belt placement is fixed)
-     *   - pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM (+Z = down)
-     *   - pose.theta = joint.theta
+     *   - pose.z = params.z_stroke_mm - joint.z (z=0 conveyor, z=z_max complete retraction)
+     *   - pose.theta = joint.theta + 90° (0° along New +X, +90° along +Y)
      */
     static EndEffectorPose forward(const JointConfig& joints,
                                     const KinematicParameters& params);

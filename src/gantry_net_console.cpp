@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 
@@ -25,21 +26,138 @@ struct NetConsoleCtx {
   const GantryTestConsoleConfig *cfg;
 };
 
-void sendAll(int fd, const char *text) {
-  if (fd < 0 || text == nullptr) {
-    return;
-  }
-  const size_t n = std::strlen(text);
-  if (n == 0) {
-    return;
-  }
-  // Non-blocking: never stall Class 1 / motion behind a slow PC.
-  (void)send(fd, text, n, MSG_DONTWAIT);
+// Direct console-loop sends (prompt, banner, auth) retry this long on a full
+// socket. The supervisor ends a command on the prompt; a dropped prompt left
+// it "busy" until STOP (2026-10-27).
+constexpr TickType_t kConsoleSendWaitTicks = pdMS_TO_TICKS(500);
+
+SemaphoreHandle_t g_sendMutex = nullptr;
+TaskHandle_t g_consoleTask = nullptr;
+// The client whose socket the log sink feeds; -1 when none. Set and cleared
+// under g_sendMutex, so a log line from a logger that read the sink just
+// before a detach never reaches a closed fd or a later client reusing it.
+int g_liveFd = -1;
+// Set by gantryNetConsoleDeferRestart from the console task's own command.
+bool g_restartPending = false;
+
+// Send outcomes since boot, read with netcon (console "busy" hunt, 2026-10-27).
+struct SendStats {
+    uint32_t waited_sends = 0;
+    uint32_t waited_short = 0;   // console-loop text not fully sent in time
+    uint32_t log_skipped = 0;    // log text skipped: another send in progress
+    uint32_t log_short = 0;      // log text cut by a full socket
+    uint32_t log_stale = 0;      // log text for a client no longer attached
+    uint32_t log_sends = 0;
+    uint32_t max_wait_ms = 0;
+    int last_errno = 0;
+};
+SendStats g_stats;
+
+// Last received command lines: arrival time and whether the prompt that ends
+// them went out in full. Tells a lost command from a lost or misread reply.
+constexpr int kRxRing = 8;
+struct RxEntry {
+    uint32_t at_ms = 0;
+    uint32_t done_ms = 0;
+    bool prompt_ok = false;
+    char line[24] = {};
+};
+RxEntry g_rx[kRxRing];
+uint32_t g_rx_count = 0;
+
+// lwIP send with MSG_DONTWAIT writes part or none of the text when the socket
+// buffer is full. wait=true (console task: prompt, banner, command output)
+// finishes every byte within kConsoleSendWaitTicks. Log lines from any other
+// task never wait, so motion tasks never stall behind a slow PC: one that
+// finds the socket busy or full is dropped. With newlib ESP-IDF holds the
+// stdout lock across the tee (log_format_text.c), so a console-task wait would
+// also hold other loggers; this build uses picolibc, which takes no such lock.
+// True when every byte went out.
+bool sendAll(int fd, const char *text, bool wait) {
+    if (fd < 0 || text == nullptr) {
+        return false;
+    }
+    const size_t n = std::strlen(text);
+    if (n == 0) {
+        return true;
+    }
+    if (wait) {
+        ++g_stats.waited_sends;
+    } else {
+        ++g_stats.log_sends;
+    }
+    const TickType_t start = xTaskGetTickCount();
+    if (g_sendMutex != nullptr &&
+        xSemaphoreTake(g_sendMutex, wait ? kConsoleSendWaitTicks : 0) != pdTRUE) {
+        if (wait) {
+            ++g_stats.waited_short;
+        } else {
+            ++g_stats.log_skipped;
+        }
+        return false;
+    }
+    if (!wait && fd != g_liveFd) {
+        ++g_stats.log_stale;
+        if (g_sendMutex != nullptr) {
+            xSemaphoreGive(g_sendMutex);
+        }
+        return false;
+    }
+    size_t off = 0;
+    while (off < n) {
+        const ssize_t w = send(fd, text + off, n - off, MSG_DONTWAIT);
+        if (w > 0) {
+            off += static_cast<size_t>(w);
+            continue;
+        }
+        if (w < 0) {
+            g_stats.last_errno = errno;
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                break;
+            }
+        }
+        if (!wait || xTaskGetTickCount() - start >= kConsoleSendWaitTicks) {
+            break;
+        }
+        vTaskDelay(1);
+    }
+    if (off < n) {
+        if (wait) {
+            ++g_stats.waited_short;
+        } else {
+            ++g_stats.log_short;
+        }
+    }
+    if (wait) {
+        const uint32_t ms = pdTICKS_TO_MS(xTaskGetTickCount() - start);
+        if (ms > g_stats.max_wait_ms) {
+            g_stats.max_wait_ms = ms;
+        }
+    }
+    if (g_sendMutex != nullptr) {
+        xSemaphoreGive(g_sendMutex);
+    }
+    return off == n;
 }
 
+// Waits out any log send in flight, so close() never runs under one.
+void setLiveFd(int fd) {
+    if (g_sendMutex != nullptr) {
+        xSemaphoreTake(g_sendMutex, portMAX_DELAY);
+    }
+    g_liveFd = fd;
+    if (g_sendMutex != nullptr) {
+        xSemaphoreGive(g_sendMutex);
+    }
+}
+
+// The console task's own command output waits for its turn like the prompt:
+// skipped, a reply arrived as "[TCP RX] cmd" + prompt with no answer while a
+// pick task was logging (2026-10-27). Other tasks hold the lock for one
+// non-blocking send, so the wait is normally microseconds.
 void replyToSocket(void *ctx, const char *text) {
   int fd = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
-  sendAll(fd, text);
+  (void)sendAll(fd, text, /*wait=*/xTaskGetCurrentTaskHandle() == g_consoleTask);
 }
 
 bool passwordsEqual(const char *attempt, const char *expected) {
@@ -59,11 +177,28 @@ bool passwordsEqual(const char *attempt, const char *expected) {
   return diff == 0;
 }
 
-/** Read one line (ends on \\n/\\r/;). Returns false on disconnect/error. */
-bool recvLine(int fd, char *out, size_t cap) {
+/** Read one line (ends on \\n/\\r/;). timeout_ms > 0 stops the wait. */
+bool recvLine(int fd, char *out, size_t cap, int timeout_ms = 0) {
   size_t len = 0;
   char chunk[64];
+  const int64_t deadline_us =
+      timeout_ms > 0 ? esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000 : 0;
   while (true) {
+    if (timeout_ms > 0) {
+      const int64_t left_us = deadline_us - esp_timer_get_time();
+      if (left_us <= 0) {
+        return false;
+      }
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      FD_SET(fd, &rfds);
+      timeval tv{};
+      tv.tv_sec = static_cast<long>(left_us / 1000000);
+      tv.tv_usec = static_cast<long>(left_us % 1000000);
+      if (select(fd + 1, &rfds, nullptr, nullptr, &tv) <= 0) {
+        return false;
+      }
+    }
     const int n = recv(fd, chunk, sizeof(chunk), 0);
     if (n <= 0) {
       return false;
@@ -149,30 +284,30 @@ bool authenticateClient(int fd, uint32_t peer_addr_nbo) {
   if (peerRecentlyAuthed(peer_addr_nbo)) {
     rememberPeerAuth(peer_addr_nbo);  // sliding window
     ESP_LOGI(TAG, "Auth skipped (recent IP, TTL %d s)", CONSOLE_TCP_AUTH_REMEMBER_S);
-    sendAll(fd, "OK authenticated (recent IP)\r\n");
+    sendAll(fd, "OK authenticated (recent IP)\r\n", /*wait=*/true);
     return true;
   }
 
-  sendAll(fd, "Authentication required. Enter password:\r\nPassword: ");
+  sendAll(fd, "Authentication required. Enter password:\r\nPassword: ", /*wait=*/true);
 
   for (int try_i = 1; try_i <= CONSOLE_TCP_AUTH_MAX_TRIES; ++try_i) {
     char attempt[kLineCap];
-    if (!recvLine(fd, attempt, sizeof(attempt))) {
-      ESP_LOGW(TAG, "Auth: client disconnected");
+    if (!recvLine(fd, attempt, sizeof(attempt), 15000)) {
+      ESP_LOGW(TAG, "Auth: no password within 15 s");
       return false;
     }
     if (passwordsEqual(attempt, CONSOLE_TCP_PASSWORD)) {
       rememberPeerAuth(peer_addr_nbo);
       ESP_LOGI(TAG, "Auth OK");
-      sendAll(fd, "OK authenticated\r\n");
+      sendAll(fd, "OK authenticated\r\n", /*wait=*/true);
       return true;
     }
     ESP_LOGW(TAG, "Auth failed (try %d/%d)", try_i, CONSOLE_TCP_AUTH_MAX_TRIES);
     if (try_i >= CONSOLE_TCP_AUTH_MAX_TRIES) {
-      sendAll(fd, "ERROR: too many failures\r\n");
+      sendAll(fd, "ERROR: too many failures\r\n", /*wait=*/true);
       return false;
     }
-    sendAll(fd, "ERROR: bad password\r\nPassword: ");
+    sendAll(fd, "ERROR: bad password\r\nPassword: ", /*wait=*/true);
   }
   return false;
 }
@@ -210,25 +345,33 @@ void sendBanner(int fd) {
 #endif
                 ,
                 log_line);
-  sendAll(fd, buf);
+  sendAll(fd, buf, /*wait=*/true);
 }
 
 void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
                  uint32_t peer_addr_nbo) {
+  if (g_sendMutex == nullptr) {
+    g_sendMutex = xSemaphoreCreateMutex();
+  }
+  g_consoleTask = xTaskGetCurrentTaskHandle();
   if (!authenticateClient(client_fd, peer_addr_nbo)) {
     close(client_fd);
     ESP_LOGI(TAG, "TCP client closed (auth failed or disconnect)");
     return;
   }
 
+  setLiveFd(client_fd);
   void *ctx_fd = reinterpret_cast<void *>(static_cast<intptr_t>(client_fd));
+  // Banner first, sink second: a log line ahead of the banner pushed its
+  // prompt past the supervisor's banner read, and that prompt then ended the
+  // first command's reply early (OPEN_ITEMS S-6, 2026-11-15).
+  sendBanner(client_fd);
   if (CONSOLE_TCP_LOG_ENABLE) {
     gantryConsoleAttachLogSink(replyToSocket, ctx_fd);
     ESP_LOGI(TAG, "TCP LAN log sink attached (min level=%d)", CONSOLE_TCP_LOG_LEVEL);
   } else {
     ESP_LOGI(TAG, "TCP LAN logging disabled (commands only)");
   }
-  sendBanner(client_fd);
 
   char line[kLineCap];
   size_t len = 0;
@@ -246,16 +389,33 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
           line[len] = '\0';
           if (std::strcmp(line, "logout") == 0 || std::strcmp(line, "exit") == 0 ||
               std::strcmp(line, "quit") == 0) {
-            sendAll(client_fd, "Bye\r\n");
+            sendAll(client_fd, "Bye\r\n", /*wait=*/true);
             gantryConsoleDetachLogSink();
+            setLiveFd(-1);
             close(client_fd);
             ESP_LOGI(TAG, "TCP client logged out");
             return;
           }
+          RxEntry &rx = g_rx[g_rx_count % kRxRing];
+          ++g_rx_count;
+          rx = RxEntry{};
+          rx.at_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+          std::strncpy(rx.line, line, sizeof(rx.line) - 1);
           ESP_LOGI(TAG, "[TCP RX] %s", line);
           gantryConsoleProcessLine(cfg, line, replyToSocket, ctx_fd);
-          sendAll(client_fd, "\r\n> ");
+          rx.prompt_ok = sendAll(client_fd, "\r\n> ", /*wait=*/true);
+          rx.done_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
           len = 0;
+          if (g_restartPending) {
+            // The prompt ends the supervisor's exchange; the close sends a
+            // FIN, so its next command reconnects instead of waiting.
+            gantryConsoleDetachLogSink();
+            setLiveFd(-1);
+            close(client_fd);
+            ESP_LOGI(TAG, "TCP client closed for restart");
+            vTaskDelay(pdMS_TO_TICKS(300));
+            esp_restart();
+          }
         }
       } else if (c >= 32 && c <= 126 && len + 1 < kLineCap) {
         line[len++] = c;
@@ -264,6 +424,7 @@ void serveClient(const GantryTestConsoleConfig *cfg, int client_fd,
   }
 
   gantryConsoleDetachLogSink();
+  setLiveFd(-1);
   close(client_fd);
   ESP_LOGI(TAG, "TCP client disconnected");
 }
@@ -346,8 +507,49 @@ void gantryNetConsoleStart(const GantryTestConsoleConfig *cfg) {
   }
 }
 
+void gantryNetConsoleStats(char *out, size_t out_len) {
+    int len = snprintf(out, out_len,
+                       "netcon waited=%lu short=%lu max_wait=%lu ms | log=%lu skipped=%lu "
+                       "short=%lu stale=%lu | last_errno=%d | rx=%lu",
+                       static_cast<unsigned long>(g_stats.waited_sends),
+                       static_cast<unsigned long>(g_stats.waited_short),
+                       static_cast<unsigned long>(g_stats.max_wait_ms),
+                       static_cast<unsigned long>(g_stats.log_sends),
+                       static_cast<unsigned long>(g_stats.log_skipped),
+                       static_cast<unsigned long>(g_stats.log_short),
+                       static_cast<unsigned long>(g_stats.log_stale), g_stats.last_errno,
+                       static_cast<unsigned long>(g_rx_count));
+    // Newest first (the first is this netcon, its prompt still open), so a
+    // truncated log line still keeps the commands just before it.
+    const uint32_t first = g_rx_count > kRxRing ? g_rx_count - kRxRing : 0;
+    for (uint32_t i = g_rx_count;
+         i > first && len > 0 && static_cast<size_t>(len) < out_len; --i) {
+        const RxEntry &e = g_rx[(i - 1) % kRxRing];
+        len += snprintf(out + len, out_len - len, " | %lu '%s' +%lums %s",
+                        static_cast<unsigned long>(e.at_ms), e.line,
+                        static_cast<unsigned long>(e.done_ms ? e.done_ms - e.at_ms : 0),
+                        e.done_ms ? (e.prompt_ok ? "ok" : "PROMPT-SHORT") : "open");
+    }
+}
+
+bool gantryNetConsoleDeferRestart(void) {
+    if (g_consoleTask == nullptr || xTaskGetCurrentTaskHandle() != g_consoleTask) {
+        return false;
+    }
+    g_restartPending = true;
+    return true;
+}
+
 #else  // !CONSOLE_TCP_ENABLE
 
 void gantryNetConsoleStart(const GantryTestConsoleConfig *) {}
+
+bool gantryNetConsoleDeferRestart(void) {
+    return false;
+}
+
+void gantryNetConsoleStats(char *out, size_t out_len) {
+    snprintf(out, out_len, "netcon disabled");
+}
 
 #endif  // CONSOLE_TCP_ENABLE

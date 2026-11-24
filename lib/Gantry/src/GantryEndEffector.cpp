@@ -9,8 +9,13 @@
 #include "GantryLimitSwitchPolicy.h"
 #include "gpio_expander.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 
 namespace Gantry {
+
+namespace {
+const char* TAG = "EndEffector";
+}
 
 GantryEndEffector::GantryEndEffector()
     : pin_(-1), activeHigh_(true), configured_(false), active_(false) {}
@@ -48,21 +53,39 @@ bool GantryEndEffector::begin() {
     return true;
 }
 
-void GantryEndEffector::setActive(bool active) {
+bool GantryEndEffector::setActive(bool active) {
     if (!configured_) {
-        return;
+        return false;
     }
     const uint8_t level = EndEffectorPolicy::outputLevel(active, activeHigh_);
     if (EndEffectorPolicy::classifyPin(pin_) == EndEffectorPolicy::PinDomain::kMcp) {
-        gpio_expander_write(pin_, level);
+        if (gpio_expander_write(pin_, level) != ESP_OK) {
+            return false;
+        }
+        // SPI has no acknowledgement: read the latch back so a silent
+        // MCP23S17 (2026-10-20: latched up, every register read 0x00) fails
+        // the write instead of reporting a gripper that never moved.
+        uint8_t latch = 0;
+        const esp_err_t rb = gpio_expander_read_latch(pin_, &latch);
+        if (rb == ESP_OK && latch != level) {
+            ESP_LOGE(TAG, "gripper output not confirmed (latch=%u, wanted %u) - MCP23S17 not responding?",
+                     (unsigned)latch, (unsigned)level);
+            return false;
+        }
+        if (rb != ESP_OK) {
+            ESP_LOGW(TAG, "gripper output written, read-back unavailable (%d)", (int)rb);
+        }
     } else {
         const int gpioPin = LimitPolicy::resolveDirectGpioPin(pin_);
         if (gpioPin < 0) {
-            return;
+            return false;
         }
-        gpio_set_level((gpio_num_t)gpioPin, level);
+        if (gpio_set_level((gpio_num_t)gpioPin, level) != ESP_OK) {
+            return false;
+        }
     }
     active_ = active;
+    return true;
 }
 
 } // namespace Gantry

@@ -15,6 +15,8 @@ Gantry::KinematicParameters makeParams() {
   Gantry::KinematicParameters params;
   params.theta_x_offset_mm  = -55.0f;
   params.z_axis_y_offset_mm = 80.0f;
+  params.x_stroke_mm        = 550.0f;
+  params.z_stroke_mm        = 150.0f;
   return params;
 }
 
@@ -39,7 +41,7 @@ constexpr float kZDatum = GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM;
 static void test_forward_x_includes_theta_offset(void) {
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(45.0f, pose.x);  // 100 + (-55)
+  TEST_ASSERT_EQUAL_FLOAT(505.0f, pose.x);  // 550 - (100 + (-55))
 }
 
 static void test_forward_y_fixed_from_z_axis_offset(void) {
@@ -51,30 +53,30 @@ static void test_forward_y_fixed_from_z_axis_offset(void) {
 static void test_forward_z_adds_datum_offset(void) {
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(25.0f + kZDatum, pose.z);
+  TEST_ASSERT_EQUAL_FLOAT(125.0f, pose.z);  // 150 - 25 (z=0 conveyor, z=150 retracted)
 }
 
-static void test_forward_theta_passthrough(void) {
+static void test_forward_theta_orientation(void) {
   Gantry::JointConfig joints(100.0f, 25.0f, 30.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(30.0f, pose.theta);
+  TEST_ASSERT_EQUAL_FLOAT(120.0f, pose.theta);  // 30 + 90 (0° along New +X, +90° along +Y)
 }
 
 static void test_forward_zero_joints(void) {
   Gantry::JointConfig joints(0.0f, 0.0f, 0.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(-55.0f, pose.x);
+  TEST_ASSERT_EQUAL_FLOAT(605.0f, pose.x);  // 550 - (-55)
   TEST_ASSERT_EQUAL_FLOAT(80.0f, pose.y);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f + kZDatum, pose.z);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, pose.theta);
+  TEST_ASSERT_EQUAL_FLOAT(150.0f, pose.z);  // complete retraction
+  TEST_ASSERT_EQUAL_FLOAT(90.0f, pose.theta);  // 0 + 90 = 90° (along +Y)
 }
 
 static void test_forward_negative_theta_and_x(void) {
   Gantry::JointConfig joints(-10.0f, 5.0f, -45.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, makeParams());
-  TEST_ASSERT_EQUAL_FLOAT(-65.0f, pose.x);  // -10 + (-55)
-  TEST_ASSERT_EQUAL_FLOAT(5.0f + kZDatum, pose.z);
-  TEST_ASSERT_EQUAL_FLOAT(-45.0f, pose.theta);
+  TEST_ASSERT_EQUAL_FLOAT(615.0f, pose.x);  // 550 - (-10 + (-55))
+  TEST_ASSERT_EQUAL_FLOAT(145.0f, pose.z);  // 150 - 5
+  TEST_ASSERT_EQUAL_FLOAT(45.0f, pose.theta);  // -45 + 90
 }
 
 static void test_forward_y_independent_of_joints(void) {
@@ -102,10 +104,10 @@ static void test_inverse_round_trip(void) {
 
 static void test_inverse_drops_pose_y(void) {
   Gantry::KinematicParameters params = makeParams();
-  Gantry::EndEffectorPose pose(45.0f, 999.0f, 25.0f + kZDatum, 30.0f);
+  Gantry::EndEffectorPose pose(505.0f, 999.0f, 125.0f, 120.0f);
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
   // pose.y must not affect joints (no Y actuator)
-  TEST_ASSERT_EQUAL_FLOAT(100.0f, inv.x);  // 45 - (-55)
+  TEST_ASSERT_EQUAL_FLOAT(100.0f, inv.x);
   TEST_ASSERT_EQUAL_FLOAT(25.0f, inv.z);
   TEST_ASSERT_EQUAL_FLOAT(30.0f, inv.theta);
 }
@@ -121,9 +123,9 @@ static void test_inverse_round_trip_table(void) {
   for (const Gantry::JointConfig& joints : cases) {
     Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, params);
     Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, joints.x, inv.x);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, joints.z, inv.z);
-    TEST_ASSERT_FLOAT_WITHIN(1e-5f, joints.theta, inv.theta);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, joints.x, inv.x);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, joints.z, inv.z);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, joints.theta, inv.theta);
   }
 }
 
@@ -131,10 +133,14 @@ static void test_forward_inverse_with_alt_offsets(void) {
   Gantry::KinematicParameters params;
   params.theta_x_offset_mm = 12.0f;
   params.z_axis_y_offset_mm = -40.0f;
+  params.x_stroke_mm = 550.0f;
+  params.z_stroke_mm = 150.0f;
   Gantry::JointConfig joints(50.0f, 10.0f, -20.0f);
   Gantry::EndEffectorPose pose = Gantry::Kinematics::forward(joints, params);
-  TEST_ASSERT_EQUAL_FLOAT(62.0f, pose.x);
+  TEST_ASSERT_EQUAL_FLOAT(488.0f, pose.x);  // 550 - (50 + 12)
   TEST_ASSERT_EQUAL_FLOAT(-40.0f, pose.y);
+  TEST_ASSERT_EQUAL_FLOAT(140.0f, pose.z);  // 150 - 10
+  TEST_ASSERT_EQUAL_FLOAT(70.0f, pose.theta);  // -20 + 90
   Gantry::JointConfig inv = Gantry::Kinematics::inverse(pose, params);
   TEST_ASSERT_EQUAL_FLOAT(50.0f, inv.x);
   TEST_ASSERT_EQUAL_FLOAT(10.0f, inv.z);
@@ -191,7 +197,7 @@ int main(void) {
   RUN_TEST(test_forward_x_includes_theta_offset);
   RUN_TEST(test_forward_y_fixed_from_z_axis_offset);
   RUN_TEST(test_forward_z_adds_datum_offset);
-  RUN_TEST(test_forward_theta_passthrough);
+  RUN_TEST(test_forward_theta_orientation);
   RUN_TEST(test_forward_zero_joints);
   RUN_TEST(test_forward_negative_theta_and_x);
   RUN_TEST(test_forward_y_independent_of_joints);

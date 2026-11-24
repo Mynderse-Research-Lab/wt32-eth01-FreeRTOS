@@ -42,6 +42,12 @@ enum class CellMsgType : uint8_t {
   CONVEYOR_SPEED = 0x02,   // Conveyor -> Gantry / Supervisor
   GANTRY_STATUS = 0x03,    // Gantry -> Supervisor
   CELL_COMMAND = 0x04,     // Supervisor -> Gantry / Conveyor
+  // Firmware update over CellNet (docs/CELLNET_OTA_PROTOCOL.md, N-2)
+  OTA_BEGIN = 0x05,        // Supervisor -> node in OTA mode
+  OTA_DATA = 0x06,         // Supervisor -> node; variable length, up to 508 bytes
+  OTA_STATUS = 0x07,       // Node -> Supervisor
+  OTA_END = 0x08,          // Supervisor -> node
+  OTA_RESULT = 0x09,       // Node -> Supervisor
 };
 
 #pragma pack(push, 1)
@@ -71,12 +77,28 @@ struct L2CellHeader {
  */
 struct L2VisionDetectPayload {
   uint32_t item_id;
-  float x_across_mm;       // Battery centroid across belt (linear X)
-  float y_bat_mm;          // Battery centroid along belt (at capture instant)
-  float theta_deg;         // Battery orientation angle (-180..+180 deg)
-  uint8_t battery_class;   // 1=18650, 2=21700, 3=Prismatic, 4=Pouch
-  uint8_t reserved[3];
+  float x_across_mm;       // Centroid across belt (linear X)
+  float y_bat_mm;          // Along belt at capture, relative to camera center (world Y = vis_cam_y_mm + y_bat_mm)
+  float theta_deg;         // Long axis: 0° along +X (across), 90° along +Y (downstream), + about +Z up (-180..+180)
+  uint8_t battery_class;   // 1–10 pick, 11–13 pack occupant. Label and jaw-time slot only.
+  uint8_t reserved[3];     // reserved[0] bit0: capture_displacement_m is valid and required
+  float capture_displacement_m;  // Conveyor displacement at exposure, metres. Required.
+  float width_mm;             // Jaws close across this. Required, in (0, 80].
+  float length_mm;            // In-plane long-axis size. Required. Not the vertical size.
+  float height_from_belt_mm;  // Belt surface up to the object top. Required. Grasp is measured down from this top.
 };
+
+// Payload is 36 bytes (offsets 0..35). The frame is 58 bytes, so a 60-byte
+// padded frame still parses (two trailing pad bytes). Width, length, and
+// height_from_belt are required. Pick classes, length × width × height:
+// AAA 44.5×10.5×10.5, AA 50.5×14.5×14.5, D 61.5×34.2×34.2, C 50×26.2×26.2,
+// 9V 48.5×17.5×26.5, CR123A 34.5×17×17, 18650 65×18.3×18.3, 21700 70×21.2×21.2,
+// 26650 65×26.5×26.5, 32650 65×32×32. Packs are tracked and not picked:
+// 11 laptop 205×50×22, 12 Li-ion pack 114×66×25, 13 power-tool 120×75×80.
+// Width must be in (0, 80] mm. A missing size is rejected; the
+// class id does not supply one. Grasp is min(h/2, 25.4 mm) down from the top.
+constexpr uint8_t kVisionCaptureDispValid = 0x01;
+constexpr float kVisionMaxWidthMm = 80.0f;
 
 /**
  * @brief Payload for Message Type 0x02: Conveyor Telemetry.
@@ -91,7 +113,7 @@ struct L2ConveyorSpeedPayload {
  * @brief Payload for Message Type 0x03: Gantry Status.
  */
 struct L2GantryStatusPayload {
-  uint8_t motion_state;      // 0=IDLE, 1=HOMING, 2=INTERCEPTING, 3=GRIPPING, 4=FAULT
+  uint8_t motion_state;      // 0=IDLE, 1=HOMING, 2=INTERCEPTING, 3=GRIP_COMMANDED (hold unverified), 4=FAULT
   uint8_t active_slot;       // 0=ota_0, 1=ota_1
   uint16_t fault_flags;      // Bitmask of active drive warnings
   float x_pos_mm;            // Current X position
@@ -104,7 +126,8 @@ struct L2GantryStatusPayload {
  * @brief Payload for Message Type 0x04: Cell Supervisor Command.
  */
 struct L2CellCommandPayload {
-  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK
+  uint8_t command_id;  // 1=START, 2=STOP, 3=PAUSE, 4=CLEAR_FAULT, 5=PARK, 6=SET_GRIPPER (param_u8=0|1),
+                       // 7=REBOOT_TO_OTA (param_u16=OTA session)
   uint8_t param_u8;
   uint16_t param_u16;
   float param_float;
@@ -122,6 +145,52 @@ struct L2HeartbeatPayload {
 /**
  * @brief Full Wire Frames.
  */
+/**
+ * @brief OTA payloads (docs/CELLNET_OTA_PROTOCOL.md section 4).
+ */
+struct L2OtaBeginPayload {
+  uint16_t session;
+  uint16_t block_size;  // 4096
+  uint16_t frag_data;   // data bytes per OTA_DATA fragment
+  uint16_t reserved;
+  uint32_t image_size;
+};
+
+/** Fixed part of OTA_DATA; data_len data bytes follow it. */
+struct L2OtaDataHeader {
+  uint16_t session;
+  uint16_t block;
+  uint8_t frag;
+  uint8_t flags;  // bit 0: ACK_REQ
+  uint16_t data_len;
+};
+
+struct L2OtaStatusPayload {
+  uint16_t session;
+  uint16_t block;
+  uint8_t status;         // CellNet::Ota::Status
+  uint8_t processed_seq;  // last OTA_DATA sequence taken from the receive buffers
+  uint8_t missing[16];    // bit i set = fragment i missing
+};
+
+struct L2OtaEndPayload {
+  uint16_t session;
+  uint16_t reserved;
+  uint32_t image_size;
+};
+
+struct L2OtaResultPayload {
+  uint16_t session;
+  uint8_t status;
+  uint8_t reserved;
+  uint16_t erase_ms;
+  uint16_t stream_ms;
+  uint16_t write_ms;
+  uint16_t check_ms;
+  uint16_t emac_missed;    // must be 0: no frame dropped for want of a buffer
+  uint16_t emac_overflow;
+};
+
 struct L2HeartbeatFrame {
   L2EthernetHeader eth;
   L2CellHeader cell;
@@ -150,6 +219,36 @@ struct L2CellCommandFrame {
   L2EthernetHeader eth;
   L2CellHeader cell;
   L2CellCommandPayload payload;
+};
+
+struct L2OtaBeginFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaBeginPayload payload;
+};
+
+struct L2OtaDataFrameHeader {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaDataHeader payload;
+};
+
+struct L2OtaStatusFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaStatusPayload payload;
+};
+
+struct L2OtaEndFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaEndPayload payload;
+};
+
+struct L2OtaResultFrame {
+  L2EthernetHeader eth;
+  L2CellHeader cell;
+  L2OtaResultPayload payload;
 };
 
 #pragma pack(pop)

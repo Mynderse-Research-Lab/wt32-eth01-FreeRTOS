@@ -3,24 +3,48 @@
 #if CONFIG_GANTRY_SELFTEST
 #include "basic_tests.h"
 #endif
+
+// Console driver auto-tune (Kinetix Mode 1 / HCS01 C1800). Off for this version —
+// re-enable with -DGANTRY_CONSOLE_AUTOTUNE=1 when bring-up needs embedded tuning.
+#ifndef GANTRY_CONSOLE_AUTOTUNE
+#define GANTRY_CONSOLE_AUTOTUNE 0
+#endif
+
 #include "EipScannerTask.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "EipSocketW5500.h"
+#include "CipEthernetLink.h"
+#include "CipMessageRouter.h"
 #include "EipSession.h"
-#include "Kinetix5100TuningClient.h"
+#include "EipSocketW5500.h"
 #include "Hcs01ComwsClient.h"
+#include "Kinetix5100ParamAccess.h"
+#if GANTRY_CONSOLE_AUTOTUNE
+#include "Kinetix5100TuningClient.h"
+#endif
 #include "freertos/task.h"
 #include "ethernet_app_config.h"
+#include "EthernetLink.h"
 #include "gantry_app_constants.h"
 #include "axis_drivetrain_params.h"
 #include "gantry_console_parse.h"
 #include "GantryPathProfile.h"
 #include "gpio_expander.h"
+#include "gantry_net_console.h"
 #include "gantry_ota.h"
+#include "pick_scheduler.h"
+#include "theta_trace.h"
+#include "boot_log_ring.h"
+#include "AppConfig.h"
+#include "gantry_runtime_params.h"
+#include "ConfigSchema.h"
 #include "MCP23S17.h"
+#include "W5500Diag.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "driver/gpio.h"
 
 #ifndef MCP_DEBUG_CMDS
@@ -35,6 +59,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 extern "C" int getchar(void);
 
@@ -50,6 +75,8 @@ using GantryConsole::kMinSpeedMmPerS;
 using GantryConsole::parseAxisToken;
 
 SemaphoreHandle_t g_consoleCmdMutex = nullptr;
+// Guards the sink/reply pointers and tee install state; held for microseconds.
+SemaphoreHandle_t g_teeMutex = nullptr;
 
 GantryConsoleReplyFn g_replyFn = nullptr;
 void *g_replyCtx = nullptr;
@@ -127,6 +154,19 @@ void uninstallTeeIfIdle() {
   g_teeInstalled = false;
 }
 
+// Publishes a (fn, ctx) pair for the unlocked readers in consoleTeeVprintf:
+// a reader that sees a non-null fn also sees its ctx. Call with g_teeMutex held.
+void setFnCtx(GantryConsoleReplyFn *fn_slot, void **ctx_slot, GantryConsoleReplyFn fn,
+              void *ctx) {
+    if (fn != nullptr) {
+        __atomic_store_n(ctx_slot, ctx, __ATOMIC_RELAXED);
+        __atomic_store_n(fn_slot, fn, __ATOMIC_RELEASE);
+    } else {
+        __atomic_store_n(fn_slot, fn, __ATOMIC_RELEASE);
+        __atomic_store_n(ctx_slot, ctx, __ATOMIC_RELAXED);
+    }
+}
+
 int consoleTeeVprintf(const char *fmt, va_list args) {
   char buf[512];
   va_list copy;
@@ -135,12 +175,20 @@ int consoleTeeVprintf(const char *fmt, va_list args) {
   va_end(copy);
   if (n > 0) {
     buf[sizeof(buf) - 1] = '\0';
-    if (g_sessionFn != nullptr) {
+    // Any task logs here, unlocked: load each pointer once, so a detach
+    // between the test and the call can never make it call a null pointer.
+    // Writers store ctx before a non-null fn; a stale ctx is caught by
+    // sendAll's live-fd check.
+    const GantryConsoleReplyFn session_fn = __atomic_load_n(&g_sessionFn, __ATOMIC_ACQUIRE);
+    if (session_fn != nullptr) {
       if (lanLogAllowsLine(buf)) {
-        g_sessionFn(g_sessionCtx, buf);
+        session_fn(__atomic_load_n(&g_sessionCtx, __ATOMIC_RELAXED), buf);
       }
-    } else if (g_replyFn != nullptr) {
-      g_replyFn(g_replyCtx, buf);
+    } else {
+      const GantryConsoleReplyFn reply_fn = __atomic_load_n(&g_replyFn, __ATOMIC_ACQUIRE);
+      if (reply_fn != nullptr) {
+        reply_fn(__atomic_load_n(&g_replyCtx, __ATOMIC_RELAXED), buf);
+      }
     }
   }
   if (g_prevVprintf != nullptr) {
@@ -149,10 +197,16 @@ int consoleTeeVprintf(const char *fmt, va_list args) {
   return vprintf(fmt, args);
 }
 
+// The SerialCmd and NetConsole tasks both get here first; a guarded static
+// (thread-safe in ESP-IDF, components/cxx/cxx_guards.cpp) creates each mutex
+// exactly once, where a check-then-create could make two.
 void ensureConsoleMutex() {
-  if (g_consoleCmdMutex == nullptr) {
+  static const bool created = [] {
     g_consoleCmdMutex = xSemaphoreCreateMutex();
-  }
+    g_teeMutex = xSemaphoreCreateMutex();
+    return true;
+  }();
+  (void)created;
 }
 
 struct ControlStateSnapshot {
@@ -187,14 +241,25 @@ static std::atomic<bool> g_homeZCompletedThisSession{false};
 static std::atomic<bool> g_calibratedZThisSession{false};
 static std::atomic<bool> g_homeThetaThisSession{false};
 static std::atomic<bool> g_calibratedThetaThisSession{false};
+// 'home t' started its return to 0 deg; resolved by resolveThetaHome().
+static std::atomic<bool> g_thetaHomePending{false};
+// Backstop for the bring-up wait on the theta return to 0 deg.
+static constexpr uint32_t kThetaHomeWaitMs = 120000;
 static std::atomic<bool> g_calibrationInProgress{false};
 static std::atomic<bool> g_testCycleInProgress{false};
-static uint32_t g_moveSpeedMmPerS = GANTRY_DEFAULT_SPEED_MM_PER_S;
-static uint32_t g_moveSpeedDegPerS = GANTRY_DEFAULT_SPEED_DEG_PER_S;
-static uint32_t g_moveAccelMmPerS2 = GANTRY_DEFAULT_ACCEL_MM_PER_S2;
-static uint32_t g_moveDecelMmPerS2 = GANTRY_DEFAULT_DECEL_MM_PER_S2;
-static uint32_t g_moveAccelDegPerS2 = GANTRY_DEFAULT_ACCEL_DEG_PER_S2;
-static uint32_t g_moveDecelDegPerS2 = GANTRY_DEFAULT_DECEL_DEG_PER_S2;
+static bool g_wsCalEdgeInited = false;
+static bool g_wsCalEdgeLast = false;
+// Older images stored the workspace latch here and restored it at boot.
+static constexpr char kWsCalNvsNs[] = "gantry_cfg";
+static constexpr char kWsCalNvsKey[] = "ws_cal";
+// Console move profile: the stored profile, until 'speed' or 'accel' changes it
+// for this session.
+static uint32_t g_moveSpeedMmPerS = 0;
+static uint32_t g_moveSpeedDegPerS = 0;
+static uint32_t g_moveAccelMmPerS2 = 0;
+static uint32_t g_moveDecelMmPerS2 = 0;
+static uint32_t g_moveAccelDegPerS2 = 0;
+static uint32_t g_moveDecelDegPerS2 = 0;
 static bool g_motionProfileRangeLimitEnabled = true;
 static LinearUnitMode g_linearUnitMode = LinearUnitMode::MM;
 // LIVE POS periodic logger frequency control.
@@ -205,6 +270,12 @@ static uint32_t g_livePosFrequencyHz = 0;
 static uint32_t g_axisLogFrequencyHz = 0;
 static uint32_t g_lastLiveMotionLogMs = 0;
 static bool g_liveMotionWasBusy = false;
+
+static constexpr uint32_t kParamSavePauseTimeoutMs = 5000;
+
+static const Config::AppConfigData &stored() {
+  return Config::AppConfig::instance().data();
+}
 
 bool limitsWired(const GantryTestConsoleConfig *cfg) {
   return cfg != nullptr && cfg->limit_switches_active &&
@@ -221,37 +292,35 @@ bool physicalLimitsAvailable(const GantryTestConsoleConfig *cfg) {
 // Shared 2-D path envelope: console speed/accel/decel are the RESULTANT along
 // the X-Z path. Protective clamp: never exceed Z ballscrew critical-RPM speed.
 uint32_t maxLinearSpeedMmPerS() {
-  uint32_t pathCap = GANTRY_PATH_MAX_SPEED_MM_PER_S;
-  const double crit = AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S;
-  if (crit > 0.0 && crit < static_cast<double>(pathCap)) {
-    pathCap = static_cast<uint32_t>(crit);
-  }
-  return pathCap;
+  // Effective path speed is operator-set and may exceed 1 m/s. The Z
+  // ballscrew critical-RPM figure stays in the drivetrain header for
+  // commissioning; it is not a hard ceiling on this setting.
+  return static_cast<uint32_t>(stored().gantry_path_max_speed_mm_per_s);
 }
 
 uint32_t maxLinearAccelMmPerS2() {
-  return GANTRY_PATH_MAX_ACCEL_MM_PER_S2;
+  return static_cast<uint32_t>(stored().gantry_path_max_accel_mm_per_s2);
 }
 
 uint32_t maxThetaSpeedDegPerS() {
-  if (AXIS_THETA_MAX_SPEED_DEG_PER_S <= 0.0f) {
+  if (stored().axis_theta_max_speed_deg_per_s <= 0.0f) {
     return 3600u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_MAX_SPEED_DEG_PER_S);
+  return static_cast<uint32_t>(stored().axis_theta_max_speed_deg_per_s);
 }
 
 uint32_t maxThetaAccelDegPerS2() {
-  if (AXIS_THETA_ACCEL_DEG_PER_S2 <= 0.0f) {
+  if (stored().axis_theta_accel_deg_per_s2 <= 0.0f) {
     return 18000u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_ACCEL_DEG_PER_S2);
+  return static_cast<uint32_t>(stored().axis_theta_accel_deg_per_s2);
 }
 
 uint32_t maxThetaDecelDegPerS2() {
-  if (AXIS_THETA_DECEL_DEG_PER_S2 <= 0.0f) {
+  if (stored().axis_theta_decel_deg_per_s2 <= 0.0f) {
     return 18000u;
   }
-  return static_cast<uint32_t>(AXIS_THETA_DECEL_DEG_PER_S2);
+  return static_cast<uint32_t>(stored().axis_theta_decel_deg_per_s2);
 }
 
 const char *getLinearUnitLabel() {
@@ -302,6 +371,103 @@ void logLiveMotionState(const GantryTestConsoleConfig *cfg) {
   g_liveMotionWasBusy = busy;
 }
 
+void clearSessionHomeCalFlags() {
+  g_homeCompletedThisSession = false;
+  g_calibratedThisSession = false;
+  g_homeZCompletedThisSession = false;
+  g_calibratedZThisSession = false;
+  g_homeThetaThisSession = false;
+  g_calibratedThetaThisSession = false;
+  g_thetaHomePending = false;
+}
+
+// 'home t' returns before theta reaches 0 deg. Count it as homed only once
+// theta is idle at 0; a faulted or timed-out return leaves it unhomed.
+// Called at every theta gate and from the idle monitor, so it does not
+// depend on the UART task.
+void resolveThetaHome(const GantryTestConsoleConfig *cfg) {
+    if (!g_thetaHomePending || cfg->gantry->isBusy()) {
+        return;
+    }
+    if (!g_thetaHomePending.exchange(false)) {
+        return;
+    }
+    if (cfg->gantry->thetaSettledAt(0.0f)) {
+        g_homeThetaThisSession = true;
+        ESP_LOGI(TAG, "OK Theta home complete at %.3f deg",
+                 (double)cfg->gantry->getCurrentThetaDeg());
+        return;
+    }
+    char diag[96] = {};
+    (void)cfg->gantry->getThetaDriveAlarmSummary(diag, sizeof(diag));
+    ESP_LOGE(TAG,
+             "ERROR: Theta home did not reach 0 deg (at %.3f deg; %s). "
+             "Run 'alarmreset', then 'home t' again",
+             (double)cfg->gantry->getCurrentThetaDeg(), diag[0] != '\0' ? diag : "no diag");
+}
+
+void noteWorkspaceCalEdge(Gantry::Gantry *gantry);
+
+void maybeLatchWorkspaceCalibrated(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    return;
+  }
+  if ((gantry->xAxisLengthMm() > 0 && gantry->zAxisLengthMm() > 0) ||
+      (g_calibratedThisSession && g_calibratedZThisSession)) {
+    gantry->setWorkspaceCalibrated(true);
+    noteWorkspaceCalEdge(gantry);
+  }
+}
+
+// When a drive loses position the latch drops; the session home/cal gates go with it.
+void noteWorkspaceCalEdge(Gantry::Gantry *gantry) {
+    if (gantry == nullptr) {
+        return;
+    }
+    const bool now = gantry->isWorkspaceCalibrated();
+    if (!g_wsCalEdgeInited) {
+        g_wsCalEdgeInited = true;
+        g_wsCalEdgeLast = now;
+        return;
+    }
+    if (now == g_wsCalEdgeLast) {
+        return;
+    }
+    g_wsCalEdgeLast = now;
+    if (!now) {
+        clearSessionHomeCalFlags();
+    }
+}
+
+// The X/Z joint zero lives in RAM: after an ESP reboot the axes read raw drive
+// position (hundreds of mm off), so the workspace latch must not survive one.
+// Boot starts uncalibrated; run 'calibrate all'. The stale key is erased so a
+// rollback to an older image cannot restore it either.
+void startWorkspaceUncalibrated(Gantry::Gantry *gantry) {
+    if (gantry == nullptr) {
+        return;
+    }
+    nvs_handle_t handle = 0;
+    if (nvs_open(kWsCalNvsNs, NVS_READWRITE, &handle) == ESP_OK) {
+        if (nvs_erase_key(handle, kWsCalNvsKey) == ESP_OK) {
+            (void)nvs_commit(handle);
+            ESP_LOGW(TAG, "Dropped stored workspace calibration; run 'calibrate all' after boot");
+        }
+        nvs_close(handle);
+    }
+    g_wsCalEdgeInited = true;
+    g_wsCalEdgeLast = gantry->isWorkspaceCalibrated();
+}
+
+void printWorkspaceCalibrated(Gantry::Gantry *gantry) {
+  if (gantry == nullptr) {
+    ESP_LOGE(TAG, "Gantry not initialized");
+    return;
+  }
+  ESP_LOGI(TAG, "Workspace calibrated: %s",
+           gantry->isWorkspaceCalibrated() ? "Yes" : "No");
+}
+
 void calibrationTask(void *param) {
   auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
   if (cfg == nullptr || cfg->gantry == nullptr) {
@@ -317,13 +483,15 @@ void calibrationTask(void *param) {
     const float zMax =
         cfg->gantry->zAxisLengthMm() > 0
             ? static_cast<float>(cfg->gantry->zAxisLengthMm())
-            : AXIS_Z_HARD_LIMIT_MAX_MM;
-    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)len,
-                                AXIS_Z_HARD_LIMIT_MIN_MM, zMax,
-                                AXIS_THETA_HARD_LIMIT_MIN_DEG, AXIS_THETA_HARD_LIMIT_MAX_DEG);
+            : stored().axis_z_hard_limit_max_mm;
+    cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, (float)len,
+                                stored().axis_z_hard_limit_min_mm, zMax,
+                                stored().axis_theta_hard_limit_min_deg,
+                                stored().axis_theta_hard_limit_max_deg);
     g_calibratedThisSession = true;
     ESP_LOGI(TAG, "OK Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK X joint max updated from calibration: %.1f mm", (float)len);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
   } else if (cfg->gantry->isAbortRequested()) {
     g_calibratedThisSession = hadCalibration;
     ESP_LOGI(TAG, "Calibration aborted by stop request");
@@ -354,6 +522,7 @@ void zCalibrationTask(void *param) {
     g_calibratedZThisSession = true;
     ESP_LOGI(TAG, "OK Z Calibrated length: %d mm", len);
     ESP_LOGI(TAG, "OK Z joint max updated from calibration: %.1f mm", (float)len);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
   } else if (cfg->gantry->isAbortRequested()) {
     g_calibratedZThisSession = hadCalibration;
     ESP_LOGI(TAG, "Z calibration aborted by stop request");
@@ -373,6 +542,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
   if (cfg == nullptr || cfg->gantry == nullptr) {
     return;
   }
+  resolveThetaHome(cfg);
 
   ControlStateSnapshot cur = {};
   cur.enabled = cfg->gantry->isEnabled();
@@ -396,6 +566,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
              (int)cur.enabled, (int)cur.busy, (int)cur.alarm,
              (int)cur.min_limit_active, (int)cur.max_limit_active,
              cur.raw_alarm_level);
+    noteWorkspaceCalEdge(cfg->gantry);
     return;
   }
 
@@ -464,6 +635,7 @@ void monitorControlVariableFlips(const GantryTestConsoleConfig *cfg) {
               g_controlDebounce.pending.raw_alarm_level,
               g_controlDebounce.raw_alarm_cnt, kRawAlarmDebounceSamples,
               "raw_alarm_pin_level");
+  noteWorkspaceCalEdge(cfg->gantry);
 }
 
 void printStatus(Gantry::Gantry *gantry) {
@@ -482,8 +654,17 @@ void printStatus(Gantry::Gantry *gantry) {
   ESP_LOGI(TAG, "Theta: %.2f deg%s", gantry->getCurrentThetaDeg(),
            gantry->hasThetaAxis() ? "" : " (axis not compiled in)");
   ESP_LOGI(TAG, "Motor Enabled: %s", gantry->isEnabled() ? "Yes" : "No");
+  ESP_LOGI(TAG, "Unsaved parameters: %d", Config::AppConfig::instance().pendingChanges());
   ESP_LOGI(TAG, "Busy: %s", gantry->isBusy() ? "Yes" : "No");
   ESP_LOGI(TAG, "Alarm: %s", gantry->isAlarmActive() ? "Yes" : "No");
+  ESP_LOGI(TAG, "Workspace calibrated: %s",
+           gantry->isWorkspaceCalibrated() ? "Yes" : "No");
+  ESP_LOGI(TAG, "Uptime: %lu s (last reset: %s)",
+           static_cast<unsigned long>(esp_timer_get_time() / 1000000LL), gantryResetReasonName());
+  // Never-used stack of this console task (UART or TCP): a low value warns
+  // before a long command like 'calibrate all' overflows it.
+  ESP_LOGI(TAG, "Console stack free (min): %lu of %d bytes",
+           static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)), CONSOLE_TASK_STACK);
   {
     char xSum[192] = {};
     char zSum[192] = {};
@@ -529,6 +710,14 @@ void printStatus(Gantry::Gantry *gantry) {
       ESP_LOGI(TAG, "Theta CIP: %s", cip);
     }
   }
+  {
+    // Dropout diagnostics: periodic W5500 register read-back (W5500Diag).
+    const w5500::SpiCheckStats sc = w5500::spiCheckStats();
+    ESP_LOGI(TAG, "W5500 SPI check: %lu reads, bad ver/mac/ip=%lu/%lu/%lu, bad rx hdr=%lu",
+             (unsigned long)sc.checks, (unsigned long)sc.version_bad,
+             (unsigned long)sc.mac_bad, (unsigned long)sc.ip_bad,
+             (unsigned long)sc.rx_hdr_bad);
+  }
   ESP_LOGI(TAG, "Units: linear=%s (internal mm)", getLinearUnitLabel());
   ESP_LOGI(TAG, "PUU scale: X=%.3f PUU/mm  Z=%.3f PUU/mm  T=%.3f PUU/deg (puuinfo / puu t / puucal)",
            gantry->getPulsesPerMm(), gantry->getZPulsesPerMm(),
@@ -557,10 +746,10 @@ void printPuuInfo(Gantry::Gantry *gantry) {
 
   ESP_LOGI(TAG, "=== PUU / mm scaling ===");
   ESP_LOGI(TAG, "X: scale=%.4f PUU/mm  actual=%.3f mm (%d PUU)  target=%.3f mm  lead=%.1f mm/rev",
-           xPpm, xMm, gantry->getXEncoderRaw(), target.x, AXIS_X_LEAD_MM_PER_REV);
+           xPpm, xMm, gantry->getXEncoderRaw(), target.x, stored().axis_x_lead_mm_per_rev);
   ESP_LOGI(TAG, "Z: scale=%.4f PUU/mm  actual=%.3f mm (%ld PUU)  target=%.3f mm  lead=%.1f mm/rev",
            zPpm, zMm, static_cast<long>(gantry->getZEncoderPulses()), target.z,
-           AXIS_Z_LEAD_MM_PER_REV);
+           stored().axis_z_lead_mm_per_rev);
   if (gantry->hasThetaAxis()) {
     const float tPpd = gantry->getThetaPulsesPerDeg();
     ESP_LOGI(TAG,
@@ -644,7 +833,138 @@ void runPuuCalCommand(Gantry::Gantry *gantry, const char *cmd) {
   ESP_LOGI(TAG, "Target tol: X +/-0.08 mm (SCHUNK), Z +/-0.03 mm (first pass +/-0.5 mm OK)");
 }
 
+// Read-only dump of one drive port's CIP Ethernet Link object (class 0xF6) for
+// the Class 1 dropout investigation. X P1 is the W5500's link partner, so its
+// counters are the switch-port counters for that cable. "clear" reads the
+// counters with Get_and_Clear so the next read shows only new errors.
+void runEthLinkCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
+    char axis[8] = {};
+    int port = 1;
+    if (sscanf(cmd, "ethlink %7s %d", axis, &port) < 1 || port < 1 || port > 2) {
+        ESP_LOGE(TAG, "Usage: ethlink <x|z|t> [port 1|2] [clear]");
+        return;
+    }
+    const bool clear = strstr(cmd, " clear") != nullptr;
+    const char *ip = nullptr;
+    switch (tolower(static_cast<unsigned char>(axis[0]))) {
+        case 'x': ip = CONFIG_EIP_TARGET_IP_X; break;
+        case 'z': ip = CONFIG_EIP_TARGET_IP_Z; break;
+        case 't': ip = CONFIG_EIP_TARGET_IP_THETA; break;
+        default: break;
+    }
+    if (ip == nullptr) {
+        ESP_LOGE(TAG, "Usage: ethlink <x|z|t> [port 1|2] [clear]");
+        return;
+    }
+    if (cfg == nullptr || cfg->w5500_hal == nullptr) {
+        ESP_LOGE(TAG, "W5500 not available");
+        return;
+    }
+
+    eip::EipSocketW5500Tcp tcp(*(cfg->w5500_hal));
+    if (!tcp.connect(ip, eip::EipSession::kDefaultPort)) {
+        ESP_LOGE(TAG, "ethlink: connect %s:44818 failed", ip);
+        return;
+    }
+    eip::EipSession session(tcp);
+    if (!session.registerSession()) {
+        ESP_LOGE(TAG, "ethlink: RegisterSession failed (%s)", ip);
+        tcp.close();
+        return;
+    }
+
+    const uint16_t inst = static_cast<uint16_t>(port);
+    auto query = [&](eip::EthLinkAttr attr, bool get_clear, eip::Bytes &data) -> bool {
+        const eip::Bytes req = get_clear ? eip::buildEthLinkGetAndClearRequest(inst, attr)
+                                         : eip::buildEthLinkGetRequest(inst, attr);
+        eip::Bytes reply;
+        if (!session.sendExplicit(req, reply)) {
+            ESP_LOGW(TAG, "  attr %u: no reply", static_cast<unsigned>(attr));
+            return false;
+        }
+        eip::MessageRouterResponse mr;
+        if (!eip::parseMessageRouterResponse(reply, mr)) {
+            ESP_LOGW(TAG, "  attr %u: malformed reply", static_cast<unsigned>(attr));
+            return false;
+        }
+        if (!mr.isSuccess()) {
+            ESP_LOGW(TAG, "  attr %u: CIP status 0x%02X (not supported by this drive?)",
+                     static_cast<unsigned>(attr), mr.general_status);
+            return false;
+        }
+        data = mr.data;
+        return true;
+    };
+    // name=value pairs, four per line so each log line stays short.
+    auto printCounters = [](const char *title, const uint32_t *vals, size_t n,
+                            const char *(*name)(size_t)) {
+        ESP_LOGI(TAG, "  %s:", title);
+        char line[160];
+        size_t used = 0;
+        for (size_t i = 0; i < n; ++i) {
+            const int w = snprintf(line + used, sizeof(line) - used, " %s=%lu", name(i),
+                                   static_cast<unsigned long>(vals[i]));
+            if (w > 0) used += static_cast<size_t>(w);
+            if (used >= sizeof(line)) used = sizeof(line) - 1;
+            if ((i % 4) == 3 || i + 1 == n) {
+                ESP_LOGI(TAG, "   %s", line);
+                used = 0;
+                line[0] = '\0';
+            }
+        }
+    };
+
+    ESP_LOGI(TAG, "=== Ethernet Link %c P%d (%s)%s ===",
+             static_cast<char>(toupper(static_cast<unsigned char>(axis[0]))), port, ip,
+             clear ? " - counters cleared after read" : "");
+    eip::Bytes data;
+    uint32_t speed = 0;
+    if (query(eip::EthLinkAttr::kInterfaceSpeed, false, data) && eip::parseEthUdint(data, speed)) {
+        ESP_LOGI(TAG, "  speed: %lu Mbit/s", static_cast<unsigned long>(speed));
+    }
+    eip::EthLinkFlags flags;
+    if (query(eip::EthLinkAttr::kInterfaceFlags, false, data) &&
+        eip::parseEthLinkFlags(data, flags)) {
+        ESP_LOGI(TAG, "  flags=0x%08lX link=%s %s negotiation=%u (%s)%s%s",
+                 static_cast<unsigned long>(flags.raw), flags.link_up ? "up" : "DOWN",
+                 flags.full_duplex ? "full-duplex" : "HALF-duplex",
+                 static_cast<unsigned>(flags.negotiation),
+                 eip::ethNegotiationName(flags.negotiation),
+                 flags.reset_required ? " reset-required" : "",
+                 flags.hardware_fault ? " HARDWARE-FAULT" : "");
+    }
+    eip::EthInterfaceControl ctl;
+    if (query(eip::EthLinkAttr::kInterfaceControl, false, data) &&
+        eip::parseEthInterfaceControl(data, ctl)) {
+        ESP_LOGI(TAG, "  control: auto-negotiate=%s forced=%s %u Mbit/s",
+                 (ctl.control_bits & 0x01) ? "on" : "OFF",
+                 (ctl.control_bits & 0x02) ? "full" : "half",
+                 static_cast<unsigned>(ctl.forced_speed));
+    }
+    uint32_t ifc[eip::kEthInterfaceCounterCount] = {};
+    if (query(eip::EthLinkAttr::kInterfaceCounters, clear, data) &&
+        eip::parseEthCounters(data, ifc, eip::kEthInterfaceCounterCount)) {
+        printCounters("interface counters", ifc, eip::kEthInterfaceCounterCount,
+                      eip::ethInterfaceCounterName);
+    }
+    uint32_t media[eip::kEthMediaCounterCount] = {};
+    if (query(eip::EthLinkAttr::kMediaCounters, clear, data) &&
+        eip::parseEthCounters(data, media, eip::kEthMediaCounterCount)) {
+        printCounters("media counters", media, eip::kEthMediaCounterCount,
+                      eip::ethMediaCounterName);
+    }
+
+    session.unregisterSession();
+    tcp.close();
+}
+
 void runAutotuneCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
+#if !GANTRY_CONSOLE_AUTOTUNE
+  (void)cfg;
+  (void)cmd;
+  ESP_LOGW(TAG, "autotune disabled for this version "
+                "(use IndraWorks / KNX5100C / tools/hcs01_eng.py for drive tuning)");
+#else
   if (cfg == nullptr || cfg->gantry == nullptr) {
     ESP_LOGE(TAG, "Gantry not initialized");
     return;
@@ -813,6 +1133,691 @@ void runAutotuneCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 
   session.unregisterSession();
   tcp.close();
+#endif  // GANTRY_CONSOLE_AUTOTUNE
+}
+
+namespace {
+
+constexpr uint16_t kHcs01CipParamClass = 0x64;
+
+bool parseHcsIdnToInstance(const char *idn, uint16_t &out_inst)
+{
+    if (idn == nullptr)
+    {
+        return false;
+    }
+    char kind = '\0';
+    unsigned set_num = 0;
+    unsigned blk_num = 0;
+    if (sscanf(idn, "%c-%u-%u", &kind, &set_num, &blk_num) != 3)
+    {
+        return false;
+    }
+    kind = static_cast<char>(toupper(static_cast<unsigned char>(kind)));
+    if ((kind != 'S' && kind != 'P') || set_num > 7U || blk_num > 4095U)
+    {
+        return false;
+    }
+    out_inst = static_cast<uint16_t>(((kind == 'P') ? 0x8000U : 0U) |
+                                     ((set_num & 0x07U) << 12) |
+                                     (blk_num & 0x0FFFU));
+    return true;
+}
+
+bool readCipAttrRaw(eip::EipSession &session, uint16_t class_id, uint16_t inst_id,
+                    uint16_t attr_id, eip::Bytes &out_data, uint8_t *out_status = nullptr)
+{
+    const eip::Bytes epath = eip::buildEPath(class_id, inst_id, true, attr_id);
+    const eip::Bytes req = eip::buildMessageRouterRequest(
+        static_cast<uint8_t>(eip::CipService::kGetAttributeSingle), epath);
+    eip::Bytes reply;
+    if (!session.sendExplicit(req, reply))
+    {
+        if (out_status != nullptr)
+        {
+            *out_status = 0xFF;
+        }
+        return false;
+    }
+    eip::MessageRouterResponse mr;
+    if (!eip::parseMessageRouterResponse(reply, mr))
+    {
+        if (out_status != nullptr)
+        {
+            *out_status = 0xFE;
+        }
+        return false;
+    }
+    if (out_status != nullptr)
+    {
+        *out_status = mr.general_status;
+    }
+    if (!mr.isSuccess())
+    {
+        return false;
+    }
+    out_data = mr.data;
+    return true;
+}
+
+bool writeCipAttrRaw(eip::EipSession &session, uint16_t class_id, uint16_t inst_id,
+                     uint16_t attr_id, const eip::Bytes &data, uint8_t *out_status = nullptr)
+{
+    const eip::Bytes epath = eip::buildEPath(class_id, inst_id, true, attr_id);
+    const eip::Bytes req = eip::buildMessageRouterRequest(
+        static_cast<uint8_t>(eip::CipService::kSetAttributeSingle), epath, data);
+    eip::Bytes reply;
+    if (!session.sendExplicit(req, reply))
+    {
+        if (out_status != nullptr)
+        {
+            *out_status = 0xFF;
+        }
+        return false;
+    }
+    eip::MessageRouterResponse mr;
+    if (!eip::parseMessageRouterResponse(reply, mr))
+    {
+        if (out_status != nullptr)
+        {
+            *out_status = 0xFE;
+        }
+        return false;
+    }
+    if (out_status != nullptr)
+    {
+        *out_status = mr.general_status;
+    }
+    return mr.isSuccess();
+}
+
+void formatHcsValue(const eip::Bytes &data, uint32_t attr3, char *out, size_t max_len)
+{
+    const uint8_t dec = static_cast<uint8_t>((attr3 >> 24) & 0x0FU);
+    const uint8_t fmt = static_cast<uint8_t>((attr3 >> 20) & 0x07U);
+    if (fmt == 4 && data.size() >= 2)
+    {
+        // SERCOS string: 2-byte current len + 2-byte max len + ASCII bytes (or raw ASCII)
+        size_t off = 0;
+        size_t slen = data.size();
+        if (data.size() >= 4)
+        {
+            const uint16_t clen = static_cast<uint16_t>(data[0] | (data[1] << 8));
+            if (clen <= data.size() - 4)
+            {
+                off = 4;
+                slen = clen;
+            }
+        }
+        const size_t n = (slen < max_len - 1) ? slen : (max_len - 1);
+        memcpy(out, data.data() + off, n);
+        out[n] = '\0';
+        return;
+    }
+    double scale = 1.0;
+    for (uint8_t i = 0; i < dec && i < 9; ++i)
+    {
+        scale *= 10.0;
+    }
+    if (data.size() == 2)
+    {
+        const uint16_t u16 = static_cast<uint16_t>(data[0] | (data[1] << 8));
+        if (fmt == 0 || fmt == 3)
+        {
+            snprintf(out, max_len, "0x%04X", static_cast<unsigned>(u16));
+        }
+        else if (fmt == 2)
+        {
+            const int16_t s16 = static_cast<int16_t>(u16);
+            snprintf(out, max_len, "%.*f (raw=%d)", static_cast<int>(dec),
+                     static_cast<double>(s16) / scale, static_cast<int>(s16));
+        }
+        else
+        {
+            snprintf(out, max_len, "%.*f (raw=%u)", static_cast<int>(dec),
+                     static_cast<double>(u16) / scale, static_cast<unsigned>(u16));
+        }
+        return;
+    }
+    if (data.size() == 4)
+    {
+        const uint32_t u32 = static_cast<uint32_t>(data[0]) |
+                             (static_cast<uint32_t>(data[1]) << 8) |
+                             (static_cast<uint32_t>(data[2]) << 16) |
+                             (static_cast<uint32_t>(data[3]) << 24);
+        if (fmt == 0 || fmt == 3)
+        {
+            snprintf(out, max_len, "0x%08lX", static_cast<unsigned long>(u32));
+        }
+        else if (fmt == 2)
+        {
+            const int32_t s32 = static_cast<int32_t>(u32);
+            snprintf(out, max_len, "%.*f (raw=%ld)", static_cast<int>(dec),
+                     static_cast<double>(s32) / scale, static_cast<long>(s32));
+        }
+        else
+        {
+            snprintf(out, max_len, "%.*f (raw=%lu)", static_cast<int>(dec),
+                     static_cast<double>(u32) / scale, static_cast<unsigned long>(u32));
+        }
+        return;
+    }
+    size_t pos = 0;
+    for (size_t i = 0; i < data.size() && pos + 3 < max_len; ++i)
+    {
+        pos += static_cast<size_t>(snprintf(out + pos, max_len - pos, "%02X ", data[i]));
+    }
+    if (pos == 0 && max_len > 0)
+    {
+        out[0] = '\0';
+    }
+}
+
+bool readHcsIdnCip(eip::EipSession &session, const char *idn, char *out_str, size_t max_len,
+                   uint32_t *out_attr3 = nullptr, size_t *out_len = nullptr)
+{
+    uint16_t inst = 0;
+    if (!parseHcsIdnToInstance(idn, inst))
+    {
+        snprintf(out_str, max_len, "<bad IDN>");
+        return false;
+    }
+    eip::Bytes attr3_bytes;
+    uint32_t attr3 = 0;
+    uint8_t st3 = 0;
+    if (readCipAttrRaw(session, kHcs01CipParamClass, inst, 3, attr3_bytes, &st3) &&
+        attr3_bytes.size() == 4)
+    {
+        attr3 = static_cast<uint32_t>(attr3_bytes[0]) |
+                (static_cast<uint32_t>(attr3_bytes[1]) << 8) |
+                (static_cast<uint32_t>(attr3_bytes[2]) << 16) |
+                (static_cast<uint32_t>(attr3_bytes[3]) << 24);
+    }
+    vTaskDelay(pdMS_TO_TICKS(4));
+    eip::Bytes val_bytes;
+    uint8_t st7 = 0;
+    if (!readCipAttrRaw(session, kHcs01CipParamClass, inst, 7, val_bytes, &st7))
+    {
+        snprintf(out_str, max_len, "<CIP err a3=0x%02X a7=0x%02X>",
+                 static_cast<unsigned>(st3), static_cast<unsigned>(st7));
+        return false;
+    }
+    if (out_attr3 != nullptr)
+    {
+        *out_attr3 = attr3;
+    }
+    if (out_len != nullptr)
+    {
+        *out_len = val_bytes.size();
+    }
+    formatHcsValue(val_bytes, attr3, out_str, max_len);
+    return true;
+}
+
+bool readK5100Attr(eip::EipSession &session, uint16_t class_id, uint16_t inst_id,
+                   uint16_t attr_id, uint8_t size_bytes, uint32_t &out_val)
+{
+    const eip::Bytes epath = eip::buildEPath(class_id, inst_id, true, attr_id);
+    const eip::Bytes req = eip::buildMessageRouterRequest(
+        static_cast<uint8_t>(eip::CipService::kGetAttributeSingle), epath);
+    eip::Bytes reply;
+    if (!session.sendExplicit(req, reply))
+    {
+        return false;
+    }
+    return k5100::parseGetParameterResponse(reply, out_val, size_bytes);
+}
+
+void dumpHcs01Params(w5500::W5500Hal &hal)
+{
+    ESP_LOGI(TAG, "=== HCS01 Theta (%s:44818 CIP Class 0x64) ===", CONFIG_EIP_TARGET_IP_THETA);
+    eip::EipSocketW5500Tcp tcp(hal);
+    if (!tcp.connect(CONFIG_EIP_TARGET_IP_THETA, eip::EipSession::kDefaultPort))
+    {
+        ESP_LOGE(TAG, "drv: HCS01 CIP connect failed (%s:44818)", CONFIG_EIP_TARGET_IP_THETA);
+        return;
+    }
+    eip::EipSession session(tcp);
+    if (!session.registerSession())
+    {
+        ESP_LOGE(TAG, "drv: HCS01 RegisterSession failed");
+        tcp.close();
+        return;
+    }
+    struct IdnEntry
+    {
+        const char *idn;
+        const char *label;
+    };
+    static const IdnEntry kIdns[] = {
+        {"S-0-0095", "diag"},
+        {"S-0-0390", "diag_num"},
+        {"S-0-0383", "motor_temp_C"},
+        {"S-0-0384", "amp_temp_C"},
+        {"S-0-0201", "warn_temp_C"},
+        {"S-0-0204", "shut_temp_C"},
+        {"P-0-0141", "therm_load_pct"},
+        {"S-0-0111", "motor_I0_A"},
+        {"S-0-0109", "motor_Imax_A"},
+        {"S-0-0110", "amp_Imax_A"},
+        {"P-0-4046", "eff_Ipeak_A"},
+        {"S-0-0082", "tq_lim_pos_pct"},
+        {"S-0-0083", "tq_lim_neg_pct"},
+        {"S-0-0092", "tq_lim_bip_pct"},
+        {"P-0-0109", "tq_peak_lim_pct"},
+        {"P-0-0442", "eff_tq_pos"},
+        {"P-0-0443", "eff_tq_neg"},
+        {"P-0-0444", "eff_tq_peak"},
+        {"P-0-0445", "tq_lim_status"},
+        {"P-0-0051", "Kt_Nm_per_A"},
+        {"P-0-4048", "R_winding_ohm"},
+        {"P-0-4010", "J_load_kgm2"},
+        {"S-0-0100", "vel_Kp"},
+        {"S-0-0101", "vel_Tn_ms"},
+        {"S-0-0104", "pos_Kv"},
+        {"S-0-0106", "curr_Kp"},
+        {"S-0-0107", "curr_Tn_ms"},
+        {"S-0-0348", "accel_FF_Ka"},
+        {"P-0-0004", "vel_smooth_us"},
+        {"S-0-0057", "pos_win_deg"},
+        {"S-0-0091", "vel_lim_bip"},
+        {"S-0-0138", "acc_lim_bip"},
+        {"P-0-0556", "axis_ctrl_cfg"},
+    };
+    char val[80];
+    for (const auto &e : kIdns)
+    {
+        val[0] = '\0';
+        readHcsIdnCip(session, e.idn, val, sizeof(val));
+        ESP_LOGI(TAG, "  %-10s %-16s = %s", e.idn, e.label, val);
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    session.unregisterSession();
+    tcp.close();
+}
+
+void dumpK5100Params(w5500::W5500Hal &hal, char axis_ch, const char *ip)
+{
+    ESP_LOGI(TAG, "=== Kinetix 5100 %c (%s:44818 CIP) ===", axis_ch, ip);
+    eip::EipSocketW5500Tcp tcp(hal);
+    if (!tcp.connect(ip, eip::EipSession::kDefaultPort))
+    {
+        ESP_LOGE(TAG, "drv: K5100 %c connect failed (%s)", axis_ch, ip);
+        return;
+    }
+    eip::EipSession session(tcp);
+    if (!session.registerSession())
+    {
+        ESP_LOGE(TAG, "drv: K5100 %c RegisterSession failed", axis_ch);
+        tcp.close();
+        return;
+    }
+
+    uint32_t v = 0;
+    if (readK5100Attr(session, 0x28, 1, 6, 2, v))
+    {
+        ESP_LOGI(TAG, "  P004 MotorContCurrent   = %.2f A", static_cast<double>(v) * 0.01);
+    }
+    if (readK5100Attr(session, 0x28, 1, 0x0D, 4, v))
+    {
+        ESP_LOGI(TAG, "  P010 MotorKt            = %.3f Nm/A", static_cast<double>(v) * 0.001);
+    }
+    if (readK5100Attr(session, 0x28, 1, 0x0E, 4, v))
+    {
+        ESP_LOGI(TAG, "  P011 MotorInertia       = %lu (1e-7 kgm2)", static_cast<unsigned long>(v));
+    }
+
+    struct K5100Entry
+    {
+        uint16_t id;
+        uint8_t sz;
+        bool is_signed;
+        const char *label;
+    };
+    static const K5100Entry kParams[] = {
+        {611, 2, false, "MotorPeakCurrent_0.01A"},
+        {647, 2, false, "MotorRatedTq_0.01Nm"},
+        {649, 2, true,  "MaxContTqLim_0.01pct"},
+        {128, 2, true,  "PresetTqLim1_pct"},
+        {129, 2, true,  "PresetTqLim2_pct"},
+        {130, 2, true,  "PresetTqLim3_pct"},
+        {629, 2, true,  "MotorOverloadLim_pct"},
+        {161, 2, true,  "OverloadWarn_pct"},
+        {162, 2, true,  "CrashTqThresh_pct"},
+        {655, 4, false, "OutputCurrent_0.01A"},
+        {217, 2, false, "GainAdjustMode"},
+        {216, 2, true,  "SysGainRespLevel"},
+        {144, 2, false, "LoadInertiaRatio"},
+        {659, 4, true,  "TotalInertia_1e-7"},
+        {185, 2, true,  "PosPropGain_rad_s"},
+        {187, 2, true,  "VelFFGain_pct"},
+        {189, 2, true,  "VelPropGain_rad_s"},
+        {191, 2, true,  "VelIntGain_rad_s"},
+        {192, 2, true,  "AccelFFGain_pct"},
+        {123, 2, true,  "TqCmdLpf_ms"},
+        {208, 2, true,  "Notch1Freq_Hz"},
+        {209, 2, true,  "Notch1Depth_dB"},
+        {210, 2, true,  "ResSuppLpf_0.1ms"},
+        {605, 4, true,  "CurrLoopKp_1e-3"},
+        {606, 2, true,  "CurrLoopKi"},
+    };
+    for (const auto &p : kParams)
+    {
+        v = 0;
+        if (readK5100Attr(session, k5100::kCipClassParameter, p.id, k5100::kCipAttributeValue,
+                          p.sz, v))
+        {
+            if (p.is_signed && p.sz == 2)
+            {
+                ESP_LOGI(TAG, "  P%03u %-22s = %d", static_cast<unsigned>(p.id), p.label,
+                         static_cast<int>(static_cast<int16_t>(v)));
+            }
+            else if (p.is_signed && p.sz == 4)
+            {
+                ESP_LOGI(TAG, "  P%03u %-22s = %ld", static_cast<unsigned>(p.id), p.label,
+                         static_cast<long>(static_cast<int32_t>(v)));
+            }
+            else
+            {
+                ESP_LOGI(TAG, "  P%03u %-22s = %lu", static_cast<unsigned>(p.id), p.label,
+                         static_cast<unsigned long>(v));
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "  P%03u %-22s = <read err>", static_cast<unsigned>(p.id), p.label);
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    session.unregisterSession();
+    tcp.close();
+}
+
+}  // namespace
+
+void runDrvCommand(const GantryTestConsoleConfig *cfg, const char *cmd)
+{
+    if (cfg == nullptr || cfg->gantry == nullptr || cfg->w5500_hal == nullptr)
+    {
+        ESP_LOGE(TAG, "drv: gantry or W5500 HAL not available");
+        return;
+    }
+
+    char sub[16] = {};
+    char a1[32] = {};
+    char a2[32] = {};
+    char a3[32] = {};
+    char a4[32] = {};
+    const int n = sscanf(cmd, "%*s %15s %31s %31s %31s %31s", sub, a1, a2, a3, a4);
+    if (n < 1)
+    {
+        ESP_LOGI(TAG, "Usage: drv read [t|x|z|all]");
+        ESP_LOGI(TAG, "       drv hcs get <IDN> | drv hcs set <IDN> <val> | drv hcs cmd <IDN> [ms]");
+        ESP_LOGI(TAG, "       drv k5100 get <x|z> <id> [2|4] | drv k5100 set <x|z> <id> <val> [2|4]");
+        return;
+    }
+    for (int i = 0; sub[i]; ++i) sub[i] = static_cast<char>(tolower(static_cast<unsigned char>(sub[i])));
+
+    if (strcmp(sub, "read") == 0)
+    {
+        const char which = (n >= 2) ? static_cast<char>(tolower(static_cast<unsigned char>(a1[0]))) : 'a';
+        if (which == 'a' || which == 't')
+        {
+            dumpHcs01Params(*(cfg->w5500_hal));
+        }
+        if (which == 'a' || which == 'x')
+        {
+            dumpK5100Params(*(cfg->w5500_hal), 'X', CONFIG_EIP_TARGET_IP_X);
+        }
+        if (which == 'a' || which == 'z')
+        {
+            dumpK5100Params(*(cfg->w5500_hal), 'Z', CONFIG_EIP_TARGET_IP_Z);
+        }
+        return;
+    }
+
+    if (strcmp(sub, "hcs") == 0 && n >= 3)
+    {
+        for (int i = 0; a1[i]; ++i) a1[i] = static_cast<char>(tolower(static_cast<unsigned char>(a1[i])));
+        uint16_t inst = 0;
+        if (!parseHcsIdnToInstance(a2, inst))
+        {
+            ESP_LOGE(TAG, "drv hcs: invalid IDN '%s' (expected S-0-xxxx or P-0-xxxx)", a2);
+            return;
+        }
+        eip::EipSocketW5500Tcp tcp(*(cfg->w5500_hal));
+        if (!tcp.connect(CONFIG_EIP_TARGET_IP_THETA, eip::EipSession::kDefaultPort))
+        {
+            ESP_LOGE(TAG, "drv hcs: CIP connect failed (%s:44818)", CONFIG_EIP_TARGET_IP_THETA);
+            return;
+        }
+        eip::EipSession session(tcp);
+        if (!session.registerSession())
+        {
+            ESP_LOGE(TAG, "drv hcs: RegisterSession failed");
+            tcp.close();
+            return;
+        }
+        if (strcmp(a1, "get") == 0)
+        {
+            char val[96] = {};
+            uint32_t attr3 = 0;
+            size_t vlen = 0;
+            if (readHcsIdnCip(session, a2, val, sizeof(val), &attr3, &vlen))
+            {
+                ESP_LOGI(TAG, "HCS %s (inst=0x%04X attr3=0x%08lX %uB) = %s",
+                         a2, static_cast<unsigned>(inst), static_cast<unsigned long>(attr3),
+                         static_cast<unsigned>(vlen), val);
+            }
+            else
+            {
+                ESP_LOGE(TAG, "HCS get %s failed: %s", a2, val);
+            }
+        }
+        else if (strcmp(a1, "set") == 0 && n >= 4)
+        {
+            if (cfg->gantry->isBusy())
+            {
+                ESP_LOGE(TAG, "drv hcs set: gantry busy — pause/stop first");
+                session.unregisterSession();
+                tcp.close();
+                return;
+            }
+            if (hcs01::Hcs01ComwsClient::isProtectedIdn(a2))
+            {
+                ESP_LOGE(TAG, "drv hcs set: refusing protected IP IDN %s", a2);
+                session.unregisterSession();
+                tcp.close();
+                return;
+            }
+            char before[80] = {};
+            uint32_t attr3 = 0;
+            size_t vlen = 0;
+            if (!readHcsIdnCip(session, a2, before, sizeof(before), &attr3, &vlen) ||
+                (vlen != 2 && vlen != 4))
+            {
+                ESP_LOGE(TAG, "drv hcs set %s: pre-read failed (%s, len=%u)",
+                         a2, before, static_cast<unsigned>(vlen));
+                session.unregisterSession();
+                tcp.close();
+                return;
+            }
+            const uint8_t dec = static_cast<uint8_t>((attr3 >> 24) & 0x0FU);
+            int64_t raw_i64 = 0;
+            if (strncmp(a3, "0x", 2) == 0 || strncmp(a3, "0X", 2) == 0)
+            {
+                raw_i64 = static_cast<int64_t>(strtoull(a3, nullptr, 16));
+            }
+            else
+            {
+                double scale = 1.0;
+                for (uint8_t i = 0; i < dec && i < 9; ++i) scale *= 10.0;
+                const double dv = strtod(a3, nullptr) * scale;
+                raw_i64 = static_cast<int64_t>(dv >= 0.0 ? (dv + 0.5) : (dv - 0.5));
+            }
+            eip::Bytes payload;
+            eip::ByteWriter w(payload);
+            if (vlen == 2)
+            {
+                w.u16(static_cast<uint16_t>(raw_i64));
+            }
+            else
+            {
+                w.u32(static_cast<uint32_t>(raw_i64));
+            }
+            uint8_t cip_st = 0;
+            const bool ok = writeCipAttrRaw(session, kHcs01CipParamClass, inst, 7, payload, &cip_st);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            char after[80] = {};
+            readHcsIdnCip(session, a2, after, sizeof(after));
+            ESP_LOGI(TAG, "HCS set %s=%s (raw=%lld %uB) -> %s (cip=0x%02X, before='%s', after='%s')",
+                     a2, a3, static_cast<long long>(raw_i64), static_cast<unsigned>(vlen),
+                     ok ? "OK" : "FAIL", static_cast<unsigned>(cip_st), before, after);
+        }
+        else if (strcmp(a1, "cmd") == 0)
+        {
+            if (cfg->gantry->isBusy())
+            {
+                ESP_LOGE(TAG, "drv hcs cmd: gantry busy — pause/stop first");
+                session.unregisterSession();
+                tcp.close();
+                return;
+            }
+            const uint32_t timeout_ms = (n >= 4) ? static_cast<uint32_t>(strtoul(a3, nullptr, 10)) : 20000U;
+            eip::Bytes z2 = {0x00, 0x00};
+            eip::Bytes go2 = {0x03, 0x00};
+            uint8_t st_wr = 0;
+            writeCipAttrRaw(session, kHcs01CipParamClass, inst, 7, z2, &st_wr);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            bool ok = writeCipAttrRaw(session, kHcs01CipParamClass, inst, 7, go2, &st_wr);
+            bool done = false;
+            bool err = false;
+            uint16_t last_sw = 0;
+            for (uint32_t elapsed = 0; ok && elapsed < timeout_ms; elapsed += 200U)
+            {
+                vTaskDelay(pdMS_TO_TICKS(200));
+                eip::Bytes sb;
+                if (!readCipAttrRaw(session, kHcs01CipParamClass, inst, 8, sb) || sb.size() < 2)
+                {
+                    if (!readCipAttrRaw(session, kHcs01CipParamClass, inst, 7, sb) || sb.size() < 2)
+                    {
+                        continue;
+                    }
+                }
+                last_sw = static_cast<uint16_t>(sb[0] | (sb[1] << 8));
+                if (last_sw & 0x08U)
+                {
+                    err = true;
+                    break;
+                }
+                if ((last_sw & 0x03U) == 0x03U && !(last_sw & 0x04U))
+                {
+                    done = true;
+                    break;
+                }
+            }
+            writeCipAttrRaw(session, kHcs01CipParamClass, inst, 7, z2);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            char diag[96] = {};
+            readHcsIdnCip(session, "S-0-0095", diag, sizeof(diag));
+            ESP_LOGI(TAG, "HCS cmd %s -> %s (wr=0x%02X sw=0x%04X err=%d diag='%s')",
+                     a2, (done && !err) ? "OK" : "FAIL",
+                     static_cast<unsigned>(st_wr), static_cast<unsigned>(last_sw),
+                     err ? 1 : 0, diag);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Usage: drv hcs <get|set|cmd> <IDN> [val|timeout_ms]");
+        }
+        session.unregisterSession();
+        tcp.close();
+        return;
+    }
+
+    if (strcmp(sub, "k5100") == 0 && n >= 4)
+    {
+        for (int i = 0; a1[i]; ++i) a1[i] = static_cast<char>(tolower(static_cast<unsigned char>(a1[i])));
+        const char ax = static_cast<char>(tolower(static_cast<unsigned char>(a2[0])));
+        const char *ip = (ax == 'x') ? CONFIG_EIP_TARGET_IP_X
+                       : (ax == 'z') ? CONFIG_EIP_TARGET_IP_Z
+                                     : nullptr;
+        if (ip == nullptr)
+        {
+            ESP_LOGE(TAG, "drv k5100: axis must be x or z");
+            return;
+        }
+        const uint16_t pid = static_cast<uint16_t>(strtoul(a3, nullptr, 10));
+        eip::EipSocketW5500Tcp tcp(*(cfg->w5500_hal));
+        if (!tcp.connect(ip, eip::EipSession::kDefaultPort))
+        {
+            ESP_LOGE(TAG, "drv k5100: connect failed (%s)", ip);
+            return;
+        }
+        eip::EipSession session(tcp);
+        if (!session.registerSession())
+        {
+            ESP_LOGE(TAG, "drv k5100: RegisterSession failed");
+            tcp.close();
+            return;
+        }
+        if (strcmp(a1, "get") == 0)
+        {
+            const uint8_t sz = (n >= 5 && atoi(a4) == 4) ? 4 : 2;
+            uint32_t val = 0;
+            if (readK5100Attr(session, k5100::kCipClassParameter, pid, k5100::kCipAttributeValue, sz, val))
+            {
+                ESP_LOGI(TAG, "K5100 %c P%u (%uB) = %lu", static_cast<char>(toupper(static_cast<unsigned char>(ax))),
+                         static_cast<unsigned>(pid), static_cast<unsigned>(sz), static_cast<unsigned long>(val));
+            }
+            else
+            {
+                ESP_LOGE(TAG, "K5100 %c P%u read failed", static_cast<char>(toupper(static_cast<unsigned char>(ax))),
+                         static_cast<unsigned>(pid));
+            }
+        }
+        else if (strcmp(a1, "set") == 0 && n >= 5)
+        {
+            if (cfg->gantry->isBusy())
+            {
+                ESP_LOGE(TAG, "drv k5100 set: gantry busy — pause/stop first");
+                session.unregisterSession();
+                tcp.close();
+                return;
+            }
+            // Optional 5th arg for 4-byte size: drv k5100 set x 659 12345 4
+            char a5[16] = {};
+            const int n5 = sscanf(cmd, "%*s %15s %31s %31s %31s %31s %15s", sub, a1, a2, a3, a4, a5);
+            const uint8_t sz = (n5 >= 6 && atoi(a5) == 4) ? 4 : 2;
+            const uint32_t new_val = static_cast<uint32_t>(strtol(a4, nullptr, 10));
+            uint32_t before = 0;
+            uint32_t after = 0;
+            readK5100Attr(session, k5100::kCipClassParameter, pid, k5100::kCipAttributeValue, sz, before);
+            const eip::Bytes req = k5100::buildSetParameterRequest(pid, new_val, sz);
+            eip::Bytes reply;
+            bool ok = false;
+            if (session.sendExplicit(req, reply))
+            {
+                eip::MessageRouterResponse mr;
+                ok = eip::parseMessageRouterResponse(reply, mr) && mr.isSuccess();
+            }
+            readK5100Attr(session, k5100::kCipClassParameter, pid, k5100::kCipAttributeValue, sz, after);
+            ESP_LOGI(TAG, "K5100 %c set P%u=%lu (%uB) -> %s (before=%lu after=%lu)",
+                     static_cast<char>(toupper(static_cast<unsigned char>(ax))),
+                     static_cast<unsigned>(pid), static_cast<unsigned long>(new_val),
+                     static_cast<unsigned>(sz), ok ? "OK" : "FAIL",
+                     static_cast<unsigned long>(before), static_cast<unsigned long>(after));
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Usage: drv k5100 <get|set> <x|z> <param_id> [val] [2|4]");
+        }
+        session.unregisterSession();
+        tcp.close();
+        return;
+    }
+
+    ESP_LOGE(TAG, "Unknown drv subcommand: %s", sub);
 }
 
 void runPuuSetCommand(Gantry::Gantry *gantry, const char *cmd) {
@@ -1194,10 +2199,11 @@ void runFieldDinCommand(const char *cmd) {
     ESP_LOGI(TAG, "FIELD_DIN%d = %d (MCP PA%d)", i, field_din_get(i) ? 1 : 0,
              MCP_FIELD_DIN0 + static_cast<int>(i));
   }
-  ESP_LOGI(TAG, "ENC A/B/PUSH/KO = %d %d %d %d  TFT_CS(PB2)=%d  W5500_RST(PB7)=%d",
-           gpio_expander_read(MCP_UI_ENC_A), gpio_expander_read(MCP_UI_ENC_B),
-           gpio_expander_read(MCP_UI_ENC_PUSH), gpio_expander_read(MCP_UI_ENC_KO),
-           gpio_expander_read(MCP_TFT_CS), gpio_expander_read(MCP_W5500_RST));
+  ESP_LOGI(TAG, "ENC KO/PUSH/B/A = %d %d %d %d  BLK=%d DC=%d RES=%d  W5500_RST(PB7)=%d",
+           gpio_expander_read(MCP_UI_ENC_KO), gpio_expander_read(MCP_UI_ENC_PUSH),
+           gpio_expander_read(MCP_UI_ENC_B), gpio_expander_read(MCP_UI_ENC_A),
+           gpio_expander_read(MCP_TFT_BLK), gpio_expander_read(MCP_TFT_DC),
+           gpio_expander_read(MCP_TFT_RES), gpio_expander_read(MCP_W5500_RST));
 }
 #endif  // MCP_DEBUG_CMDS
 
@@ -1245,16 +2251,18 @@ void runSoftHomeX(const GantryTestConsoleConfig *cfg) {
 }
 
 void runSoftCalibrateX(const GantryTestConsoleConfig *cfg) {
-  const float xMax = AXIS_X_HARD_LIMIT_MAX_MM;
-  cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, xMax,
-                              AXIS_Z_HARD_LIMIT_MIN_MM, AXIS_Z_HARD_LIMIT_MAX_MM,
-                              AXIS_THETA_HARD_LIMIT_MIN_DEG,
-                              AXIS_THETA_HARD_LIMIT_MAX_DEG);
+  const float xMax = stored().axis_x_hard_limit_max_mm;
+  cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, xMax,
+                              stored().axis_z_hard_limit_min_mm,
+                              stored().axis_z_hard_limit_max_mm,
+                              stored().axis_theta_hard_limit_min_deg,
+                              stored().axis_theta_hard_limit_max_deg);
   g_calibratedThisSession = true;
   ESP_LOGI(TAG,
            "OK X soft-calibrate (no limit switches). Joint envelope X=%.1f..%.1f mm "
            "from SCHUNK datasheet. Run puucal after measured moves.",
-           AXIS_X_HARD_LIMIT_MIN_MM, xMax);
+           stored().axis_x_hard_limit_min_mm, xMax);
+  maybeLatchWorkspaceCalibrated(cfg->gantry);
 }
 
 void runHomeXSequence(const GantryTestConsoleConfig *cfg) {
@@ -1401,6 +2409,7 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
   g_homeCompletedThisSession = false;
   g_homeZCompletedThisSession = false;
   g_homeThetaThisSession = false;
+  g_thetaHomePending = false;
 
   if (!cfg->gantry->startEipBringUp()) {
     g_calibrationInProgress = false;
@@ -1421,7 +2430,7 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
       break;
     }
     if ((xTaskGetTickCount() - start) >
-        pdMS_TO_TICKS(Gantry::Constants::TRAVEL_MEASUREMENT_TIMEOUT_MS * 4)) {
+        pdMS_TO_TICKS(Gantry::Constants::BRINGUP_SEQUENCE_TIMEOUT_MS)) {
       ESP_LOGE(TAG, "ERROR: Bring-up timed out");
       cfg->gantry->requestAbort();
       break;
@@ -1441,40 +2450,47 @@ bool runEipBringUpSequence(const GantryTestConsoleConfig *cfg) {
     g_homeZCompletedThisSession = true;
     g_calibratedThisSession = true;
     g_calibratedZThisSession = true;
-    cfg->gantry->setJointLimits(AXIS_X_HARD_LIMIT_MIN_MM, (float)xLen,
-                                AXIS_Z_HARD_LIMIT_MIN_MM, (float)zLen,
-                                AXIS_THETA_HARD_LIMIT_MIN_DEG,
-                                AXIS_THETA_HARD_LIMIT_MAX_DEG);
+    cfg->gantry->setJointLimits(stored().axis_x_hard_limit_min_mm, (float)xLen,
+                                stored().axis_z_hard_limit_min_mm, (float)zLen,
+                                stored().axis_theta_hard_limit_min_deg,
+                                stored().axis_theta_hard_limit_max_deg);
     if (cfg->gantry->hasThetaAxis()) {
-      if (cfg->gantry->homeTheta() && cfg->gantry->calibrateTheta() > 0) {
-        g_homeThetaThisSession = true;
-        g_calibratedThetaThisSession = true;
-        ESP_LOGI(TAG,
-                 "Bring-up: theta origin %s (drive_abs=%.3f, joint_lim=%.1f..%.1f)",
-                 cfg->gantry->isThetaDriveOriginAligned() ? "ALIGNED" : "OFFSET",
-                 (double)cfg->gantry->getThetaDriveAbsDeg(),
-                 (double)cfg->gantry->getJointLimits().theta_min,
-                 (double)cfg->gantry->getJointLimits().theta_max);
-        // Wait for Theta to finish settling at physical zero (0.000 deg)
-        const TickType_t th_start = xTaskGetTickCount();
-        while (cfg->gantry->isBusy()) {
-          if ((xTaskGetTickCount() - th_start) > pdMS_TO_TICKS(15000)) {
-            ESP_LOGW(TAG, "Bring-up: timeout waiting for theta to settle at 0 deg");
-            break;
-          }
-          vTaskDelay(pdMS_TO_TICKS(50));
+        bool thetaOk = cfg->gantry->homeTheta();
+        if (thetaOk) {
+            // The axis times out its own move (thetaMoveTimeoutUs); this cap
+            // is only a backstop.
+            const TickType_t th_start = xTaskGetTickCount();
+            while (cfg->gantry->isBusy()) {
+                if ((xTaskGetTickCount() - th_start) > pdMS_TO_TICKS(kThetaHomeWaitMs)) {
+                    ESP_LOGW(TAG, "Bring-up: timeout waiting for theta to settle at 0 deg");
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+            thetaOk = cfg->gantry->thetaSettledAt(0.0f) && cfg->gantry->calibrateTheta() > 0;
         }
-      } else {
-        ESP_LOGW(TAG,
-                 "Bring-up: X/Z OK; theta home/cal failed "
-                 "(CIP .23 / Class 1 / encoder?) — X/Z gates stay set");
-      }
+        if (thetaOk) {
+            g_homeThetaThisSession = true;
+            g_calibratedThetaThisSession = true;
+            ESP_LOGI(TAG,
+                     "Bring-up: theta origin %s at 0 deg (drive_abs=%.3f, joint_lim=%.1f..%.1f)",
+                     cfg->gantry->isThetaDriveOriginAligned() ? "ALIGNED" : "OFFSET",
+                     (double)cfg->gantry->getThetaDriveAbsDeg(),
+                     (double)cfg->gantry->getJointLimits().theta_min,
+                     (double)cfg->gantry->getJointLimits().theta_max);
+        } else {
+            ESP_LOGW(TAG,
+                     "Bring-up: X/Z OK; theta home/cal failed at %.3f deg "
+                     "(alarm? CIP .23 / Class 1 / encoder) — X/Z gates stay set",
+                     (double)cfg->gantry->getCurrentThetaDeg());
+        }
     }
     ESP_LOGI(TAG,
              "OK Bring-up complete: X stroke=%d mm, Z stroke=%d mm, "
              "SAFE_Z ceiling=%.1f mm (z_min + %.1f)",
              xLen, zLen, (double)cfg->gantry->traverseClearanceZMm(),
-             (double)GANTRY_SAFE_Z_HEIGHT_MM);
+             (double)stored().gantry_safe_z_height_mm);
+    maybeLatchWorkspaceCalibrated(cfg->gantry);
     return true;
   }
   ESP_LOGE(TAG, "ERROR: Bring-up finished without valid X/Z stroke");
@@ -1489,6 +2505,8 @@ const char *gantryErrorName(Gantry::GantryError err) {
       return "NOT_INITIALIZED";
     case Gantry::GantryError::MOTOR_NOT_ENABLED:
       return "MOTOR_NOT_ENABLED";
+    case Gantry::GantryError::NOT_CALIBRATED:
+      return "NOT_CALIBRATED";
     case Gantry::GantryError::ALREADY_MOVING:
       return "ALREADY_MOVING";
     case Gantry::GantryError::INVALID_POSITION:
@@ -1640,8 +2658,9 @@ bool testCycleMoveLeg(const GantryTestConsoleConfig *cfg, const char *name,
 bool testCycleGripAction(const GantryTestConsoleConfig *cfg, bool grip_closed) {
   ESP_LOGI(TAG, "[TEST_CYCLE] Gripper -> %s", grip_closed ? "CLOSED (GRIP)" : "OPEN (RELEASE)");
   cfg->gantry->grip(grip_closed);
-  const uint32_t wait_ms = grip_closed ? (GANTRY_GRIPPER_CLOSE_TIME_MS + 60u)
-                                       : (GANTRY_GRIPPER_OPEN_TIME_MS + 60u);
+  const uint32_t wait_ms =
+      static_cast<uint32_t>(grip_closed ? stored().gantry_gripper_close_time_ms
+                                        : stored().gantry_gripper_open_time_ms) + 60u;
   if (!testCycleWaitMs(cfg, wait_ms)) {
     ESP_LOGE(TAG, "ERROR: test_cycle aborted during gripper action");
     return false;
@@ -2018,12 +3037,15 @@ void runHomeForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
         return;
       }
       if (cfg->gantry->homeTheta()) {
-        g_homeThetaThisSession = true;
-        ESP_LOGI(TAG, "OK Theta origin captured (HIPERFACE; no X31). %s",
+        g_homeThetaThisSession = false;
+        g_thetaHomePending = true;
+        ESP_LOGI(TAG, "Theta origin captured (HIPERFACE; no X31). %s",
                  cfg->gantry->isThetaDriveOriginAligned()
                      ? "ALIGNED: joint = drive abs"
                      : "OFFSET: thetalim shrunk to remaining drive travel; "
                        "C0300 at this pose then 'home t' for full envelope");
+        ESP_LOGI(TAG, "Theta returning to 0 deg (use 'status' to monitor)");
+        resolveThetaHome(cfg);
       } else {
         ESP_LOGE(TAG, "ERROR: Theta home failed (enable, Class 1 on CIP .23, clear alarm)");
       }
@@ -2107,6 +3129,11 @@ void runCalibrateForAxis(const GantryTestConsoleConfig *cfg, AxisToken axis) {
     case AxisToken::THETA:
       if (!cfg->gantry->hasThetaAxis()) {
         ESP_LOGE(TAG, "ERROR: Theta axis not compiled in (CONFIG_EIP_AXIS_THETA)");
+        return;
+      }
+      resolveThetaHome(cfg);
+      if (g_thetaHomePending) {
+        ESP_LOGE(TAG, "ERROR: Theta home still returning to 0 deg — wait for busy=0");
         return;
       }
       if (!g_homeThetaThisSession) {
@@ -2229,6 +3256,300 @@ void dispatchPerAxisCommand(const GantryTestConsoleConfig *cfg, const char *cmd,
   }
 }
 
+static bool cmdTokenIs(const char *cmd, const char *word) {
+  size_t i = 0;
+  for (; word[i] != '\0'; ++i) {
+    if (tolower(static_cast<unsigned char>(cmd[i])) !=
+        tolower(static_cast<unsigned char>(word[i]))) {
+      return false;
+    }
+  }
+  return cmd[i] == '\0' || isspace(static_cast<unsigned char>(cmd[i]));
+}
+
+static const char *skipCmdSpace(const char *s) {
+  while (s != nullptr && *s != '\0' && isspace(static_cast<unsigned char>(*s))) {
+    ++s;
+  }
+  return s;
+}
+
+static void formatSetTime(uint32_t unix_s, char *out, size_t out_len) {
+  if (unix_s == 0) {
+    snprintf(out, out_len, "no clock");
+    return;
+  }
+  const time_t when = static_cast<time_t>(unix_s);
+  struct tm utc;
+  gmtime_r(&when, &utc);
+  strftime(out, out_len, "%Y-%m-%dT%H:%M:%SZ", &utc);
+}
+
+// One 'PARAM key=value' line per visible parameter, replayable as 'cfg key value'.
+// The toolbox page turns this into the downloadable parameter file. Passwords
+// stay out of it.
+static void printConfigExport() {
+  auto &config = Config::AppConfig::instance();
+  const Config::ConfigSetInfo set = config.activeSet();
+  char when[24];
+  formatSetTime(set.unix_s, when, sizeof(when));
+  ESP_LOGI(TAG, "PARAM # gantry parameters, set #%lu, stored %s, %d change(s) since",
+           static_cast<unsigned long>(set.seq), when, config.pendingChanges());
+  for (const auto &schema : Config::getParamSchemas()) {
+    if (!config.isParamVisible(schema.key) || strcmp(schema.key, "con_pw") == 0 ||
+        strcmp(schema.key, "dev_pw") == 0) {
+      continue;
+    }
+    // The display format rounds to two decimals; a file has to reload exactly.
+    char value[40];
+    float number = 0.0f;
+    if (schema.type == Config::ParamType::FLOAT && config.getParamFloat(schema.key, number)) {
+      snprintf(value, sizeof(value), "%.7g", static_cast<double>(number));
+      ESP_LOGI(TAG, "PARAM %s=%s", schema.key, value);
+    } else if (config.formatParamValue(schema.key, value, sizeof(value))) {
+      ESP_LOGI(TAG, "PARAM %s=%s", schema.key, value);
+    }
+  }
+  ESP_LOGI(TAG, "OK parameter export done");
+}
+
+static void printClock() {
+  char when[24];
+  const time_t now = time(nullptr);
+  formatSetTime(now > 1700000000 ? static_cast<uint32_t>(now) : 0, when, sizeof(when));
+  ESP_LOGI(TAG, "Clock %s (NTP %s)", when, stored().ntp_server);
+}
+
+// A flash write can stall both CPUs past the Class 1 timeout, so Class 1 closes
+// around it and the motors must already be off.
+static bool saveParameters(const GantryTestConsoleConfig *cfg) {
+  auto &config = Config::AppConfig::instance();
+  if (cfg != nullptr && cfg->gantry != nullptr &&
+      (cfg->gantry->isEnabled() || cfg->gantry->isBusy())) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: run 'stop' first, motors must be off");
+    return false;
+  }
+  if (!config.hasStorage()) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: NVS is unavailable ('cfg factory' erases it)");
+    return false;
+  }
+  if (config.pendingChanges() == 0 && config.activeSet().valid) {
+    ESP_LOGI(TAG, "OK nothing to save, set #%lu is current",
+             static_cast<unsigned long>(config.activeSet().seq));
+    return true;
+  }
+  if (!eip::pauseClass1(kParamSavePauseTimeoutMs)) {
+    ESP_LOGE(TAG, "ERROR: parameters not saved: Class 1 did not close");
+    return false;
+  }
+  const bool saved = config.saveSet();
+  eip::resumeClass1();
+  if (!saved) {
+    ESP_LOGE(TAG, "ERROR: NVS write failed; values stay in RAM only");
+    return false;
+  }
+  ESP_LOGI(TAG, "OK saved set #%lu. Class 1 is reopening; wait for it, then 'enable'",
+           static_cast<unsigned long>(config.activeSet().seq));
+  return true;
+}
+
+// A stored value is the only one in force, so a change reaches the Gantry now.
+// Reboot-only keys still wait for the boot that applies them.
+static void applyStoredToMotion(const GantryTestConsoleConfig *cfg, const char *key) {
+  if (cfg != nullptr && cfg->gantry != nullptr) {
+    cfg->gantry->setRuntimeParams(gantryRuntimeParams(stored()));
+  }
+  static constexpr const char *kMoveProfileKeys[] = {
+      "spd_mm_s", "acc_mm_s2", "dec_mm_s2", "th_spd_deg_s", "th_acc_deg_s2", "th_dec_deg_s2"};
+  for (const char *profile_key : kMoveProfileKeys) {
+    if (key == nullptr || strcmp(key, profile_key) == 0) {
+      gantryConsoleLoadStoredProfile();
+      return;
+    }
+  }
+}
+
+static void runCfgCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
+  const char *args = skipCmdSpace(cmd + 3);
+  auto &config = Config::AppConfig::instance();
+
+  if (args == nullptr || *args == '\0') {
+    const char *section = "";
+    for (const auto &schema : Config::getParamSchemas()) {
+      if (!config.isParamVisible(schema.key)) {
+        continue;
+      }
+      if (strcmp(section, schema.section) != 0) {
+        section = schema.section;
+        ESP_LOGI(TAG, "--- %s ---", section);
+      }
+      char value[40];
+      if (!config.formatParamValue(schema.key, value, sizeof(value))) {
+        snprintf(value, sizeof(value), "?");
+      }
+      ESP_LOGI(TAG, "  %-16s %-16s = %s %s%s", schema.key, schema.label, value,
+               schema.units, schema.reboot_required ? "  (reboot)" : "");
+    }
+    ESP_LOGI(TAG, "cfg <key> [value] | cfg unlock <pw> | cfg lock | "
+                  "cfg passwd <old> <new> | cfg save | cfg export | cfg time | "
+                  "cfg factory | cfg reboot [discard]");
+    return;
+  }
+
+  char buf[160];
+  strncpy(buf, args, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char *token = buf;
+  char *rest = buf;
+  while (*rest != '\0' && !isspace(static_cast<unsigned char>(*rest))) {
+    ++rest;
+  }
+  if (*rest != '\0') {
+    *rest = '\0';
+    rest = const_cast<char *>(skipCmdSpace(rest + 1));
+  } else {
+    rest = const_cast<char *>(rest);
+  }
+  for (char *p = token; *p != '\0'; ++p) {
+    *p = static_cast<char>(tolower(static_cast<unsigned char>(*p)));
+  }
+
+  if (cmdTokenIs(token, "reboot") && (*rest == '\0' || strcmp(rest, "discard") == 0)) {
+    if (*rest == '\0' && config.pendingChanges() > 0) {
+      ESP_LOGE(TAG, "ERROR: %d unsaved change(s). 'cfg save' first, or 'cfg reboot discard'",
+               config.pendingChanges());
+      return;
+    }
+    ESP_LOGI(TAG, "Rebooting");
+    // Over TCP the console ends the reply and closes the client first;
+    // restarting here sent no prompt and no FIN, and the supervisor's console
+    // stayed busy for its 180 s deadline (OPEN_ITEMS S-7).
+    if (!gantryNetConsoleDeferRestart()) {
+        esp_restart();
+    }
+    return;
+  }
+  if (cmdTokenIs(token, "lock") && *rest == '\0') {
+    config.lockDeveloperMode();
+    ESP_LOGI(TAG, "OK developer mode locked");
+    return;
+  }
+  if (cmdTokenIs(token, "save") && *rest == '\0') {
+    saveParameters(cfg);
+    return;
+  }
+  if (cmdTokenIs(token, "export") && *rest == '\0') {
+    printConfigExport();
+    return;
+  }
+  if (cmdTokenIs(token, "time") && *rest == '\0') {
+    printClock();
+    return;
+  }
+  if (cmdTokenIs(token, "factory") && *rest == '\0') {
+    if (!config.hasStorage()) {
+      // NVS was unreadable at boot; this is the operator asking to start over.
+      if (nvs_flash_erase() != ESP_OK || nvs_flash_init() != ESP_OK || !config.init()) {
+        ESP_LOGE(TAG, "ERROR: NVS erase failed");
+        return;
+      }
+      ESP_LOGI(TAG, "OK NVS erased and a new set stored");
+      return;
+    }
+    if (!config.factoryReset()) {
+      ESP_LOGE(TAG, "ERROR: factory reset failed");
+      return;
+    }
+    applyStoredToMotion(cfg, nullptr);
+    ESP_LOGI(TAG, "OK compile-time defaults in RAM, not saved. 'cfg save' stores them over the "
+                  "set; download the parameter file first to keep the old values");
+    return;
+  }
+  if (cmdTokenIs(token, "unlock")) {
+    if (*rest == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg unlock <password>");
+      return;
+    }
+    if (!config.unlockDeveloperMode(rest)) {
+      ESP_LOGE(TAG, "ERROR: developer unlock failed");
+      return;
+    }
+    ESP_LOGI(TAG, "OK developer mode unlocked");
+    return;
+  }
+  if (cmdTokenIs(token, "passwd")) {
+    if (!config.isDeveloperModeUnlocked()) {
+      ESP_LOGE(TAG, "ERROR: developer mode is locked");
+      return;
+    }
+    char *old_pw = rest;
+    char *new_pw = rest;
+    while (*new_pw != '\0' && !isspace(static_cast<unsigned char>(*new_pw))) {
+      ++new_pw;
+    }
+    if (*new_pw == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg passwd <old> <new>");
+      return;
+    }
+    *new_pw = '\0';
+    new_pw = const_cast<char *>(skipCmdSpace(new_pw + 1));
+    if (*new_pw == '\0') {
+      ESP_LOGE(TAG, "Usage: cfg passwd <old> <new>");
+      return;
+    }
+    if (!config.changeDeveloperPassword(old_pw, new_pw)) {
+      ESP_LOGE(TAG, "ERROR: developer password change failed");
+      return;
+    }
+    ESP_LOGI(TAG, "OK developer password changed");
+    return;
+  }
+
+  // Keys renamed on 2026-11-16 still work under their old name.
+  if (const char *renamed = Config::renamedParamKey(token)) {
+    ESP_LOGI(TAG, "%s is now %s", token, renamed);
+    token = const_cast<char *>(renamed);
+  }
+  const Config::ParamSchema *schema = Config::findParamSchema(token);
+  if (schema == nullptr) {
+    ESP_LOGE(TAG, "ERROR: unknown config key '%s'", token);
+    return;
+  }
+  if (!config.isParamVisible(token)) {
+    ESP_LOGE(TAG, "ERROR: '%s' requires developer mode ('cfg unlock <password>')", token);
+    return;
+  }
+
+  if (*rest == '\0') {
+    char value[40];
+    if (!config.formatParamValue(token, value, sizeof(value))) {
+      ESP_LOGE(TAG, "ERROR: cannot read '%s'", token);
+      return;
+    }
+    ESP_LOGI(TAG, "%s (%s) = %s %s%s", token, schema->label, value, schema->units,
+             schema->reboot_required ? "  (reboot)" : "");
+    if (schema->description != nullptr) {
+      ESP_LOGI(TAG, "  %s", schema->description);
+    }
+    return;
+  }
+
+  bool reboot = false;
+  if (!config.applyParamText(token, rest, reboot)) {
+    ESP_LOGE(TAG, "ERROR: rejected %s = %s", token, rest);
+    return;
+  }
+  applyStoredToMotion(cfg, token);
+  char value[40];
+  const char *shown = value;
+  if (!config.formatParamValue(token, value, sizeof(value))) {
+    shown = rest;
+  }
+  ESP_LOGI(TAG, "OK %s = %s %s%s", token, shown, schema->units,
+           reboot ? "  (reboot required; 'cfg save', then 'cfg reboot')" : "  (not saved)");
+}
+
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (cfg == nullptr || cmd == nullptr || strlen(cmd) == 0) {
     return;
@@ -2241,19 +3562,27 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     cmdLower[i] = static_cast<char>(tolower(cmdLower[i]));
   }
 
-  if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0) {
+  const bool cfg_cmd = cmdTokenIs(cmd, "cfg");
+  if (cfg->gantry == nullptr && strcmp(cmdLower, "help") != 0 &&
+      strcmp(cmdLower, "?") != 0 && !cfg_cmd) {
     ESP_LOGE(TAG, "Gantry not initialized");
     return;
   }
 
   if (strcmp(cmdLower, "help") == 0 || strcmp(cmdLower, "?") == 0) {
     gantryTestPrintHelp();
+  } else if (cfg_cmd) {
+    runCfgCommand(cfg, cmd);
   } else if (g_testCycleInProgress &&
              strcmp(cmdLower, "stop") != 0 &&
              strcmp(cmdLower, "status") != 0 &&
+             strcmp(cmdLower, "calibrated") != 0 &&
              strcmp(cmdLower, "faults") != 0 &&
              strcmp(cmdLower, "alarms") != 0 &&
              strcmp(cmdLower, "eiptiming") != 0 &&
+             strcmp(cmdLower, "gaptrace") != 0 &&
+             strcmp(cmdLower, "bootlog") != 0 &&
+             strncmp(cmdLower, "ethlink", 7) != 0 &&
              strcmp(cmdLower, "limits") != 0 &&
              strcmp(cmdLower, "puuinfo") != 0 &&
              strncmp(cmdLower, "puucal", 6) != 0 &&
@@ -2285,6 +3614,8 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     gantryOtaPrintStatus();
   } else if (strcmp(cmdLower, "status") == 0) {
     printStatus(cfg->gantry);
+  } else if (strcmp(cmdLower, "calibrated") == 0) {
+    printWorkspaceCalibrated(cfg->gantry);
   } else if (strcmp(cmdLower, "faults") == 0 || strcmp(cmdLower, "alarms") == 0) {
     char xSum[192] = {};
     char zSum[192] = {};
@@ -2322,6 +3653,10 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     runThetaLimCommand(cfg->gantry, cmd);
   } else if (strncmp(cmdLower, "autotune", 8) == 0) {
     runAutotuneCommand(cfg, cmd);
+  } else if (strncmp(cmdLower, "ethlink", 7) == 0) {
+    runEthLinkCommand(cfg, cmdLower);
+  } else if (strncmp(cmdLower, "drv", 3) == 0 && (cmdLower[3] == '\0' || cmdLower[3] == ' ')) {
+    runDrvCommand(cfg, cmd);
   } else if (strcmp(cmdLower, "limits") == 0) {
     printLimits(cfg);
   } else if (strcmp(cmdLower, "pins") == 0) {
@@ -2585,6 +3920,14 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     const bool moveZ = fabsf(target.z - cur.z) > kHoldEpsMm;
     constexpr float kHoldEpsDeg = 0.1f;
     const bool moveT = fabsf(target.theta - cur.theta) > kHoldEpsDeg;
+    if (!cfg->gantry->isWorkspaceCalibrated()) {
+      ESP_LOGE(TAG,
+               "ERROR: Move blocked — workspace not calibrated. Run "
+               "'calibrate all' (query with 'calibrated'). Flag clears on every "
+               "ESP reboot (OTA, power, crash) and when a drive loses position "
+               "(motor 24 V / encoder ref).");
+      return;
+    }
     if (moveX && (!g_homeCompletedThisSession || !g_calibratedThisSession)) {
       ESP_LOGE(TAG,
                "ERROR: X move blocked. Run 'home x' then 'calibrate x' "
@@ -2602,6 +3945,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGE(TAG, "ERROR: Theta move requested but axis not compiled in");
         return;
       }
+      resolveThetaHome(cfg);
       if (!g_homeThetaThisSession || !g_calibratedThetaThisSession) {
         ESP_LOGE(TAG,
                  "ERROR: Theta move blocked. Run 'home t' then 'calibrate t' "
@@ -2609,10 +3953,11 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         return;
       }
       if (!cfg->gantry->zInTraverseBand()) {
-        ESP_LOGE(TAG,
-                 "ERROR: theta move blocked — Z above SAFE_Z band ceiling "
-                 "(%.1f mm). Theta only while Z is in the retract/traverse "
-                 "band. Linear path still runs.",
+        // Not a rejection: the path planner defers theta into the in-band
+        // segment (or logs [INTERLOCK] if it cannot).
+        ESP_LOGI(TAG,
+                 "Theta deferred until Z is in the SAFE_Z band (ceiling "
+                 "%.1f mm); the path rotates once Z retracts.",
                  (double)cfg->gantry->traverseClearanceZMm());
       }
     }
@@ -2649,6 +3994,62 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
         ESP_LOGI(TAG, "Gantry reports busy - wait for motion to finish, or 'stop' then 'enable'");
       }
     }
+  } else if (strcmp(cmdLower, "boottime") == 0) {
+    const Network::EthernetBootTimes bt = Network::ethernetBootTimes();
+    ESP_LOGI(TAG, "boottime reset=%d (ms since app start, -1 = not reached): eth_start=%lld "
+                  "eth_started=%lld phy_link_up=%lld got_ip=%lld",
+             static_cast<int>(esp_reset_reason()),
+             bt.start_us < 0 ? -1LL : static_cast<long long>(bt.start_us / 1000),
+             bt.eth_started_us < 0 ? -1LL : static_cast<long long>(bt.eth_started_us / 1000),
+             bt.link_up_us < 0 ? -1LL : static_cast<long long>(bt.link_up_us / 1000),
+             bt.got_ip_us < 0 ? -1LL : static_cast<long long>(bt.got_ip_us / 1000));
+  } else if (strncmp(cmdLower, "flashstall ", 11) == 0) {
+    char mode[8] = {};
+    int writes = 96;
+    const int got = sscanf(cmdLower + 11, "%7s %d", mode, &writes);
+    const bool erase = strcmp(mode, "erase") == 0;
+    char line[200];
+    if (got < 1 || (!erase && strcmp(mode, "write") != 0)) {
+      ESP_LOGE(TAG, "usage: flashstall erase|write [n]");
+      return;
+    }
+    if (gantryOtaFlashStallTest(cfg->gantry, erase, writes, line, sizeof(line)) != ESP_OK) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strcmp(cmdLower, "netstat") == 0 || strcmp(cmdLower, "netstat reset") == 0) {
+    char line[200];
+    if (!pickSchedulerNetStats(strcmp(cmdLower, "netstat reset") == 0, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "vismark", 7) == 0) {
+    const char* arg = cmdLower + 7;
+    while (*arg == ' ') {
+      ++arg;
+    }
+    char line[160];
+    const bool on = strcmp(arg, "on") == 0;
+    if ((!on && strcmp(arg, "off") != 0) || !pickSchedulerVisMark(on, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", (on || strcmp(arg, "off") == 0) ? line : "usage: vismark on|off");
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "gripmark", 8) == 0) {
+    // Ahead of "grip", whose prefix test would also take "gripmark".
+    const char* arg = cmdLower + 8;
+    while (*arg == ' ') {
+      ++arg;
+    }
+    char line[160];
+    const bool on = strcmp(arg, "on") == 0;
+    if ((!on && strcmp(arg, "off") != 0) || !pickSchedulerGripMark(on, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", (on || strcmp(arg, "off") == 0) ? line : "usage: gripmark on|off");
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
   } else if (strncmp(cmdLower, "grip", 4) == 0) {
     int value = 0;
     int parsed = sscanf(cmd, "grip %d", &value);
@@ -2658,8 +4059,129 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
     }
     cfg->gantry->grip(value != 0);
     ESP_LOGI(TAG, "OK Gripper %s", value ? "closed" : "opened");
+  } else if (strncmp(cmdLower, "picksim", 7) == 0) {
+    float x_mm = 0.0f;
+    float y_mm = 0.0f;
+    float theta_deg = 0.0f;
+    int battery_class = 0;
+    unsigned item_id = 0;
+    float width_mm = 0.0f;
+    float length_mm = 0.0f;
+    float height_from_belt_mm = 0.0f;
+    const int n = sscanf(cmdLower, "picksim %f %f %f %d %u %f %f %f", &x_mm, &y_mm, &theta_deg,
+                         &battery_class, &item_id, &width_mm, &length_mm, &height_from_belt_mm);
+    if (n != 8) {
+      ESP_LOGE(TAG,
+               "Usage: picksim <x> <y> <theta> <class 1-13> <item_id> <width_mm> <length_mm> <height_from_belt_mm>");
+      return;
+    }
+    if (!pickSchedulerInject(x_mm, y_mm, theta_deg, static_cast<uint8_t>(battery_class), item_id,
+                             width_mm, length_mm, height_from_belt_mm)) {
+      ESP_LOGE(TAG, "ERROR: picksim not queued");
+    }
+  } else if (strncmp(cmdLower, "pickplan", 8) == 0) {
+    float x_mm = 0.0f;
+    float y_mm = 0.0f;
+    float theta_deg = 0.0f;
+    int battery_class = 0;
+    unsigned item_id = 0;
+    float width_mm = 0.0f;
+    float length_mm = 0.0f;
+    float height_from_belt_mm = 0.0f;
+    const int n = sscanf(cmdLower, "pickplan %f %f %f %d %u %f %f %f", &x_mm, &y_mm, &theta_deg,
+                         &battery_class, &item_id, &width_mm, &length_mm, &height_from_belt_mm);
+    if (n != 8) {
+      ESP_LOGE(TAG,
+               "Usage: pickplan <x> <y> <theta> <class 1-13> <item_id> <width_mm> <length_mm> <height_from_belt_mm>");
+      return;
+    }
+    char plan[512];
+    if (!pickSchedulerPlan(x_mm, y_mm, theta_deg, static_cast<uint8_t>(battery_class), item_id,
+                           plan, sizeof(plan), width_mm, length_mm, height_from_belt_mm)) {
+      ESP_LOGE(TAG, "ERROR: %s", plan);
+      return;
+    }
+    ESP_LOGI(TAG, "pickplan %s", plan);
+  } else if (strncmp(cmdLower, "pickcover", 9) == 0) {
+    int cls = 1;
+    if (sscanf(cmdLower, "pickcover %d", &cls) != 1) {
+      cls = 1;
+    }
+    char line[384];
+    if (!pickSchedulerCover(static_cast<uint8_t>(cls), line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "pickcover %s", line);
+  } else if (strncmp(cmdLower, "pickcal", 7) == 0) {
+    const char* args = cmdLower + 7;
+    while (*args == ' ') {
+      ++args;
+    }
+    char line[384];
+    if (!pickSchedulerCalibrate(args, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "beltsim", 7) == 0) {
+    float mm_s = 0.0f;
+    if (sscanf(cmdLower, "beltsim %f", &mm_s) != 1) {
+      ESP_LOGE(TAG, "Usage: beltsim <mm_s>  (0 = off)");
+      return;
+    }
+    char line[160];
+    if (!pickSchedulerBeltSim(mm_s, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "ztrace", 6) == 0) {
+    const char* args = cmdLower + 6;
+    while (*args == ' ') {
+      ++args;
+    }
+    char line[512];
+    if (!pickSchedulerTrace(args, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "thtrace", 7) == 0) {
+    const char* args = cmdLower + 7;
+    while (*args == ' ') {
+      ++args;
+    }
+    char line[768];
+    if (!thetaTraceCommand(cfg->gantry, args, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strncmp(cmdLower, "beltcal", 7) == 0) {
+    const char* arg = cmdLower + 7;
+    while (*arg == ' ') {
+      ++arg;
+    }
+    char line[384];
+    if (!pickSchedulerBeltCal(arg, line, sizeof(line))) {
+      ESP_LOGE(TAG, "ERROR: %s", line);
+      return;
+    }
+    ESP_LOGI(TAG, "%s", line);
+  } else if (strcmp(cmdLower, "netcon") == 0) {
+    char line[480];
+    gantryNetConsoleStats(line, sizeof(line));
+    ESP_LOGI(TAG, "%s", line);
   } else if (strcmp(cmdLower, "eiptiming") == 0) {
     eip::dumpClass1TimingStats();
+  } else if (strcmp(cmdLower, "gaptrace") == 0) {
+    eip::printLastClass1GapReport();
+  } else if (strcmp(cmdLower, "bootlog") == 0) {
+    ESP_LOGI(TAG, "=== boot log (%u bytes captured from reset) ===",
+             static_cast<unsigned>(bootLogRingBytes()));
+    bootLogRingForEach(
+        [](const char *line, void *) { ESP_LOGI(TAG, "boot| %s", line); }, nullptr);
   } else if (strcmp(cmdLower, "stop") == 0) {
     // Stop motion while servos stay enabled, then disable. Do not reverse
     // that order: disable-only left sticky CIP; re-enable ClearCip StopMotion
@@ -2704,21 +4226,24 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 }
 }  // namespace
 
+// The sink swap takes only the short tee lock, never g_consoleCmdMutex: a UART
+// command holds that for its whole run (calibrate all: up to 120 s), which
+// stalled a TCP connect or disconnect behind it. Loggers read the sink pair
+// unlocked; sendAll's live-fd check drops a line a swap leaves stale.
 void gantryConsoleAttachLogSink(GantryConsoleReplyFn fn, void *ctx) {
-  ensureConsoleMutex();
-  if (g_consoleCmdMutex != nullptr) {
-    xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
-  }
-  g_sessionFn = fn;
-  g_sessionCtx = ctx;
-  if (fn != nullptr) {
-    installTeeIfNeeded();
-  } else {
-    uninstallTeeIfIdle();
-  }
-  if (g_consoleCmdMutex != nullptr) {
-    xSemaphoreGive(g_consoleCmdMutex);
-  }
+    ensureConsoleMutex();
+    if (g_teeMutex != nullptr) {
+        xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+    }
+    setFnCtx(&g_sessionFn, &g_sessionCtx, fn, ctx);
+    if (fn != nullptr) {
+        installTeeIfNeeded();
+    } else {
+        uninstallTeeIfIdle();
+    }
+    if (g_teeMutex != nullptr) {
+        xSemaphoreGive(g_teeMutex);
+    }
 }
 
 void gantryConsoleDetachLogSink(void) {
@@ -2732,22 +4257,29 @@ void gantryConsoleProcessLine(const GantryTestConsoleConfig *cfg, const char *li
     xSemaphoreTake(g_consoleCmdMutex, portMAX_DELAY);
   }
 
+  if (g_teeMutex != nullptr) {
+    xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+  }
   const bool use_temp_tee = (reply_fn != nullptr && g_sessionFn == nullptr);
-  g_replyFn = reply_fn;
-  g_replyCtx = reply_ctx;
+  setFnCtx(&g_replyFn, &g_replyCtx, reply_fn, reply_ctx);
   if (use_temp_tee) {
     installTeeIfNeeded();
+  }
+  if (g_teeMutex != nullptr) {
+    xSemaphoreGive(g_teeMutex);
   }
 
   processCommand(cfg, line);
 
+  if (g_teeMutex != nullptr) {
+    xSemaphoreTake(g_teeMutex, portMAX_DELAY);
+  }
+  setFnCtx(&g_replyFn, &g_replyCtx, nullptr, nullptr);
   if (use_temp_tee) {
-    g_replyFn = nullptr;
-    g_replyCtx = nullptr;
     uninstallTeeIfIdle();
-  } else {
-    g_replyFn = nullptr;
-    g_replyCtx = nullptr;
+  }
+  if (g_teeMutex != nullptr) {
+    xSemaphoreGive(g_teeMutex);
   }
 
   if (g_consoleCmdMutex != nullptr) {
@@ -2761,14 +4293,24 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  help                 - show this help");
   ESP_LOGI(TAG, "  status               - print gantry status");
+  ESP_LOGI(TAG, "  calibrated           - query workspace calibrated latch "
+                "(Yes until a drive loses position or the ESP reboots)");
   ESP_LOGI(TAG, "  faults | alarms      - decode X/Z Kinetix and theta HCS01 diag");
   ESP_LOGI(TAG, "  puuinfo              - print X/Z PUU/mm and theta PUU/deg");
   ESP_LOGI(TAG, "  eiptiming            - dump Class 1 latency p50/p99 (exchange/ot/cycle/cmd2start)");
+  ESP_LOGI(TAG, "  gaptrace             - last Class 1 gap >= 10 ms: breakdown + CPU ms per task");
+  ESP_LOGI(TAG, "  bootlog              - print the first ~12 KB of log output since reset");
+  ESP_LOGI(TAG, "  ethlink <x|z|t> [1|2] [clear] - drive port speed/duplex/negotiation + error counters");
+  ESP_LOGI(TAG, "  drv read [t|x|z|all] | drv hcs <get|set|cmd> ... | drv k5100 <get|set> ...");
   ESP_LOGI(TAG, "  puu t <scale>        - set live theta PUU/deg (re-run home t)");
   ESP_LOGI(TAG, "  puucal <x|z|t> c m   - suggest (x/z) or apply (t) PUU scale from commanded vs measured");
   ESP_LOGI(TAG, "  thetalim <min> <max> - set theta software joint limits (deg); "
                 "clamped to captured envelope after home t");
+#if GANTRY_CONSOLE_AUTOTUNE
   ESP_LOGI(TAG, "  autotune [theta|t]   - run or guide driver-level inertia auto-tuning (ERD-04/HCS01 C1800)");
+#else
+  ESP_LOGI(TAG, "  autotune             - DISABLED this version (IndraWorks / KNX5100C / hcs01_eng.py)");
+#endif
   ESP_LOGI(TAG, "  ota                  - print Dual-OTA partition status, image state, and version");
   ESP_LOGI(TAG, "  limits               - read limit switches");
   ESP_LOGI(TAG, "  pins                 - print active pin configuration");
@@ -2796,6 +4338,27 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "  axislog <hz>         - set per-axis MOVE periodic rate (0=off; START/END always on)");
   ESP_LOGI(TAG, "  move <x> <z> <t>     - move to (x_linear, z_linear, theta_deg); +Z=down, z=A015 retract");
   ESP_LOGI(TAG, "  grip <0|1>           - control gripper (0=open, 1=close)");
+  ESP_LOGI(TAG, "  picksim <x> <y> <t> <class> <id> <w> <len> <h> - synthetic pick; class 1-10, packs 11-13");
+  ESP_LOGI(TAG, "  pickplan <x> <y> <t> <class> <id> <w> <len> <h> - dry-run the vision contract");
+  ESP_LOGI(TAG, "  beltsim <mm_s>                - synthetic conveyor clock (0 = off)");
+  ESP_LOGI(TAG, "  ztrace [raw <start> <count>]  - last strike's 1 kHz Z trace");
+  ESP_LOGI(TAG, "  thtrace [arm|off|raw <start> <count>] - 1 kHz trace of the next theta move");
+  ESP_LOGI(TAG, "  netcon                        - TCP console send counters");
+  ESP_LOGI(TAG, "  gripmark on|off               - grip timing marker on GPIO17 (TFT backlight off)");
+  ESP_LOGI(TAG, "  vismark on|off                - vision frame receipt marker on GPIO17 (TFT backlight off)");
+  ESP_LOGI(TAG, "  netstat [reset]               - CellNet RX counters and EMAC drop counters");
+  ESP_LOGI(TAG, "  boottime                      - Ethernet start / PHY link-up / IP times since app start");
+  ESP_LOGI(TAG, "  flashstall erase|write [n]    - erase, then n back-to-back 4 KB writes, passive slot from 1.5 MB (motors off)");
+  ESP_LOGI(TAG, "  beltcal [near|far|cnvyr near|cnvyr far|batt|z|apply [center]] - belt/conveyor/battery X");
+  ESP_LOGI(TAG, "  pickcover [class]    - pick or skip per cell angle (5 deg steps, 0 across, 90 along the belt)");
+  ESP_LOGI(TAG, "  pickcal valve <ms> | jaw <class> <ms, 0=derived> | jawoff <deg> | cam mark | cam apply");
+  ESP_LOGI(TAG, "  cfg                  - list settings (same keys as the panel menu)");
+  ESP_LOGI(TAG, "  cfg <key> [value]    - read or set a setting; developer keys need unlock");
+  ESP_LOGI(TAG, "  cfg unlock <pw>      - unlock developer settings");
+  ESP_LOGI(TAG, "  cfg lock             - lock developer settings");
+  ESP_LOGI(TAG, "  cfg passwd <old> <new> - change developer password (unlocked)");
+  ESP_LOGI(TAG, "  cfg factory          - factory reset stored settings");
+  ESP_LOGI(TAG, "  cfg reboot           - restart (apply reboot-required settings)");
     ESP_LOGI(TAG, "  test_cycle           - 8-stage holistic test: arm, bring-up, bounds check, legs A-F, pick+place grip, dynamics, theta G-I, telemetry");
   ESP_LOGI(TAG, "  test_theta_path      - combined in-band X+Z+theta (25-75 "
                 "window) using live thetalim-safe dtheta; enable+bring-up first");
@@ -2807,21 +4370,36 @@ void gantryTestPrintHelp() {
   ESP_LOGI(TAG, "");
 }
 
+void gantryConsoleLoadStoredProfile() {
+  g_moveSpeedMmPerS = static_cast<uint32_t>(stored().gantry_default_speed_mm_per_s);
+  g_moveSpeedDegPerS = static_cast<uint32_t>(stored().gantry_default_speed_deg_per_s);
+  g_moveAccelMmPerS2 = static_cast<uint32_t>(stored().gantry_default_accel_mm_per_s2);
+  g_moveDecelMmPerS2 = static_cast<uint32_t>(stored().gantry_default_decel_mm_per_s2);
+  g_moveAccelDegPerS2 = static_cast<uint32_t>(stored().gantry_default_accel_deg_per_s2);
+  g_moveDecelDegPerS2 = static_cast<uint32_t>(stored().gantry_default_decel_deg_per_s2);
+}
+
 void gantryTestConsoleTask(void *param) {
   auto *cfg = static_cast<GantryTestConsoleConfig *>(param);
 
   char inputLine[256];
   size_t inputIndex = 0;
 
+  Config::AppConfig::instance().setSaveHandler([cfg]() { return saveParameters(cfg); });
   ESP_LOGI(TAG, "Serial task started");
   ESP_LOGI(TAG, "Type 'help' for commands");
+  startWorkspaceUncalibrated(cfg->gantry);
 
   while (1) {
-    monitorControlVariableFlips(cfg);
-    logLiveMotionState(cfg);
-
-    int c = getchar();
-    if (c >= 0) {
+    // Drain UART before status polling so a typed line is not held behind
+    // Gantry mutex / CTRL FLIP work after Class 1 starts.
+    bool got_char = false;
+    for (;;) {
+      const int c = getchar();
+      if (c < 0) {
+        break;
+      }
+      got_char = true;
       if (c == '\n' || c == '\r' || c == ';') {
         if (inputIndex > 0) {
           inputLine[inputIndex] = '\0';
@@ -2832,6 +4410,11 @@ void gantryTestConsoleTask(void *param) {
       } else if (c >= 32 && c <= 126 && inputIndex < sizeof(inputLine) - 1) {
         inputLine[inputIndex++] = static_cast<char>(c);
       }
+    }
+
+    if (!got_char) {
+      monitorControlVariableFlips(cfg);
+      logLiveMotionState(cfg);
     }
 
     vTaskDelay(pdMS_TO_TICKS(1));

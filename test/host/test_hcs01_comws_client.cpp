@@ -93,6 +93,40 @@ void test_getvar_parses_response(void) {
     
     TEST_ASSERT_TRUE(ok);
     TEST_ASSERT_EQUAL_STRING("1234", val);
+    TEST_ASSERT_FALSE(tcp.isConnected());
+}
+
+void test_protected_idns_are_blocked(void) {
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("P-0-4089.0.13"));
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("P-0-4089.0.14"));
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("P-0-4089.0.15"));
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("S-0-1020"));
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("S-0-1021.0.0"));
+    TEST_ASSERT_TRUE(Hcs01ComwsClient::isProtectedIdn("S-0-1022.0.0"));
+    TEST_ASSERT_FALSE(Hcs01ComwsClient::isProtectedIdn("S-0-0092"));
+    TEST_ASSERT_FALSE(Hcs01ComwsClient::isProtectedIdn("S-0-0109.0.0"));
+    TEST_ASSERT_FALSE(Hcs01ComwsClient::isProtectedIdn("P-0-0109"));
+
+    FakeTcpClient tcp;
+    Hcs01ComwsClient client(tcp);
+    tcp.setResponse("HTTP/1.0 200 OK\r\n\r\nLogin OK");
+    client.connect();
+    char reply[64] = {0};
+    TEST_ASSERT_FALSE(client.setVar("P-0-4089.0.13", "192.168.1.99"));
+    TEST_ASSERT_FALSE(client.setVarElement7("S-0-1020", "192.168.1.99", reply, sizeof(reply)));
+}
+
+void test_setvar_element7_succeeds(void) {
+    FakeTcpClient tcp;
+    Hcs01ComwsClient client(tcp);
+    tcp.setResponse("HTTP/1.0 200 OK\r\n\r\nLogin OK");
+    client.connect();
+
+    tcp.setResponse("HTTP/1.0 200 OK\r\n\r\nOK\r\n");
+    char reply[64] = {0};
+    TEST_ASSERT_TRUE(client.setVarElement7("S-0-0092", "322.5", reply, sizeof(reply)));
+    TEST_ASSERT_EQUAL_STRING("OK", reply);
+    TEST_ASSERT_NOT_NULL(std::strstr(tcp.last_request.c_str(), "var=0,1,S-0-0092.0.0.7&value=322.5"));
 }
 
 int main(void) {
@@ -103,5 +137,7 @@ int main(void) {
     RUN_TEST(test_parse_status_word_hex);
     RUN_TEST(test_parse_status_word_binary);
     RUN_TEST(test_getvar_parses_response);
+    RUN_TEST(test_protected_idns_are_blocked);
+    RUN_TEST(test_setvar_element7_succeeds);
     return UNITY_END();
 }

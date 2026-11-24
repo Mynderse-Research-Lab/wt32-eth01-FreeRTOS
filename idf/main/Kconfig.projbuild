@@ -13,6 +13,15 @@ menu "Gantry application"
             command and the basic_tests.cpp source from the firmware without
             losing test coverage.
 
+    config GANTRY_UPDATE_PERIOD_MS
+        int "Gantry update period (ms)"
+        range 2 10
+        default 10
+        help
+            Period of the GantryUpdate task. 10 ms is the default. The Z
+            strike edge is published from PickStrike and does not wait on
+            this loop. Do not set this below the 2 ms Class 1 RPI.
+
     config GANTRY_SUPPRESS_GEOMETRY_WARNING
         bool "Suppress dev-rig geometry compile reminder"
         default n
@@ -75,11 +84,12 @@ menu "Gantry kinematics"
 
         config GANTRY_PATH_MAX_SPEED_MM_PER_S
             int "2-D path speed ceiling (mm/s)"
-            default 500
-            range 1 2000
+            default 2000
+            range 1 5000
             help
-                Console rangelimit ceiling for path speed. Z ballscrew
-                critical-RPM derived cap is still applied as a protective clamp.
+                Console rangelimit ceiling for path speed. Effective speed
+                may be set above 1 m/s. The Z ballscrew critical-RPM figure
+                is commissioning data, not this ceiling.
 
         config GANTRY_PATH_MAX_ACCEL_MM_PER_S2
             int "2-D path accel ceiling (mm/s^2)"
@@ -223,6 +233,16 @@ menu "Gantry kinematics"
         config AXIS_THETA_HARD_LIMIT_MAX_DEG
             float "Hard limit max (deg)"
             default 180.0
+        config AXIS_THETA_DRIVE_ABS_MIN_DEG
+            float "Drive-absolute window lower limit (deg)"
+            default -180.0
+            help
+                Drive-absolute window lower limit enforced by F2057 (S-0-0051).
+        config AXIS_THETA_DRIVE_ABS_MAX_DEG
+            float "Drive-absolute window upper limit (deg)"
+            default 180.0
+            help
+                Drive-absolute window upper limit enforced by F2057 (S-0-0051).
         config AXIS_THETA_MAX_SPEED_DEG_PER_S
             float "Max speed (deg/s)"
             default 3600.0
@@ -261,7 +281,7 @@ menu "Gantry kinematics"
             default 80.0
         config GANTRY_SAFE_Z_HEIGHT_MM
             float "Z+ clearance margin (mm below Z+)"
-            default 35.7
+            default 48.4
             help
                 Coordinated X+Z Absolute only while joint Z is within this
                 margin of Z+ (band floor = z_max - this). Below that band,
@@ -273,12 +293,91 @@ menu "Gantry kinematics"
             help
                 During EIP bring-up calibrate-all: after X stroke is measured,
                 move to this X before seeking Z+ (stroke).
+                The tunable bin-drop X (geom_cal_x_mm) is a separate runtime
+                setting and does not move this bring-up park.
+
+        config GANTRY_CAL_Z_PARK_MM
+            float "Bin drop height (mm)"
+            default 90.8
+            help
+                Joint Z (+Z down) where the gripper opens above the drop bins.
+                Tunable at runtime as geom_cal_z_mm.
+
+        config GANTRY_CAL_THETA_PARK_DEG
+            float "Bin drop orientation (deg)"
+            default 90.0
+            help
+                Theta at the drop bins. Tunable at runtime as geom_cal_th_deg.
+
+        config GANTRY_CONVEYOR_COLLISION_X_MIN_MM
+            float "Conveyor collision envelope X threshold (mm)"
+            default 95.0
+            help
+                With current gripper jaws: when X >= this threshold, the gripper
+                extends over the conveyor belt region.
+
+        config GANTRY_CONVEYOR_COLLISION_Z_MIN_MM
+            float "Conveyor collision envelope Z lower limit (mm)"
+            default 115.0
+            help
+                With current gripper jaws: when X >= X_MIN_MM over the conveyor,
+                lowering Z to or beyond this limit causes physical collision
+                with the conveyor belt/frame.
+
         config GANTRY_GRIPPER_OPEN_TIME_MS
             int "Gripper open time (ms)"
             default 190
         config GANTRY_GRIPPER_CLOSE_TIME_MS
             int "Gripper close time (ms)"
-            default 150
+            default 190
+    endmenu
+
+    menu "Conveyor intercept (pick scheduler)"
+        config CONVEYOR_Y_CAM_MM
+            float "Camera Y position along belt (mm)"
+            default -711.0
+        config CONVEYOR_Y_PICK_MM
+            float "Pick Y position along belt (mm)"
+            default 0.0
+        config CONVEYOR_X_ACROSS_TO_GANTRY_X_OFFSET_MM
+            float "Camera X, belt center (mm)"
+            default 245.0
+            help
+                Gantry X of the camera. Vision x_across is measured from the
+                camera, and gantry X is x_across plus this value. The camera
+                sits at the belt center: 150 mm past the conveyor edge at
+                95 mm. Runtime key vis_x_off_mm, no reboot.
+
+        config CONVEYOR_BELT_WIDTH_MM
+            float "Belt width across X (mm)"
+            default 300.0
+            help
+                Width of the belt along gantry X. Runtime key cv_belt_w_mm,
+                no reboot.
+        config PICK_DEFAULT_BELT_SPEED_MM_S
+            float "Default belt speed (mm/s)"
+            default 1524.0
+    endmenu
+
+    menu "Homing and calibration"
+        config EIP_HOME_CAL_SPEED_MM_S
+            float "Home / cal search speed (mm/s)"
+            default 50.0
+        config EIP_HOME_THETA_SPEED_DEG_S
+            float "Home / cal theta speed (deg/s)"
+            default 15.0
+        config EIP_HOME_CAL_ACCEL_MM_S2
+            float "Home / cal accel (mm/s^2)"
+            default 2000.0
+        config EIP_CREEP_SPEED_MM_S
+            float "Creep speed toward switch-clear (mm/s)"
+            default 1.0
+        config GANTRY_CALIBRATION_TIMEOUT_MS
+            int "Calibration timeout (ms)"
+            default 20000
+        config GANTRY_TRAVEL_MEASUREMENT_TIMEOUT_MS
+            int "Travel measurement timeout (ms)"
+            default 20000
     endmenu
 
 endmenu
@@ -297,6 +396,13 @@ menu "LAN8720 plant Ethernet"
         default "192.168.1.100"
         depends on ETH_USE_STATIC_IP
 
+    config NTP_SERVER
+        string "NTP server (supervisor)"
+        default "10.42.0.1"
+        help
+            Runtime key ntp_server, reboot to apply. The clock only stamps the
+            stored parameter set; motion runs on esp_timer.
+
     config ETH_STATIC_GATEWAY
         string "LAN8720 static gateway"
         default "192.168.1.5"
@@ -309,7 +415,7 @@ menu "LAN8720 plant Ethernet"
 
     config ETH_IP_WAIT_TIMEOUT_MS
         int "Wait for LAN8720 PHY+IP (ms)"
-        default 3000
+        default 1500
         range 100 60000
         help
             How long Bridge / net-console bring-up waits for link+IP.
@@ -363,7 +469,7 @@ menu "TCP gantry console (LAN8720)"
 
     config CONSOLE_TCP_AUTH_REMEMBER_S
         int "Remember authenticated peer IP (seconds)"
-        default 600
+        default 60
         range 0 86400
         depends on CONSOLE_TCP_AUTH_ENABLE
         help
@@ -404,3 +510,22 @@ menu "TCP gantry console (LAN8720)"
     endchoice
 
 endmenu
+
+menu "OTA and Developer mode security"
+
+    config OTA_SERVER_PORT
+        int "TCP OTA firmware streaming port"
+        default 8032
+        range 1 65535
+        help
+            Port for the background TCP OTA server task on LAN8720.
+
+    config DEV_MODE_PASSWORD
+        string "Default Developer Mode password"
+        default "DEV_2026"
+        help
+            Initial password required to unlock Developer Mode in the TFT settings menu.
+            Can be changed at runtime via the UI if the previous password is known.
+
+endmenu
+

@@ -59,6 +59,13 @@ menu "EtherNet/IP originator"
             192.168.1.22, MAC …B6). CIP is on the FKM MAC (…B9).
             Must not collide with X .20 / Z .21 / W5500 .10.
 
+    config EIP_HCS01_ENG_IP
+        string "Theta-axis HCS01 Engineering HTTP IP address"
+        default "192.168.1.22"
+        depends on EIP_AXIS_THETA
+        help
+            HTTP COMWS address for Rexroth IndraWorks / service API.
+
     config EIP_TARGET_IP
         string "Target drive IP address (legacy idle scanner)"
         default "192.168.1.20"
@@ -92,14 +99,13 @@ menu "EtherNet/IP originator"
 
     config EIP_W5500_SPI_HZ
         int "W5500 SPI clock (Hz)"
-        default 20000000
+        default 10000000
         depends on EIP_SCANNER_ENABLED
         range 1000000 80000000
         help
-            SPI clock for WIZ850io / W5500. Default 20 MHz — ESP-IDF v6
-            full-duplex on GPIO-matrix pins rejects >~26.67 MHz. Chip max
-            is 80 MHz; raise only with IOMUX pins or SPI_DEVICE_NO_DUMMY
-            and SI validation.
+            SPI clock for WIZ850io / W5500. Default 10 MHz for reliable signal
+            integrity across ESP32 GPIO-matrix routing and carrier traces.
+            Chip max is 80 MHz; raise to 20 MHz only with validated SI.
     config EIP_AXIS_X_PUU_PER_MM
         float "X-axis PUU/mm scaling (Kinetix 5100)"
         default 52428.8

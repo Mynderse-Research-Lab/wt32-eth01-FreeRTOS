@@ -39,13 +39,16 @@ struct ScannerConfig {
   uint16_t connection_serial = 0x0001;
   uint16_t originator_vendor_id = 0;
   uint32_t originator_serial = 0xCAFEB00D;
-  uint8_t connection_timeout_multiplier = 4;
+  uint8_t connection_timeout_multiplier = 0;
   bool include_run_idle_header = true;
-  /// When true, set bit 8 (Run/Idle header format) in O->T network params.
-  /// When false, omit bit 8 even when include_run_idle_header is true
-  /// (required by Kinetix 5100 which wants the 4-byte header on the wire
-  /// but does not conform to the standard bit-8 signalling convention).
+  /// When true, set bit 8 in O->T network params. Leave false: bit 8 belongs to
+  /// Connection Size (ODVA Vol 1, Table 3-5.8). The target learns the 4-byte
+  /// header from the connection path (Vol 1, section 3-6.1), not from a flag.
   bool include_run_idle_bit_in_net_params = false;
+  /// Read TCP/IP object attribute 13 before Forward Open to set the NOP period.
+  /// When false the spec default (120 s) is assumed; host fakes that answer a
+  /// fixed reply sequence leave it off.
+  bool read_encap_inactivity_timeout = false;
   ConnectionType to_connection_type = ConnectionType::kMulticast;
 };
 

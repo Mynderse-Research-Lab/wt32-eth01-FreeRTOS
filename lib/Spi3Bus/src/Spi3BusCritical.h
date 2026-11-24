@@ -10,13 +10,20 @@ namespace spi3 {
 
 class Class1Critical {
 public:
-    void enter() { count_.fetch_add(1, std::memory_order_acq_rel); }
+    /// Returns true on the idle -> active transition (first enter).
+    bool enter() {
+        return count_.fetch_add(1, std::memory_order_acq_rel) == 0;
+    }
 
-    void exit() {
+    /// Returns true on the active -> idle transition (last exit). An unmatched
+    /// exit clamps to 0 and also reports idle so waiters are never stranded.
+    bool exit() {
         const int v = count_.fetch_sub(1, std::memory_order_acq_rel);
         if (v <= 0) {
             count_.store(0, std::memory_order_release);
+            return true;
         }
+        return v == 1;
     }
 
     bool active() const {

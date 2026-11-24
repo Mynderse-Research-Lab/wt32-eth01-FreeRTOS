@@ -12,8 +12,9 @@ idf_component_register(
         esp_event
         freertos
         log
-        lan87xx
+        espressif__lan87xx
         nvs_flash
     PRIV_REQUIRES
         esp_driver_gpio
+        esp_timer
 )

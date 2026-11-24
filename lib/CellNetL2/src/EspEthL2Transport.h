@@ -9,20 +9,21 @@
 #ifdef ESP_PLATFORM
 
 #include "IL2Transport.h"
-#include "esp_err.h"
+#include "esp_eth.h"
+#include "esp_netif.h"
 #include "esp_eth_driver.h"
 
 namespace CellNet {
 
 class EspEthL2Transport : public IL2Transport {
  public:
-  explicit EspEthL2Transport(esp_eth_handle_t eth_handle = nullptr);
+  explicit EspEthL2Transport();
   ~EspEthL2Transport() override = default;
 
   /**
    * @brief Bind the transport to an initialized ESP-IDF Ethernet handle.
    */
-  esp_err_t attachEthHandle(esp_eth_handle_t eth_handle);
+  esp_err_t attachEthHandle(esp_eth_handle_t eth_handle, esp_netif_t* netif);
 
   // IL2Transport interface overrides
   bool sendFrame(const uint8_t* data, size_t length) override;
@@ -32,6 +33,7 @@ class EspEthL2Transport : public IL2Transport {
 
  private:
   esp_eth_handle_t eth_handle_{nullptr};
+  esp_netif_t* netif_{nullptr};
   RxFrameCallback rx_callback_{nullptr};
   bool hooked_{false};
 

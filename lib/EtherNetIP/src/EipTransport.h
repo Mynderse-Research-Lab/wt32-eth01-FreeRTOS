@@ -67,6 +67,11 @@ class ITcpClient {
   virtual ~ITcpClient() = default;
   virtual bool connect(const char* host, uint16_t port) = 0;
   virtual ssize_t send(const uint8_t* data, size_t len) = 0;
+  /// Send without waiting for the chip to confirm it; a failure shows up on
+  /// the next call. Only for a rare frame from the Class 1 task.
+  virtual ssize_t sendNoWait(const uint8_t* data, size_t len) {
+      return send(data, len);
+  }
   virtual ssize_t recv(uint8_t* buf, size_t max_len, uint32_t timeout_ms) = 0;
   virtual void close() = 0;
   virtual bool isConnected() const = 0;

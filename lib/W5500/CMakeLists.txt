@@ -4,6 +4,8 @@ idf_component_register(
         "src/W5500Socket.cpp"
         "src/W5500SpiHal.cpp"
         "src/W5500BusMutex.cpp"
+        "src/W5500Diag.cpp"
+        "src/W5500DeferredLog.cpp"
     INCLUDE_DIRS
         "src"
     REQUIRES

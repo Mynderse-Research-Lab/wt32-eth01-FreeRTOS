@@ -17,7 +17,8 @@ public:
     bool begin();
     bool isConfigured() const { return configured_; }
 
-    void setActive(bool active);
+    /// False when unconfigured or the output write failed.
+    bool setActive(bool active);
     bool isActive() const { return active_; }
     int getPin() const { return pin_; }
 

@@ -4,11 +4,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
 
 #include "CipMessageRouter.h"
+#include "CipTcpIpInterface.h"
+#include "EipClass1DeferredLog.h"
 #include "EipClass1Timing.h"
 #include "EipClass1TimingStats.h"
 #include "EipConnectionManager.h"
@@ -18,6 +21,7 @@
 #include "EipMultiScanner.h"
 #include "EipProcessImage.h"
 #include "EipScanner.h"
+#include "EipScannerPolicy.h"
 #include "EipSession.h"
 #include "EipTransport.h"
 
@@ -45,8 +49,23 @@ class FakeTcpClient : public eip::ITcpClient {
     return false;
   }
 
-  bool connect(const char*, uint16_t) override { return true; }
+  // The peer sends FIN: the socket stops being usable until reconnected.
+  void dropByPeer() { connected_ = false; }
+  // The socket still reads connected, but nothing can be sent on it.
+  void failSendsUntilReconnect() { fail_sends_ = true; }
+  void failConnect() { fail_connect_ = true; }
+  void onSend(std::function<void()> hook) { on_send_ = std::move(hook); }
+  size_t connects() const { return connects_; }
+
+  bool connect(const char*, uint16_t) override {
+    ++connects_;
+    connected_ = !fail_connect_;
+    fail_sends_ = false;
+    return connected_;
+  }
   ssize_t send(const uint8_t* data, size_t len) override {
+    if (!connected_ || fail_sends_) return -1;
+    if (on_send_) on_send_();
     last_sent_.assign(data, data + len);
     all_sent_.push_back(last_sent_);
     return static_cast<ssize_t>(len);
@@ -59,13 +78,18 @@ class FakeTcpClient : public eip::ITcpClient {
     return static_cast<ssize_t>(n);
   }
   void close() override {}
-  bool isConnected() const override { return true; }
+  bool isConnected() const override { return connected_; }
 
  private:
   std::vector<Bytes> responses_;
   size_t response_index_ = 0;
   Bytes last_sent_;
   std::vector<Bytes> all_sent_;
+  bool connected_ = true;
+  bool fail_connect_ = false;
+  bool fail_sends_ = false;
+  std::function<void()> on_send_;
+  size_t connects_ = 0;
 };
 
 class FakeUdpEndpoint : public eip::IUdpEndpoint {
@@ -522,6 +546,105 @@ static void test_parse_class1_input_cpf_view(void) {
       addr_only.data(), addr_only.size(), cid_view, assy, assy_len, false));
 }
 
+// One axis opened through a fake drive, for the planned-close tests.
+struct ClosableAxis {
+  FakeTcpClient tcp;
+  FakeUdpEndpoint udp;
+  eip::EipProcessImage image;
+  std::unique_ptr<eip::EipMultiScanner> scanner;
+
+  ClosableAxis() {
+    const uint32_t handle = 0x11110001;
+    tcp.enqueueResponse(makeRegisterSessionReply(handle));
+    tcp.enqueueResponse(
+        makeSendRRDataEncapReply(handle, makeForwardOpenMrReply(makeSampleForwardOpenReply())));
+    eip::ScannerConfig cfg = makeTestScannerConfig();
+    cfg.target_ip = "192.168.1.20";
+    eip::MultiAxisSlot slots[1] = {{cfg, &image}};
+    eip::ITcpClient* tcps[1] = {&tcp};
+    scanner = std::make_unique<eip::EipMultiScanner>(tcps, 1, udp, slots);
+    TEST_ASSERT_TRUE(scanner->openAxis(0));
+    TEST_ASSERT_TRUE(scanner->bindSharedUdp());
+    TEST_ASSERT_TRUE(scanner->axisConnected(0));
+  }
+};
+
+static void test_graceful_close_uses_a_live_session(void) {
+  ClosableAxis ax;
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x11110001, makeForwardCloseMrReply()));
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(1, ax.tcp.connects());
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+static void test_graceful_close_rebuilds_a_dropped_session(void) {
+  ClosableAxis ax;
+  const size_t sent_before = ax.tcp.allSent().size();
+  ax.tcp.dropByPeer();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(2, ax.tcp.connects());
+  // The new session's RegisterSession, then the ForwardClose on it.
+  TEST_ASSERT_TRUE(ax.tcp.allSent().size() >= sent_before + 2);
+  const Bytes& close_frame = ax.tcp.allSent()[sent_before + 1];
+  TEST_ASSERT_EQUAL_HEX8(0x6F, close_frame[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x02, close_frame[4]);
+  TEST_ASSERT_EQUAL_HEX8(0x00, close_frame[5]);
+  TEST_ASSERT_EQUAL_HEX8(0x22, close_frame[6]);
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+// The live failure: the socket still looked connected when the send failed.
+static void test_graceful_close_retries_on_a_new_session_when_the_send_fails(void) {
+  ClosableAxis ax;
+  ax.tcp.failSendsUntilReconnect();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_EQUAL_UINT32(2, ax.tcp.connects());
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+}
+
+// Connected through the close, or the keepalive helper would stop its O->T.
+static void test_graceful_close_keeps_the_axis_connected_until_closed(void) {
+  ClosableAxis ax;
+  ax.tcp.dropByPeer();
+  ax.tcp.enqueueResponse(makeRegisterSessionReply(0x22220002));
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x22220002, makeForwardCloseMrReply()));
+  size_t sends = 0;
+  size_t while_connected = 0;
+  eip::EipMultiScanner* scanner = ax.scanner.get();
+  ax.tcp.onSend([&]() {
+    ++sends;
+    if (scanner->axisConnected(0)) ++while_connected;
+  });
+
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  // RegisterSession and ForwardClose; UnRegisterSession follows the close.
+  TEST_ASSERT_TRUE(sends >= 2);
+  TEST_ASSERT_EQUAL_UINT32(sends - 1, while_connected);
+}
+
+static void test_graceful_close_reports_a_failed_reconnect(void) {
+  ClosableAxis ax;
+  ax.tcp.dropByPeer();
+  ax.tcp.failConnect();
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->axisConnected(0));
+  TEST_ASSERT_FALSE(ax.image.isOnline());
+}
+
+static void test_graceful_close_ignores_a_closed_axis(void) {
+  ClosableAxis ax;
+  ax.tcp.enqueueResponse(makeSendRRDataEncapReply(0x11110001, makeForwardCloseMrReply()));
+  TEST_ASSERT_TRUE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(0));
+  TEST_ASSERT_FALSE(ax.scanner->gracefulCloseAxis(5));
+}
+
 static void test_multi_scanner_dual_demux(void) {
   FakeTcpClient tcp0;
   FakeTcpClient tcp1;
@@ -641,14 +764,17 @@ static void test_class1_rpi_remainder_and_miss_policy(void) {
   }
 
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(0));
-  TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(2));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterInputMisses(1));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(2));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(3));
-  TEST_ASSERT_TRUE(eip::shouldTeardownAfterInputMisses(4));
 
+  // Default teardown window is 10x RPI (20 ms @ 2 ms), below the drive's
+  // 16x RPI CIP timeout (multiplier code 2).
+  TEST_ASSERT_EQUAL_UINT32(10u, eip::kClass1StaleTeardownRpiMultiples);
   TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(0, 2000));
-  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(1999, 2000));
-  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(5999, 2000));
-  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(6000, 2000));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(6000, 2000));
+  TEST_ASSERT_FALSE(eip::shouldTeardownAfterStaleUs(19999, 2000));
+  TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(20000, 2000));
   TEST_ASSERT_TRUE(eip::shouldTeardownAfterStaleUs(1, 0));
 
   // Stale gate stays disarmed until O->T has been sent and N*RPI elapsed.
@@ -744,13 +870,13 @@ static void test_multi_scanner_input_miss_status(void) {
   fo0.ot_connection_id = 0x10000001;
   fo0.to_connection_id = 0x20000001;
   fo0.connection_serial = 0x0001;
-  fo0.to_api_us = 1000;
+  fo0.to_api_us = 5000;
 
   eip::ForwardOpenReply fo1 = makeSampleForwardOpenReply();
   fo1.ot_connection_id = 0x10000002;
   fo1.to_connection_id = 0x20000002;
   fo1.connection_serial = 0x0002;
-  fo1.to_api_us = 1000;
+  fo1.to_api_us = 5000;
 
   const uint32_t h0 = 0x11110001;
   const uint32_t h1 = 0x11110002;
@@ -796,14 +922,26 @@ static void test_multi_scanner_input_miss_status(void) {
   TEST_ASSERT_FALSE(scanner.axisReceivedLastCycle(0));
   TEST_ASSERT_FALSE(scanner.axisReceivedLastCycle(1));
 
-  // Grace ends at 3x RPI (@1000 us = 3 ms) and reseeds the stale clock.
-  // Real starvation needs another 3x RPI after that → miss.
-  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  // Grace ends at 3x RPI (@5000 us = 15 ms) and reseeds the stale clock.
+  // Real starvation needs another 10x RPI (50 ms) after that → miss.
+  // Sleeps are sized well clear of ~15 ms host timer granularity.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
                         static_cast<int>(scanner.exchangeOnce(0)));
-  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  // Well inside the 50 ms window: the old 3x RPI policy would already have
+  // flagged this; the 10x policy must not.
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(scanner.exchangeOnce(0)));
+  (void)scanner.flushDeferredLogs();
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
   TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kInputMiss),
                         static_cast<int>(scanner.exchangeOnce(0)));
+  // The teardown diagnostic is queued for the task to print after the
+  // critical section, never emitted from inside exchangeOnce.
+  TEST_ASSERT_EQUAL_UINT32(1u, static_cast<uint32_t>(scanner.pendingLogCount()));
+  TEST_ASSERT_EQUAL_UINT32(1u, static_cast<uint32_t>(scanner.flushDeferredLogs()));
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(scanner.pendingLogCount()));
 
   scanner.disconnect();
 }
@@ -967,6 +1105,76 @@ static void test_drain_applies_multiple_datagrams_one_cycle(void) {
   d.scanner->disconnect();
 }
 
+// Regression (bench log 2026-10-13): priming drained T->O, then
+// beginCyclicExchange reset the per-cycle flag and "first T->O" was logged a
+// second time from inside the Class 1 critical section.
+static void test_first_to_reported_once_across_cyclic_start(void) {
+  DualConnected d;
+  d.udp.setEmptyReturnsZero(true);
+  const Bytes assy(52, 0x11);
+
+  d.udp.enqueueResponse(eip::buildClass1OutputCpf(d.fo0.to_connection_id, 1, 1, assy, false));
+  d.udp.enqueueResponse(eip::buildClass1OutputCpf(d.fo1.to_connection_id, 1, 1, assy, false));
+  (void)d.scanner->drainBufferedInputs();
+  TEST_ASSERT_EQUAL_UINT32(2u, static_cast<uint32_t>(d.scanner->pendingLogCount()));
+  TEST_ASSERT_EQUAL_UINT32(2u, static_cast<uint32_t>(d.scanner->flushDeferredLogs()));
+
+  d.scanner->beginCyclicExchange();
+  d.udp.enqueueResponse(eip::buildClass1OutputCpf(d.fo0.to_connection_id, 2, 2, assy, false));
+  d.udp.enqueueResponse(eip::buildClass1OutputCpf(d.fo1.to_connection_id, 2, 2, assy, false));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(0));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(1));
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(d.scanner->pendingLogCount()));
+
+  d.scanner->disconnect();
+}
+
+static void test_class1_deferred_log_fifo_and_overflow(void) {
+  eip::Class1DeferredLog q;
+  eip::Class1LogEntry e;
+  TEST_ASSERT_FALSE(q.pop(e));
+
+  TEST_ASSERT_TRUE(q.push(eip::Class1LogEvent::kHcs01Stale, 2, 15788));
+  TEST_ASSERT_TRUE(q.push(eip::Class1LogEvent::kStaleTeardown, 0, 6569, 2000));
+  TEST_ASSERT_EQUAL_UINT32(2u, static_cast<uint32_t>(q.size()));
+
+  TEST_ASSERT_TRUE(q.pop(e));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::Class1LogEvent::kHcs01Stale),
+                        static_cast<int>(e.event));
+  TEST_ASSERT_EQUAL_UINT8(2, e.axis);
+  TEST_ASSERT_EQUAL_UINT32(15788u, e.a);
+  TEST_ASSERT_TRUE(q.pop(e));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::Class1LogEvent::kStaleTeardown),
+                        static_cast<int>(e.event));
+  TEST_ASSERT_EQUAL_UINT32(2000u, e.b);
+
+  // Full queue drops (never blocks) and counts the drops once.
+  for (size_t i = 0; i < eip::Class1DeferredLog::kCapacity; ++i) {
+    TEST_ASSERT_TRUE(q.push(eip::Class1LogEvent::kHcs01OtFailed, 2));
+  }
+  TEST_ASSERT_FALSE(q.push(eip::Class1LogEvent::kHcs01OtFailed, 2));
+  TEST_ASSERT_FALSE(q.push(eip::Class1LogEvent::kHcs01OtFailed, 2));
+  TEST_ASSERT_EQUAL_UINT32(2u, q.takeDropped());
+  TEST_ASSERT_EQUAL_UINT32(0u, q.takeDropped());
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(eip::Class1DeferredLog::kCapacity),
+                           static_cast<uint32_t>(q.size()));
+  q.clear();
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(q.size()));
+}
+
+static void test_scanner_policy_cip_timeout_multiplier(void) {
+  // Code 2 => drive timeout 16x RPI, above our 10x RPI stale teardown.
+  TEST_ASSERT_EQUAL_UINT8(2, eip::kClass1ConnectionTimeoutMultiplier);
+  eip::KinetixScannerArgs ka;
+  ka.ip = "192.168.1.20";
+  TEST_ASSERT_EQUAL_UINT8(2, eip::makeKinetixScannerConfig(ka).connection_timeout_multiplier);
+  TEST_ASSERT_EQUAL_UINT8(2, eip::makeThetaScannerConfig().connection_timeout_multiplier);
+  const uint32_t drive_timeout_rpi = 4u << eip::kClass1ConnectionTimeoutMultiplier;
+  TEST_ASSERT_TRUE(drive_timeout_rpi > eip::kClass1StaleTeardownRpiMultiples);
+}
+
 static void test_hcs01_stale_does_not_teardown_kinetix(void) {
   FakeTcpClient tcp0;
   FakeTcpClient tcp1;
@@ -1070,6 +1278,198 @@ static void test_hcs01_stale_does_not_teardown_kinetix(void) {
   TEST_ASSERT_FALSE(img2.isOnline());
 
   scanner.disconnect();
+}
+
+namespace {
+
+// X/Z Kinetix + theta HCS01 on 1 ms RPI. `theta_reopen_ok` queues the TCP
+// replies a successful theta reopen consumes (FC, RegisterSession, FO).
+// UnRegisterSession has no reply, so none is queued for it.
+struct TriConnected {
+  FakeTcpClient tcp0;
+  FakeTcpClient tcp1;
+  FakeTcpClient tcp2;
+  FakeUdpEndpoint udp;
+  eip::EipProcessImage img0;
+  eip::EipProcessImage img1;
+  eip::EipProcessImage img2;
+  eip::ForwardOpenReply fo[3];
+  eip::MultiAxisSlot slots[3];
+  eip::ITcpClient* tcps[3];
+  std::unique_ptr<eip::EipMultiScanner> scanner;
+  const Bytes kx = Bytes(52, 0xA0);
+  const Bytes kz = Bytes(52, 0xB1);
+  const Bytes th = Bytes(14, 0xC2);
+
+  explicit TriConnected(bool theta_reopen_ok) {
+    FakeTcpClient* t[3] = {&tcp0, &tcp1, &tcp2};
+    for (uint32_t i = 0; i < 3; ++i) {
+      fo[i] = makeSampleForwardOpenReply();
+      fo[i].ot_connection_id = 0x10000001u + i;
+      fo[i].to_connection_id = 0x20000001u + i;
+      fo[i].connection_serial = static_cast<uint16_t>(i + 1);
+      fo[i].to_api_us = 1000;
+      const uint32_t h = 0x11110001u + i;
+      t[i]->enqueueResponse(makeRegisterSessionReply(h));
+      t[i]->enqueueResponse(makeSendRRDataEncapReply(h, makeForwardOpenMrReply(fo[i])));
+    }
+    const uint32_t h2 = 0x11110003u;
+    if (theta_reopen_ok) {
+      const uint32_t h2b = 0x22220003u;
+      tcp2.enqueueResponse(makeSendRRDataEncapReply(h2, makeForwardCloseMrReply()));
+      tcp2.enqueueResponse(makeRegisterSessionReply(h2b));
+      tcp2.enqueueResponse(makeSendRRDataEncapReply(h2b, makeForwardOpenMrReply(fo[2])));
+      tcp2.enqueueResponse(makeSendRRDataEncapReply(h2b, makeForwardCloseMrReply()));
+    } else {
+      // FC answered, then RegisterSession gets no reply -> reopen fails.
+      tcp2.enqueueResponse(makeSendRRDataEncapReply(h2, makeForwardCloseMrReply()));
+    }
+    tcp0.enqueueResponse(makeSendRRDataEncapReply(0x11110001u, makeForwardCloseMrReply()));
+    tcp1.enqueueResponse(makeSendRRDataEncapReply(0x11110002u, makeForwardCloseMrReply()));
+
+    eip::ScannerConfig cfg0 = makeTestScannerConfig();
+    cfg0.target_ip = "192.168.1.20";
+    cfg0.connection_serial = 0x0001;
+    cfg0.ot_connection_id = 0x10000001;
+    cfg0.to_connection_id = 0x20000001;
+    eip::ScannerConfig cfg1 = makeTestScannerConfig();
+    cfg1.target_ip = "192.168.1.21";
+    cfg1.connection_serial = 0x0002;
+    cfg1.ot_connection_id = 0x10000002;
+    cfg1.to_connection_id = 0x20000002;
+    eip::ScannerConfig cfg2 = makeTestScannerConfig();
+    cfg2.target_ip = "192.168.1.23";
+    cfg2.drive_family = eip::ScannerConfig::DriveFamily::kHcs01;
+    cfg2.config_assembly_instance = 0;
+    cfg2.ot_assembly_instance = 101;
+    cfg2.to_assembly_instance = 102;
+    cfg2.ot_assembly_size = 18;
+    cfg2.to_assembly_size = 14;
+    cfg2.connection_serial = 0x0003;
+    cfg2.ot_connection_id = 0x10000003;
+    cfg2.to_connection_id = 0x20000003;
+
+    slots[0] = {cfg0, &img0};
+    slots[1] = {cfg1, &img1};
+    slots[2] = {cfg2, &img2};
+    tcps[0] = &tcp0;
+    tcps[1] = &tcp1;
+    tcps[2] = &tcp2;
+    scanner = std::make_unique<eip::EipMultiScanner>(tcps, 3, udp, slots);
+    TEST_ASSERT_TRUE(scanner->openAxis(0));
+    TEST_ASSERT_TRUE(scanner->bindSharedUdp());
+    TEST_ASSERT_TRUE(scanner->openAxis(1));
+    TEST_ASSERT_TRUE(scanner->openAxis(2));
+    udp.setEmptyReturnsZero(true);
+  }
+
+  void feedKinetix() {
+    udp.enqueueResponse(eip::buildClass1OutputCpf(fo[0].to_connection_id, 1, 1, kx, false));
+    udp.enqueueResponse(eip::buildClass1OutputCpf(fo[1].to_connection_id, 1, 1, kz, false));
+  }
+
+  // Run until theta (never answering) has been silent past the reopen threshold
+  // while X/Z keep answering every exchange.
+  void starveThetaPastReopenThreshold() {
+    feedKinetix();
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                          static_cast<int>(scanner->exchangeOnce(0)));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));  // past 3x grace
+    feedKinetix();
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                          static_cast<int>(scanner->exchangeOnce(0)));
+    std::this_thread::sleep_for(
+        std::chrono::microseconds(eip::kHcs01ReopenAfterStaleUs + 20000));
+    feedKinetix();
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                          static_cast<int>(scanner->exchangeOnce(0)));
+  }
+};
+
+}  // namespace
+
+static void test_axis_reopen_backoff_policy(void) {
+  TEST_ASSERT_EQUAL_UINT32(500000u, eip::kHcs01ReopenAfterStaleUs);
+  TEST_ASSERT_EQUAL_UINT32(1000u, eip::axisReopenNextBackoffMs(0));
+  TEST_ASSERT_EQUAL_UINT32(2000u, eip::axisReopenNextBackoffMs(1000));
+  TEST_ASSERT_EQUAL_UINT32(8000u, eip::axisReopenNextBackoffMs(4000));
+  TEST_ASSERT_EQUAL_UINT32(10000u, eip::axisReopenNextBackoffMs(8000));
+  TEST_ASSERT_EQUAL_UINT32(10000u, eip::axisReopenNextBackoffMs(10000));
+  TEST_ASSERT_EQUAL_UINT32(10000u, eip::axisReopenNextBackoffMs(0x90000000u));
+}
+
+// Regression (bench log 2026-10-13): HCS01 went silent after one T->O and was
+// never re-opened while X/Z kept running. It must be re-opened on its own.
+static void test_hcs01_silent_axis_is_reopened_alone(void) {
+  TriConnected d(true);
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(eip::EipMultiScanner::kMaxAxes),
+                           static_cast<uint32_t>(d.scanner->nextAxisToReopen()));
+  d.starveThetaPastReopenThreshold();
+
+  TEST_ASSERT_TRUE(d.scanner->axisReopenPending(2));
+  TEST_ASSERT_EQUAL_UINT32(2u, static_cast<uint32_t>(d.scanner->nextAxisToReopen()));
+  TEST_ASSERT_TRUE(d.img0.isOnline());
+  TEST_ASSERT_TRUE(d.img1.isOnline());
+  TEST_ASSERT_FALSE(d.img2.isOnline());
+  (void)d.scanner->flushDeferredLogs();
+
+  d.scanner->prepareAxisReopen(2);
+  TEST_ASSERT_FALSE(d.scanner->axisConnected(2));
+  TEST_ASSERT_TRUE(d.scanner->axisConnected(0));
+  const size_t x_tcp_frames_before = d.tcp0.allSent().size();
+  const size_t z_tcp_frames_before = d.tcp1.allSent().size();
+  TEST_ASSERT_TRUE(d.scanner->reopenAxis(2));
+
+  // Old connection was closed before the new ForwardOpen (0x4E = FC service).
+  TEST_ASSERT_TRUE(d.tcp2.sentContainsCipService(0x4E));
+  TEST_ASSERT_TRUE(d.scanner->axisConnected(2));
+  TEST_ASSERT_FALSE(d.scanner->axisReopenPending(2));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(eip::EipMultiScanner::kMaxAxes),
+                           static_cast<uint32_t>(d.scanner->nextAxisToReopen()));
+  // X/Z were never touched: still connected, no explicit traffic to them.
+  TEST_ASSERT_TRUE(d.scanner->axisConnected(0));
+  TEST_ASSERT_TRUE(d.scanner->axisConnected(1));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(x_tcp_frames_before),
+                           static_cast<uint32_t>(d.tcp0.allSent().size()));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(z_tcp_frames_before),
+                           static_cast<uint32_t>(d.tcp1.allSent().size()));
+
+  // Theta answers again on the new connection and comes back online.
+  d.feedKinetix();
+  d.udp.enqueueResponse(eip::buildClass1OutputCpf(d.fo[2].to_connection_id, 1, 1, d.th, false));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_TRUE(d.scanner->axisReceivedLastCycle(2));
+  TEST_ASSERT_TRUE(d.img2.isOnline());
+  TEST_ASSERT_TRUE(d.scanner->flushDeferredLogs() >= 1u);  // reopen OK + first T->O
+
+  d.scanner->disconnect();
+}
+
+static void test_hcs01_reopen_failure_backs_off(void) {
+  TriConnected d(false);
+  d.starveThetaPastReopenThreshold();
+  TEST_ASSERT_EQUAL_UINT32(2u, static_cast<uint32_t>(d.scanner->nextAxisToReopen()));
+  (void)d.scanner->flushDeferredLogs();
+
+  d.scanner->prepareAxisReopen(2);
+  TEST_ASSERT_FALSE(d.scanner->reopenAxis(2));
+  TEST_ASSERT_FALSE(d.scanner->axisConnected(2));
+  TEST_ASSERT_TRUE(d.scanner->axisReopenPending(2));
+  // Not retried immediately: next attempt waits the initial backoff.
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(eip::EipMultiScanner::kMaxAxes),
+                           static_cast<uint32_t>(d.scanner->nextAxisToReopen()));
+  TEST_ASSERT_EQUAL_UINT32(1u, static_cast<uint32_t>(d.scanner->flushDeferredLogs()));
+
+  // X/Z keep exchanging normally with theta idle.
+  d.feedKinetix();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(eip::ExchangeStatus::kOk),
+                        static_cast<int>(d.scanner->exchangeOnce(0)));
+  TEST_ASSERT_TRUE(d.img0.isOnline());
+  TEST_ASSERT_TRUE(d.img1.isOnline());
+
+  d.scanner->disconnect();
+  TEST_ASSERT_FALSE(d.scanner->axisReopenPending(2));
 }
 
 static void test_drain_ignores_duplicate_cid(void) {
@@ -1302,8 +1702,149 @@ static void test_cip_sequence_number_wraparound(void) {
   TEST_ASSERT_EQUAL_UINT32(dummy_assembly.size(), out_assy.size());
 }
 
+static void test_session_nop_frame(void) {
+    FakeTcpClient tcp;
+    tcp.enqueueResponse(makeRegisterSessionReply(0x0A0B0C0D));
+    eip::EipSession session(tcp);
+    TEST_ASSERT_TRUE(session.registerSession());
+
+    TEST_ASSERT_TRUE(session.sendNop());
+    const Bytes& f = tcp.lastSent();
+    TEST_ASSERT_EQUAL_UINT32(24, f.size());
+    const uint8_t head[8] = {0x00, 0x00, 0x00, 0x00, 0x0D, 0x0C, 0x0B, 0x0A};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(head, f.data(), sizeof(head));
+    for (size_t i = 8; i < 12; ++i) {
+        TEST_ASSERT_EQUAL_HEX8(0, f[i]);  // status
+    }
+    for (size_t i = 20; i < 24; ++i) {
+        TEST_ASSERT_EQUAL_HEX8(0, f[i]);  // options
+    }
+}
+
+static void test_session_nop_needs_a_session(void) {
+    FakeTcpClient tcp;
+    eip::EipSession session(tcp);
+    TEST_ASSERT_FALSE(session.sendNop());
+    TEST_ASSERT_EQUAL_UINT32(0, tcp.allSent().size());
+}
+
+static void test_encap_nop_interval_policy(void) {
+    TEST_ASSERT_EQUAL_UINT32(30000, eip::encapNopIntervalMs(true, 120));
+    TEST_ASSERT_EQUAL_UINT32(30000, eip::encapNopIntervalMs(false, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, eip::encapNopIntervalMs(true, 0));
+    TEST_ASSERT_EQUAL_UINT32(250, eip::encapNopIntervalMs(true, 1));
+    TEST_ASSERT_EQUAL_UINT32(900000, eip::encapNopIntervalMs(true, 3600));
+}
+
+static void test_encap_inactivity_timeout_request(void) {
+    // Get_Attribute_Single, 3-word path: class 0xF5, instance 1, attribute 13.
+    const Bytes expected = {0x0E, 0x03, 0x20, 0xF5, 0x24, 0x01, 0x30, 0x0D};
+    const Bytes req = eip::buildEncapInactivityTimeoutGetRequest();
+    TEST_ASSERT_EQUAL_UINT32(expected.size(), req.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), req.data(), expected.size());
+}
+
+namespace {
+
+Bytes makeGetAttributeMrReply(uint8_t general_status, const Bytes& data) {
+    Bytes cip;
+    eip::ByteWriter w(cip);
+    w.u8(static_cast<uint8_t>(eip::CipService::kGetAttributeSingle) |
+         eip::kCipReplyServiceMask);
+    w.u8(0);
+    w.u8(general_status);
+    w.u8(0);
+    w.bytes(data);
+    return cip;
+}
+
+// One axis whose drive answers attribute 13 with `reply` before Forward Open.
+struct KeptAliveAxis {
+    FakeTcpClient tcp;
+    FakeUdpEndpoint udp;
+    std::unique_ptr<eip::EipMultiScanner> scanner;
+
+    explicit KeptAliveAxis(const Bytes& attr13_reply) {
+        const uint32_t handle = 0x33330003;
+        tcp.enqueueResponse(makeRegisterSessionReply(handle));
+        tcp.enqueueResponse(makeSendRRDataEncapReply(handle, attr13_reply));
+        tcp.enqueueResponse(
+            makeSendRRDataEncapReply(handle, makeForwardOpenMrReply(makeSampleForwardOpenReply())));
+        eip::ScannerConfig cfg = makeTestScannerConfig();
+        cfg.read_encap_inactivity_timeout = true;
+        eip::MultiAxisSlot slots[1] = {{cfg, nullptr}};
+        eip::ITcpClient* tcps[1] = {&tcp};
+        scanner = std::make_unique<eip::EipMultiScanner>(tcps, 1, udp, slots);
+        TEST_ASSERT_TRUE(scanner->openAxis(0));
+    }
+
+    size_t nopsSent() const {
+        size_t n = 0;
+        for (const Bytes& f : tcp.allSent()) {
+            if (f.size() == 24 && f[0] == 0x00 && f[1] == 0x00) {
+                ++n;
+            }
+        }
+        return n;
+    }
+};
+
+}  // namespace
+
+static void test_open_reads_the_timeout_and_spaces_nops(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{60, 0}));  // 60 s
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+    TEST_ASSERT_EQUAL_UINT32(15000, ax.scanner->axisEncapNopIntervalMs(0));
+
+    const int64_t now = eip::class1NowUs();
+    ax.scanner->serviceEncapKeepalive(now);
+    TEST_ASSERT_EQUAL_UINT32(0, ax.nopsSent());
+
+    const int64_t due = now + 15000LL * 1000;
+    ax.scanner->serviceEncapKeepalive(due);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.nopsSent());
+    ax.scanner->serviceEncapKeepalive(due + 1000);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.nopsSent());
+    ax.scanner->serviceEncapKeepalive(due + 15000LL * 1000);
+    TEST_ASSERT_EQUAL_UINT32(2, ax.nopsSent());
+}
+
+static void test_unreadable_timeout_assumes_the_default(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0x14, Bytes{}));  // attribute not supported
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+    TEST_ASSERT_EQUAL_UINT32(30000, ax.scanner->axisEncapNopIntervalMs(0));
+}
+
+static void test_disabled_timeout_sends_no_nop(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{0, 0}));
+    ax.scanner->serviceEncapKeepalive(eip::class1NowUs() + 3600LL * 1000 * 1000);
+    TEST_ASSERT_EQUAL_UINT32(0, ax.nopsSent());
+}
+
+static void test_failed_nop_is_logged_once_and_not_recovered(void) {
+    KeptAliveAxis ax(makeGetAttributeMrReply(0, Bytes{120, 0}));
+    const size_t connects = ax.tcp.connects();
+    ax.tcp.failSendsUntilReconnect();
+    const int64_t due = eip::class1NowUs() + 30000LL * 1000;
+
+    ax.scanner->serviceEncapKeepalive(due);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.scanner->pendingLogCount());
+    ax.scanner->serviceEncapKeepalive(due + 30000LL * 1000);
+    TEST_ASSERT_EQUAL_UINT32(1, ax.scanner->pendingLogCount());
+    TEST_ASSERT_EQUAL_UINT32(connects, ax.tcp.connects());
+    TEST_ASSERT_TRUE(ax.scanner->axisConnected(0));
+}
+
 int main(void) {
   UNITY_BEGIN();
+  RUN_TEST(test_session_nop_frame);
+  RUN_TEST(test_session_nop_needs_a_session);
+  RUN_TEST(test_encap_nop_interval_policy);
+  RUN_TEST(test_encap_inactivity_timeout_request);
+  RUN_TEST(test_open_reads_the_timeout_and_spaces_nops);
+  RUN_TEST(test_unreadable_timeout_assumes_the_default);
+  RUN_TEST(test_disabled_timeout_sends_no_nop);
+  RUN_TEST(test_failed_nop_is_logged_once_and_not_recovered);
   RUN_TEST(test_session_register);
   RUN_TEST(test_class1_cpf_bytes);
   RUN_TEST(test_io_connection_output_frame);
@@ -1323,7 +1864,13 @@ int main(void) {
   RUN_TEST(test_multi_scanner_input_miss_status);
   RUN_TEST(test_fo_delay_before_first_exchange_not_stale);
   RUN_TEST(test_drain_applies_multiple_datagrams_one_cycle);
+  RUN_TEST(test_first_to_reported_once_across_cyclic_start);
+  RUN_TEST(test_class1_deferred_log_fifo_and_overflow);
+  RUN_TEST(test_scanner_policy_cip_timeout_multiplier);
   RUN_TEST(test_hcs01_stale_does_not_teardown_kinetix);
+  RUN_TEST(test_axis_reopen_backoff_policy);
+  RUN_TEST(test_hcs01_silent_axis_is_reopened_alone);
+  RUN_TEST(test_hcs01_reopen_failure_backs_off);
   RUN_TEST(test_drain_ignores_duplicate_cid);
   RUN_TEST(test_drain_ignores_unknown_cid);
   RUN_TEST(test_drain_stops_when_all_axes_got);
@@ -1334,5 +1881,11 @@ int main(void) {
   RUN_TEST(test_feedback_age_resets_on_fresh_data);
   RUN_TEST(test_exchange_reports_send_failure);
   RUN_TEST(test_cip_sequence_number_wraparound);
+  RUN_TEST(test_graceful_close_uses_a_live_session);
+  RUN_TEST(test_graceful_close_rebuilds_a_dropped_session);
+  RUN_TEST(test_graceful_close_retries_on_a_new_session_when_the_send_fails);
+  RUN_TEST(test_graceful_close_keeps_the_axis_connected_until_closed);
+  RUN_TEST(test_graceful_close_reports_a_failed_reconnect);
+  RUN_TEST(test_graceful_close_ignores_a_closed_axis);
   return UNITY_END();
 }

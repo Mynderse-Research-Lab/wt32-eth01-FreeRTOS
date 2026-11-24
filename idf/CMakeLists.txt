@@ -17,7 +17,14 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/MCP23S17"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Spi3Bus"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/SpiDisplay"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/AppConfig"
 )
+
+# Compile-time defaults come from sdkconfig.defaults alone. The generated
+# sdkconfig lives in the build tree and is rebuilt on every configure, so a
+# leftover menuconfig edit cannot override them. Runtime values live in NVS.
+set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig")
+file(REMOVE "${SDKCONFIG}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(wt32_eth01_gantry)

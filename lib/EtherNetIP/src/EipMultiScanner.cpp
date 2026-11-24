@@ -6,8 +6,10 @@
 #include <climits>
 
 #include "CipMessageRouter.h"
+#include "CipTcpIpInterface.h"
 #include "EipClass1TimingStats.h"
 #include "EipCpf.h"
+#include "EipScannerPolicy.h"
 #include "Hcs01Assembly.h"
 #include "Kinetix5100Assembly.h"
 
@@ -240,6 +242,11 @@ bool EipMultiScanner::openAxis(size_t i) {
     return false;
   }
   ax.state = AxisState::kRegistered;
+  if (ax.config.read_encap_inactivity_timeout) {
+      readEncapInactivityTimeout(i);
+  } else {
+      ax.nop_interval_ms = eip::encapNopIntervalMs(false, 0);
+  }
 
   if (!forwardOpenAxis(i)) {
     (void)ax.session->unregisterSession();
@@ -249,7 +256,10 @@ bool EipMultiScanner::openAxis(size_t i) {
   }
 
   configureIo(i);
+  ax.next_nop_us = class1NowUs() + static_cast<int64_t>(ax.nop_interval_ms) * 1000;
+  ax.nop_failed_logged = false;
   ax.state = AxisState::kConnected;
+  ax.first_to_logged = false;
   // Do not stamp last_feedback_us here — FO→peer-open gap is not T->O age.
   return true;
 }
@@ -286,12 +296,9 @@ bool EipMultiScanner::sendAxisOutput(size_t i) {
                                            class1NowUs());
     return true;
   }
-#ifdef ESP_PLATFORM
-  ESP_LOGW(kTag, "axis%u O->T send failed dest=%s (%d of %u)",
-           static_cast<unsigned>(i),
-           ax.config.target_ip ? ax.config.target_ip : "?",
-           static_cast<int>(sent), static_cast<unsigned>(frame.size()));
-#endif
+  deferred_log_.push(Class1LogEvent::kOtSendFailed, static_cast<uint8_t>(i),
+                     static_cast<uint32_t>(static_cast<int32_t>(sent)),
+                     static_cast<uint32_t>(frame.size()), ax.target_ip_host);
   return false;
 }
 
@@ -301,11 +308,8 @@ bool EipMultiScanner::sendKeepaliveAll() {
     if (axes_[i].state != AxisState::kConnected) continue;
     if (!sendAxisOutput(i)) {
       if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01) {
-#ifdef ESP_PLATFORM
-        ESP_LOGW(kTag,
-                 "axis%u HCS01 keepalive O->T failed — X/Z keep pumping",
-                 static_cast<unsigned>(i));
-#endif
+        deferred_log_.push(Class1LogEvent::kHcs01KeepaliveFailed,
+                           static_cast<uint8_t>(i));
         continue;
       }
       return false;
@@ -350,26 +354,24 @@ size_t EipMultiScanner::drainBufferedInputs(size_t max_n) {
 
       const size_t idx = matchAxisByConnectionId(cid);
       if (idx >= kMaxAxes) {
-#ifdef ESP_PLATFORM
         static uint32_t last_unmatched_cid = 0;
         if (cid != last_unmatched_cid) {
           last_unmatched_cid = cid;
-          ESP_LOGW(kTag, "T->O unmatched cid=0x%08lX n=%d",
-                   static_cast<unsigned long>(cid), static_cast<int>(n));
+          deferred_log_.push(Class1LogEvent::kUnmatchedCid, 0, cid,
+                             static_cast<uint32_t>(n));
         }
-#endif
         continue;
       }
       if (last_got_[idx]) continue;
       last_got_[idx] = true;
-#ifdef ESP_PLATFORM
-      if (!axes_[idx].received_to_since_cyclic_) {
-        ESP_LOGI(kTag, "axis%u first T->O assy=%u expect=%u cid=0x%08lX",
-                 static_cast<unsigned>(idx), static_cast<unsigned>(assy_len),
-                 static_cast<unsigned>(axes_[idx].config.to_assembly_size),
-                 static_cast<unsigned long>(cid));
+      if (!axes_[idx].first_to_logged) {
+        axes_[idx].first_to_logged = true;
+        deferred_log_.push(Class1LogEvent::kFirstToReceived,
+                           static_cast<uint8_t>(idx),
+                           static_cast<uint32_t>(assy_len),
+                           static_cast<uint32_t>(axes_[idx].config.to_assembly_size),
+                           cid);
       }
-#endif
       (void)applyFeedback(idx, assy, assy_len);
       ++applied;
       // One fresh T->O per connected axis is enough this cycle.
@@ -423,11 +425,11 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     if (axes_[i].state != AxisState::kConnected) continue;
     if (!sendAxisOutput(i)) {
       if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01) {
-#ifdef ESP_PLATFORM
-        ESP_LOGW(kTag,
-                 "axis%u HCS01 O->T failed — X/Z stay up",
-                 static_cast<unsigned>(i));
-#endif
+        const uint32_t now_ms = static_cast<uint32_t>(class1NowUs() / 1000);
+        if (shouldWarnSoftMiss(hcs01_ot_fail_warn_ms_, now_ms)) {
+          deferred_log_.push(Class1LogEvent::kHcs01OtFailed,
+                             static_cast<uint8_t>(i));
+        }
         continue;
       }
       return ExchangeStatus::kOutputSendFailed;
@@ -441,6 +443,7 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     const int64_t dt = class1NowUs() - t_ot0;
     if (dt >= 0 && dt <= static_cast<int64_t>(UINT32_MAX)) {
       class1TimingStats().recordOtSendUs(static_cast<uint32_t>(dt));
+      last_ot_us_ = static_cast<uint32_t>(dt);
     }
   }
 
@@ -450,6 +453,7 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     const int64_t dt = class1NowUs() - t_drain0;
     if (dt >= 0 && dt <= static_cast<int64_t>(UINT32_MAX)) {
       class1TimingStats().recordToDrainUs(static_cast<uint32_t>(dt));
+      last_drain_us_ = static_cast<uint32_t>(dt);
     }
   }
 
@@ -504,26 +508,27 @@ ExchangeStatus EipMultiScanner::exchangeOnce(uint32_t /*recv_timeout_ms*/) {
     if (!shouldTeardownAfterStaleUs(age, rpi_us)) continue;
     if (axes_[i].config.drive_family == ScannerConfig::DriveFamily::kHcs01 &&
         any_kinetix) {
-#ifdef ESP_PLATFORM
-      static uint32_t hcs01_stale_warn_ms = 0;
       const uint32_t now_ms = static_cast<uint32_t>(now / 1000);
-      if (shouldWarnSoftMiss(hcs01_stale_warn_ms, now_ms, 1000)) {
-        ESP_LOGW(kTag,
-                 "axis%u HCS01 T->O stale — X/Z stay up (age=%lu us)",
-                 static_cast<unsigned>(i), static_cast<unsigned long>(age));
+      if (shouldWarnSoftMiss(hcs01_stale_warn_ms_, now_ms, 1000)) {
+        deferred_log_.push(Class1LogEvent::kHcs01Stale, static_cast<uint8_t>(i),
+                           age);
       }
-#endif
+      // The drive dropped its side long ago (16x RPI); a new ForwardOpen is
+      // the only way back. The task performs it outside the exchange.
+      if (!axes_[i].reopen_pending && age >= kHcs01ReopenAfterStaleUs) {
+        axes_[i].reopen_pending = true;
+        axes_[i].reopen_due_us = now;
+        axes_[i].reopen_backoff_ms = kAxisReopenInitialBackoffMs;
+        deferred_log_.push(Class1LogEvent::kAxisReopenRequested,
+                           static_cast<uint8_t>(i), age);
+      }
       if (axes_[i].image != nullptr) {
         axes_[i].image->setOnline(false);
       }
       continue;
     }
-#ifdef ESP_PLATFORM
-    ESP_LOGW(kTag,
-             "axis%u T->O stale (age=%lu us rpi=%lu) — teardown",
-             static_cast<unsigned>(i), static_cast<unsigned long>(age),
-             static_cast<unsigned long>(rpi_us));
-#endif
+    deferred_log_.push(Class1LogEvent::kStaleTeardown, static_cast<uint8_t>(i),
+                       age, rpi_us);
     return ExchangeStatus::kInputMiss;
   }
   return ExchangeStatus::kOk;
@@ -564,29 +569,257 @@ bool EipMultiScanner::forwardCloseAxis(size_t i) {
   return mr.isSuccess();
 }
 
+size_t EipMultiScanner::flushDeferredLogs() {
+  size_t flushed = 0;
+  Class1LogEntry e;
+  while (deferred_log_.pop(e)) {
+    ++flushed;
+#ifdef ESP_PLATFORM
+    const unsigned ax = static_cast<unsigned>(e.axis);
+    switch (e.event) {
+      case Class1LogEvent::kFirstToReceived:
+        ESP_LOGI(kTag, "axis%u first T->O assy=%lu expect=%lu cid=0x%08lX", ax,
+                 static_cast<unsigned long>(e.a), static_cast<unsigned long>(e.b),
+                 static_cast<unsigned long>(e.c));
+        break;
+      case Class1LogEvent::kUnmatchedCid:
+        ESP_LOGW(kTag, "T->O unmatched cid=0x%08lX n=%lu",
+                 static_cast<unsigned long>(e.a), static_cast<unsigned long>(e.b));
+        break;
+      case Class1LogEvent::kOtSendFailed:
+        ESP_LOGW(kTag, "axis%u O->T send failed dest=%u.%u.%u.%u (%d of %lu)", ax,
+                 static_cast<unsigned>((e.c >> 24) & 0xFFu),
+                 static_cast<unsigned>((e.c >> 16) & 0xFFu),
+                 static_cast<unsigned>((e.c >> 8) & 0xFFu),
+                 static_cast<unsigned>(e.c & 0xFFu),
+                 static_cast<int>(static_cast<int32_t>(e.a)),
+                 static_cast<unsigned long>(e.b));
+        break;
+      case Class1LogEvent::kHcs01OtFailed:
+        ESP_LOGW(kTag, "axis%u HCS01 O->T failed — X/Z stay up", ax);
+        break;
+      case Class1LogEvent::kHcs01KeepaliveFailed:
+        ESP_LOGW(kTag, "axis%u HCS01 keepalive O->T failed — X/Z keep pumping", ax);
+        break;
+      case Class1LogEvent::kHcs01Stale:
+        ESP_LOGW(kTag, "axis%u HCS01 T->O stale — X/Z stay up (age=%lu us)", ax,
+                 static_cast<unsigned long>(e.a));
+        break;
+      case Class1LogEvent::kStaleTeardown:
+        ESP_LOGW(kTag, "axis%u T->O stale (age=%lu us rpi=%lu) — teardown", ax,
+                 static_cast<unsigned long>(e.a), static_cast<unsigned long>(e.b));
+        break;
+      case Class1LogEvent::kAxisReopenRequested:
+        ESP_LOGW(kTag, "axis%u silent %lu us — per-axis reopen (X/Z stay up)", ax,
+                 static_cast<unsigned long>(e.a));
+        break;
+      case Class1LogEvent::kAxisReopenOk:
+        ESP_LOGI(kTag, "axis%u reopen OK", ax);
+        break;
+      case Class1LogEvent::kAxisReopenFailed:
+        ESP_LOGW(kTag, "axis%u reopen failed — retry in %lu ms", ax,
+                 static_cast<unsigned long>(e.a));
+        break;
+      case Class1LogEvent::kEncapNopFailed:
+        ESP_LOGW(kTag, "axis%u explicit TCP session lost: NOP failed (every %lu ms)."
+                 " Class 1 carries on; the close rebuilds the session", ax,
+                 static_cast<unsigned long>(e.a));
+        break;
+      default:
+        ESP_LOGW(kTag, "axis%u unknown Class 1 event %d", ax,
+                 static_cast<int>(e.event));
+        break;
+    }
+#endif
+  }
+  const uint32_t dropped = deferred_log_.takeDropped();
+#ifdef ESP_PLATFORM
+  if (dropped > 0) {
+    ESP_LOGW(kTag, "Class 1 log queue dropped %lu event(s)",
+             static_cast<unsigned long>(dropped));
+  }
+#else
+  (void)dropped;
+#endif
+  return flushed;
+}
+
+// A Kinetix ends its explicit session while Class 1 carries on over UDP, so that
+// session may be gone by the time a ForwardClose needs it.
+bool EipMultiScanner::reconnectExplicitSession(size_t i) {
+  AxisRuntime& ax = axes_[i];
+  if (ax.tcp == nullptr || ax.session == nullptr) return false;
+  ax.tcp->close();
+  if (!ax.tcp->connect(ax.config.target_ip, EipSession::kDefaultPort)) return false;
+  return ax.session->registerSession();
+}
+
+// Read on the axis's own session before Forward Open. A drive that does not
+// answer gets the spec default, so it is still kept alive.
+void EipMultiScanner::readEncapInactivityTimeout(size_t i) {
+    AxisRuntime& ax = axes_[i];
+    uint16_t timeout_s = 0;
+    bool known = false;
+    Bytes reply;
+    MessageRouterResponse mr;
+    if (ax.session->sendExplicit(buildEncapInactivityTimeoutGetRequest(), reply) &&
+        parseMessageRouterResponse(reply, mr)) {
+        known = mr.isSuccess() && parseEncapInactivityTimeout(mr.data, timeout_s);
+    }
+    ax.nop_interval_ms = eip::encapNopIntervalMs(known, timeout_s);
+#ifdef ESP_PLATFORM
+    if (known) {
+        ESP_LOGI(kTag, "axis%u encapsulation inactivity timeout %u s, NOP every %lu ms",
+                 static_cast<unsigned>(i), static_cast<unsigned>(timeout_s),
+                 static_cast<unsigned long>(ax.nop_interval_ms));
+    } else {
+        ESP_LOGW(kTag, "axis%u encapsulation inactivity timeout not read (CIP status 0x%02X),"
+                 " assuming %u s, NOP every %lu ms",
+                 static_cast<unsigned>(i), mr.general_status,
+                 static_cast<unsigned>(kEncapInactivityTimeoutDefaultS),
+                 static_cast<unsigned long>(ax.nop_interval_ms));
+    }
+#endif
+}
+
+void EipMultiScanner::serviceEncapKeepalive(int64_t now_us) {
+    for (size_t i = 0; i < axis_count_; ++i) {
+        AxisRuntime& ax = axes_[i];
+        if (ax.state != AxisState::kConnected || ax.nop_interval_ms == 0 ||
+            ax.session == nullptr || now_us < ax.next_nop_us) {
+            continue;
+        }
+        ax.next_nop_us = now_us + static_cast<int64_t>(ax.nop_interval_ms) * 1000;
+        if (!ax.session->sendNop() && !ax.nop_failed_logged) {
+            ax.nop_failed_logged = true;
+            deferred_log_.push(Class1LogEvent::kEncapNopFailed, static_cast<uint8_t>(i),
+                               ax.nop_interval_ms);
+        }
+        return;
+    }
+}
+
+uint32_t EipMultiScanner::axisEncapNopIntervalMs(size_t i) const {
+    return (i < axis_count_) ? axes_[i].nop_interval_ms : 0;
+}
+
+bool EipMultiScanner::gracefulCloseAxis(size_t i) {
+  if (i >= axis_count_ || axes_[i].state != AxisState::kConnected) return false;
+  AxisRuntime& ax = axes_[i];
+  // Still kConnected here: the keepalive helper keeps this axis's O->T running
+  // through a retry, so the connection cannot time out while it is rebuilt.
+  bool closed = ax.tcp != nullptr && ax.tcp->isConnected() && forwardCloseAxis(i);
+  if (!closed) {
+    closed = reconnectExplicitSession(i) && forwardCloseAxis(i);
+  }
+  closeAxis(i, false);
+  return closed;
+}
+
+void EipMultiScanner::closeAxis(size_t i, bool forward_close) {
+  AxisRuntime& ax = axes_[i];
+  const bool had_connection = (ax.state == AxisState::kConnected) ||
+                              (ax.open_reply.ot_connection_id != 0);
+  // kIdle first so any concurrent keepalive/drain stops touching this axis.
+  ax.state = AxisState::kIdle;
+  if (had_connection && forward_close) {
+    (void)forwardCloseAxis(i);
+  }
+  if (ax.session && ax.session->isRegistered()) {
+    (void)ax.session->unregisterSession();
+  }
+  if (ax.image) ax.image->setOnline(false);
+  if (ax.tcp) ax.tcp->close();
+  ax.open_reply = ForwardOpenReply{};
+  ax.to_connection_id = 0;
+  ax.last_feedback_us = 0;
+  ax.target_ip_host = 0;
+  ax.received_to_since_cyclic_ = false;
+  ax.first_to_logged = false;
+  ax.ot_cmd_scratch.clear();
+  ax.ot_frame_scratch.clear();
+}
+
+void EipMultiScanner::prepareAxisReopen(size_t i) {
+  if (i >= axis_count_) return;
+  // ForwardClose still needs open_reply, so only the state flips here.
+  axes_[i].state = AxisState::kIdle;
+  if (axes_[i].image != nullptr) {
+    axes_[i].image->setOnline(false);
+  }
+}
+
+bool EipMultiScanner::reopenAxis(size_t i) {
+  if (i >= axis_count_) return false;
+  AxisRuntime& ax = axes_[i];
+  prepareAxisReopen(i);
+  closeAxis(i);
+
+  const bool ok = openAxis(i);
+  const int64_t now = class1NowUs();
+  if (ok) {
+    // Fresh FO: start the stale window now, as beginCyclicExchange would.
+    ax.last_feedback_us = now;
+    ax.received_to_since_cyclic_ = false;
+    ax.reopen_pending = false;
+    ax.reopen_backoff_ms = kAxisReopenInitialBackoffMs;
+    deferred_log_.push(Class1LogEvent::kAxisReopenOk, static_cast<uint8_t>(i));
+    return true;
+  }
+  const uint32_t wait_ms = (ax.reopen_backoff_ms > 0) ? ax.reopen_backoff_ms
+                                                      : kAxisReopenInitialBackoffMs;
+  ax.reopen_pending = true;
+  ax.reopen_due_us = now + static_cast<int64_t>(wait_ms) * 1000;
+  ax.reopen_backoff_ms = axisReopenNextBackoffMs(wait_ms);
+  deferred_log_.push(Class1LogEvent::kAxisReopenFailed, static_cast<uint8_t>(i),
+                     wait_ms);
+  return false;
+}
+
+size_t EipMultiScanner::nextAxisToReopen() const {
+  const int64_t now = class1NowUs();
+  for (size_t i = 0; i < axis_count_; ++i) {
+    if (axes_[i].reopen_pending && now >= axes_[i].reopen_due_us) {
+      return i;
+    }
+  }
+  return kMaxAxes;
+}
+
+bool EipMultiScanner::axisReopenPending(size_t i) const {
+  return i < axis_count_ && axes_[i].reopen_pending;
+}
+
+void EipMultiScanner::deferAxisReopen(size_t i) {
+  if (i >= axis_count_ || !axes_[i].reopen_pending) return;
+  AxisRuntime& ax = axes_[i];
+  const uint32_t wait_ms = (ax.reopen_backoff_ms > 0) ? ax.reopen_backoff_ms
+                                                      : kAxisReopenInitialBackoffMs;
+  ax.reopen_due_us = class1NowUs() + static_cast<int64_t>(wait_ms) * 1000;
+  ax.reopen_backoff_ms = axisReopenNextBackoffMs(wait_ms);
+}
+
+void EipMultiScanner::requestAxisReopen(size_t i) {
+  if (i >= axis_count_ || axes_[i].reopen_pending) return;
+  AxisRuntime& ax = axes_[i];
+  ax.reopen_pending = true;
+  ax.reopen_due_us =
+      class1NowUs() + static_cast<int64_t>(kAxisReopenInitialBackoffMs) * 1000;
+  ax.reopen_backoff_ms = axisReopenNextBackoffMs(kAxisReopenInitialBackoffMs);
+}
+
 void EipMultiScanner::disconnect() {
   for (size_t i = 0; i < axis_count_; ++i) {
-    AxisRuntime& ax = axes_[i];
-    if (ax.state == AxisState::kConnected) {
-      (void)forwardCloseAxis(i);
-    }
-    if (ax.session && ax.session->isRegistered()) {
-      (void)ax.session->unregisterSession();
-    }
-    if (ax.image) ax.image->setOnline(false);
-    if (ax.tcp) ax.tcp->close();
-    ax.state = AxisState::kIdle;
-    ax.open_reply = ForwardOpenReply{};
-    ax.to_connection_id = 0;
-    ax.last_feedback_us = 0;
-    ax.target_ip_host = 0;
-    ax.received_to_since_cyclic_ = false;
-    ax.ot_cmd_scratch.clear();
-    ax.ot_frame_scratch.clear();
+    closeAxis(i);
+    axes_[i].reopen_pending = false;
+    axes_[i].reopen_due_us = 0;
+    axes_[i].reopen_backoff_ms = 0;
   }
   cyclic_started_us_ = 0;
   ot_sent_since_cyclic_ = false;
   stale_gate_latched_ = false;
+  hcs01_stale_warn_ms_ = 0;
+  hcs01_ot_fail_warn_ms_ = 0;
   if (udp_bound_) {
     udp_.close();
     udp_bound_ = false;

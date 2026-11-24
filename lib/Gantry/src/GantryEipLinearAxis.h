@@ -42,6 +42,12 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   bool moveToMm(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
                 float decel_mm_per_s2) override;
+  bool moveToMmHeld(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
+                    float decel_mm_per_s2) override;
+  bool releaseStartMotion() override;
+  bool isStartHeld() const override;
+  bool queueHeldMm(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
+                   float decel_mm_per_s2) override;
   bool moveRelativeMm(float delta_mm, float speed_mm_per_s, float accel_mm_per_s2,
                       float decel_mm_per_s2) override;
   bool stopMotion() override;
@@ -58,6 +64,8 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   bool isAlarmActive() const override;
   bool clearAlarm() override;
+  bool isLinkOnline() const override { return image_.isOnline(); }
+  bool isServoActive() const override;
   bool getDriveAlarmSummary(char* buf, size_t n) const override;
   uint16_t getDriveFaultCode() const override;
   uint16_t getDriveWarningCode() const override;
@@ -70,6 +78,7 @@ class GantryEipLinearAxis : public GantryLinearAxis {
 
   void setLogTag(const char* tag) override;
   void setLogRateHz(uint32_t hz) override;
+  DrivePositionRef getDrivePositionRef() const override;
 
   /// Optional: sync drive overtravel heuristic into GantryLimitSwitch objects.
   void attachLimitSwitches(GantryLimitSwitch* min_sw, GantryLimitSwitch* max_sw) override;
@@ -119,9 +128,9 @@ class GantryEipLinearAxis : public GantryLinearAxis {
     kHolding
   };
   ArmPhase arm_phase_;
-  uint8_t arm_phase_ticks_;
+  uint32_t arm_phase_us_;
   uint8_t a603_clear_attempts_;
-  uint16_t home_wait_ticks_;
+  uint32_t home_wait_us_;
 
   // Position Absolute PTP (OM=1 TM=2 NonCyclic=0). Done on AtReference.
   // kPreload latches the new Position with StartMotion=0; kStart is the edge.
@@ -129,20 +138,31 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   enum class MovePhase : uint8_t {
     kIdle = 0,
     kPreload,
+    kPreloadHold,
     kStart,
     kRun,
     kStopping
   };
   MovePhase move_phase_;
-  uint8_t move_phase_ticks_;
-  uint8_t fault_reset_pulse_ticks_;
+  uint32_t move_phase_us_;
+  // Next Absolute queued behind the move in flight (queueHeldMm). kPending
+  // waits for the current StartMotion pulse to end; kReady is on the wire with
+  // StartMotion=0 and waits for releaseStartMotion().
+  enum class QueuedMove : uint8_t { kNone = 0, kPending, kReady };
+  QueuedMove queued_ = QueuedMove::kNone;
+  float queued_target_mm_ = 0.0f;
+  float queued_speed_mm_s_ = 0.0f;
+  float queued_accel_mm_s2_ = 0.0f;
+  float queued_decel_mm_s2_ = 0.0f;
+  int64_t queued_at_us_ = 0;
+  uint32_t fault_reset_pulse_us_;
   float last_speed_mm_s_;
   float last_accel_mm_s2_;
   float last_decel_mm_s2_;
   int32_t move_speed_ref_;  // unsigned cruise magnitude (0.1 RPM)
-  uint16_t run_ticks_;
-  uint8_t stop_stable_ticks_;
-  uint8_t arrival_stable_ticks_;
+  uint32_t run_us_;
+  uint32_t stop_stable_us_;
+  uint32_t arrival_stable_us_;
   int32_t last_stop_sample_puu_;
   bool stop_sample_valid_;
 
@@ -160,7 +180,10 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   eip::k5100::OutputAssembly104 buildMoveCommand(bool start_motion_edge) const;
   eip::k5100::OutputAssembly104 buildHoldCommand() const;
   eip::k5100::OutputAssembly104 buildStopCommand(bool stop_motion) const;
+  bool startAbsoluteMm(float target_mm, float speed_mm_per_s, float accel_mm_per_s2,
+                       float decel_mm_per_s2, bool hold_start);
   void republishMoveCommand(bool start_motion_edge);
+  void applyQueuedMove();
   void enterAbortStop();
   void finishMoveHold();
   void advanceArmPhase();

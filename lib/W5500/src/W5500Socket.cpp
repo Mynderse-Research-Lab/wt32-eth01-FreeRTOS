@@ -7,6 +7,8 @@
 
 #include "W5500.h"  // register/status/command constants
 #include "W5500BusMutex.h"
+#include "W5500DeferredLog.h"
+#include "W5500Diag.h"
 #include "W5500Poll.h"
 
 #include <cstring>
@@ -17,9 +19,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#define W5500_LOGI(...) ESP_LOGI(TAG, __VA_ARGS__)
-#define W5500_LOGW(...) ESP_LOGW(TAG, __VA_ARGS__)
-#define W5500_LOGE(...) ESP_LOGE(TAG, __VA_ARGS__)
+// Socket calls run inside the W5500 bus mutex and on the Class 1 path, so
+// they never print directly: a line is queued and EipLog prints it (G-B13).
+#define W5500_LOGI(...) ::w5500::deferLog(TAG, 'I', esp_log_timestamp(), __VA_ARGS__)
+#define W5500_LOGW(...) ::w5500::deferLog(TAG, 'W', esp_log_timestamp(), __VA_ARGS__)
+#define W5500_LOGE(...) ::w5500::deferLog(TAG, 'E', esp_log_timestamp(), __VA_ARGS__)
 #else
 #include <chrono>
 #include <thread>
@@ -35,8 +39,8 @@ static const char* TAG = "W5500Sock";
 namespace {
 
 constexpr uint8_t kCommonBlock    = 0x00;
-constexpr uint32_t kDefaultTimeoutMs = 5000;
-constexpr uint32_t kCommandTimeoutMs  = 100;
+constexpr uint32_t kDefaultTimeoutMs = 500;
+constexpr uint32_t kCommandTimeoutMs  = 10;
 constexpr size_t   kUdpHeaderSize     = 8;
 
 static uint16_t g_next_tcp_source_port = 49152;
@@ -77,8 +81,23 @@ uint16_t readSocketSizeReg16Stable(W5500Hal& hal, uint8_t sock, uint16_t addr) {
     return a;
 }
 
+// cfg eip_txwr_split (dropout experiment): Sn_TX_WR as two 1-byte writes.
+// Each is a 4-byte SPI frame (TXDATA, no DMA) instead of one 5-byte DMA frame;
+// on 2026-10-20 the 5-byte TX_WR write was the one landing wrong or lost.
+bool g_txwr_split = false;
+
 void writeSocketReg16(W5500Hal& hal, uint8_t sock, uint16_t addr, uint16_t val) {
     hal.writeReg16(kBlockSocketReg(sock), addr, val);
+}
+
+void writeTxWr(W5500Hal& hal, uint8_t sock, uint16_t txWr) {
+    if (g_txwr_split) {
+        writeSocketReg(hal, sock, Sn_TX_WR, static_cast<uint8_t>(txWr >> 8));
+        writeSocketReg(hal, sock, static_cast<uint16_t>(Sn_TX_WR + 1),
+                       static_cast<uint8_t>(txWr & 0xFF));
+        return;
+    }
+    writeSocketReg16(hal, sock, Sn_TX_WR, txWr);
 }
 
 bool waitCommandComplete(W5500Hal& hal, uint8_t sock, uint32_t timeoutMs) {
@@ -144,6 +163,9 @@ struct TxWrCache {
 };
 static TxWrCache g_tx_wr_cache[8] = {};
 
+// Time each socket last issued SEND (diagnostics only; see W5500Diag).
+static int64_t g_last_send_us[8] = {};
+
 void cacheSocketDest(uint8_t sock, uint32_t ip, uint16_t port) {
     if (sock < 8) {
         g_udp_dest_cache[sock] = {ip, port, true};
@@ -155,6 +177,7 @@ void clearSocketDestCache(uint8_t sock) {
         g_udp_dest_cache[sock] = {};
         g_udp_send_pending[sock] = false;
         g_tx_wr_cache[sock] = {};
+        g_last_send_us[sock] = 0;
     }
 }
 
@@ -181,6 +204,12 @@ void noteSocketTxWr(uint8_t sock, uint16_t wr) {
     }
 }
 
+void noteSocketSend(uint8_t sock) {
+    if (sock < 8) {
+        g_last_send_us[sock] = pollNowUs();
+    }
+}
+
 bool socketDestCached(uint8_t sock, uint32_t ip, uint16_t port) {
     if (sock >= 8) return false;
     const UdpDestCache& c = g_udp_dest_cache[sock];
@@ -200,7 +229,7 @@ bool waitSendComplete(W5500Hal& hal, uint8_t sock, uint32_t timeout_us) {
     // Tight spin: Class 1 UDP SENDOK is typically microseconds; taskYIELD at
     // 1000 Hz was costing ~1 ms per axis (~3 ms dual O->T).
     return busyPollUsTight(timeout_us, [&]() {
-        std::lock_guard<std::mutex> lock(spiBusMutex());
+        std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
         uint8_t ir = readSocketReg(hal, sock, Sn_IR);
         if (ir & (Sn_IR_SENDOK | Sn_IR_TIMEOUT | Sn_IR_DISCON)) {
             return true;
@@ -216,7 +245,7 @@ bool waitCommandCompleteUnlocked(W5500Hal& hal, uint8_t sock, uint32_t timeoutMs
     const uint32_t capped =
         (timeout_us > kUdpSendOkTimeoutUs) ? kUdpSendOkTimeoutUs : timeout_us;
     return busyPollUsTight(capped, [&]() {
-        std::lock_guard<std::mutex> lock(spiBusMutex());
+        std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
         return readSocketReg(hal, sock, Sn_CR) == 0;
     });
 }
@@ -227,6 +256,28 @@ void clearSendInterrupts(W5500Hal& hal, uint8_t sock, uint8_t ir) {
     if (ir != 0) {
         writeSocketReg(hal, sock, Sn_IR, ir);
     }
+}
+
+// Software TX state for the failure snapshot. extraPending marks a socket
+// whose pending flag was already consumed by the failing confirm.
+SoftTxState softTxState(uint8_t extraPending) {
+    SoftTxState st;
+    st.pending_mask = extraPending;
+    for (uint8_t i = 0; i < 8; ++i) {
+        const uint8_t bit = static_cast<uint8_t>(1u << i);
+        if (g_udp_send_pending[i]) st.pending_mask = static_cast<uint8_t>(st.pending_mask | bit);
+        if (g_tx_wr_cache[i].valid) {
+            st.tx_wr[i] = g_tx_wr_cache[i].wr;
+            st.tx_wr_valid = static_cast<uint8_t>(st.tx_wr_valid | bit);
+        }
+        st.last_send_us[i] = g_last_send_us[i];
+        if (g_udp_dest_cache[i].valid) {
+            st.dest_ip[i] = g_udp_dest_cache[i].ip;
+            st.dest_port[i] = g_udp_dest_cache[i].port;
+            st.dest_valid = static_cast<uint8_t>(st.dest_valid | bit);
+        }
+    }
+    return st;
 }
 
 // Confirm a SEND that was left unconfirmed by the previous deferred call on
@@ -256,13 +307,22 @@ bool confirmDeferredSend(W5500Hal& hal, uint8_t sock) {
         }
     }
     if (!send_done) {
-        W5500_LOGW( "SendTo: sock=%d deferred SENDOK timeout", sock);
+        W5500_LOGW( "SendTo: sock=%d deferred SENDOK timeout (CR=0x%02X IR=0x%02X)",
+                 sock, cr_ir[0], cr_ir[1]);
+        captureFailureSnapshot(hal, sock, FailReason::kDeferredSendOkTimeout,
+                               softTxState(static_cast<uint8_t>(1u << sock)));
         return false;
     }
-    clearSendInterrupts(hal, sock, cr_ir[1]);
-    if (cr_ir[1] & Sn_IR_SENDOK) return true;
+    if (cr_ir[1] & Sn_IR_SENDOK) {
+        clearSendInterrupts(hal, sock, cr_ir[1]);
+        return true;
+    }
     W5500_LOGW( "SendTo: sock=%d deferred send failed (IR=0x%02X)", sock,
              cr_ir[1]);
+    // Snapshot before the clear so Sn_IR still shows what the chip reported.
+    captureFailureSnapshot(hal, sock, FailReason::kDeferredSendFailed,
+                           softTxState(static_cast<uint8_t>(1u << sock)));
+    clearSendInterrupts(hal, sock, cr_ir[1]);
     return false;
 }
 
@@ -346,6 +406,7 @@ int readUdpDatagramUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
         W5500_LOGW(
             "RecvFrom: sock=%d bad UDP hdr len=%u avail=%u - discarding %u", sock,
             payloadLen, avail, avail);
+        noteRxHeaderBad();
         completeUdpRecv(hal, sock, static_cast<uint16_t>(rxRd + avail));
         return 0;
     }
@@ -429,8 +490,12 @@ size_t readUdpBatchUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
         }
     }
 
-    W5500_LOGW( "RecvBatch: sock=%d bad UDP hdr avail=%u - discarding %u", sock,
-             avail, avail);
+    // Log the head header bytes: a corrupt SPI read shows as junk here while
+    // avail still adds up to whole drive frames.
+    W5500_LOGW( "RecvBatch: sock=%d bad UDP hdr avail=%u rd=0x%04X hdr=%02X%02X%02X%02X "
+             "%02X%02X %02X%02X - discarding %u", sock, avail, rxRd, buf[0], buf[1],
+             buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], avail);
+    noteRxHeaderBad();
     completeUdpRecv(hal, sock, static_cast<uint16_t>(rxRd + avail));
     return 0;
 }
@@ -438,7 +503,7 @@ size_t readUdpBatchUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
 }  // namespace
 
 uint16_t nextEphemeralPort() {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     return nextTcpSourcePort();
 }
 
@@ -446,7 +511,7 @@ uint16_t nextEphemeralPort() {
 
 int socketOpen(W5500Hal& hal, SocketMode mode, uint16_t localPort,
                uint32_t udpMulticastListenIp) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
     int sock = findFreeSocket(hal);
     if (sock < 0) return -1;
@@ -504,10 +569,10 @@ int socketOpen(W5500Hal& hal, SocketMode mode, uint16_t localPort,
         if (udpMulticastListenIp != 0) {
             W5500_LOGI("UDP multicast sock=%d port=%u group=%u.%u.%u.%u",
                      sock, localPort,
-                     (udpMulticastListenIp >> 24) & 0xFF,
-                     (udpMulticastListenIp >> 16) & 0xFF,
-                     (udpMulticastListenIp >> 8) & 0xFF,
-                     udpMulticastListenIp & 0xFF);
+                     static_cast<unsigned>((udpMulticastListenIp >> 24) & 0xFF),
+                     static_cast<unsigned>((udpMulticastListenIp >> 16) & 0xFF),
+                     static_cast<unsigned>((udpMulticastListenIp >> 8) & 0xFF),
+                     static_cast<unsigned>(udpMulticastListenIp & 0xFF));
         } else {
             W5500_LOGI("UDP sock=%d bound port=%u", sock, localPort);
         }
@@ -524,6 +589,10 @@ int socketOpen(W5500Hal& hal, SocketMode mode, uint16_t localPort,
     return sock;
 }
 
+void socketSetTxWrSplit(bool split) {
+    g_txwr_split = split;
+}
+
 void socketResetSoftwareState() {
     for (uint8_t s = 0; s < 8; ++s) {
         g_udp_mcast_listen[s] = {};
@@ -531,8 +600,12 @@ void socketResetSoftwareState() {
     }
 }
 
+SoftTxState socketSoftTxState() {
+    return softTxState(0);
+}
+
 void socketClose(W5500Hal& hal, uint8_t sock) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     g_udp_mcast_listen[sock] = {};
     clearSocketDestCache(sock);
     invalidateSocketTxWr(sock);
@@ -550,7 +623,7 @@ bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
     {
         // Hold SPI only for setup + CONNECT + Sn_CR clear (ms). Do NOT hold
         // across the ESTABLISHED poll - that starved Class 1 for up to 5s.
-        std::lock_guard<std::mutex> lock(spiBusMutex());
+        std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
         sourcePort = readSocketReg16(hal, sock, Sn_PORT);
         if (sourcePort == 0) {
@@ -581,18 +654,23 @@ bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
         }
     }
 
-    // Poll Sn_SR without holding SPI (Class 1 / other sockets must proceed).
-    // INIT during ARP is normal on W5500; SYNSENT once ARP succeeds; CLOSED
-    // on ARP/TCP failure.
+    // Poll Sn_SR without holding SPI between reads (Class 1 / other sockets
+    // must proceed). INIT during ARP is normal on W5500; SYNSENT once ARP
+    // succeeds; CLOSED on ARP/TCP failure. Sleep between reads so tasks below
+    // the scanner priority are not starved for the whole connect timeout.
     uint32_t elapsed = 0;
     constexpr uint32_t kDiagIntervalMs = 1000;
     uint32_t nextDiag = kDiagIntervalMs;
     uint8_t finalSr = SOCK_CLOSED;
 
-    if (!busyPollMs(timeoutMs, [&]() {
-        std::lock_guard<std::mutex> lock(spiBusMutex());
-        uint8_t sr = readSocketReg(hal, sock, Sn_SR);
+    if (!sleepPollMs(timeoutMs, kConnectPollIntervalMs, [&](uint32_t elapsedMs) {
+        uint8_t sr = 0;
+        {
+            std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
+            sr = readSocketReg(hal, sock, Sn_SR);
+        }
         finalSr = sr;
+        elapsed = elapsedMs;
 
 #ifdef ESP_PLATFORM
         if (elapsed >= nextDiag) {
@@ -602,7 +680,6 @@ bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
             nextDiag += kDiagIntervalMs;
         }
 #endif
-        ++elapsed;
 
         return (sr == SOCK_ESTABLISHED || sr == SOCK_CLOSED ||
                 sr == SOCK_CLOSE_WAIT);
@@ -616,7 +693,7 @@ bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
     if (finalSr != SOCK_ESTABLISHED) {
         uint8_t ir = 0;
         {
-            std::lock_guard<std::mutex> lock(spiBusMutex());
+            std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
             ir = readSocketReg(hal, sock, Sn_IR);
             clearSendInterrupts(hal, sock, ir);
         }
@@ -634,7 +711,7 @@ bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
 }
 
 bool socketListen(W5500Hal& hal, uint8_t sock, uint16_t port) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
     writeSocketReg16(hal, sock, Sn_PORT, port);
     writeSocketReg(hal, sock, Sn_CR, Sn_CR_LISTEN);
@@ -646,7 +723,7 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
     if (len > 0xFFFF) return -1;
 
     {
-        std::lock_guard<std::mutex> lock(spiBusMutex());
+        std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
         uint16_t freeSize = readSocketSizeReg16Stable(hal, sock, Sn_TX_FSR);
         if (freeSize < static_cast<uint16_t>(len)) {
@@ -655,13 +732,18 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
             return -1;
         }
 
+        // A socketSendNoWait leaves its SENDOK set; it must not pass for ours.
+        const uint8_t stale = readSocketReg(hal, sock, Sn_IR) & Sn_IR_SENDOK;
+        clearSendInterrupts(hal, sock, stale);
+
         uint16_t txWr = readSocketReg16(hal, sock, Sn_TX_WR);
         hal.writeBuf(kBlockSocketTxBuf(sock), txWr, data, static_cast<uint16_t>(len));
 
         txWr += static_cast<uint16_t>(len);
-        writeSocketReg16(hal, sock, Sn_TX_WR, txWr);
+        writeTxWr(hal, sock, txWr);
         noteSocketTxWr(sock, txWr);
         writeSocketReg(hal, sock, Sn_CR, Sn_CR_SEND);
+        noteSocketSend(sock);
     }
 
     if (!waitCommandCompleteUnlocked(hal, sock, kCommandTimeoutMs)) {
@@ -674,7 +756,7 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
         return -1;
     }
 
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     uint8_t ir = readSocketReg(hal, sock, Sn_IR);
     if (ir & Sn_IR_SENDOK) {
         clearSendInterrupts(hal, sock, ir);
@@ -689,12 +771,42 @@ int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
     return -1;
 }
 
+int socketSendNoWait(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len) {
+    if (len == 0) return 0;
+    if (len > 0xFFFF) return -1;
+
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
+
+    // The previous call's outcome is still in Sn_IR.
+    const uint8_t ir = readSocketReg(hal, sock, Sn_IR) &
+                       (Sn_IR_SENDOK | Sn_IR_TIMEOUT | Sn_IR_DISCON);
+    clearSendInterrupts(hal, sock, ir);
+    if ((ir & (Sn_IR_TIMEOUT | Sn_IR_DISCON)) != 0) {
+        return -1;
+    }
+    if (readSocketReg(hal, sock, Sn_SR) != SOCK_ESTABLISHED) {
+        return -1;
+    }
+    if (readSocketSizeReg16Stable(hal, sock, Sn_TX_FSR) < static_cast<uint16_t>(len)) {
+        return -1;
+    }
+
+    uint16_t txWr = readSocketReg16(hal, sock, Sn_TX_WR);
+    hal.writeBuf(kBlockSocketTxBuf(sock), txWr, data, static_cast<uint16_t>(len));
+    txWr += static_cast<uint16_t>(len);
+    writeTxWr(hal, sock, txWr);
+    noteSocketTxWr(sock, txWr);
+    writeSocketReg(hal, sock, Sn_CR, Sn_CR_SEND);
+    noteSocketSend(sock);
+    return static_cast<int>(len);
+}
+
 int socketRecv(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
                uint32_t timeoutMs) {
     // Poll without holding the SPI mutex for the whole timeout (other sockets
     // must keep exchanging Class 1 frames).
     bool dataReady = busyPollMs(timeoutMs, [&]() {
-        std::lock_guard<std::mutex> lock(spiBusMutex());
+        std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
         uint16_t avail = readSocketSizeReg16Stable(hal, sock, Sn_RX_RSR);
         if (avail > 0) return true;
         uint8_t sr = readSocketReg(hal, sock, Sn_SR);
@@ -702,7 +814,7 @@ int socketRecv(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
     });
     (void)dataReady;
 
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
     uint8_t sr = readSocketReg(hal, sock, Sn_SR);
     if (sr == SOCK_CLOSED || sr == SOCK_CLOSE_WAIT) return -1;
@@ -730,7 +842,7 @@ int socketSendTo(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len,
 
     // Hold SPI for the whole UDP TX + SENDOK. Avoids per-poll mutex churn and
     // keeps Class 1 O->T on a tight path (SPI3 is deferred during exchange).
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
 
     if (!confirmDeferredSend(hal, sock)) {
         return -1;
@@ -751,9 +863,10 @@ int socketSendTo(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len,
     hal.writeBuf(kBlockSocketTxBuf(sock), txWr, data, static_cast<uint16_t>(len));
 
     txWr += static_cast<uint16_t>(len);
-    writeSocketReg16(hal, sock, Sn_TX_WR, txWr);
+    writeTxWr(hal, sock, txWr);
     noteSocketTxWr(sock, txWr);
     writeSocketReg(hal, sock, Sn_CR, Sn_CR_SEND);
+    noteSocketSend(sock);
 
     // Cached dest means no ARP, and each Class 1 axis owns its TX socket and
     // sends once per RPI - so SENDOK can be confirmed at the head of the next
@@ -784,6 +897,10 @@ int socketSendTo(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len,
         } else {
             W5500_LOGW( "SendTo: sock=%d SENDOK timeout", sock);
         }
+        captureFailureSnapshot(hal, sock,
+                               (cr_ir[0] != 0) ? FailReason::kSendCmdTimeout
+                                               : FailReason::kSendOkTimeout,
+                               softTxState(0));
         const uint8_t sr = readSocketReg(hal, sock, Sn_SR);
         if (sr != SOCK_UDP) {
             W5500_LOGW( "SendTo: sock=%d not UDP (Sr=0x%02X)", sock, sr);
@@ -810,19 +927,19 @@ int socketRecvFrom(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
     bool dataReady = false;
     if (timeout_us <= kBusyPollYieldAboveUs) {
         dataReady = busyPollUsTight(timeout_us, [&]() {
-            std::lock_guard<std::mutex> lock(spiBusMutex());
+            std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
             return readSocketSizeReg16Stable(hal, sock, Sn_RX_RSR) >=
                    kUdpHeaderSize;
         });
     } else {
         dataReady = busyPollUs(timeout_us, [&]() {
-            std::lock_guard<std::mutex> lock(spiBusMutex());
+            std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
             return readSocketSizeReg16Stable(hal, sock, Sn_RX_RSR) >=
                    kUdpHeaderSize;
         });
     }
 
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     if (!dataReady) {
         return 0;
     }
@@ -831,41 +948,41 @@ int socketRecvFrom(W5500Hal& hal, uint8_t sock, uint8_t* buf, size_t maxLen,
 
 int socketRecvFromNonBlocking(W5500Hal& hal, uint8_t sock, uint8_t* buf,
                               size_t maxLen) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     return readUdpDatagramUnlocked(hal, sock, buf, maxLen);
 }
 
 size_t socketRecvFromBatch(W5500Hal& hal, uint8_t sock, uint8_t* buf,
                            size_t bufLen, UdpDatagram* out, size_t maxOut) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     return readUdpBatchUnlocked(hal, sock, buf, bufLen, out, maxOut);
 }
 
 bool socketBind(W5500Hal& hal, uint8_t sock, uint16_t port) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     writeSocketReg16(hal, sock, Sn_PORT, port);
     return true;
 }
 
 bool socketIsConnected(W5500Hal& hal, uint8_t sock) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     uint8_t sr = readSocketReg(hal, sock, Sn_SR);
     return (sr == SOCK_ESTABLISHED);
 }
 
 bool socketIsOpen(W5500Hal& hal, uint8_t sock) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     uint8_t sr = readSocketReg(hal, sock, Sn_SR);
     return (sr != SOCK_CLOSED);
 }
 
 int socketRxAvailable(W5500Hal& hal, uint8_t sock) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     return static_cast<int>(readSocketSizeReg16Stable(hal, sock, Sn_RX_RSR));
 }
 
 uint8_t socketStatus(W5500Hal& hal, uint8_t sock) {
-    std::lock_guard<std::mutex> lock(spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(spiBusMutex());
     return readSocketReg(hal, sock, Sn_SR);
 }
 

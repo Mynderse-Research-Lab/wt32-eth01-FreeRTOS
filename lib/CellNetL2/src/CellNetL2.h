@@ -70,6 +70,10 @@ class CellNetL2Node {
 
   bool sendVisionDetect(uint32_t item_id, float x_across_mm, float y_bat_mm,
                         float theta_deg, uint8_t battery_class,
+                        float capture_displacement_m = 0.0f,
+                        bool capture_disp_valid = false,
+                        float width_mm = 0.0f, float length_mm = 0.0f,
+                        float height_from_belt_mm = 0.0f,
                         const uint8_t dest_mac[6] = nullptr);
 
   bool sendConveyorSpeed(float speed_mm_s, float displacement_m,

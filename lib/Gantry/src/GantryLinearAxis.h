@@ -11,6 +11,8 @@
 #ifndef GANTRY_LINEAR_AXIS_H
 #define GANTRY_LINEAR_AXIS_H
 
+#include "GantryDriveRef.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -37,6 +39,24 @@ public:
     // ---------- mm-domain motion ----------
     virtual bool  moveToMm(float target_mm, float speed_mm_per_s,
                            float accel_mm_per_s2, float decel_mm_per_s2) = 0;
+    /// Latch Absolute and hold the StartMotion edge until releaseStartMotion().
+    /// Axes that cannot hold fall through to moveToMm().
+    virtual bool moveToMmHeld(float target_mm, float speed_mm_per_s,
+                              float accel_mm_per_s2, float decel_mm_per_s2) {
+        return moveToMm(target_mm, speed_mm_per_s, accel_mm_per_s2, decel_mm_per_s2);
+    }
+    virtual bool releaseStartMotion() { return false; }
+    virtual bool isStartHeld() const { return false; }
+    /// Latch the next Absolute behind the move in flight, StartMotion held, so
+    /// releaseStartMotion() can queue it without stopping the current move.
+    virtual bool queueHeldMm(float target_mm, float speed_mm_per_s,
+                             float accel_mm_per_s2, float decel_mm_per_s2) {
+        (void)target_mm;
+        (void)speed_mm_per_s;
+        (void)accel_mm_per_s2;
+        (void)decel_mm_per_s2;
+        return false;
+    }
     virtual bool  moveRelativeMm(float delta_mm, float speed_mm_per_s,
                                  float accel_mm_per_s2, float decel_mm_per_s2) = 0;
     virtual bool  stopMotion()            = 0;
@@ -55,6 +75,10 @@ public:
     // ---------- Faults ----------
     virtual bool isAlarmActive() const = 0;
     virtual bool clearAlarm()          = 0;
+    /// Cyclic drive link up. While false, position reads are not live (EIP: 0).
+    virtual bool isLinkOnline() const  = 0;
+    /// Drive reports its servo on (Active). False after a trip until 'enable'.
+    virtual bool isServoActive() const = 0;
     /// @brief EIP: fill buf with FAULT/WARN summary (e.g. "WARN A603 ...").
     ///        Pulse-motor backends return false / "n/a".
     virtual bool getDriveAlarmSummary(char* buf, size_t n) const {
@@ -84,6 +108,11 @@ public:
 
     // ---------- Periodic ----------
     virtual void update() = 0;
+
+    /// Live drive homed/in-reference. Default unknown (host fakes override).
+    virtual DrivePositionRef getDrivePositionRef() const {
+        return DrivePositionRef::kUnknown;
+    }
 
     // ---------- Homing speed (used by Gantry::home / calibrate) ----------
     virtual uint32_t homingSpeedPps() const = 0;

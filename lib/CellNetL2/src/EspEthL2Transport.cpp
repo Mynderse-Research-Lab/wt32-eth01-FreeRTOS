@@ -10,6 +10,7 @@
 
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "hal/emac_ll.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -18,8 +19,6 @@ static const char* TAG = "EspEthL2";
 
 namespace CellNet {
 
-static esp_err_t (*s_original_eth_input)(esp_eth_handle_t, uint8_t*, uint32_t,
-                                         void*) = nullptr;
 static EspEthL2Transport* s_active_instance = nullptr;
 
 esp_err_t EspEthL2Transport::rxHook(esp_eth_handle_t hdl, uint8_t* buffer,
@@ -39,33 +38,40 @@ esp_err_t EspEthL2Transport::rxHook(esp_eth_handle_t hdl, uint8_t* buffer,
     }
   }
 
-  if (s_original_eth_input != nullptr) {
-    return s_original_eth_input(hdl, buffer, length, priv);
+  if (s_active_instance != nullptr && s_active_instance->netif_ != nullptr) {
+    return esp_netif_receive(s_active_instance->netif_, buffer, length, nullptr);
+  }
+
+  // If no netif is attached, we must free the buffer to prevent a leak
+  if (buffer != nullptr) {
+      std::free(buffer);
   }
   return ESP_OK;
 }
 
-EspEthL2Transport::EspEthL2Transport(esp_eth_handle_t eth_handle)
-    : eth_handle_(eth_handle) {
+EspEthL2Transport::EspEthL2Transport() {
   s_active_instance = this;
 }
 
-esp_err_t EspEthL2Transport::attachEthHandle(esp_eth_handle_t eth_handle) {
-  if (eth_handle == nullptr) {
+esp_err_t EspEthL2Transport::attachEthHandle(esp_eth_handle_t eth_handle, esp_netif_t* netif) {
+  if (eth_handle == nullptr || netif == nullptr) {
     return ESP_ERR_INVALID_ARG;
   }
   eth_handle_ = eth_handle;
+  netif_ = netif;
   s_active_instance = this;
 
   if (!hooked_) {
-    esp_err_t err = esp_eth_update_input_path(eth_handle_, rxHook,
-                                              &s_original_eth_input);
+    esp_err_t err = esp_eth_update_input_path(eth_handle_, rxHook, nullptr);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "Failed to hook Ethernet input path: %d", (int)err);
       return err;
     }
     hooked_ = true;
-    ESP_LOGI(TAG, "Attached Layer-2 RX filter hook (EtherType 0x%04X)",
+    // CellNet peers may send frames under the 64-byte Ethernet minimum; the stock
+    // driver configures the EMAC DMA to drop them before the RX hook sees them.
+    emac_ll_forward_undersized_good_frame_enable(&EMAC_DMA, true);
+    ESP_LOGI(TAG, "Attached Layer-2 RX filter hook (EtherType 0x%04X), undersized RX forward on",
              CELL_NET_L2_ETHERTYPE);
   }
 

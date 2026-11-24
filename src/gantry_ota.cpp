@@ -8,11 +8,13 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -60,6 +62,35 @@ esp_err_t gantryOtaGetStatus(GantryOtaStatus &status) {
   return ESP_OK;
 }
 
+const char *gantryResetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:
+            return "POWERON (power applied)";
+        case ESP_RST_EXT:
+            return "EXT (reset pin)";
+        case ESP_RST_SW:
+            return "SW (esp_restart / OTA)";
+        case ESP_RST_PANIC:
+            return "PANIC (crash: exception or abort)";
+        case ESP_RST_INT_WDT:
+            return "INT_WDT (interrupt watchdog)";
+        case ESP_RST_TASK_WDT:
+            return "TASK_WDT (task watchdog)";
+        case ESP_RST_WDT:
+            return "WDT (other watchdog)";
+        case ESP_RST_DEEPSLEEP:
+            return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:
+            return "BROWNOUT (supply dipped)";
+        case ESP_RST_SDIO:
+            return "SDIO";
+        case ESP_RST_UNKNOWN:
+            return "UNKNOWN";
+        default:
+            return "OTHER";
+    }
+}
+
 void gantryOtaPrintStatus() {
   GantryOtaStatus status;
   if (gantryOtaGetStatus(status) != ESP_OK) {
@@ -103,6 +134,9 @@ void gantryOtaPrintStatus() {
   }
   ESP_LOGI(TAG, "Image State      : %s", state_str);
   ESP_LOGI(TAG, "Rollback Possible: %s", status.rollback_possible ? "YES" : "NO");
+  ESP_LOGI(TAG, "Last Reset       : %s (reason %d), uptime %lu s", gantryResetReasonName(),
+           static_cast<int>(esp_reset_reason()),
+           static_cast<unsigned long>(esp_timer_get_time() / 1000000LL));
   ESP_LOGI(TAG, "============================================================");
 }
 
@@ -128,12 +162,30 @@ esp_err_t gantryOtaConfirmBootValid() {
   return ESP_OK;
 }
 
+esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry) {
+    if (gantry == nullptr || !gantry->isEnabled()) {
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "OTA: disabling motors for the update (re-enable after reboot)");
+    gantry->disable();
+    if (gantry->isEnabled()) {
+        ESP_LOGE(TAG, "OTA REFUSED: motors did not disable");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
-                              const esp_partition_t *&target_part) {
-  if (gantry != nullptr && (gantry->isEnabled() || gantry->isBusy())) {
-    ESP_LOGE(TAG, "OTA REFUSED: Gantry is ENABLED or BUSY! Disable drives before flashing.");
-    return ESP_ERR_INVALID_STATE;
-  }
+                              const esp_partition_t *&target_part, size_t image_size) {
+    // A move, home or pick in progress is not interrupted for an update.
+    if (gantry != nullptr && gantry->isBusy()) {
+        ESP_LOGE(TAG, "OTA REFUSED: Gantry is BUSY (move/home/pick). Stop it before flashing.");
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t disable_err = gantryOtaDisableMotors(gantry);
+    if (disable_err != ESP_OK) {
+        return disable_err;
+    }
 
   const esp_partition_t *running = esp_ota_get_running_partition();
   target_part = esp_ota_get_next_update_partition(running);
@@ -145,7 +197,11 @@ esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
   ESP_LOGI(TAG, "Initiating OTA update stream into partition '%s' (0x%06lX)...",
            target_part->label, (unsigned long)target_part->address);
 
-  esp_err_t err = esp_ota_begin(target_part, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+  // Erasing the announced range up front lets the flash driver use 64 KB block
+  // erases instead of one 4 KB sector erase per write (N-2).
+  esp_err_t err = esp_ota_begin(target_part,
+                                image_size > 0 ? image_size : OTA_WITH_SEQUENTIAL_WRITES,
+                                &handle);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "esp_ota_begin failed: %s (0x%x)", esp_err_to_name(err), err);
     return err;
@@ -277,7 +333,7 @@ static void otaServerTask(void *param) {
              inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
     char line[128] = {};
-    if (!readLine(client_fd, line, sizeof(line), 5000)) {
+    if (!readLine(client_fd, line, sizeof(line), 1000)) {
       sendStr(client_fd, "ERR TIMEOUT\n");
       close(client_fd);
       continue;
@@ -294,7 +350,7 @@ static void otaServerTask(void *param) {
     sendStr(client_fd, "OK AUTH\n");
 
     // Step 2: Receive START command
-    if (!readLine(client_fd, line, sizeof(line), 5000)) {
+    if (!readLine(client_fd, line, sizeof(line), 1000)) {
       sendStr(client_fd, "ERR TIMEOUT\n");
       close(client_fd);
       continue;
@@ -310,10 +366,12 @@ static void otaServerTask(void *param) {
     // Step 3: Safety check & start stream
     esp_ota_handle_t ota_handle = 0;
     const esp_partition_t *target_part = nullptr;
-    esp_err_t err = gantryOtaStartStream(ctx->gantry, ota_handle, target_part);
+    const int64_t erase_t0 = esp_timer_get_time();
+    esp_err_t err = gantryOtaStartStream(ctx->gantry, ota_handle, target_part, image_size);
+    const int64_t erase_us = esp_timer_get_time() - erase_t0;
     if (err != ESP_OK) {
       if (err == ESP_ERR_INVALID_STATE) {
-        sendStr(client_fd, "ERR SAFETY: Gantry active (motors enabled/moving)\n");
+        sendStr(client_fd, "ERR SAFETY: Gantry busy (move/home/pick in progress)\n");
       } else {
         sendStr(client_fd, "ERR OTA_INIT\n");
       }
@@ -328,10 +386,18 @@ static void otaServerTask(void *param) {
     static uint8_t chunk_buf[4096];
     bool stream_failed = false;
 
-    // Set receive timeout to 10 seconds for chunk transfer
+    // Silence longer than 2 s means the sender stalled.
     struct timeval tv {};
-    tv.tv_sec = 10;
+    tv.tv_sec = 2;
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    // Where the stream time goes: waiting in recv() (the sender or TCP) or
+    // inside esp_ota_write() (flash erase and program). Reported in OK COMPLETE.
+    const int64_t stream_t0 = esp_timer_get_time();
+    int64_t recv_us = 0;
+    int64_t write_us = 0;
+    int64_t write_max_us = 0;
+    uint32_t recv_calls = 0;
 
     while (received_bytes < image_size) {
       size_t to_read = sizeof(chunk_buf);
@@ -339,7 +405,11 @@ static void otaServerTask(void *param) {
         to_read = image_size - received_bytes;
       }
 
+      const int64_t recv_t0 = esp_timer_get_time();
       ssize_t read_bytes = recv(client_fd, chunk_buf, to_read, 0);
+      const int64_t write_t0 = esp_timer_get_time();
+      recv_us += write_t0 - recv_t0;
+      recv_calls++;
       if (read_bytes <= 0) {
         ESP_LOGE(TAG, "OTA socket recv error during stream: read %zd, errno %d",
                  read_bytes, errno);
@@ -348,12 +418,18 @@ static void otaServerTask(void *param) {
       }
 
       err = gantryOtaWriteStream(ota_handle, chunk_buf, (size_t)read_bytes);
+      const int64_t write_dt = esp_timer_get_time() - write_t0;
+      write_us += write_dt;
+      if (write_dt > write_max_us) {
+        write_max_us = write_dt;
+      }
       if (err != ESP_OK) {
         stream_failed = true;
         break;
       }
       received_bytes += (size_t)read_bytes;
     }
+    const int64_t stream_us = esp_timer_get_time() - stream_t0;
 
     if (stream_failed || received_bytes != image_size) {
       ESP_LOGE(TAG, "OTA stream aborted: received %zu / %zu bytes",
@@ -365,18 +441,32 @@ static void otaServerTask(void *param) {
     }
 
     // Step 5: Finish & validate image
+    const int64_t finish_t0 = esp_timer_get_time();
     err = gantryOtaFinishStream(ota_handle, target_part);
+    const int64_t finish_us = esp_timer_get_time() - finish_t0;
     if (err != ESP_OK) {
       sendStr(client_fd, "ERR VALIDATION_FAILED\n");
       close(client_fd);
       continue;
     }
 
-    sendStr(client_fd, "OK COMPLETE: Rebooting into new firmware...\n");
+    // Keep this line short: the supervisor shows it in a 128-byte status message.
+    char done[112];
+    snprintf(done, sizeof(done),
+             "OK COMPLETE ms: erase=%lu stream=%lu recv=%lu write=%lu wmax=%lu verify=%lu n=%lu\n",
+             (unsigned long)(erase_us / 1000),
+             (unsigned long)(stream_us / 1000), (unsigned long)(recv_us / 1000),
+             (unsigned long)(write_us / 1000), (unsigned long)(write_max_us / 1000),
+             (unsigned long)(finish_us / 1000), (unsigned long)recv_calls);
+    ESP_LOGI(TAG, "%.*s", (int)strcspn(done, "\n"), done);
+    sendStr(client_fd, done);
     vTaskDelay(pdMS_TO_TICKS(500));
     close(client_fd);
     close(listen_fd);
 
+    // A supervisor START during the upload re-enables the motors. Drop them
+    // under control before the reboot cuts Class 1.
+    (void)gantryOtaDisableMotors(ctx->gantry);
     ESP_LOGI(TAG, "Restarting ESP32 now...");
     vTaskDelay(pdMS_TO_TICKS(200));
     esp_restart();
@@ -399,5 +489,74 @@ esp_err_t gantryOtaStartServer(Gantry::Gantry *gantry, int port, const char *pas
     delete ctx;
     return ESP_FAIL;
   }
+  return ESP_OK;
+}
+
+// flashstall (N-2): measure how many frames the EMAC holds while a flash write
+// stalls the receive task. "erase" clears the test region; "write" then does
+// back-to-back 4 KB writes into it, like an OTA after its up-front erase. Two
+// steps, so frames lost during the erase are not counted against the writes.
+// The region is the passive OTA slot from 1.5 MB on; images today are about
+// 0.85 MB, so the slot's resident image is untouched while images stay under
+// 1.5 MB. Flash writes disable the cache on both cores, so the motors must be off.
+esp_err_t gantryOtaFlashStallTest(Gantry::Gantry *gantry, bool erase, int writes, char *out,
+                                  size_t out_len) {
+  constexpr uint32_t kOffset = 0x180000;
+  constexpr size_t kBlock = 4096;
+  static uint8_t block[kBlock];  // .bss: DRAM, as the OTA block buffer must be
+  if (gantry != nullptr && (gantry->isEnabled() || gantry->isBusy())) {
+    snprintf(out, out_len, "refused: motors enabled or gantry busy ('stop' first)");
+    return ESP_ERR_INVALID_STATE;
+  }
+  const esp_partition_t *part = esp_ota_get_next_update_partition(nullptr);
+  if (part == nullptr || part->size <= kOffset) {
+    snprintf(out, out_len, "refused: no passive OTA slot");
+    return ESP_ERR_NOT_FOUND;
+  }
+  const int max_writes = static_cast<int>((part->size - kOffset) / kBlock);
+  if (writes < 1 || writes > max_writes) {
+    snprintf(out, out_len, "refused: n must be 1..%d", max_writes);
+    return ESP_ERR_INVALID_ARG;
+  }
+  const size_t len = static_cast<size_t>(writes) * kBlock;
+  if (erase) {
+    const int64_t e0 = esp_timer_get_time();
+    const esp_err_t err = esp_partition_erase_range(part, kOffset, len);
+    const int64_t erase_us = esp_timer_get_time() - e0;
+    if (err != ESP_OK) {
+      snprintf(out, out_len, "erase failed: %s", esp_err_to_name(err));
+      return err;
+    }
+    snprintf(out, out_len, "flashstall erase %s+0x%lX: %d KB in %lu ms", part->label,
+             (unsigned long)kOffset, writes * 4, (unsigned long)(erase_us / 1000));
+    return ESP_OK;
+  }
+  for (size_t i = 0; i < kBlock; ++i) {
+    block[i] = static_cast<uint8_t>(i * 31u + 7u);
+  }
+  int64_t total_us = 0;
+  int64_t min_us = INT64_MAX;
+  int64_t max_us = 0;
+  const int64_t w0 = esp_timer_get_time();
+  for (int i = 0; i < writes; ++i) {
+    const int64_t t = esp_timer_get_time();
+    const esp_err_t err =
+        esp_partition_write(part, kOffset + static_cast<uint32_t>(i) * kBlock, block, kBlock);
+    const int64_t dt = esp_timer_get_time() - t;
+    if (err != ESP_OK) {
+      snprintf(out, out_len, "write %d failed: %s ('flashstall erase %d' first)", i,
+               esp_err_to_name(err), writes);
+      return err;
+    }
+    total_us += dt;
+    min_us = dt < min_us ? dt : min_us;
+    max_us = dt > max_us ? dt : max_us;
+  }
+  const int64_t span_us = esp_timer_get_time() - w0;
+  snprintf(out, out_len,
+           "flashstall write %s+0x%lX: %d writes of 4 KB in %lu ms (writing %lu ms, min %lu us, "
+           "max %lu us)",
+           part->label, (unsigned long)kOffset, writes, (unsigned long)(span_us / 1000),
+           (unsigned long)(total_us / 1000), (unsigned long)min_us, (unsigned long)max_us);
   return ESP_OK;
 }

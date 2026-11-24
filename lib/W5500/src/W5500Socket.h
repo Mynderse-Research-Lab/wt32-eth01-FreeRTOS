@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstddef>
 
+#include "W5500Diag.h"
 #include "W5500Hal.h"
 
 namespace w5500 {
@@ -47,6 +48,14 @@ void socketClose(W5500Hal& hal, uint8_t sock);
 // Caller must already hold spiBusMutex() (or be single-threaded).
 void socketResetSoftwareState();
 
+// Dropout experiment (cfg eip_txwr_split): write Sn_TX_WR as two single-byte
+// register writes (no DMA) instead of one 2-byte write. Set once at boot.
+void socketSetTxWrSplit(bool split);
+
+// Software TX state (cached Sn_TX_WR, deferred-SENDOK flags, last SEND time)
+// for the dropout failure snapshot. Caller must hold spiBusMutex().
+SoftTxState socketSoftTxState();
+
 // TCP client connect. Sets destination IP/port, issues OPEN+CONNECT,
 // polls Sn_SR until SOCK_ESTABLISHED or timeout. Returns true on connect.
 bool socketConnect(W5500Hal& hal, uint8_t sock, uint32_t ip, uint16_t port,
@@ -59,6 +68,12 @@ bool socketListen(W5500Hal& hal, uint8_t sock, uint16_t port);
 
 // Send data on a connected TCP socket. Returns bytes sent, or -1 on error.
 int socketSend(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len);
+
+// TCP send that issues SEND and returns without polling SENDOK, for a rare
+// frame sent from the Class 1 task (encapsulation NOP). It first reports the
+// previous one's outcome: -1 if it timed out or the socket is no longer
+// ESTABLISHED. Returns bytes queued, or -1.
+int socketSendNoWait(W5500Hal& hal, uint8_t sock, const uint8_t* data, size_t len);
 
 // Receive data from a connected TCP socket.
 // Returns bytes read, 0 if no data within timeout, -1 on error/disconnect.

@@ -42,6 +42,14 @@ struct GantryOtaStatus {
 esp_err_t gantryOtaGetStatus(GantryOtaStatus &status);
 
 /**
+ * @brief Why the ESP32 last reset (esp_reset_reason), as a short label.
+ *
+ * The UART boot log is lost on a TCP-only bench, so `ota` and `status` print
+ * this to tell an OTA restart (SW) from a crash (PANIC / WDT) or BROWNOUT.
+ */
+const char *gantryResetReasonName();
+
+/**
  * @brief Print OTA status, running slot, and version details to log.
  */
 void gantryOtaPrintStatus();
@@ -53,14 +61,28 @@ void gantryOtaPrintStatus();
 esp_err_t gantryOtaConfirmBootValid();
 
 /**
+ * @brief Disable the motors if they are enabled (OTA start and pre-reboot).
+ * @param gantry Active Gantry instance; nullptr is a no-op.
+ * @return ESP_OK when the motors are off, ESP_ERR_INVALID_STATE if they stayed enabled.
+ */
+esp_err_t gantryOtaDisableMotors(Gantry::Gantry *gantry);
+
+/**
  * @brief Begin an OTA flash stream, verifying motion safety preconditions.
- * @param gantry Active Gantry instance to check for motion idle/disabled state.
+ *
+ * Idle motors are disabled automatically. A move, home or pick in progress
+ * refuses the update instead of being interrupted.
+ * @param gantry Active Gantry instance to check for motion idle state.
  * @param handle Output OTA transaction handle.
  * @param target_part Output pointer to target partition receiving update.
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE if gantry is enabled/moving.
+ * @param image_size Size announced by the sender. That range is erased before
+ *        the stream, in 64 KB blocks where aligned; 0 erases sector by sector
+ *        while writing.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the gantry is busy or
+ *         the motors would not disable.
  */
 esp_err_t gantryOtaStartStream(Gantry::Gantry *gantry, esp_ota_handle_t &handle,
-                              const esp_partition_t *&target_part);
+                              const esp_partition_t *&target_part, size_t image_size);
 
 /**
  * @brief Write a chunk of the incoming firmware binary to flash.
@@ -80,5 +102,30 @@ esp_err_t gantryOtaFinishStream(esp_ota_handle_t handle, const esp_partition_t *
  * @return ESP_OK on success.
  */
 esp_err_t gantryOtaStartServer(Gantry::Gantry *gantry, int port, const char *password);
+
+/**
+ * @brief N-2 diagnostic: erase (erase=true) or write back to back (erase=false)
+ *        n 4 KB blocks in the passive slot from 1.5 MB on, to measure EMAC
+ *        buffering while a flash write stalls reception.
+ * @return ESP_OK with a summary in out; refuses while the motors are enabled.
+ */
+esp_err_t gantryOtaFlashStallTest(Gantry::Gantry *gantry, bool erase, int writes, char *out,
+                                  size_t out_len);
+
+/**
+ * @brief CELL_COMMAND 7 (REBOOT_TO_OTA): refuse while busy or while the running
+ *        image is not marked valid; otherwise disable the motors, store the
+ *        session in noinit RAM and restart into OTA-only mode (does not return).
+ *        docs/CELLNET_OTA_PROTOCOL.md section 3.
+ */
+esp_err_t gantryOtaRebootToCellNetMode(Gantry::Gantry *gantry, uint16_t session);
+
+/** @brief At boot: true (and the session) only after a software reset with a valid
+ *         flag; the flag is cleared either way. Call first in app_main. */
+bool gantryOtaCellNetModeRequested(uint16_t *session);
+
+/** @brief Run OTA-only mode: Ethernet, CellNet and the OTA receiver only. Never
+ *         returns; reboots into the new image on success, the old one otherwise. */
+void gantryOtaRunCellNetMode(uint16_t session);
 
 #endif  // GANTRY_OTA_H

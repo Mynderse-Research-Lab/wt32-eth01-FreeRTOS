@@ -56,5 +56,16 @@ inline Plan plan(float drive_abs_deg, float drive_min_deg, float drive_max_deg,
   return p;
 }
 
+inline constexpr float kFullTurnDeg = 360.0f;
+
+/// Continuous (slip-ring) axis: the joint angle equivalent to `target_deg`
+/// (mod 360) that is nearest to `current_deg`, so an orient move travels at
+/// most 180 deg. E.g. current -357.79, target 90 -> -270 (87.8 deg move)
+/// instead of a 447.8 deg move to 90.
+inline float nearestEquivalentDeg(float current_deg, float target_deg) {
+  const float delta = std::remainder(target_deg - current_deg, kFullTurnDeg);
+  return current_deg + delta;
+}
+
 }  // namespace ThetaOrigin
 }  // namespace Gantry

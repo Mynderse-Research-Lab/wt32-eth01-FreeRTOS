@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <vector>
 
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
@@ -27,6 +28,15 @@ uint32_t getCurrentTimestampUs() {
           .count() &
       0xFFFFFFFF);
 #endif
+}
+
+// The ESP32 EMAC drops received frames under the Ethernet minimum, so every
+// sender pads with zeros instead of relying on the NIC or driver to do it.
+bool sendPadded(IL2Transport& transport, std::vector<uint8_t> frame) {
+  if (frame.size() < CellNetL2Framing::kMinEthFrameLen) {
+    frame.resize(CellNetL2Framing::kMinEthFrameLen, 0);
+  }
+  return transport.sendFrame(frame.data(), frame.size());
 }
 
 }  // namespace
@@ -68,7 +78,7 @@ bool CellNetL2Node::sendHeartbeat(uint32_t uptime_ms, uint16_t status_flags,
   const auto frame = CellNetL2Framing::buildHeartbeatFrame(
       self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
 
-  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  const bool ok = sendPadded(transport_, frame);
   if (ok) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.tx_frames++;
@@ -79,6 +89,10 @@ bool CellNetL2Node::sendHeartbeat(uint32_t uptime_ms, uint16_t status_flags,
 bool CellNetL2Node::sendVisionDetect(uint32_t item_id, float x_across_mm,
                                      float y_bat_mm, float theta_deg,
                                      uint8_t battery_class,
+                                     float capture_displacement_m,
+                                     bool capture_disp_valid,
+                                     float width_mm, float length_mm,
+                                     float height_from_belt_mm,
                                      const uint8_t dest_mac[6]) {
   if (!initialized_) {
     return false;
@@ -90,12 +104,19 @@ bool CellNetL2Node::sendVisionDetect(uint32_t item_id, float x_across_mm,
   payload.y_bat_mm = y_bat_mm;
   payload.theta_deg = theta_deg;
   payload.battery_class = battery_class;
+  payload.capture_displacement_m = capture_displacement_m;
+  payload.width_mm = width_mm;
+  payload.length_mm = length_mm;
+  payload.height_from_belt_mm = height_from_belt_mm;
+  if (capture_disp_valid) {
+    payload.reserved[0] = kVisionCaptureDispValid;
+  }
 
   const uint32_t ts_us = getCurrentTimestampUs();
   const auto frame = CellNetL2Framing::buildVisionDetectFrame(
       self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
 
-  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  const bool ok = sendPadded(transport_, frame);
   if (ok) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.tx_frames++;
@@ -119,7 +140,7 @@ bool CellNetL2Node::sendConveyorSpeed(float speed_mm_s, float displacement_m,
   const auto frame = CellNetL2Framing::buildConveyorSpeedFrame(
       self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
 
-  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  const bool ok = sendPadded(transport_, frame);
   if (ok) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.tx_frames++;
@@ -149,7 +170,7 @@ bool CellNetL2Node::sendGantryStatus(uint8_t motion_state, uint8_t active_slot,
   const auto frame = CellNetL2Framing::buildGantryStatusFrame(
       self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
 
-  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  const bool ok = sendPadded(transport_, frame);
   if (ok) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.tx_frames++;
@@ -174,7 +195,7 @@ bool CellNetL2Node::sendCellCommand(uint8_t command_id, uint8_t param_u8,
   const auto frame = CellNetL2Framing::buildCellCommandFrame(
       self_mac_, node_id_, sequence_++, ts_us, payload, dest_mac);
 
-  const bool ok = transport_.sendFrame(frame.data(), frame.size());
+  const bool ok = sendPadded(transport_, frame);
   if (ok) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     stats_.tx_frames++;

@@ -56,17 +56,33 @@ inline Class1OverrunAction class1OverrunAction(uint32_t& streak,
   return Class1OverrunAction::kCatchUp;
 }
 
+// True when last_wake (already advanced by one period by xTaskDelayUntil) still
+// trails now by at least one full period. Reseeding last_wake = now prevents a
+// stall from triggering back-to-back zero-sleep catch-up bursts that starve
+// lower-priority Core 1 tasks and SPI3 Class 1 idle waits.
+inline bool class1ShouldReseedWake(uint32_t now_ticks, uint32_t last_wake_ticks,
+                                   uint32_t period_ticks) {
+  if (period_ticks == 0) return false;
+  return static_cast<uint32_t>(now_ticks - last_wake_ticks) >= period_ticks;
+}
+
 // Soft-miss policy: allow a few T->O misses while O->T keeps running before
 // tearing down dual Class 1 (avoids cascading E602 on a single dropped UDP).
 inline bool shouldTeardownAfterInputMisses(uint32_t consecutive_misses,
-                                           uint32_t max_misses = 3) {
+                                           uint32_t max_misses = 2) {
   return consecutive_misses >= max_misses;
 }
 
-// Produce-then-drain policy: tear down when feedback age exceeds N * RPI
-// (one RPI of phase lag is normal; more means the drive stopped answering).
-inline bool shouldTeardownAfterStaleUs(uint32_t age_us, uint32_t rpi_us,
-                                       uint32_t max_rpi_multiples = 3) {
+// Produce-then-drain policy: tear down when feedback age exceeds N * RPI.
+// 10x RPI (20 ms @ 2 ms) rides through a few ms of scanner jitter; the drive
+// side times out at 16x RPI (CIP multiplier 2), so we still notice first.
+constexpr uint32_t kClass1StaleTeardownRpiMultiples = 10;
+// Post-cyclic-start grace before the stale gate arms (first T->O lag).
+constexpr uint32_t kClass1StaleGateGraceRpiMultiples = 3;
+
+inline bool shouldTeardownAfterStaleUs(
+    uint32_t age_us, uint32_t rpi_us,
+    uint32_t max_rpi_multiples = kClass1StaleTeardownRpiMultiples) {
   if (rpi_us == 0) return age_us > 0;
   const uint64_t limit =
       static_cast<uint64_t>(rpi_us) * static_cast<uint64_t>(max_rpi_multiples);
@@ -77,9 +93,9 @@ inline bool shouldTeardownAfterStaleUs(uint32_t age_us, uint32_t rpi_us,
 // and at least one O->T has been sent. FO→first-exchange gap must not count.
 // Callers should reseed last_feedback when the gate first latches so the
 // subsequent stale window starts *after* grace (not age-from-cyclic-start).
-inline bool class1StaleGateArmed(uint32_t since_cyclic_start_us, uint32_t rpi_us,
-                                 bool ot_sent_since_cyclic,
-                                 uint32_t max_rpi_multiples = 3) {
+inline bool class1StaleGateArmed(
+    uint32_t since_cyclic_start_us, uint32_t rpi_us, bool ot_sent_since_cyclic,
+    uint32_t max_rpi_multiples = kClass1StaleGateGraceRpiMultiples) {
   if (!ot_sent_since_cyclic) return false;
   if (rpi_us == 0) return since_cyclic_start_us > 0;
   const uint64_t limit =

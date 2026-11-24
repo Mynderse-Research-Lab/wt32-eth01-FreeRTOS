@@ -102,9 +102,9 @@ LAN8720 and W5500 do **not** share physical cabling. An outage or packet flood o
   └── WT32 W5500 ──► Kinetix X ──► Kinetix Z ──► Rexroth Theta (HCS01)
 ```
 
-**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the cell unmanaged switch. That merges the domains, causing IP collisions (`.10`), ARP storms, and lost packets.
+**Do not** plug drive Port 2 (e.g. HCS01 / Kinetix) or the WIZ850io into the cell unmanaged switch. That merges the isolated motion segment onto the cell LAN.
 
-* **Cell Subnet (LAN8720):** `192.168.1.0/24` (WT32 LAN8720 = `.100`, TCP console `:2323`, Zenoh / Raw L2 frames).
+* **Cell Subnet (LAN8720):** `10.42.0.0/24` (WT32 LAN8720 = `10.42.0.100`, gateway `10.42.0.1`, TCP console `:2323`, Raw L2 frames).
 * **Motion Subnet (W5500):** `192.168.1.0/24` isolated segment (W5500 = `.10`, X = `.20`, Z = `.21`, Theta = `.23`).
 
 ### W5500 pins and IPs
@@ -184,9 +184,10 @@ From [`src/main.cpp`](../src/main.cpp):
 | `EipScannerM` / `EipScannerT` | **6** | **1** | 8192 | Class 1 exchange (highest vs SPI3 users) |
 | `EipHoldKA` | **7** | **1** | 4096 | ~5 ms O→T keepalive during 2nd FO only |
 | `GantryUpdate` | 5 | 1 | 4096 | **100 Hz** (10 ms) — axis SMs + orchestration |
-| `PickScheduler` | 4 | 1 | 4096 | MQTT pick queue (motion not wired) |
-| `SerialCmd` | 1 | 0 | 4096 | UART console poll |
-| `NetConsole` | 1 | 0 | 4096 | TCP line console on LAN8720 `:2323` |
+| `PickScheduler` | 4 | 1 | 8192 | Side-grip moving pick: vision queue, tracker, pre-position, strike, bin drop |
+| `SerialCmd` | **3** | 0 | 4096 | UART console poll (above TFT so Class 1 UI redraws do not starve RX) |
+| `TftUiTask` | 2 | 0 | 4096 | Encoder poll **100 Hz**, ST7789 draw **15 Hz** (SPI3; skips sample while Class 1 critical) |
+| `NetConsole` | **3** | 0 | 4096 | TCP line console on LAN8720 `:2323` |
 
 App constants: [`gantry_app_constants.h`](../include/gantry_app_constants.h).  
 Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
@@ -209,7 +210,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 | Boot `gantry.enable()` | **Not** — deferred |
 | Theta / `GantryEipRotaryAxis` | **Enabled** (`CONFIG_EIP_AXIS_THETA=y`; CIP `192.168.1.23` FKM, eng `.22`; FO config **0** / 101/102, Class 1 **24/16** from 18/14 + seq + Run/Idle; HIPERFACE soft-home) |
 | Field 24 V DOUT/DIN + SPI TFT UI | **MCP23S17 on SPI3** (8 Field ch; TFT CS on update only) |
-| Pick → `moveTo(EndEffectorPose)` | **Not wired** (`SKIP:pick_motion_not_wired`) |
+| Pick → `moveTo(JointConfig)` + timed strike | **Wired** (side grip; picks run only after CellNet Start) |
 | PulseMotor / MCP motion path | **Removed** (MCP restored only for Field/UI) |
 
 ---
@@ -226,6 +227,19 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 - **Joint:** `(x, z, theta)`. Joint Z=0 is the firmware soft-home datum (`zero_puu_`).
 - **Pose:** `(x, y, z, theta)` with `pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`.
 - MQTT / pick planner owns belt **Y**; Gantry does not.
+
+### 2.1 Option-A World Frame vs Vision Frame vs Joint Angle
+- **Option-A World Frame:** Right-handed: +X across belt, +Y downstream, +Z down. Angle \(\theta_{\mathrm{world}} = 0^\circ\) is oriented along **New +X** (across belt); \(\theta_{\mathrm{world}} = +90^\circ\) is oriented along **+Y** (downstream).
+- **Vision Wire Frame (\(\theta_{\mathrm{vis}}\)):** Camera broadcasts orientation with \(0^\circ\) along downstream +Y, rotating positive toward \(-X\).
+- **Transformation to World Frame:**
+  \[
+  \theta_{\mathrm{world}} = \mathrm{halfTurnDeg}(90.0^\circ + \theta_{\mathrm{vis}})
+  \]
+- **Theta Joint Command (\(\theta_{\mathrm{joint}}\)):** Physical rotary joint \(0^\circ\) aligns finger pads with the gantry beam (+Y), requiring:
+  \[
+  \theta_{\mathrm{joint}} = 90.0^\circ - \theta_{\mathrm{world}} = -\theta_{\mathrm{vis}}
+  \]
+  Folded into \([-90^\circ, 90^\circ)\) to select the minimum linear rotary travel.
 
 **Two datums (do not conflate):**
 
@@ -255,7 +269,10 @@ Construction: DI with `unique_ptr` axes + gripper pin. PulseMotor constructor
 | `begin()` / `enable()` / `disable()` | Lifecycle; enable arms EIP axes (settle → Home34 if needed → hold) |
 | `isBusy()` | True while `motionState_ != IDLE`, any axis busy, or homing/calibration flags |
 | `moveTo(EndEffectorPose)` | PnP path: 2-D path planner + gripper staging; post-grip retract to clearance |
-| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: 2-D path to joint target (no gripper) |
+| `moveTo(JointConfig)` / `moveTo(x,z,theta,…)` | **JOINT_DIRECT**: 2-D path to joint target (no gripper). `moveTo(JointConfig, …, theta_start_frac)` sets where theta starts in the in-band segment (scheduler passes 0; −1 = default 25%) |
+| `preloadJointMove()` / `releasePreloadedMotion()` | Held Z preload for a late Z tail; the pick timer fires the StartMotion edge |
+| `retractToSafeZ(speed, accel, decel)` | Z-only lift to the traverse band at the Z-capped speed; allowed while X or theta is alarmed; refused (`TIMEOUT`) on a Z alarm or lost Z reference |
+| `grip(bool)` | Gripper write; returns false when no pin is configured or the MCP write fails |
 | `softHomeJointDatum()` | Zeros firmware `zero_puu_` on X+Z (not drive Homed) |
 | `requestAbort()` | Abort motion only — does **not** disable servos |
 | Console `stop` | `requestAbort()` + `disable()`; requires home+calibrate again |
@@ -276,8 +293,10 @@ are derived from path direction:
 `v_i = V · |d_i| / L`, `a_i = A · |d_i| / L`, with `L = hypot(dx, dz)`.
 
 Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
-(`decompose`, `planSegments`). Protective clamp: Z ballscrew critical-RPM
-derived speed cap still applies to the path speed ceiling.
+(`decompose`, `planSegments`). Z cap: `armCurrentPathSegment` lowers each
+segment's path speed with `Path::zCappedPathSpeed` so the Z component stays under
+`AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` (ballscrew critical speed) and the
+segment stays straight. The pick budget uses the same helper.
 
 **Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`, default **35.7 mm**): margin
 from Z− / A015 (retracted joint min). This corresponds to **4.5 inches (114.3 mm)** clearance
@@ -295,6 +314,10 @@ that segment, finish by **75%**. Required theta speed is
 `AXIS_THETA_MAX_SPEED_DEG_PER_S` (360 deg/s). If the cap forces finish past 75%, the
 below-band descent segment is **held** until theta is idle. Theta-only
 commands while Z is out of band are refused (linear path still runs).
+With a per-move `theta_start_frac` ≥ 0 (pick scheduler: 0), theta starts at that
+fraction and runs at the move's theta speed, capped at the axis maximum; the
+rotary start phases (preload 4, release-halt ≤ 10, ack ≤ 4 ticks) are shared with
+the budget through `GantryRotaryPhases.h`.
 Limit warning codes: **X** A014/PL = joint min,
 A015/NL = joint max; **Z** A015/NL = joint min (retract), A014/PL = joint max
 (+Z down / toward belt). Z Absolute joint sense is **inverted** so joint −
@@ -340,8 +363,8 @@ same path planner / clearance rule.
 **X-Z path (production):** in-band X+Z together; above SAFE_Z, Z-alone. X
 Absolute and theta are interlocked unless Z is in the retract/traverse band.
 Retract from pick height to an in-band target does not stop at SAFE_Z.
-Theta window: 25–75% of the in-band traverse; descent below the band waits
-for theta idle if the speed cap is hit.
+Theta window: 25–75% of the in-band traverse (or from `theta_start_frac`);
+descent below the band waits for theta idle if the speed cap is hit.
 
 Arm Z first, then X (or defer X until the interlock is true) before publishing
 `motionState_` (A603 / StartMotion race guard).
@@ -470,7 +493,7 @@ Exchange outcomes:
 | Status | Meaning | Action |
 |--------|---------|--------|
 | `kOk` | T→O fresh on Kinetix (HCS01 may be isolated) | Sleep RPI remainder |
-| `kInputMiss` | Kinetix T→O stale | Soft-retry; tear down after **3** consecutive Kinetix misses |
+| `kInputMiss` | Kinetix T→O stale | Soft-retry; tear down after **2** consecutive Kinetix misses |
 | `kOutputSendFailed` | Kinetix O→T / W5500 SENDOK fail | Disconnect → `W5500::recover()` immediately |
 
 ### Recover ladder
@@ -646,24 +669,24 @@ Shared command core: `gantryConsoleProcessLine()` in
 
 Config (idf.py menuconfig): **LAN8720 plant Ethernet** and **TCP gantry console
 (LAN8720)** — bridged by [`ethernet_app_config.h`](../include/ethernet_app_config.h).
-Defaults: gantry IP **`192.168.1.100/24`**, TCP **`:2323`**, password **`LTU_1932`**,
+Defaults: gantry IP **`10.42.0.100/24`** (gateway `10.42.0.1`), TCP **`:2323`**, password **`LTU_1932`**,
 up to **4** remembered IPs for **600 s** (timer resets on reconnect). UART has no
 password. Single TCP client (backlog 1).
 
 ### Connect from a PC (plant / LAN8720 subnet)
 
-Prerequisites: PC on `192.168.1.0/24`, gantry at `192.168.1.100`, link up.
+Prerequisites: PC on `10.42.0.0/24`, gantry at `10.42.0.100`, link up.
 
 ```powershell
 # Windows (ncat from Nmap)
-ncat 192.168.1.100 2323
+ncat 10.42.0.100 2323
 
-# PuTTY: Connection type Raw, Host 192.168.1.100, Port 2323
+# PuTTY: Connection type Raw, Host 10.42.0.100, Port 2323
 ```
 
 ```bash
 # Linux / macOS
-nc 192.168.1.100 2323
+nc 10.42.0.100 2323
 ```
 
 1. At `Password:` prompt, enter the menuconfig password (`CONSOLE_TCP_PASSWORD`,
@@ -677,7 +700,7 @@ UART remains for bring-up before Ethernet is ready (no password).
 
 ### Commands
 
-Primary: `help`, `status`, `faults` / `alarms`, `enable`, `disable`, `home`,
+Primary: `help`, `status`, `calibrated`, `faults` / `alarms`, `enable`, `disable`, `home`,
 `calibrate`, `test_cycle`, `speed`, `accel`, `move`, `grip`, `stop`, `alarmreset`,
 `puuinfo`, `puucal`, `puu t`, `thetalim`, `livepos`, `units`, `selftest`.
 
@@ -689,15 +712,22 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `enable` / `disable` | Arms / ServoOff via Gantry |
 | `home` | Drive-managed: seek joint min per axis (`home x` A014; `home z` A015; `all` = Z then X); else soft-home |
 | `calibrate` | Drive-managed: seek joint max (`calibrate x` A015; `calibrate z` A014); **`calibrate all`** = bring-up Z−→band→X→Z+→band; else SCHUNK hard envelope (X soft-cal) |
+| `calibrated` | Query workspace calibrated latch. **Yes** after X+Z stroke; **No** only when a live drive reports lost position-ref (Kinetix `homed_status` / HCS01 `in_reference`). Survives disable/stop. **Does not survive an ESP reboot** (OTA, power cycle): the X/Z joint zero is held in RAM, so after a reboot the axes read raw drive position and the latch starts **No** until `calibrate all`. Boot erases the older `gantry_cfg/ws_cal` NVS key that used to restore it. Printed on `status` |
 | `test_cycle` | Enable + bring-up (home/cal) + path legs A–F at live `speed`/`accel`, then theta G–I at `thetalim` min/max using kinematic speed/accel caps; `stop` aborts |
 | `test_theta_path` | Combined in-band X+Z+theta (25–75% window) with live thetalim-safe dθ; enable + bring-up first |
-| `move` | Requires **home + calibrate this session** (X gates) |
+| `move` | Requires **workspace calibrated**. Per-axis session home/cal still apply. Latch does **not** clear on `stop` |
 | `stop` | Abort + disable; does **not** clear session home/cal gates |
 | `alarmreset` / `arst` | EIP **FaultReset** (Kinetix) and HCS01 C0500 **bit5**; if Gantry is disabled, theta stays Drive OFF (no WaitAf / AF). HTTP `hcs01_eng.py c0500` if theta T→O is stale |
 | `faults` / `alarms` | Decode FaultCode/WarningCode (e.g. A603) |
 | `puuinfo` / `puucal` / `puu t` | Scale / suggest PUU/mm; theta PUU/deg is live-settable |
 | `speed` / `accel` | Path mm/s and mm/s²; optional theta deg/s and deg/s² |
 | `thetalim` | Software theta joint min/max (deg) |
+| `picksim <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Queue a detection (needs Start). `y` is camera-relative. Class 1–10 is a pick (AAA, AA, D, C, 9V, CR123A, 18650, 21700, 26650, 32650). Class 11–13 is a pack occupant and is not picked. All three sizes are required. The command stamps the live belt displacement as the capture sample |
+| `pickplan <x> <y> <theta> <class> <item_id> <w> <len> <h>` | Same input as `picksim`. Prints pick or skip, jaw angle, window, clearances, contact speed, budget, and the rejection reason |
+| `pickcover [class]` | Pick or skip per cell angle (−90..85° in 5° steps, 0° across the belt, 90° along it) at the current belt speed: `P` pick, `S` skip |
+| `pickcal valve \| jaw \| jawoff \| cam` | Valve delay, per-class jaw time (`0` = derived from jaw travel), jaw offset, camera mark/apply |
+| `ztrace [raw <start> <count>]` | Inspect last strike's 1 kHz vertical Z trace. Summary prints timing, overshoot, settle. Raw dumps are not paced in the firmware (checked 2026-11-19); keep them small (G-E1) |
+| `thtrace arm` / `thtrace` / `thtrace raw <start> <count>` / `thtrace off` | 1 kHz trace of the next theta move from any source (`move`, picks): HCS01 actual angle, velocity and status word per sample, plus the move as commanded. Class 1 refreshes every 2 ms, so samples can repeat. Summary (ms from the move command): start edge, onset, profile start `t0` and latency, ideal trapezoid time, entry into and settling within ±0.1° (S-0-0057), overshoot, worst following error against the ideal trapezoid (aligned at 20 % of the accel distance, so a constant delay shows as latency), peak speed, final error, how the axis ended the move. Raw: at most 300 samples per call, 10 per line, 20 ms per line. `tools/theta_trace_fetch.py` saves a whole trace as CSV |
 
 MCP diagnostic commands (`mcp_*`) are **legacy leftovers** — MCP hardware is
 removed; do not rely on them.
@@ -711,11 +741,21 @@ removed; do not rely on them.
 - Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
 - `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t c m`.
 - **Absolute Encoder Tracking & Zero-Offset Architecture**: `GantryEipRotaryAxis` operates in pure absolute frame without software offsets (`zero_puu_` eliminated). `getCurrentDeg()` directly reflects the HIPERFACE absolute encoder position (`S-0-0051`). Because end-effector cabling and pneumatics are routed over pass-through slip-rings, continuous multi-turn rotation is supported for any number of revolutions.
-- **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`). Command velocity is clamped to $360^\circ/\text{s}$ ($60\text{ RPM}$ = $360,000,000\text{ PUU}$) and acceleration/deceleration to $1800^\circ/\text{s}^2$ ($31.416\text{ rad}/\text{s}^2 = 31416\text{ units}$) to eliminate signed 32-bit integer overflow risks.
-- **Home & Bring-up**: `home t` captures the absolute encoder datum and commands Theta to return directly to physical zero ($0.000^\circ$). Bring-up synchronizes until Theta reaches $\le 0.01^\circ$ error before opening subsequent path stages.
-- **Embedded Autotuning (Zero External Scripting)**: Autotuning runs 100% autonomously on the WT32 microcontroller without requiring host scripts:
-  - **HCS01 Theta (`autotune theta [inertia|tune|zero]`)**: Executed via embedded `Hcs01ComwsClient` over HTTP port 80 to trigger C1800 load inertia identification and C2200 non-volatile parameter backup.
-  - **Kinetix 5100 X/Z (`autotune <x|z> [mode1|lock|read|gain]`)**: Executed via embedded `Kinetix5100ParamAccess` over CIP Explicit Messaging (Class 0x0F Parameter Object) to configure real-time adaptive tuning (Mode 1 / Mode 0).
+- **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`).
+- **Profile units** (`hcs01VelocityUnits` / `hcs01AccelUnits` in `GantryEipRotaryAxis.h`), from the drive export `tools/Parameter_default_1.par` (2026-10-13):
+  - S-0-0259 velocity: S-0-0044 = `0b0010`, S-0-0045 = 1, S-0-0046 = −4 → **0.0001 rpm**, motor side (ERD04 direct drive, so = theta rpm). 1 deg/s = 1666.67 units; no PUU factor. Capped at S-0-0113 = 600 rpm (6,000,000 = 3600 deg/s).
+  - S-0-0260 / S-0-0359: S-0-0160 = `0b0010`, S-0-0162 = −3 → **0.001 rad/s²**, no PUU factor (1800 deg/s² = 31416). Capped at S-0-0138 = 1000 rad/s².
+  - Position: S-0-0076 = `0b0010`, S-0-0079 = 3,600,000 → 0.0001 deg (10000 PUU/deg).
+  - The config defaults used when a move passes accel/decel 0 (`home t`, bring-up orient) are built by `eipRotaryAxisConfigFromDeg()` in the same units.
+  - History (2026-10-13): `main.cpp` sent accel × PUU/deg (180,000,000), tripping F2028 about 40° into every home/orient (P-0-0098 max deviation 101.9° vs S-0-0159 window 100°). Velocity was sent as 0.0001 deg/min, 360× too large: 15 deg/s became 900 rpm, past the 600 rpm motor max (E2049), so the commanded speed was ignored.
+  - S-0-0159 following-error window is **100°** on this drive, which is very loose; review it in IndraWorks.
+- **Move timeout**: `thetaMoveTimeoutUs()` = max(15 s, 2 × distance / speed), so a long return at the 15 deg/s home speed is not cut off at 15 s.
+- **Home & Bring-up**: `home t` captures the absolute encoder datum and starts the return to physical zero ($0.000^\circ$). It counts as homed only once theta is idle, alarm-free and within `EIP_THETA_SETTLED_TOL_DEG` (0.1°) of 0 (`Gantry::thetaSettledAt`); the console then logs `OK Theta home complete`, or `ERROR: Theta home did not reach 0 deg`. `calibrate t` and theta moves stay blocked until then. Bring-up fails (`theta orient did not arrive`) instead of running the Z+ stroke when the 90° orient faults or times out.
+- **Embedded Autotuning**: Console `autotune` is **disabled for this version**
+  (`GANTRY_CONSOLE_AUTOTUNE=0`). Use IndraWorks / KNX5100C / `tools/hcs01_eng.py`
+  for drive tuning. Re-enable with `-DGANTRY_CONSOLE_AUTOTUNE=1` to restore:
+  - **HCS01 Theta (`autotune theta [inertia|tune|zero]`)**: Embedded `Hcs01ComwsClient` HTTP :80 → C1800 / C2200.
+  - **Kinetix 5100 X/Z (`autotune <x|z> [mode1|lock|read|gain]`)**: CIP Class 0x0F Parameter Object Mode 1 / Mode 0.
 - `CONFIG_GANTRY_THETA_SEQUENTIAL` default **n**: theta is scheduled on the
   in-band X+Z segment (start 25%, finish 75%) unless sequential choreography
   is enabled (theta after the linear path, still SAFE_Z-gated).
@@ -723,9 +763,56 @@ removed; do not rely on them.
 
 ### Network / pick
 
-CellNetL2 (LAN8720) -> queue -> pick_scheduler -> (future)
-Gantry::moveTo(EndEffectorPose). Today pick motion is **not wired**
-(SKIP:pick_motion_not_wired). For real-time protocol specs, see 
+CellNetL2 (LAN8720) → vision queue → `PickScheduler` task → tracker → `Gantry::moveTo(JointConfig)`
+pre-position → timed strike → bin drop. The Ethernet receive callback only queues the
+detection and its receipt time. A separate `PickStrike` task fires the Z release and grip
+from `esp_timer` one-shots, re-timed from the newest belt state on every conveyor frame.
+
+- **Side grip only.** Cell angle 0° is the long axis along +X (across the belt), 90° along
+  +Y, positive about +Z up. The theta joint holds the pads along +Y at 0° and turns them counter-clockwise
+  seen from above (Pi camera check, 2026-11-16): joint = fold(θ) + `jaw_off_deg` − 90°, with `jaw_off_deg`
+  0° by default. Of the two equivalent
+  angles the one with less linear theta travel inside `thetalim` is used, else skip
+  `theta range` (never clamped). Any pick turn with |dθ| ≥ 0.1° is commanded and quantized
+  to 0.1°; a change of 1.0° or less is left in place (`budgetPick`). On a pick or transfer retract, X and theta
+  may start up to 160 ms before Z reaches the SAFE_Z band, at most 48 mm below it and within 78 % of the stroke
+  (`Path::retractLeadMm`, `Gantry::retractLeadReady`); console moves still wait for the band. The early start does
+  not check the conveyor frame's collision zone (G-C14).
+- **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm: Z goes to the
+  grasp right after the pre-position, and only the grip is timed. Grasp height is
+  \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top. Width, length, and
+  height-from-belt are required on every detection. A width of 80 mm has zero jaw travel;
+  it is still a pick only when that across-belt strip misses the fingers. Width above 80 mm
+  is skipped. A successful grip write is a commanded close; possession is unverified until
+  a part sensor exists.
+- **Late Z** otherwise, if `pk_dropin` is on (default off): hover above the tallest tracked
+  cell, then a Z descent that is at grasp height one guard before the earliest jaw/object
+  contact. The 4 mm lane margin, 3 mm hover, 15 ms guard, and flat-rectangle contact model
+  are provisional and need bench replacement. With `pk_dropin` off that case is skipped
+  (`late Z off`).
+- **Coordinated grasp.** `coordinated_grasp.h` is host-tested (`test_coordinated_grasp`) but the
+  pick path does not call it, and there is no bench switch for it. `pk_dropin` is not that switch.
+  The update task period is `GANTRY_UPDATE_PERIOD_MS` (10). The strike edge does not wait on that task.
+- **Failures** (belt stop, stale frames, conveyor restart, refined angle out of the frozen
+  jaw's clearance, grip write failure, missed deadline) abort the pick and call
+  `retractToSafeZ()` at the ballscrew cap. A commanded close blocks another pick until the
+  bin sequence succeeds. The object is marked taken only after the grip command fires.
+- After the drop the gantry retracts at the bin, then goes to the next tracked cell, or waits
+  at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0). `pk_drop_any_th` skips the turn
+  to `geom_cal_th_deg` at the bin.
+- Belt clock: gantry X is vision \(x\) plus `vis_x_off_mm` (default 245, the 95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is not read by the intercept, so changing the width does not move the camera. A repeated conveyor sequence is ignored. The epoch restarts on a sequence jump above 32, a displacement step backward of more than 5 mm, or a conveyor-time step backward of more than 500 ms. Three unchanged displacement samples while speed stays positive integrate the previous speed. Stale is gantry receipt age above `kStaleAfterUs` (500 ms, two configured 250 ms periods), not the live gap between conveyor timestamps.
+- The pick scheduler has no motion parameters of its own. The active approach and the transfer
+  to the bin run on the global profile: `spd_mm_s`, `th_spd_deg_s` (capped by `th_spd_max`),
+  `acc_mm_s2`, `dec_mm_s2`, `th_acc_deg_s2`, and `th_dec_deg_s2`. A following part uses the speed
+  ceiling `ceil_spd_mm_s` only when its own approach from the post-bin pose misses at the default
+  speed and still arrives at the ceiling; otherwise that follower is skipped. Z descend, grip, and
+  retract use `AXIS_Z_PICK_SPEED_FRACTION` of the stored ballscrew cap (950 mm/s from `z_crit_rpm` and `z_lead_mm`). Safe Z comes from
+  `Gantry::traverseClearanceZMm()`; tick, preload, settle, and arrival values come from
+  `GantryControlPeriod.h`, `GantryLinearPhases.h`, `GantryRotaryPhases.h`, and
+  `GantryPathProfile.h`. `grp_valve_ms` and `jaw_aaa_ms`…`jaw_32650_ms`
+  (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable.
+
+For real-time protocol specs, see
 [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
 For kinematics, see [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md).
 
@@ -799,7 +886,7 @@ Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII C
 
 ## 13. Dual-OTA & Ethernet Firmware Flashing
 
-The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`192.168.1.100:8032`).
+The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`10.42.0.100:8032`).
 
 ### 13.1 Partition Map (4 MB Flash)
 
@@ -821,10 +908,52 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
    ```powershell
    idf.py -C idf build
    ```
-2. **Execute OTA update:**
-   ```powershell
-   py tools/eth_ota_flash.py --host 192.168.1.100 idf/build/wt32_eth01_gantry.bin
-   ```
+2. **Execute OTA update**. On START the firmware disables enabled-but-idle motors itself, and again just before the reboot in case a supervisor START re-enabled them mid-upload. It still replies `ERR SAFETY` while a move, home or pick is running. Re-enable after the reboot:
+   - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
+   - CLI, PC on the cell switch: `py tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin`
+   - CLI, no switch cable: `py tools/ota_flash.py --wireless 10.168.40.1 --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin` (`PI_USER` / `PI_PASS`).
 3. **Console commands:**
-   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, and rollback status.
+   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, rollback status, and `Last Reset` (`esp_reset_reason`: `SW` after an OTA/restart, `PANIC` / `*_WDT` after a crash, `BROWNOUT` on a supply dip) with uptime. `status` prints the same reset reason and uptime, so an unexpected reboot is visible over the LAN console without the UART boot log.
 
+## 14. Runtime parameters
+
+At runtime the stored parameters are the only source. `main.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key the stored set does not hold, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
+
+### 14.1 Stored set
+
+NVS keeps one complete parameter set under `cfg_set`, with a write counter, the time it was saved, and a hash. Boot loads it. Because every parameter is in it, flashing a build with different defaults does not move a stored value.
+
+Notes on what is and is not stored:
+- **Pick approach motion** has no keys of its own. Picks use the global profile: `spd_mm_s`, `ceil_spd_mm_s` only when a later part would otherwise be missed, and `th_spd_deg_s` capped by `th_spd_max` (`pickConfig()` in `pick_scheduler.cpp`; G-C7).
+- **Trigger sensor geometry** is still compile-time: `kTriggerSensorYFromCamMm` (−130 mm) and `kTriggerCentreBehindMm` (6 mm) in `pick_scheduler.cpp` (G-C5).
+- **Drive IP addresses** are stored: `eip_ip_x`, `eip_ip_z`, `eip_ip_th` (developer keys, applied after a reboot).
+
+| Step | What happens |
+|------|--------------|
+| `cfg <key> <value>` | Applies now, in RAM only. Nothing touches flash, so this cannot affect Class 1. |
+| `cfg save` | Refused unless the motors are off. Closes Class 1, writes the set, and reopens Class 1. Run `enable` afterwards. |
+| Reboot or power loss | Changes not saved are gone. `cfg reboot` refuses while any are unsaved (`cfg reboot discard` overrides), and `tools/supervisor_ota.py` refuses to flash (`--discard-unsaved` overrides). `status` shows the count. |
+
+Saving is an explicit step because of the Class 1 timeout, 16 × RPI (32 ms at the 2 ms RPI, `EipScannerPolicy.h`). A flash sector erase stalls both CPUs for its whole duration. On 2026-10-30, two of 151 per-key `cfg` writes took 81–82 ms instead of about 8 ms, one with a measured 63.9 ms Class 1 gap, and both dropped the link. The erase is inferred from the timing and the NVS entry count, not observed directly.
+
+The close runs one axis at a time, with a helper keeping O→T running to the axes still open, because each drive needs its ForwardClose before its connection times out. A Kinetix drops its explicit TCP session while Class 1 carries on over UDP (W5500 `Sn_SR` reads `CLOSE_WAIT`), so the ForwardClose goes out with the axis still connected and, if the session is gone or the send fails, is retried on a rebuilt session. Why the drive drops it has not been established. A log line `Class 1 close not clean` names any axis that refused.
+
+Per-key values left by older firmware merge into the set at boot, before Class 1 opens, and are erased after `gantryOtaConfirmBootValid()`, so a rollback in that window still finds them. An image from before this format reads only the per-key store, so it starts from its own compile-time defaults.
+
+### 14.2 Commands and the parameter file
+
+| Command | Effect |
+|---------|--------|
+| `cfg <key>` | Shows the value, its label and what it does (the schema description). The 16 keys renamed on 2026-11-16 (`cv_cam_y_mm` → `vis_cam_y_mm`, `cv_x_off_mm` → `vis_x_off_mm`, `cv_vis_ms` → `vis_lat_ms`, `cv_dedupe_mm` → `vis_dedupe_mm`, `cv_jaw_deg` → `jaw_off_deg`, `cv_valve_ms` → `grp_valve_ms`, `cv_jaw_<class>_ms` → `jaw_<class>_ms`) still work under the old name, and a stored set keeps their values. |
+| `cfg save` | Stores the running values, as above. The toolbox **Save to NVS** button and the TFT **Save Parameters** item do the same. |
+| `cfg export` | Prints every visible parameter as `PARAM key=value`. Passwords are left out. |
+| `cfg factory` | Puts compile-time defaults in RAM. `cfg save` stores them over the set, so download the file first. A reboot without saving brings the stored set back. |
+| `cfg time` | Shows the clock and the NTP server. |
+
+The toolbox page has **Download parameters**, which saves `cfg export` as a text file, and **Upload parameters**, which reloads one. Upload compares the file with the gantry and sends only the values that differ, as `cfg <key> <value>`, so the changes are in RAM until saved. A key the gantry does not show, such as a developer key while locked, is skipped and listed.
+
+Boot never erases NVS or replaces a damaged set. If NVS cannot be read, or the set fails its hash, the firmware logs an error and runs on compile-time defaults. `cfg save` replaces a damaged set, and `cfg factory` erases unreadable NVS.
+
+### 14.3 Time
+
+The supervisor runs chrony and serves NTP on `10.42.0.1`. The gantry syncs from it through the `ntp_server` key (reboot to apply), and vision uses it too. Motion and picks run on `esp_timer`, so a clock step does not affect them; the clock only stamps the stored set.

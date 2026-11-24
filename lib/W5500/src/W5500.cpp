@@ -1,5 +1,6 @@
 #include "W5500.h"
 #include "W5500BusMutex.h"
+#include "W5500Diag.h"
 #include "W5500Socket.h"
 
 #include "sdkconfig.h"
@@ -23,6 +24,9 @@ static constexpr uint16_t kMaxFrameSize = 1536;
 static constexpr uint16_t kHeaderSize   = 3;
 static constexpr uint16_t kMaxBurstPayload = 2048;
 static constexpr uint16_t kSpiScratchSize = kHeaderSize + kMaxBurstPayload;
+// Without DMA the ESP32 SPI data buffer holds 64 bytes: header + 61 payload.
+static constexpr uint16_t kNoDmaMaxTransfer = 64;
+static constexpr uint16_t kNoDmaChunkPayload = kNoDmaMaxTransfer - kHeaderSize;
 
 // Static DMA-capable SPI burst scratch (no per-call heap under Class 1 RPI).
 #ifdef ESP_PLATFORM
@@ -48,9 +52,9 @@ W5500::~W5500() {
 void W5500::hardReset() {
     if (cfg_.rst_set_level != nullptr) {
         cfg_.rst_set_level(cfg_.rst_ctx, 0);
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(pdMS_TO_TICKS(50));
         cfg_.rst_set_level(cfg_.rst_ctx, 1);
-        vTaskDelay(pdMS_TO_TICKS(55));
+        vTaskDelay(pdMS_TO_TICKS(150));
         ESP_LOGI(TAG, "Hardware reset complete (external RST callback)");
         return;
     }
@@ -58,7 +62,7 @@ void W5500::hardReset() {
     if (cfg_.rst_gpio < 0) {
         // Use software reset
         writeReg(kBlockCommon(), REG_MR, MR_RST);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(20));
         return;
     }
 
@@ -70,13 +74,13 @@ void W5500::hardReset() {
     io.intr_type    = GPIO_INTR_DISABLE;
     gpio_config(&io);
 
-    // Hold RSTn low >= 500 us
+    // Hold RSTn low >= 500 us (use 10 ms)
     gpio_set_level(static_cast<gpio_num_t>(cfg_.rst_gpio), 0);
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(static_cast<gpio_num_t>(cfg_.rst_gpio), 1);
 
-    // Wait >= 50 ms before SPI communication
-    vTaskDelay(pdMS_TO_TICKS(55));
+    // Wait >= 50 ms before SPI communication (use 100 ms)
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP_LOGI(TAG, "Hardware reset complete (GPIO%d)", cfg_.rst_gpio);
 }
 
@@ -98,13 +102,17 @@ bool W5500::init(const W5500Config& cfg) {
     busCfg.sclk_io_num     = cfg_.sclk_gpio;
     busCfg.quadwp_io_num   = -1;
     busCfg.quadhd_io_num   = -1;
-    busCfg.max_transfer_sz = kMaxFrameSize + kHeaderSize;
+    busCfg.max_transfer_sz = cfg_.use_dma ? (kMaxFrameSize + kHeaderSize) : kNoDmaMaxTransfer;
 
     esp_err_t err = spi_bus_initialize(static_cast<spi_host_device_t>(cfg_.spi_host),
-                                       &busCfg, SPI_DMA_CH_AUTO);
+                                       &busCfg, cfg_.use_dma ? SPI_DMA_CH_AUTO : SPI_DMA_DISABLED);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
         return false;
+    }
+    if (!cfg_.use_dma) {
+        ESP_LOGW(TAG, "SPI bus without DMA: bursts split into %u-byte frames",
+                 (unsigned)kNoDmaChunkPayload);
     }
 
     // --- SPI device ---
@@ -125,6 +133,8 @@ bool W5500::init(const W5500Config& cfg) {
     devCfg.spics_io_num   = (cfg_.cs_gpio >= 0) ? cfg_.cs_gpio : -1;
     devCfg.queue_size     = 1;
     devCfg.flags          = 0;
+    devCfg.cs_ena_pretrans = 1;
+    devCfg.cs_ena_posttrans = 1;
 
     err = spi_bus_add_device(static_cast<spi_host_device_t>(cfg_.spi_host),
                              &devCfg, reinterpret_cast<spi_device_handle_t*>(&spiHandle_));
@@ -155,7 +165,67 @@ bool W5500::init(const W5500Config& cfg) {
 }
 
 bool W5500::configureAfterReset() {
-    uint8_t ver = readReg(kBlockCommon(), REG_VERSIONR);
+    uint8_t ver = 0;
+    for (int retry = 0; retry < 10; ++retry) {
+        ver = readReg(kBlockCommon(), REG_VERSIONR);
+        if (ver == 0x04) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    // Fallback: try software reset if external reset line didn't bring chip up
+    if (ver != 0x04) {
+        ESP_LOGW(TAG, "W5500 version read 0x%02X; attempting software reset fallback...", ver);
+        writeReg(kBlockCommon(), REG_MR, MR_RST);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        for (int retry = 0; retry < 5; ++retry) {
+            ver = readReg(kBlockCommon(), REG_VERSIONR);
+            if (ver == 0x04) {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
+    // Multirate fallback: if current clock failed, try stepped-down clock rates (5 MHz, 2 MHz, 1 MHz)
+    if (ver != 0x04) {
+        const int fallback_rates[] = {5000000, 2000000, 1000000};
+        for (int fb_hz : fallback_rates) {
+            if (fb_hz >= cfg_.sclk_hz) {
+                continue;
+            }
+            ESP_LOGW(TAG, "W5500 version 0x%02X at %d Hz; retrying at fallback %d Hz...",
+                     ver, cfg_.sclk_hz, fb_hz);
+            spi_bus_remove_device(static_cast<spi_device_handle_t>(spiHandle_));
+            spiHandle_ = nullptr;
+
+            spi_device_interface_config_t devCfg = {};
+            devCfg.mode           = 0;
+            devCfg.clock_speed_hz = fb_hz;
+            devCfg.spics_io_num   = (cfg_.cs_gpio >= 0) ? cfg_.cs_gpio : -1;
+            devCfg.queue_size     = 1;
+            devCfg.flags          = 0;
+            devCfg.cs_ena_pretrans = 1;
+            devCfg.cs_ena_posttrans = 1;
+
+            esp_err_t add_err = spi_bus_add_device(static_cast<spi_host_device_t>(cfg_.spi_host),
+                                                   &devCfg, reinterpret_cast<spi_device_handle_t*>(&spiHandle_));
+            if (add_err != ESP_OK) {
+                ESP_LOGE(TAG, "SPI device re-add failed at %d Hz: %s", fb_hz, esp_err_to_name(add_err));
+                break;
+            }
+            cfg_.sclk_hz = fb_hz;
+            writeReg(kBlockCommon(), REG_MR, MR_RST);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            ver = readReg(kBlockCommon(), REG_VERSIONR);
+            if (ver == 0x04) {
+                ESP_LOGI(TAG, "W5500 communication established at %d Hz!", fb_hz);
+                break;
+            }
+        }
+    }
+
     if (ver != 0x04) {
         ESP_LOGE(TAG, "Unexpected W5500 version: 0x%02X (expected 0x04)", ver);
         return false;
@@ -164,8 +234,8 @@ bool W5500::configureAfterReset() {
 
     // Write a valid MAC to SHAR for hardware TCP/UDP sockets (ARP needs it).
     // Locally-administered unicast: 02:00:00:00:00:01 (unique on the daisy-chain).
+    uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
     {
-        uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
         writeBuf(kBlockCommon(), REG_SHAR, mac, 6);
         ESP_LOGI(TAG, "W5500 MAC set: %02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -187,6 +257,8 @@ bool W5500::configureAfterReset() {
         writeBuf(kBlockCommon(), REG_SIPR, ip, 4);
         writeBuf(kBlockCommon(), REG_SUBR, sub, 4);
         writeBuf(kBlockCommon(), REG_GAR, gw, 4);
+        // Reference for the periodic SPI read-back check (W5500Diag).
+        w5500::setExpectedIdentity(mac, ip);
 
         ESP_LOGI(TAG, "W5500 IP: %u.%u.%u.%u / %u.%u.%u.%u gw %u.%u.%u.%u",
                  ip[0], ip[1], ip[2], ip[3],
@@ -199,6 +271,7 @@ bool W5500::configureAfterReset() {
     // FO TCP peers get 2 KB; remaining sockets 1 KB. Sum RX=4+2+2+2+1+1+1+1=14.
     static const uint8_t kRxKb[8] = {4, 2, 2, 2, 1, 1, 1, 1};
     static const uint8_t kTxKb[8] = {4, 2, 2, 2, 1, 1, 1, 1};
+    w5500::setExpectedBufferSizes(kRxKb, kTxKb);  // W5500Diag snapshot reference
     for (uint8_t sock = 0; sock < 8; ++sock) {
         writeReg(kBlockSocketReg(sock), Sn_RXBUF_SIZE, kRxKb[sock]);
         writeReg(kBlockSocketReg(sock), Sn_TXBUF_SIZE, kTxKb[sock]);
@@ -216,7 +289,7 @@ bool W5500::recover() {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
 
     ESP_LOGW(TAG, "W5500 recover: closing sockets + hard reset");
     for (uint8_t sock = 0; sock < 8; ++sock) {
@@ -308,6 +381,16 @@ void W5500::readBuf(uint8_t blockSelect, uint16_t addr, uint8_t* buf, uint16_t l
         ESP_LOGE(TAG, "readBuf: len %u > %u", (unsigned)len, (unsigned)kMaxBurstPayload);
         return;
     }
+    if (!cfg_.use_dma && len > kNoDmaChunkPayload) {
+        // Each piece is a complete VDM frame (own header, own CS cycle).
+        for (uint16_t off = 0; off < len; off = static_cast<uint16_t>(off + kNoDmaChunkPayload)) {
+            const uint16_t n = (len - off > kNoDmaChunkPayload)
+                                   ? kNoDmaChunkPayload
+                                   : static_cast<uint16_t>(len - off);
+            readBuf(blockSelect, static_cast<uint16_t>(addr + off), buf + off, n);
+        }
+        return;
+    }
     const uint16_t totalLen = static_cast<uint16_t>(kHeaderSize + len);
     g_spi_tx_scratch[0] = static_cast<uint8_t>(addr >> 8);
     g_spi_tx_scratch[1] = static_cast<uint8_t>(addr & 0xFF);
@@ -321,6 +404,15 @@ void W5500::readBuf(uint8_t blockSelect, uint16_t addr, uint8_t* buf, uint16_t l
 void W5500::writeBuf(uint8_t blockSelect, uint16_t addr, const uint8_t* buf, uint16_t len) {
     if (len > kMaxBurstPayload) {
         ESP_LOGE(TAG, "writeBuf: len %u > %u", (unsigned)len, (unsigned)kMaxBurstPayload);
+        return;
+    }
+    if (!cfg_.use_dma && len > kNoDmaChunkPayload) {
+        for (uint16_t off = 0; off < len; off = static_cast<uint16_t>(off + kNoDmaChunkPayload)) {
+            const uint16_t n = (len - off > kNoDmaChunkPayload)
+                                   ? kNoDmaChunkPayload
+                                   : static_cast<uint16_t>(len - off);
+            writeBuf(blockSelect, static_cast<uint16_t>(addr + off), buf + off, n);
+        }
         return;
     }
     const uint16_t totalLen = static_cast<uint16_t>(kHeaderSize + len);
@@ -371,7 +463,7 @@ bool W5500::openMacRaw(uint8_t sock) {
     // Issue OPEN command
     writeSocketReg(sock, Sn_CR, Sn_CR_OPEN);
 
-    if (!waitForCommand(sock, 100)) {
+    if (!waitForCommand(sock, 10)) {
         ESP_LOGE(TAG, "MACRAW OPEN command timed out for socket %d", sock);
         return false;
     }
@@ -391,7 +483,7 @@ void W5500::closeSocket(uint8_t sock) {
     if (!initialized_) return;
 
     writeSocketReg(sock, Sn_CR, Sn_CR_CLOSE);
-    waitForCommand(sock, 100);
+    waitForCommand(sock, 10);
 }
 
 // ==========================================================================
@@ -498,17 +590,17 @@ int W5500::recvFrame(uint8_t* buf, uint16_t bufSize) {
 // ==========================================================================
 
 uint8_t W5500::getVersion() {
-    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
     return readReg(kBlockCommon(), REG_VERSIONR);
 }
 
 void W5500::getMacAddress(uint8_t mac[6]) {
-    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
     readBuf(kBlockCommon(), REG_SHAR, mac, 6);
 }
 
 bool W5500::isLinkUp() {
-    std::lock_guard<std::mutex> lock(w5500::spiBusMutex());
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
     // PHYCFGR register is at offset 0x002E in common block
     // Bit 0 = LNK (link status)
     uint8_t phyCfgr = readReg(kBlockCommon(), 0x002E);
@@ -531,8 +623,13 @@ bool W5500::waitForCommand(uint8_t sock, uint32_t timeoutMs) {
     return false;
 }
 
+// acquire/release take spiBusMutex(): every W5500 transaction runs under it,
+// and ESP-IDF rejects (acquire) or asserts (release) when another task has a
+// polling transaction in flight on this device - e.g. a console explicit
+// message (ethlink) while the Class 1 scanner holds the bus.
 bool W5500::acquireBus() {
 #ifdef ESP_PLATFORM
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
     if (spiHandle_ == nullptr || !initialized_) {
         return false;
     }
@@ -555,6 +652,7 @@ bool W5500::acquireBus() {
 
 void W5500::releaseBus() {
 #ifdef ESP_PLATFORM
+    std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
     if (spiHandle_ == nullptr || !bus_acquired_) {
         bus_acquired_ = false;
         return;

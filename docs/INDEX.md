@@ -4,12 +4,16 @@ Canonical product-design and software architecture set (EIP production architect
 
 | Document | Summary | Audience |
 |----------|---------|----------|
+| [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) | Start here: subsystems, how they connect, components and working rules | New engineers |
+| [OPEN_ITEMS.md](OPEN_ITEMS.md) | Live list of open items, blockers and decisions, with closed items kept for reference | Everyone, before starting work |
 | [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
 | [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
 | [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |
 | [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware review, data integrity fixes, memory optimizations, and 8-stage holistic test cycle | Firmware developers / QA |
-| [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol specification, data integrity model, and multi-platform deployment manual (ESP32 / Linux) | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
+| [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | CellNet Layer-2 wire specification: framing, receive rules, payloads, library use and diagnostics | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
+| [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md) | Firmware updates over CellNet L2 (N-2): OTA-only mode, messages, flow control, timing | Gantry, Conveyor and Supervisor developers |
 | [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate conventions (+Y downstream, +Z down) and feasibility/timing algorithms ($\tau = D / v_{belt}$) for the Pick Scheduler. | Firmware / Subsystem developers |
+| [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) | End-to-end mathematical narrative of one pickup, from the camera observation through the belt, grasp, bin, and the following object. | Firmware / mechanical / vision |
 | [DEV_TRACKER.md](DEV_TRACKER.md) | Active hardware bring-up and firmware milestone tracker | Firmware / commissioning |
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | Phase 5 & Phase 6 architecture roadmap (Network extraction, Zenoh-DDS migration) | System architects / developers |
 

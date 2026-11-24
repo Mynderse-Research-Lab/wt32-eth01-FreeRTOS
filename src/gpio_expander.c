@@ -86,6 +86,13 @@ mcp23s17_handle_t gpio_expander_get_mcp_handle(void) {
     return g_mcp_handle;
 }
 
+uint8_t gpio_expander_read_port_b(void) {
+    if (g_mcp_handle == NULL) {
+        return 0xFF;
+    }
+    return mcp23s17_read_port(g_mcp_handle, MCP23S17_PORT_B);
+}
+
 esp_err_t gpio_expander_configure_field_and_ui(void) {
     if (g_mcp_handle == NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -103,33 +110,64 @@ esp_err_t gpio_expander_configure_field_and_ui(void) {
         if (e != ESP_OK) return e;
     }
 
-    // Port B outs: TFT DC/RES, TFT CS (idle HIGH), W5500 RST (idle HIGH).
-    // BLK is hardwired ON; not driven from MCP.
-    const int tft_ctrl[] = {MCP_TFT_DC, MCP_TFT_RES, MCP_TFT_CS, MCP_W5500_RST};
-    for (unsigned i = 0; i < sizeof(tft_ctrl) / sizeof(tft_ctrl[0]); ++i) {
-        if (tft_ctrl[i] < 0) continue;
-        esp_err_t e =
-            mcp23s17_set_pin_direction(g_mcp_handle, (mcp23s17_pin_t)tft_ctrl[i], true);
-        if (e != ESP_OK) return e;
-        uint8_t level = 0;
-        if (tft_ctrl[i] == MCP_TFT_CS || tft_ctrl[i] == MCP_W5500_RST) {
-            level = 1;
-        }
-        e = mcp23s17_write_pin(g_mcp_handle, (mcp23s17_pin_t)tft_ctrl[i], level);
-        if (e != ESP_OK) return e;
-    }
-
-    // Encoder / UI inputs with pull-ups (A, B, PUSH, KO)
-    for (int i = MCP_UI_ENC_A; i <= MCP_UI_ENC_KO; ++i) {
+    // Port B inputs with pull-ups: KO (PB0), PUSH (PB1), ENC_B (PB2), ENC_A (PB3)
+    for (int i = MCP_UI_ENC_KO; i <= MCP_UI_ENC_A; ++i) {
         esp_err_t e = mcp23s17_set_pin_direction(g_mcp_handle, (mcp23s17_pin_t)i, false);
         if (e != ESP_OK) return e;
         e = mcp23s17_set_pin_pullup(g_mcp_handle, (mcp23s17_pin_t)i, true);
         if (e != ESP_OK) return e;
     }
 
+    // Port B outputs: BLK (PB4), DC (PB5), RES (PB6).
+    // Initialize BLK=HIGH (backlight ON), DC=LOW (command mode), RES=HIGH (run mode).
+    const int tft_outs[] = {MCP_TFT_BLK, MCP_TFT_DC, MCP_TFT_RES};
+    for (unsigned i = 0; i < sizeof(tft_outs) / sizeof(tft_outs[0]); ++i) {
+        if (tft_outs[i] < 0) continue;
+        esp_err_t e =
+            mcp23s17_set_pin_direction(g_mcp_handle, (mcp23s17_pin_t)tft_outs[i], true);
+        if (e != ESP_OK) return e;
+        uint8_t level = (tft_outs[i] == MCP_TFT_DC) ? 0 : 1;
+        e = mcp23s17_write_pin(g_mcp_handle, (mcp23s17_pin_t)tft_outs[i], level);
+        if (e != ESP_OK) return e;
+    }
+
+    // W5500_RST (PB7) is released (input) except during a commanded reset.
+    // Every TFT DC/RES toggle rewrites the whole OLATB byte, so a driven PB7
+    // could reset the W5500 on one bad write (2026-10-20: the chip reset itself
+    // with the gantry idle). The external pull-up holds RSTn high.
+    esp_err_t e = mcp23s17_write_pin(g_mcp_handle, (mcp23s17_pin_t)MCP_W5500_RST, 1);
+    if (e != ESP_OK) return e;
+    e = mcp23s17_set_pin_pullup(g_mcp_handle, (mcp23s17_pin_t)MCP_W5500_RST, true);
+    if (e != ESP_OK) return e;
+    e = mcp23s17_set_pin_direction(g_mcp_handle, (mcp23s17_pin_t)MCP_W5500_RST, false);
+    if (e != ESP_OK) return e;
+
     ESP_LOGI(TAG,
-             "MCP Port A Field x8 (DOUT0=gripper); Port B TFT CS/DC/RES + ENC + KO + W5500_RST");
+             "MCP Port A Field x8 (DOUT0=gripper); Port B: KO/PUSH/ENC(PB0..3) BLK(PB4) DC(PB5) RES(PB6) W5500_RST(PB7, released)");
     return ESP_OK;
+}
+
+esp_err_t gpio_expander_read_latch(int pin, uint8_t* level) {
+    if (!is_mcp_pin(pin) || level == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (g_mcp_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t latch = 0;
+    const esp_err_t e = mcp23s17_read_latch(
+        g_mcp_handle, (pin < 8) ? MCP23S17_PORT_A : MCP23S17_PORT_B, &latch);
+    if (e == ESP_OK) {
+        *level = (uint8_t)((latch >> (pin & 0x07)) & 0x01);
+    }
+    return e;
+}
+
+esp_err_t gpio_expander_verify(uint8_t* iocon, uint8_t* iodira, uint8_t* iodirb) {
+    if (g_mcp_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return mcp23s17_verify_config(g_mcp_handle, iocon, iodira, iodirb);
 }
 
 void gpio_expander_w5500_rst_set_level(void* ctx, int level) {
@@ -137,8 +175,17 @@ void gpio_expander_w5500_rst_set_level(void* ctx, int level) {
     if (g_mcp_handle == NULL) {
         return;
     }
-    (void)mcp23s17_write_pin(g_mcp_handle, (mcp23s17_pin_t)MCP_W5500_RST,
-                             level ? 1 : 0);
+    const mcp23s17_pin_t pin = (mcp23s17_pin_t)MCP_W5500_RST;
+    if (level) {
+        // Release first (pull-up raises RSTn), then park the latch high so a
+        // stray IODIRB write could only ever drive the pin high.
+        (void)mcp23s17_set_pin_direction(g_mcp_handle, pin, false);
+        (void)mcp23s17_write_pin(g_mcp_handle, pin, 1);
+    } else {
+        // Latch low first, then drive: RSTn goes low only on purpose.
+        (void)mcp23s17_write_pin(g_mcp_handle, pin, 0);
+        (void)mcp23s17_set_pin_direction(g_mcp_handle, pin, true);
+    }
 }
 
 esp_err_t field_dout_set(unsigned channel, bool level) {

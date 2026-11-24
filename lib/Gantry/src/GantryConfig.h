@@ -86,7 +86,7 @@ struct JointLimits {
     JointLimits()
         : x_min(0.0f), x_max(0.0f),
           z_min(0.0f), z_max(0.0f),
-          theta_min(-90.0f), theta_max(90.0f) {}
+          theta_min(-180.0f), theta_max(180.0f) {}
 
     /**
      * @brief Check if joint configuration is within limits.
@@ -145,12 +145,16 @@ struct KinematicParameters {
     float theta_x_offset_mm;     // Theta X offset from Z column.
     float gripper_x_offset_mm;   // Gripper X offset.
     float gripper_z_offset_mm;   // Gripper Z offset.
+    float x_stroke_mm;           // X mechanical stroke: x_home = x_max in inverted frame.
+    float z_stroke_mm;           // Z mechanical stroke: z_home = z_max (retracted), z=0 conveyor.
 
     KinematicParameters()
         : z_axis_y_offset_mm(GANTRY_Z_AXIS_Y_OFFSET_MM),
           theta_x_offset_mm(GANTRY_THETA_X_OFFSET_MM),
           gripper_x_offset_mm(GANTRY_GRIPPER_X_OFFSET_MM),
-          gripper_z_offset_mm(GANTRY_GRIPPER_Z_OFFSET_MM) {}
+          gripper_z_offset_mm(GANTRY_GRIPPER_Z_OFFSET_MM),
+          x_stroke_mm(AXIS_X_HARD_LIMIT_MAX_MM),
+          z_stroke_mm(AXIS_Z_HARD_LIMIT_MAX_MM) {}
 };
 
 /**

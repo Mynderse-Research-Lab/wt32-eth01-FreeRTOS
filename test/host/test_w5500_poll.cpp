@@ -26,7 +26,7 @@ static void test_busy_poll_us_timeout(void) {
 static void test_sendok_timeout_constants(void) {
   TEST_ASSERT_EQUAL_UINT32(2000u, w5500::kUdpSendOkTimeoutUs);
   TEST_ASSERT_EQUAL_UINT32(10000u, w5500::kUdpDestChangeSendOkTimeoutUs);
-  TEST_ASSERT_EQUAL_UINT32(500000u, w5500::kTcpSendOkTimeoutUs);
+  TEST_ASSERT_EQUAL_UINT32(50000u, w5500::kTcpSendOkTimeoutUs);
   TEST_ASSERT_EQUAL_UINT32(50000u, w5500::kBusyPollYieldAboveUs);
   TEST_ASSERT_EQUAL_UINT32(2000u, w5500::kUdpRecvCmdTimeoutUs);
 }
@@ -34,6 +34,37 @@ static void test_sendok_timeout_constants(void) {
 static void test_busy_poll_tight_timeout(void) {
   const bool ok = w5500::busyPollUsTight(200, []() { return false; });
   TEST_ASSERT_FALSE(ok);
+}
+
+// Regression (bench log 2026-10-13): connect diag counted iterations and
+// printed "elapsed=14377 ms" for a 500 ms timeout. Elapsed must be wall time
+// and the poll must sleep, not spin, between checks.
+static void test_sleep_poll_reports_wall_time_and_times_out(void) {
+  constexpr uint32_t kTimeoutMs = 30;
+  uint32_t calls = 0;
+  uint32_t last_elapsed_ms = 0;
+  const bool ok = w5500::sleepPollMs(kTimeoutMs, w5500::kConnectPollIntervalMs,
+                                     [&](uint32_t elapsed_ms) {
+                                       ++calls;
+                                       last_elapsed_ms = elapsed_ms;
+                                       return false;
+                                     });
+  TEST_ASSERT_FALSE(ok);
+  TEST_ASSERT_TRUE(last_elapsed_ms >= kTimeoutMs);
+  // At most one check per interval (plus the final check), never thousands.
+  TEST_ASSERT_TRUE(calls <= kTimeoutMs / w5500::kConnectPollIntervalMs + 2u);
+  TEST_ASSERT_TRUE(calls >= 2u);
+}
+
+static void test_sleep_poll_immediate_success(void) {
+  uint32_t calls = 0;
+  const bool ok = w5500::sleepPollMs(500, 1, [&](uint32_t elapsed_ms) {
+    ++calls;
+    TEST_ASSERT_TRUE(elapsed_ms < 5u);
+    return true;
+  });
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_EQUAL_UINT32(1u, calls);
 }
 
 static void test_soft_miss_warn_gate(void) {
@@ -68,14 +99,31 @@ static void test_likely_limit_stop_heuristic(void) {
   TEST_ASSERT_FALSE(fb.isReady());
 }
 
+static void test_class1_reseed_wake_only_on_multi_period_lag(void) {
+  // Exact boundary (lag 0) and single-tick slip (< period 2): stay on grid.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(102u, 102u, 2u));
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(103u, 102u, 2u));
+  // Full period behind (lag >= period): reseed to avoid catch-up spin.
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(104u, 102u, 2u));
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(110u, 102u, 2u));
+  // Modular 32-bit tick wraparound safety.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(0u, 0xFFFFFFFFu, 2u));
+  TEST_ASSERT_TRUE(eip::class1ShouldReseedWake(1u, 0xFFFFFFFFu, 2u));
+  // Zero period guard.
+  TEST_ASSERT_FALSE(eip::class1ShouldReseedWake(200u, 100u, 0u));
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_busy_poll_us_immediate_success);
   RUN_TEST(test_busy_poll_us_timeout);
   RUN_TEST(test_sendok_timeout_constants);
   RUN_TEST(test_busy_poll_tight_timeout);
+  RUN_TEST(test_sleep_poll_reports_wall_time_and_times_out);
+  RUN_TEST(test_sleep_poll_immediate_success);
   RUN_TEST(test_soft_miss_warn_gate);
   RUN_TEST(test_reliability_counters);
   RUN_TEST(test_likely_limit_stop_heuristic);
+  RUN_TEST(test_class1_reseed_wake_only_on_multi_period_lag);
   return UNITY_END();
 }
