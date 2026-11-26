@@ -38,20 +38,20 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `1db4520` | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
 | `28c3107` | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | 3 files, 53–465 lines; `update()` and the trace stamps are in `GantryEipRotaryAxisUpdate.cpp` |
 | `e1c549b` | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | 4 files, 50–457 lines; the arm and move phase machine is in `GantryEipLinearAxisPhases.cpp`, alarms and logging in `GantryEipLinearAxisAlarm.cpp` |
-|  | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
+| `e4761cb` | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
+|  | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 
 ## Planned splits
 
-14 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
+13 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
 
-### Production files (4)
+### Production files (3)
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
-| 2 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
-| 3 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
-| 4 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+| 1 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
+| 2 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
+| 3 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
 
 ### Headers (3)
 
@@ -174,11 +174,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/CellNetL2Framing.h` | 138 | under 500 |
 | `src/CellNetOtaReceiver.cpp` | 208 | under 500 |
 | `src/CellNetOtaReceiver.h` | 122 | under 500 |
-| `src/CellNetOtaSender.cpp` | 418 | split done |
+| `src/CellNetOtaSender.cpp` | 418 | split done (`e4761cb`) |
 | `src/CellNetOtaSender.h` | 95 | under 500 |
-| `src/CellNetOtaSenderInternal.h` | 360 | split done |
-| `src/CellNetOtaSenderPhases.cpp` | 424 | split done |
-| `src/CellNetOtaSenderReport.cpp` | 87 | split done |
+| `src/CellNetOtaSenderInternal.h` | 360 | split done (`e4761cb`) |
+| `src/CellNetOtaSenderPhases.cpp` | 424 | split done (`e4761cb`) |
+| `src/CellNetOtaSenderReport.cpp` | 87 | split done (`e4761cb`) |
 | `src/EspEthL2Transport.cpp` | 108 | under 500 |
 | `src/EspEthL2Transport.h` | 48 | under 500 |
 | `src/IL2Transport.h` | 62 | under 500 |
@@ -334,11 +334,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/UiRebootPrompt.cpp` | 72 | under 500 |
 | `src/UiRebootPrompt.h` | 27 | under 500 |
 
-### `lib/W5500/` (14 files, 3,033 lines)
+### `lib/W5500/` (16 files, 3,066 lines)
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/W5500.cpp` | 731 | **over 500: planned** |
+| `src/W5500.cpp` | 436 | split done |
 | `src/W5500.h` | 217 | under 500 |
 | `src/W5500BusMutex.cpp` | 84 | under 500 |
 | `src/W5500BusMutex.h` | 40 | under 500 |
@@ -347,6 +347,8 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500Diag.cpp` | 305 | under 500 |
 | `src/W5500Diag.h` | 149 | under 500 |
 | `src/W5500Hal.h` | 33 | under 500 |
+| `src/W5500Init.cpp` | 312 | split done |
+| `src/W5500Internal.h` | 16 | split done |
 | `src/W5500Poll.h` | 115 | under 500 |
 | `src/W5500Socket.cpp` | 990 | **over 500: planned** |
 | `src/W5500Socket.h` | 135 | under 500 |

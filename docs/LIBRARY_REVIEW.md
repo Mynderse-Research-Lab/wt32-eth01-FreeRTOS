@@ -16,7 +16,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 
 | Library | Lines | Files over 500 | README | Host tests | Most important finding |
 |---|---:|---|---|---|---|
-| [W5500](#w5500) | 3,032 | `W5500Socket.cpp` 989, `W5500.cpp` 731 | none | 6 files | UDP length wrap hands a 65,535-byte view of a 512-byte buffer to the Class 1 parser (G-B15) |
+| [W5500](#w5500) | 3,066 | `W5500Socket.cpp` 990 | none | 6 files | UDP length wrap hands a 65,535-byte view of a 512-byte buffer to the Class 1 parser (G-B15) |
 | [EtherNetIP](#ethernetip) | 7,306 | `EipScannerTask.cpp` 1,329, `EipMultiScanner.cpp` 829 | none | 11 files | Synchronous logs on the Class 1 send path (G-B16) |
 | [Gantry](#gantry) | 8,316 | `Gantry.h` 597 | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
 | [AppConfig](#appconfig) | 3,181 | none (split done) | none | `test_app_config` (27 cases) | Any NVS read error at boot overwrites the stored set with defaults (G-F7) |
@@ -66,7 +66,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 
 **Threading.**
 - One process-wide `std::mutex` guards every socket-layer SPI access.
-- The burst scratch buffers (`W5500.cpp:33-34`) are safe only under that mutex.
+- The burst scratch buffers (`W5500.cpp:27-28`) are safe only under that mutex.
 - `diagMutex()` is a plain `std::mutex`. The scanner takes it every 100 ms and the console takes it too.
 - The scanner runs at priority 6 on core 1, the keepalive helpers at 7 on core 1, and EipLog at 2 on core 0.
 
@@ -74,16 +74,16 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 |---:|---|---|---|---|---|
 | W1 | bug | `W5500Socket.cpp:453-470` | `packetBytes = uint16(8 + payloadLen)` wraps for `payloadLen` ≥ 0xFFF8, so the over-claim check passes and `out[n].len` (up to 65,535) points into the caller's buffer (512 bytes on the stack in `EipMultiScanner::drainBufferedInputs`). `readSettledRxPointers` accepts `avail` = 0xFFFF. With all bytes 0xFF, `packetBytes` is 7 and the loop keeps producing bad views | Confirmed, rechecked | G-B15 |
 | W2 | bug | `W5500Socket.cpp:400-427` | Same wrap in the single receive. `memcpy(buf, scratch + 8, maxLen)` reads past the 264-byte stack scratch when `maxLen` > 256, and `RX_RD` advances by only 0–7 bytes | Confirmed, rechecked | G-B15 |
-| W3 | bug, not in production | `W5500.cpp:493-586` | MACRAW writes the TX buffer and reads the RX buffer at address 0 without using `Sn_TX_WR`/`Sn_RX_RD`. `recvFrame` underflows on a length below 2. `sendFrame` and `waitForCommand` truncate `esp_timer_get_time()` to 32 bits (every wait expires at once after 71.6 min). Used only by `test/w5500_loopback`. Whether the chip requires the pointer offset is not checked against the datasheet | Confirmed (code) | — |
-| W4 | risk | `W5500.cpp:191-227` | On a VERSIONR failure, `configureAfterReset` steps the SPI clock down to 5, 2 or 1 MHz and keeps it, including inside `recover()`. Only a boot `ESP_LOGW` reports it | Confirmed | G-B18 |
+| W3 | bug, not in production | `W5500.cpp:198-291` | MACRAW writes the TX buffer and reads the RX buffer at address 0 without using `Sn_TX_WR`/`Sn_RX_RD`. `recvFrame` underflows on a length below 2. `sendFrame` and `waitForCommand` truncate `esp_timer_get_time()` to 32 bits (every wait expires at once after 71.6 min). Used only by `test/w5500_loopback`. Whether the chip requires the pointer offset is not checked against the datasheet | Confirmed (code) | — |
+| W4 | risk | `W5500Init.cpp:176-212` | On a VERSIONR failure, `configureAfterReset` steps the SPI clock down to 5, 2 or 1 MHz and keeps it, including inside `recover()`. Only a boot `ESP_LOGW` reports it | Confirmed | G-B18 |
 | W5 | risk | `W5500Diag.cpp:22, 266, 289, 295` | `diagMutex` is a `std::mutex` shared by the scanner and the console. This is the G-B6 pattern, though the hold is about 40 bytes. A spinlock removes it | Suggested: read the waiter name in `gaptrace` | G-B17 |
-| W6 | risk | `W5500.cpp:381, 406, 685, 699, 707, 720` | Synchronous `ESP_LOGE` on SPI or length errors runs inside the bus mutex on the Class 1 path; G-B13's closing note does not cover these | Confirmed | G-B16 |
-| W7 | risk | `W5500.cpp:25, 105` | With DMA on, `max_transfer_sz` is 1,539 while bursts go up to 2,048 bytes. A TCP receive of 1,537–2,048 bytes would exceed the bus limit. Only matters with `eip_spi_dma=1` | Confirmed (code); IDF behaviour Suggested | — |
+| W6 | risk | `W5500.cpp:86, 111, 390, 404, 412, 425` | Synchronous `ESP_LOGE` on SPI or length errors runs inside the bus mutex on the Class 1 path; G-B13's closing note does not cover these | Confirmed | G-B16 |
+| W7 | risk | `W5500.cpp:22`, `W5500Init.cpp:90` | With DMA on, `max_transfer_sz` is 1,539 while bursts go up to 2,048 bytes. A TCP receive of 1,537–2,048 bytes would exceed the bus limit. Only matters with `eip_spi_dma=1` | Confirmed (code); IDF behaviour Suggested | — |
 | W8 | risk | `W5500Socket.cpp:554-560, 607-618` | `socketClose` holds the bus mutex across two 10 ms command waits plus a 200 ms poll, and UDP `socketOpen` across a 500 ms poll. A hang blocks Class 1 for that long | Confirmed | G-B17 |
 | W9 | bug | `W5500Socket.cpp:817-823` | TCP `socketRecv` returns -1 on CLOSE_WAIT before reading `RX_RSR`, so a reply followed by FIN is lost | Confirmed | — |
 | W10 | risk | `W5500Poll.h:38-54` | Waits of 50 ms or less spin without yielding, and longer ones only `taskYIELD()`. A 1,000 ms TCP receive takes a core from every lower-priority task | Confirmed | G-B17 |
 | W11 | docs | `W5500.h:164`, `W5500Socket.h:8-10, 32, 55-57, 91-95, 110-111` | Stale or wrong comments: "factory-burned MAC" (the code writes 02:00:00:00:00:01), "yield" polling, the "all functions lock" claim, the UDP ephemeral port, the -1 return, and "oversized datagrams stay queued" (they are truncated and consumed, unflagged) | Confirmed | — |
-| W12 | cleanup | `W5500.h:7-9`, `W5500.cpp:151-153, 606`, `W5500Socket.cpp:609` | `extern "C"` around C++; literal 0x002E instead of `REG_PHYCFGR`; `socketClose` indexes without `sock < 8`; a failed `init` leaks the device | Confirmed | — |
+| W12 | cleanup | `W5500.h:7-9`, `W5500Init.cpp:136-138`, `W5500.cpp:311`, `W5500Socket.cpp:609` | `extern "C"` around C++; literal 0x002E instead of `REG_PHYCFGR`; `socketClose` indexes without `sock < 8`; a failed `init` leaks the device | Confirmed | — |
 
 **Dead code:** `socketListen`, `socketBind`, `socketIsOpen`, `socketStatus`, `nextEphemeralPort`, `MR_WOL`/`MR_PB`, and the MACRAW path (used only by `test/w5500_loopback`).
 

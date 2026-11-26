@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/W5500.cpp"
+        "src/W5500Init.cpp"
         "src/W5500Socket.cpp"
         "src/W5500SpiHal.cpp"
         "src/W5500BusMutex.cpp"
