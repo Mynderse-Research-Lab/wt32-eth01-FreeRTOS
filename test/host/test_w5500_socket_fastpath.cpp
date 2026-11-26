@@ -852,6 +852,64 @@ static void test_recv_batch_bad_header_drains(void) {
   TEST_ASSERT_EQUAL_UINT16(0, hal2.rxRsr());
 }
 
+// MISO stuck high: every RX byte and Sn_RX_RSR read as 0xFF (G-B15).
+static void fillRxStuckHigh(CountingHal& hal) {
+  hal.rx_mem.assign(0x10000, 0xFF);
+  hal.rx_rd = 0;
+  hal.rx_wr = 0xFFFF;
+}
+
+// One header declaring payload_len, then 64 bytes, so avail is 72.
+static void enqueueHeaderWithLength(CountingHal& hal, uint16_t payload_len) {
+  uint8_t raw[72];
+  std::memset(raw, 0xA5, sizeof(raw));
+  raw[6] = static_cast<uint8_t>(payload_len >> 8);
+  raw[7] = static_cast<uint8_t>(payload_len & 0xFF);
+  hal.enqueueRawRx(raw, sizeof(raw));
+}
+
+static void test_recv_batch_rejects_stuck_high_rx(void) {
+  CountingHal hal;
+  fillRxStuckHigh(hal);
+  uint8_t buf[512] = {};
+  w5500::UdpDatagram dg[16] = {};
+  TEST_ASSERT_EQUAL_UINT32(
+      0, static_cast<uint32_t>(
+             w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 16)));
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+}
+
+static void test_recv_batch_rejects_lengths_that_wrap_16_bits(void) {
+  for (uint32_t len = 0xFFF8; len <= 0xFFFF; ++len) {
+    CountingHal hal;
+    enqueueHeaderWithLength(hal, static_cast<uint16_t>(len));
+    uint8_t buf[128] = {};
+    w5500::UdpDatagram dg[16] = {};
+    TEST_ASSERT_EQUAL_UINT32(
+        0, static_cast<uint32_t>(
+               w5500::socketRecvFromBatch(hal, 0, buf, sizeof(buf), dg, 16)));
+    TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+  }
+}
+
+static void test_recv_nonblocking_rejects_stuck_high_rx(void) {
+  CountingHal hal;
+  fillRxStuckHigh(hal);
+  uint8_t out[300] = {};  // larger than the 264-byte peek scratch
+  TEST_ASSERT_EQUAL_INT(0, w5500::socketRecvFromNonBlocking(hal, 0, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+}
+
+static void test_recv_nonblocking_rejects_lengths_that_wrap_16_bits(void) {
+  for (uint32_t len = 0xFFF8; len <= 0xFFFF; ++len) {
+    CountingHal hal;
+    enqueueHeaderWithLength(hal, static_cast<uint16_t>(len));
+    uint8_t out[300] = {};
+    TEST_ASSERT_EQUAL_INT(0, w5500::socketRecvFromNonBlocking(hal, 0, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_UINT16(0, hal.rxRsr());
+  }
+}
+
 // A datagram larger than the batch buffer must not stall the FIFO.
 static void test_recv_batch_oversized_datagram_advances(void) {
   CountingHal hal;
@@ -987,6 +1045,10 @@ int main(void) {
   RUN_TEST(test_recv_batch_respects_max_out);
   RUN_TEST(test_recv_batch_bad_header_drains);
   RUN_TEST(test_recv_batch_oversized_datagram_advances);
+  RUN_TEST(test_recv_batch_rejects_stuck_high_rx);
+  RUN_TEST(test_recv_batch_rejects_lengths_that_wrap_16_bits);
+  RUN_TEST(test_recv_nonblocking_rejects_stuck_high_rx);
+  RUN_TEST(test_recv_nonblocking_rejects_lengths_that_wrap_16_bits);
   RUN_TEST(test_w5500_sram_pointer_wraparound);
   RUN_TEST(test_w5500_handles_spi_corruption);
   return UNITY_END();

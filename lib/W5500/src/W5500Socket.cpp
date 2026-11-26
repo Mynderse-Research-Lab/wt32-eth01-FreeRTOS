@@ -400,8 +400,8 @@ int readUdpDatagramUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
     const uint16_t payloadLen =
         static_cast<uint16_t>((static_cast<uint16_t>(scratch[6]) << 8) |
                               scratch[7]);
-    const uint16_t packetBytes =
-        static_cast<uint16_t>(kUdpHeaderSize + payloadLen);
+    // 32 bits: a length of 0xFFF8 or more must not wrap past the checks.
+    const uint32_t packetBytes = kUdpHeaderSize + static_cast<uint32_t>(payloadLen);
     if (payloadLen == 0 || packetBytes > avail) {
         W5500_LOGW(
             "RecvFrom: sock=%d bad UDP hdr len=%u avail=%u - discarding %u", sock,
@@ -452,8 +452,9 @@ size_t readUdpBatchUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
     while (n < maxOut && static_cast<size_t>(off) + kUdpHeaderSize <= burst) {
         const uint16_t payloadLen = static_cast<uint16_t>(
             (static_cast<uint16_t>(buf[off + 6]) << 8) | buf[off + 7]);
-        const uint16_t packetBytes =
-            static_cast<uint16_t>(kUdpHeaderSize + payloadLen);
+        // 32 bits: a length of 0xFFF8 or more must not wrap past the checks.
+        const uint32_t packetBytes =
+            kUdpHeaderSize + static_cast<uint32_t>(payloadLen);
         if (payloadLen == 0) {
             malformed = true;
             break;
@@ -480,8 +481,8 @@ size_t readUdpBatchUnlocked(W5500Hal& hal, uint8_t sock, uint8_t* buf,
         // and consume the whole packet so the FIFO cannot stall.
         const uint16_t payloadLen = static_cast<uint16_t>(
             (static_cast<uint16_t>(buf[6]) << 8) | buf[7]);
-        const uint16_t packetBytes =
-            static_cast<uint16_t>(kUdpHeaderSize + payloadLen);
+        const uint32_t packetBytes =
+            kUdpHeaderSize + static_cast<uint32_t>(payloadLen);
         if (payloadLen > 0 && packetBytes <= avail) {
             out[0].data = buf + kUdpHeaderSize;
             out[0].len = static_cast<uint16_t>(burst - kUdpHeaderSize);
