@@ -2,12 +2,6 @@
 
 *.code-workspace
 
-# Cursor IDE / agent local state (rules, hooks, MCP, plans)
-.cursor/
-
-# Antigravity rule wrappers (they inline the text from .cursor/rules, which is also local)
-.agents/
-
 # IDE/tooling
 .cache/
 .clangd
@@ -73,7 +67,3 @@ tools/sim/
 docs/*.docx
 docs/Grasp_Timing_*.html
 driver_datasheets_and_calculations/GANTRY_EXACT_COPY_PURCHASING_BOM*.xlsx
-
-# Shared AI instruction hub: per-project instructions, context, saved requests and responses
-# (created by setup_ai_hub.py and ai_dispatch.py; the hub itself lives outside this repo)
-.ai/

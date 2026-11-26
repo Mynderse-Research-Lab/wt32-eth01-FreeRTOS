@@ -497,5 +497,3 @@ What it does, in one or two sentences.
 ```
 
 Then give the component an ID prefix and its own section in [OPEN_ITEMS.md](OPEN_ITEMS.md), and point the link above at it.
-
-The AI-generated plans behind the `(plan)` items are listed in [OPEN_ITEMS.md](OPEN_ITEMS.md#suggested-plans-since-2026-10-29).

@@ -26,8 +26,6 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 | Document | Summary |
 |----------|---------|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
-| [../AGENTS.md](../AGENTS.md) | AI agent entry point and hard rules |
-| [MCP_SETUP.md](MCP_SETUP.md) | Cursor / Antigravity MCP server setup |
 | [../test/README](../test/README) | Host unit tests & on-target test documentation |
 | [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
 

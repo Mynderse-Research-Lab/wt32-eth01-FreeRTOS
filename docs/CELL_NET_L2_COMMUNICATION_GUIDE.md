@@ -207,4 +207,4 @@ to one interface and to `0x88B5`). Callbacks run on its receive thread. Compile
 `test/host/test_cell_net_l2.cpp` covers frame sizes, round trips for every type (OTA
 included), rejection of a wrong EtherType, a wrong version and truncated frames, padded
 frames, callback dispatch and sequence-loss counting. The OTA receiver has its own
-`test_cellnet_ota_receiver.cpp`. Run them with the repository testing gate (`AGENTS.md`).
+`test_cellnet_ota_receiver.cpp`. Run them with the repository testing gate (`CONTRIBUTING.md`).
