@@ -54,7 +54,7 @@ cmake --build build/host
 ctest --test-dir build/host --output-on-failure
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Entering programming mode (WT32-ETH01)
 

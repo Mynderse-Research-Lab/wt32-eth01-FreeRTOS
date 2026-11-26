@@ -2,9 +2,6 @@
 
 *.code-workspace
 
-# Cursor IDE / agent local state (rules, hooks, MCP, plans)
-.cursor/
-
 # IDE/tooling
 .cache/
 .clangd

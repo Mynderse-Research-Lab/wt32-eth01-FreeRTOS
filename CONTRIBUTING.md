@@ -2,6 +2,13 @@
 
 Software engineering rules for the WT32-ETH01 gantry firmware project.
 
+## What this project is
+
+ESP-IDF v6.0 firmware for a WT32-ETH01-based gantry pick-and-place controller.
+Motion control (`Gantry`), Layer-2 closed cell transport (`CellNetL2`), and EtherNet/IP originator
+(`EtherNetIP`) share one ESP32. **Production motion is EtherNet/IP only**
+(W5500 $\rightarrow$ Kinetix X/Z and Rexroth HCS01 Theta).
+
 ## Quick start
 
 ```powershell
@@ -23,14 +30,27 @@ CI runs both lanes on every push and pull request (`.github/workflows/firmware-c
 
 | Directory | Role |
 |-----------|------|
-| `idf/` | ESP-IDF project root |
-| `src/`, `include/` | Application code |
-| `lib/` | Reusable ESP-IDF components |
-| `test/host/` | Native Unity unit tests |
-| `docs/` | Hardware integration and migration docs |
-| `tools/` | Build/analysis scripts |
+| `idf/` | ESP-IDF project root (build here) |
+| `src/` | `app_main`, test console, pick scheduler |
+| `include/` | App-wide constants and headers |
+| `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, ...) |
+| `test/host/` | Native Unity tests (primary regression) |
+| `docs/` | Canonical design docs and schematics |
+| `tools/` | Python and Node helper scripts |
 
 This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or the Arduino core.
+
+## Hard rules
+
+- **ESP-IDF only** — no PlatformIO, no Arduino core in main firmware.
+- **Build from `idf/`** — `idf.py build`, target `esp32`, FreeRTOS @ 1000 Hz.
+- **Motion via `Gantry` only** — application layer must not drive motors directly.
+- **EIP production path** — no PulseMotor / MCP / PTI for production control.
+- **Runtime parameters are stored only** — motion and pick code reads `AppConfig` values
+  (`gantryRuntimeParams()` for the Gantry library), never a compile-time macro.
+  `idf/sdkconfig.defaults` is the only source of compile-time defaults.
+- **Host-test pure logic** — kinematics, trajectory, protocol encoding before firmware wiring.
+- **Minimize diff scope** — match existing naming, CMake layout, and comment style.
 
 ## Engineering principles
 
@@ -47,6 +67,16 @@ This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or t
 | **Host tests** (`test/host/`) | Primary regression for math and encoding; required before merge |
 | **ESP-IDF build** | Proves full firmware compiles; run locally for firmware changes |
 | **On-target `selftest`** | Optional hardware smoke test; disable via `CONFIG_GANTRY_SELFTEST=n` for production |
+
+### Testing gate
+
+```powershell
+cmake -S test/host -B build/host && cmake --build build/host
+ctest --test-dir build/host --output-on-failure
+```
+
+Both must pass before a change is finalized. `.github/workflows/firmware-ci.yml` runs the same
+two commands on every push.
 
 
 ### Adding a host test
@@ -73,8 +103,8 @@ See `test/README` for details.
 | [`docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics, drives, networks, endstops |
 | [`docs/HV_LV_SCHEMATICS.md`](docs/HV_LV_SCHEMATICS.md) | HV/LV schematics (preliminary) |
 | [`docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 protocol & deployment manual |
-| [`docs/PICK_SCHEDULER_KINEMATICS.md`](docs/PICK_SCHEDULER_KINEMATICS.md) | Pick scheduler coordinate frames and timing math |
 | [`docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md`](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware quality review & 8-stage verification test cycle |
+| [`docs/OPEN_ITEMS.md`](docs/OPEN_ITEMS.md) | Open items, blockers and decisions (live list) |
 | [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md) | Architecture phases & Zenoh-DDS migration |
 | [`docs/INDEX.md`](docs/INDEX.md) | Full documentation index |
 | [`test/README`](test/README) | Testing overview |
