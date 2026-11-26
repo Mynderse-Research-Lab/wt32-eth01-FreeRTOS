@@ -313,12 +313,18 @@ void Gantry::updateAxisPositions() {
             calibrationInProgress_ = false;
         } else if (movingTowardMin && xMinSwitch_.isConfigured() && xMinSwitch_.isActive()) {
             axisX_->stopMotion();
-            axisX_->setCurrentPulses(0);
+            // Only a GPIO home switch marks joint zero here. A drive-managed
+            // switch is also set by any fault-stop, so with drive-managed
+            // limits the EIP home sequence alone sets the datum (G-A9).
+            if (xMinSwitch_.source() != GantryLimitSwitch::Source::kDriveManaged) {
+                axisX_->setCurrentPulses(0);
+            }
             homingInProgress_ = false;
         }
         lastXPositionCounts_ = currentXCounts;
     } else if (homingInProgress_) {
-        if (xMinSwitch_.isActive()) {
+        if (xMinSwitch_.isActive() &&
+            xMinSwitch_.source() != GantryLimitSwitch::Source::kDriveManaged) {
             axisX_->setCurrentPulses(0);
         }
         homingInProgress_ = false;

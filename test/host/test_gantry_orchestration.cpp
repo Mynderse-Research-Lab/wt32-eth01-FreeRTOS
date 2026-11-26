@@ -137,6 +137,24 @@ static void test_workspace_cal_clears_on_theta_lost(void) {
     TEST_ASSERT_FALSE(h.g->isWorkspaceCalibrated());
 }
 
+// G-A9: with drive-managed limits, any fault with the stopped bit sets both
+// soft switches. A fault-stop while X moves toward min must stop X but leave
+// its position alone; only the EIP home sequence sets the datum.
+static void test_drive_fault_stop_does_not_rezero_x(void) {
+    Harness h = makeHarness(200.0f, 0.0f, 0.0f);
+    TEST_ASSERT_NOT_NULL(h.x->min_sw);
+    TEST_ASSERT_NOT_NULL(h.x->max_sw);
+    h.x->busy = true;
+    tick(*h.g);  // records the current X count
+    h.x->mm = 199.5f;  // moving toward min
+    h.x->min_sw->setExternalActive(true);
+    h.x->max_sw->setExternalActive(true);
+    const int stops = h.x->stop_count;
+    tick(*h.g);
+    TEST_ASSERT_GREATER_THAN_INT(stops, h.x->stop_count);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 199.5f, h.x->mm);
+}
+
 static void test_move_invalid_position(void) {
     Harness h = makeHarness();
     TEST_ASSERT_EQUAL(GantryError::INVALID_POSITION,
@@ -1002,6 +1020,7 @@ int main(void) {
     RUN_TEST(test_move_not_calibrated);
     RUN_TEST(test_workspace_cal_clears_on_drive_lost);
     RUN_TEST(test_workspace_cal_clears_on_theta_lost);
+    RUN_TEST(test_drive_fault_stop_does_not_rezero_x);
     RUN_TEST(test_move_invalid_position);
     RUN_TEST(test_orchestrator_bubbles_up_axis_rejection);
     RUN_TEST(test_move_already_moving);
