@@ -3,6 +3,7 @@ idf_component_register(
         "src/W5500.cpp"
         "src/W5500Init.cpp"
         "src/W5500Socket.cpp"
+        "src/W5500SocketTcp.cpp"
         "src/W5500SpiHal.cpp"
         "src/W5500BusMutex.cpp"
         "src/W5500Diag.cpp"
