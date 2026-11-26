@@ -37,6 +37,7 @@ set(APP_SRCS
     "${APP_ROOT}/src/gantry_net_console.cpp"
     "${APP_ROOT}/src/gantry_net_console_auth.cpp"
     "${APP_ROOT}/src/gantry_ota.cpp"
+    "${APP_ROOT}/src/gantry_ota_tcp.cpp"
     "${APP_ROOT}/src/gpio_expander.c"
     "${APP_ROOT}/src/boot_log_ring.cpp"
 )
