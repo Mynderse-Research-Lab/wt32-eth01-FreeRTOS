@@ -14,7 +14,7 @@ All issues were resolved across three structured phases, validated against 28 na
 
 1. **MCP23S17 Driver Shadow Cache Race Fix**:
    - **Problem**: `handle->port_a_output` and `handle->port_b_output` shadow caches were updated prior to acquiring driver mutex locks, leading to lost bit updates and corrupted pin states when multiple tasks concurrently toggled pins on the same 8-bit port.
-   - **Solution** in [`lib/MCP23S17/src/MCP23S17.cpp`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/src/MCP23S17.cpp):
+   - **Solution** in [`lib/MCP23S17/src/MCP23S17Bus.cpp`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/src/MCP23S17Bus.cpp) and [`MCP23S17.cpp`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/src/MCP23S17.cpp):
      - Created internal helpers `mcp23s17_write_register_unlocked` and `mcp23s17_read_register_unlocked`.
      - Enclosed all read-modify-write operations across output, direction, pull-up, and interrupt registers in `mcp23s17_lock(handle)`.
      - Added checks for `spi3_class1_critical_active()` to defer non-realtime I/O during high-priority Class 1 EtherNet/IP frames.

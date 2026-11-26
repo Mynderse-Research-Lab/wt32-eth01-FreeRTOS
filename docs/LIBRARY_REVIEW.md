@@ -21,7 +21,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | [Gantry](#gantry) | 8,221 | `GantryEipLinearAxis.cpp` 955, `GantryEipRotaryAxis.cpp` 768, `Gantry.h` 597 | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
 | [AppConfig](#appconfig) | 3,181 | none (split done) | none | `test_app_config` (27 cases) | Any NVS read error at boot overwrites the stored set with defaults (G-F7) |
 | [CellNetL2](#cellnetl2) | 2,855 | `CellNetOtaSender.cpp` 1,209 | 20 lines | 2 files | OTA sender (1,209 lines) has no test and is not built in CI |
-| [MCP23S17](#mcp23s17) | 728 | `MCP23S17.cpp` 546 | 70 lines, stale pin map | none | Shadow cache diverges from the chip after a failed write; reads return 0 on error (G-D6) |
+| [MCP23S17](#mcp23s17) | 755 | none (split done) | 70 lines, stale pin map | none | Shadow cache diverges from the chip after a failed write; reads return 0 on error (G-D6) |
 | [Spi3Bus](#spi3bus) | 293 | none | none | `test_spi3_critical` | Two independent locks guard SPI3 (G-D6) |
 | [SpiDisplay](#spidisplay) | 2,340 | none | none | none | Reboot prompt restarts without saving; save failures are silent (G-E6) |
 | [EthernetLink](#ethernetlink) | 462 | none | none | none | `isUp()` stays true after the cable is pulled in static-IP mode (G-E7) |
@@ -415,13 +415,13 @@ The message structs are in `include/cell_net_l2_protocol.h`.
 
 | # | Category | Location | Finding | Evidence | Item |
 |---:|---|---|---|---|---|
-| M1 | risk | `MCP23S17.cpp:44, 211`; `Spi3Bus.cpp:15, 67-93` | Two unrelated locks guard SPI3: the gripper, inputs and health check take only the MCP mutex, while the TFT takes Spi3Bus's mutex (and then the MCP one for DC writes). No caller takes them in reverse order, so no deadlock; an MCP transfer may land between a TFT chip-select assert and its data | Confirmed (two locks); display corruption Suggested | G-D6 |
-| M2 | risk | `MCP23S17.cpp` lock path | A holder is not bounded by the 8 ms timeout, because the bus-lock wait inside the transfer is unbounded; this fits the 131 ms PickScheduler hold in G-D3 | Confirmed from IDF v6.0 source | G-D3 |
-| M3 | bug | `MCP23S17.cpp:336-342, 359-365, 382-388, 444-450` | The shadow cache is updated before the write is known to succeed; after a failed write, the next write to another pin of that port writes the wrong bit | Confirmed, rechecked | G-D6 |
-| M4 | bug | `MCP23S17.cpp:427-429, 463-465` | `read_pin` and `read_port` return 0 on any error, which for the active-low inputs looks like "active" | Confirmed, rechecked | G-D6 |
-| M5 | risk | `MCP23S17.cpp:283-300, 288-289`; `gpio_expander.c:104-108` | `init` does not check the IODIR and GPPU writes, returns a handle after a failed read-back, and does not write OLAT first, so after an ESP-only reset a DOUT pin (for example the gripper) drives its old level for one transaction | Confirmed | G-D6 |
+| M1 | risk | `MCP23S17Internal.h:45`; `MCP23S17.cpp:26`; `Spi3Bus.cpp:15, 67-93` | Two unrelated locks guard SPI3: the gripper, inputs and health check take only the MCP mutex, while the TFT takes Spi3Bus's mutex (and then the MCP one for DC writes). No caller takes them in reverse order, so no deadlock; an MCP transfer may land between a TFT chip-select assert and its data | Confirmed (two locks); display corruption Suggested | G-D6 |
+| M2 | risk | `MCP23S17Bus.cpp` lock path | A holder is not bounded by the 8 ms timeout, because the bus-lock wait inside the transfer is unbounded; this fits the 131 ms PickScheduler hold in G-D3 | Confirmed from IDF v6.0 source | G-D3 |
+| M3 | bug | `MCP23S17.cpp:151-157, 174-180, 197-203, 259-265` | The shadow cache is updated before the write is known to succeed; after a failed write, the next write to another pin of that port writes the wrong bit | Confirmed, rechecked | G-D6 |
+| M4 | bug | `MCP23S17.cpp:242-244, 278-280` | `read_pin` and `read_port` return 0 on any error, which for the active-low inputs looks like "active" | Confirmed, rechecked | G-D6 |
+| M5 | risk | `MCP23S17.cpp:98-115, 103-104`; `gpio_expander.c:104-108` | `init` does not check the IODIR and GPPU writes, returns a handle after a failed read-back, and does not write OLAT first, so after an ESP-only reset a DOUT pin (for example the gripper) drives its old level for one transaction | Confirmed | G-D6 |
 | M6 | bug, consumer | `gantry_console_io.cpp:166, 183, 186` | `ESP_ERROR_CHECK` around the debug register calls reboots the controller on a lock timeout | Confirmed | G-D6 |
-| M7 | cleanup | `MCP23S17.cpp:541-546` | Debug register writes bypass the caches, so writing IODIR or OLAT that way makes `verify_config` fail | Confirmed | — |
+| M7 | cleanup | `MCP23S17Bus.cpp:155-160` | Debug register writes bypass the caches, so writing IODIR or OLAT that way makes `verify_config` fail | Confirmed | — |
 | M8 | docs | `README.md`; `MCP23S17.h:51`; `Spi3Bus.h:13` | Stale channel map. The real map (`gantry_app_constants.h:44-71`): TFT CS on ESP GPIO32; PB0 KO, PB1 PUSH, PB2 ENC_B, PB3 ENC_A, PB4 BLK unused, PB5 DC, PB6 RES, PB7 W5500 RSTn. The header says the default clock is 10 MHz; the code uses 1 MHz. `set_pin_interrupt` is described as edge-triggered, but it sets INTCON (compare against DEFVAL) | Confirmed; interrupt semantics Suggested (MCP23S17 datasheet INTCON/DEFVAL) | — |
 
 **Dead code:** `mcp23s17_write_port`, `mcp23s17_set_pin_interrupt`, and the IPOL, INTF and INTCAP defines.
@@ -452,7 +452,7 @@ The message structs are in `include/cell_net_l2_protocol.h`.
 
 | # | Category | Location | Finding | Evidence | Item |
 |---:|---|---|---|---|---|
-| S1 | risk/docs | `Spi3Bus.cpp:102`; `MCP23S17.cpp:211` | `withMcp` does not exclude the MCP driver's own accesses, which use a separate mutex (M1). The exported `mutex()` suggests one bus lock exists; there are two, which the G-D3 priority-ceiling design must know | Confirmed | G-D6 |
+| S1 | risk/docs | `Spi3Bus.cpp:102`; `MCP23S17.cpp:26` | `withMcp` does not exclude the MCP driver's own accesses, which use a separate mutex (M1). The exported `mutex()` suggests one bus lock exists; there are two, which the G-D3 priority-ceiling design must know | Confirmed | G-D6 |
 | S2 | docs | `Spi3Bus.h:15-16` | Only the start of an SPI3 operation is deferred during a Class 1 exchange; a running operation continues (a full TFT fill takes about 61 ms at 20 MHz, calculated). The W5500 is on SPI2, and nothing records why SPI3 must defer at all. This deferral is itself a source of MCP lock failures | Confirmed (start-only); need for the deferral Suggested: soak with it disabled and compare `gaptrace`/`eiptiming` | G-D3 |
 | S3 | risk | `Spi3Bus.h` (`std::function` parameters) | Lambdas capturing three words probably exceed the `std::function` small-buffer size on Xtensa, so every TFT data write may allocate on core 0 | Suggested: check `sizeof(std::_Any_data)` on target, or trace the heap | — |
 | S4 | cleanup | `Spi3Bus.cpp:80, 91`; `CMakeLists.txt:6`, `Spi3Bus.cpp:4` | Failure logs are not rate-limited; the library includes an app header for pin numbers | Confirmed | — |
