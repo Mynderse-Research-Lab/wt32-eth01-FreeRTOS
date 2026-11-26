@@ -1,6 +1,6 @@
 # Math Relink Inventory
 
-**Status:** working list, 2026-11-19, read from the code at `abb8c96`. Not committed.
+**Status:** working list, 2026-11-19, read from the code at `352cd06`. Not committed.
 **Purpose:** every piece of code that implements system mathematics, grouped by topic, so each can be linked to a section of the new canonical mathematical foundation document. This list names *what* the code computes; it contains no derivations or equations.
 
 **How to use it:** give each topic a section with a stable anchor in the new document, then add one comment per function, for example `// Math: <doc>#belt-odometer`. The "Doc link today" column shows what has to be repointed.
@@ -129,7 +129,7 @@
 
 ## Other math text still in the repository
 
-- `docs/KNOWLEDGE_TRANSFER.md:196` onward: a model section "read from the code at `8e5798c`", with equations.
+- `docs/KNOWLEDGE_TRANSFER.md:196` onward: a model section "read from the code at `ee7b6a7`", with equations.
 - `tools/sim/SYSTEM_AND_MATHEMATICAL_MODELS.md` (ignored folder), a "digital twin … mathematical models" document: backed up and deleted 2026-11-19 with the others.
 
 ## Links to repoint once the document exists
