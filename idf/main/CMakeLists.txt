@@ -7,6 +7,9 @@ set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 
 set(APP_SRCS
     "${APP_ROOT}/src/main.cpp"
+    "${APP_ROOT}/src/main_init_io.cpp"
+    "${APP_ROOT}/src/main_init_motion.cpp"
+    "${APP_ROOT}/src/main_init_net.cpp"
     "${APP_ROOT}/src/main_tasks.cpp"
     "${APP_ROOT}/src/pick_scheduler.cpp"
     "${APP_ROOT}/src/pick_belt.cpp"

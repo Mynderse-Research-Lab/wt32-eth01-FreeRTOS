@@ -93,7 +93,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 - Fix W1 and W2 in one commit with tests (all-0xFF reads, `payloadLen` 0xFFF8–0xFFFF on both paths).
 - Delete MACRAW and `test/w5500_loopback`. This replaces "MACRAW access stays" in the split plan.
 - Write a README: role, the rule never to block under the bus mutex, consumers, tests.
-- Write a REFERENCE.md: API per header, the bus-mutex contract, the timeout table, socket buffer layout (4/2/2/2/1/1/1/1 KB), fixed MAC, IP from Kconfig (G-B5), return conventions, deferred-log rules, and the stored keys read in `main.cpp` (`eip_spi_khz`, `eip_spi_dma`, `eip_txwr_split`).
+- Write a REFERENCE.md: API per header, the bus-mutex contract, the timeout table, socket buffer layout (4/2/2/2/1/1/1/1 KB), fixed MAC, IP from Kconfig (G-B5), return conventions, deferred-log rules, and the stored keys read in `main_init_motion.cpp` (`eip_spi_khz`, `eip_spi_dma`, `eip_txwr_split`).
 
 ---
 
@@ -298,7 +298,7 @@ The legacy limit block in `updateAxisPositions` is not dead: it is A1.
 | # | Category | Location | Finding | Evidence | Item |
 |---:|---|---|---|---|---|
 | C1 | bug, persistence | `NvsStorage.cpp:96-99`; `AppConfig.cpp:100-135` | `getBlob` returns false for any NVS error, not only "not found". `load()` then treats the set as absent and writes a fresh set of defaults plus any old per-key values over the stored one. `main.cpp` promises parameters revert only on an operator command | Confirmed, rechecked | G-F7 |
-| C2 | risk | `main.cpp:99-103` | With a damaged set, or no storage, the machine runs on compile-time defaults that do not match it (G-F1) and only a log line says so; nothing holds motion off | Confirmed (no gate); consequence Suggested | G-F1 |
+| C2 | risk | `main_init_io.cpp:31-35` | With a damaged set, or no storage, the machine runs on compile-time defaults that do not match it (G-F1) and only a log line says so; nothing holds motion off | Confirmed (no gate); consequence Suggested | G-F1 |
 | C3 | bug | `AppConfigText.cpp:162-168`; `AppConfigAccess.cpp:227` | `strtof("nan")` gives NaN, and the range check is false for NaN, so NaN is stored in any float key and later saved, from `cfg` or a parameter-file replay | Confirmed, rechecked | G-F8 |
 | C4 | rule | `AppConfigDefaults*.cpp`, `AppConfigData.h` | Three copies of the defaults. The host fallbacks disagree with `sdkconfig.defaults`; for example X speed 3333.3 vs 500, theta accel 1800 vs 18000, LAN IP 192.168.1.100 vs 10.42.0.100. About 30 defaults exist only in C++, against the rule that `sdkconfig.defaults` is the only compile-time default source | Confirmed | — |
 | C5 | docs/risk | `ConfigSchema.cpp:194-250` | Network, console, OTA and EtherNet/IP keys are editable and marked "reboot required", yet nothing reads them (`eth_ip`, `con_port`, `ota_port`, `con_pw`, `w5500_ip`, target IPs, RPIs, PUU) | Confirmed | G-B5, G-F2 |
@@ -520,7 +520,7 @@ The TFT stays enabled; nothing here proposes otherwise.
 | # | Category | Location | Finding | Evidence | Item |
 |---:|---|---|---|---|---|
 | L1 | bug | `EthernetLink.cpp:366-369` | With a static IP (the default), `ETHERNET_EVENT_DISCONNECTED` clears only `phy_link_connected_`; `link_up_` is cleared only under `#if !ETH_USE_STATIC_IP`, so `isUp()` stays true after the cable is pulled and the TFT shows "UP" | Confirmed, rechecked | G-E7 |
-| L2 | risk | `main.cpp:467-489` | Network services start only if the link is up within `ETH_IP_WAIT_TIMEOUT_MS` (1,500 ms); a later link-up never starts the net console, OTA server or CellNet L2 | Confirmed (code); timing Suggested: `boottime` over several boots and a late cable insert | G-E7 |
+| L2 | risk | `main_init_net.cpp:21-43` | Network services start only if the link is up within `ETH_IP_WAIT_TIMEOUT_MS` (1,500 ms); a later link-up never starts the net console, OTA server or CellNet L2 | Confirmed (code); timing Suggested: `boottime` over several boots and a late cable insert | G-E7 |
 | L3 | rule | `EthernetLink.cpp:221-223`; `include/ethernet_app_config.h:24-40` | The static IP comes from compile-time macros; the stored `eth_ip` (shown in the TFT Network menu) is not read | Confirmed | G-B5 |
 | L4 | resource | `EthernetLink.cpp:306, 353-358, 382-392` | MAC and PHY objects leak on a failed driver install; a failed IP-handler registration leaves the Ethernet handler registered with `this` | Confirmed; low impact (one start per boot) | — |
 | L5 | docs | `EthernetLink.cpp:287-288, 428-432` | A "next step" comment for work the function already does; an error text that still mentions a broker PC | Confirmed | — |

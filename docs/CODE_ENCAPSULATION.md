@@ -33,25 +33,25 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `285825e` | `src/pick_scheduler.cpp` | 2,785 | 9 files, 252–403 lines; the strike path stays in `pick_strike.cpp` |
 | `6bcb0ab` | `lib/AppConfig/src/AppConfig.cpp` | 1,841 | 6 files, 176–398 lines; `loadDefaults()` calls two section functions |
 | `d114630` | `src/gantry_net_console.cpp` | 555 | 2 files, 182 and 396 lines; login and the recent-peer cache are in `gantry_net_console_auth.cpp` |
-| OTA split | `src/gantry_ota.cpp` | 562 | 2 files, 270 and 316 lines; the TCP OTA server task and `gantryOtaStartServer` are in `gantry_ota_tcp.cpp` |
+| `8339673` | `src/gantry_ota.cpp` | 562 | 2 files, 270 and 316 lines; the TCP OTA server task and `gantryOtaStartServer` are in `gantry_ota_tcp.cpp` |
+| `e971af4`, main stages split | `src/main.cpp` | 615 | 6 files, 53–231 lines; `app_main` calls five stage functions (config, I/O, motion, tasks, network) in `main_init_*.cpp` and `main_tasks.cpp` |
 
 ## Planned splits
 
-19 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
+18 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
 
-### Production files (9)
+### Production files (8)
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `src/main.cpp` | 515 | The update and TFT UI tasks are in `main_tasks.cpp`. Next, `app_main` (about 440 lines) breaks into init stages (config and I/O, motion, tasks, network) in `main_init_*.cpp`, a separate commit | Boot log; `eiptiming` after boot |
-| 2 | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | Lock, holder logging and register access into `MCP23S17Bus.cpp`; the pin API stays | Build; G-D3 is open on this bus |
-| 3 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
-| 4 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
-| 5 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
-| 6 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
-| 7 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
-| 8 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
-| 9 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+| 1 | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | Lock, holder logging and register access into `MCP23S17Bus.cpp`; the pin API stays | Build; G-D3 is open on this bus |
+| 2 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
+| 3 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
+| 4 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
+| 5 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
+| 6 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
+| 7 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
+| 8 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
 
 ### Headers (3)
 
@@ -116,7 +116,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 ## Order of work
 
 1. This record and the library review.
-2. Production splits 1–5, then the Class 1 splits 6–9, each held until its on-cell soak passes.
+2. Production splits 1–4, then the Class 1 splits 5–8, each held until its on-cell soak passes.
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, the console decoupling, then `GantryConsole` once G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries.
@@ -343,7 +343,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (48 files, 11,498 lines)
+### `src/` (51 files, 11,604 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -379,9 +379,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
 | `gantry_test_console.h` | 67 | under 500 |
 | `gpio_expander.c` | 206 | under 500 |
-| `main.cpp` | 515 | **over 500: planned** |
-| `main_internal.h` | 27 | split done |
-| `main_tasks.cpp` | 109 | split done |
+| `main.cpp` | 105 | split done |
+| `main_init_io.cpp` | 143 | split done |
+| `main_init_motion.cpp` | 231 | split done |
+| `main_init_net.cpp` | 53 | split done |
+| `main_internal.h` | 56 | split done |
+| `main_tasks.cpp` | 169 | split done |
 | `pick_belt.cpp` | 381 | split done (`285825e`) |
 | `pick_bench.cpp` | 255 | split done (`285825e`) |
 | `pick_console.cpp` | 253 | split done (`285825e`) |

@@ -161,7 +161,7 @@ For buffer copies the largest useful FDM length is **4 bytes** (`OM=11`). Regist
 
 ### Boot order (`CONFIG_EIP_SCANNER_ENABLED`)
 
-From [`src/main.cpp`](../src/main.cpp):
+From [`src/main.cpp`](../src/main.cpp), whose `app_main` calls the stages in [`src/main_init_io.cpp`](../src/main_init_io.cpp), [`src/main_init_motion.cpp`](../src/main_init_motion.cpp), [`src/main_tasks.cpp`](../src/main_tasks.cpp) and [`src/main_init_net.cpp`](../src/main_init_net.cpp):
 
 1. **SPI3 + MCP** — bus init, Field/UI/TFT CS/W5500 RST; optional TFT stub.
 2. **W5500** — `w5500.init(...)` with MCP-driven RST (static; must outlive the scanner).
@@ -739,7 +739,7 @@ removed; do not rely on them.
 ### Theta (HCS01)
 - Assemblies **101/102** (18 / 14 bytes), freely configurable profile (`P-0-4084 = 0xFFFE`). Map: `P-0-4081` = 4077, 0282, 0259, 0260, 0359; `P-0-4080` = 4078, 0051, 0040, 0390. See `Hcs01Assembly.h`.
 - Class 1 ForwardOpen (third slot on the X/Z multi-scanner): T→O still demuxes on shared UDP **2222**; O→T uses one W5500 UDP socket per dest so DIPR stays cached. Config instance **0** (HCS01 has no 110), O→T **24** (18+2 seq+4 Run/Idle), T→O **16** (14+2), Run/Idle **bytes on / net-params bit 8 clear**, serial `0x0003`, O→T CID `0x10000003`, T→O CID `0x20000003`, RPI **2000** µs. Theta FO reject is **non-fatal** (X/Z stay up).
-- `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t c m`.
+- `CONFIG_EIP_AXIS_THETA` default **y** in `idf/sdkconfig.defaults`. `main_init_motion.cpp` constructs `GantryEipRotaryAxis` with `CONFIG_EIP_AXIS_THETA_PUU_PER_DEG` (**10000** = 0.0001 deg LSB; live S-0-0079 = 3600000 inc/rev). Override with `puu t` / `puucal t c m`.
 - **Absolute Encoder Tracking & Zero-Offset Architecture**: `GantryEipRotaryAxis` operates in pure absolute frame without software offsets (`zero_puu_` eliminated). `getCurrentDeg()` directly reflects the HIPERFACE absolute encoder position (`S-0-0051`). Because end-effector cabling and pneumatics are routed over pass-through slip-rings, continuous multi-turn rotation is supported for any number of revolutions.
 - **High-Precision Tolerance ($0.01^\circ$)**: Positioning precision is enforced at **$0.01^\circ$** (`AXIS_THETA_POSITION_TOLERANCE_DEG = 0.01f`, `kArrivalEpsDeg = 0.01f`).
 - **Profile units** (`hcs01VelocityUnits` / `hcs01AccelUnits` in `GantryEipRotaryAxis.h`), from the drive export `tools/Parameter_default_1.par` (2026-10-13):
@@ -917,7 +917,7 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
 
 ## 14. Runtime parameters
 
-At runtime the stored parameters are the only source. `main.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key the stored set does not hold, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
+At runtime the stored parameters are the only source. `main_init_motion.cpp` and the console pass them to the Gantry library through `gantryRuntimeParams()`, and the pick scheduler reads them from `AppConfig`. Compile-time values come from `idf/sdkconfig.defaults` alone: the build regenerates `sdkconfig` from it on every configure, so a local menuconfig edit does not survive. Those values only fill a key the stored set does not hold, or apply after an explicit `cfg factory`. Macros in `axis_drivetrain_params.h` seed those defaults and are not read for motion.
 
 ### 14.1 Stored set
 

@@ -1,12 +1,13 @@
 /**
  * @file main_tasks.cpp
- * @brief The application's periodic tasks: the 100 Hz Gantry update and the
- *        TFT UI (encoder input at 100 Hz, display redraw at 15 Hz).
+ * @brief The application's periodic tasks (the 100 Hz Gantry update and the
+ *        TFT UI) and the boot stage that starts every application task.
  */
 
 #include "main_internal.h"
 
 #include "AppConfig.h"
+#include "CellNetL2.h"
 #include "GantryControlPeriod.h"
 #include "Spi3Bus.h"
 #include "SpiDisplay.h"
@@ -14,10 +15,13 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "ethernet_app_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gantry_app_constants.h"
+#include "gantry_test_console.h"
 #include "gpio_expander.h"
+#include "pick_scheduler.h"
 
 #include <cstring>
 
@@ -106,4 +110,60 @@ void tftUiTask(void* param) {
 
         vTaskDelayUntil(&lastWakeTime, inputInterval);
     }
+}
+
+GantryTestConsoleConfig* bootStartTasks(Gantry::Gantry& gantry, w5500::W5500Hal* w5500_hal,
+                                        Network::EthernetLink& ethernetLink,
+                                        CellNet::CellNetL2Node& l2Node) {
+    BaseType_t result;
+    static PickSchedulerTaskConfig pickCfg = { &gantry, &l2Node };
+    result = xTaskCreatePinnedToCore(
+        pickSchedulerTask, "PickScheduler",
+        PICK_SCHEDULER_TASK_STACK, &pickCfg,
+        PICK_SCHEDULER_TASK_PRIORITY, nullptr, PICK_SCHEDULER_TASK_CORE);
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "FATAL: Failed to create PickScheduler task");
+        gantry.disable();
+        return nullptr;
+    }
+    static UpdateTaskConfig updateCfg = { &gantry };
+    result = xTaskCreatePinnedToCore(
+        gantryUpdateTask, "GantryUpdate",
+        GANTRY_UPDATE_TASK_STACK, &updateCfg,
+        GANTRY_UPDATE_TASK_PRIORITY, nullptr, GANTRY_UPDATE_TASK_CORE);
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Gantry Update task!");
+    }
+
+    static UiTaskConfig uiCfg = { &gantry, &ethernetLink };
+    if (Config::AppConfig::instance().data().display_tft_enable != 0) {
+        result = xTaskCreatePinnedToCore(
+            tftUiTask, "TftUiTask",
+            TFT_UI_TASK_STACK, &uiCfg,
+            TFT_UI_TASK_PRIORITY, nullptr, TFT_UI_TASK_CORE);
+        if (result != pdPASS) {
+            ESP_LOGW(TAG, "Failed to create TftUiTask");
+        }
+    }
+
+    static GantryTestConsoleConfig consoleCfg = {};
+    consoleCfg.gantry                 = &gantry;
+    consoleCfg.limit_min_pin          = -1;   // Endstops drive-managed (EIP)
+    consoleCfg.limit_max_pin          = -1;
+    consoleCfg.use_mcp23s17           = (gpio_expander_get_mcp_handle() != nullptr);
+    consoleCfg.w5500_hal              = w5500_hal;
+
+#if CONSOLE_UART_ENABLE
+    result = xTaskCreatePinnedToCore(
+        gantryTestConsoleTask, "SerialCmd",
+        CONSOLE_TASK_STACK, &consoleCfg,
+        CONSOLE_TASK_PRIORITY, nullptr, CONSOLE_TASK_CORE);
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Serial task!");
+    }
+#else
+    ESP_LOGI(TAG, "UART console disabled — GPIO1/3 free; use TCP :%d",
+             CONSOLE_TCP_PORT);
+#endif
+    return &consoleCfg;
 }

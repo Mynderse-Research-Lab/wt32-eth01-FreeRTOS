@@ -177,7 +177,7 @@ message type `0x00`–`0x04`, plus `begin()`, `isReady()`, `getStats()` and `res
 
 **ESP-IDF.** Once the LAN8720 is up, call
 `EspEthL2Transport::attachEthHandle(eth_handle, netif)` and then `CellNetL2Node::begin()`
-(`src/main.cpp`). The transport hooks the Ethernet input path: `0x88B5` frames go to CellNet,
+(`src/main_init_net.cpp`). The transport hooks the Ethernet input path: `0x88B5` frames go to CellNet,
 every other frame goes on to lwIP, so the TCP console and OTA server share the port. Callbacks
 run in the EMAC receive task; keep them short and hand work to a queue.
 `EspEthL2Transport::isLinkUp()` only reports that a handle is attached, not the PHY link.
