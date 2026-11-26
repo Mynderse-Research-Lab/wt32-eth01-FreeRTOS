@@ -43,7 +43,7 @@ This page records every source file, the plan to bring each one under 500 lines,
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `src/main.cpp` | 615 | `app_main` (about 440 lines) into init stages (network, motion, UI, tasks) in `main_init_*.cpp`; a separate commit | Boot log; `eiptiming` after boot |
+| 1 | `src/main.cpp` | 515 | The update and TFT UI tasks are in `main_tasks.cpp`. Next, `app_main` (about 440 lines) breaks into init stages (config and I/O, motion, tasks, network) in `main_init_*.cpp`, a separate commit | Boot log; `eiptiming` after boot |
 | 2 | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | Lock, holder logging and register access into `MCP23S17Bus.cpp`; the pin API stays | Build; G-D3 is open on this bus |
 | 3 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
 | 4 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
@@ -343,7 +343,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (46 files, 11,462 lines)
+### `src/` (48 files, 11,498 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -379,7 +379,9 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
 | `gantry_test_console.h` | 67 | under 500 |
 | `gpio_expander.c` | 206 | under 500 |
-| `main.cpp` | 615 | **over 500: planned** |
+| `main.cpp` | 515 | **over 500: planned** |
+| `main_internal.h` | 27 | split done |
+| `main_tasks.cpp` | 109 | split done |
 | `pick_belt.cpp` | 381 | split done (`285825e`) |
 | `pick_bench.cpp` | 255 | split done (`285825e`) |
 | `pick_console.cpp` | 253 | split done (`285825e`) |
