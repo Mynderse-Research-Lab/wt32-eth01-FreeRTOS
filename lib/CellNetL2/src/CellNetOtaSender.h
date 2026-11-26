@@ -8,8 +8,8 @@
  * 5.1), as proven on hardware by tools/cellnet_ota_send.cpp, which is now a
  * thin CLI over runOtaSender().
  *
- * Linux only: off Linux this header declares nothing and
- * CellNetOtaSender.cpp compiles to nothing. Not part of the ESP component.
+ * Linux only: off Linux this header declares nothing and the sender
+ * sources compile to nothing. Not part of the ESP component.
  *
  * Steps:
  *   0. Wait up to 3 s for one GANTRY_STATUS (sender_id 0x03) from the node:

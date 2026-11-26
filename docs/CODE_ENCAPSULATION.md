@@ -37,21 +37,21 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `e971af4`, `fcb89c8` | `src/main.cpp` | 615 | 6 files, 53–231 lines; `app_main` calls five stage functions (config, I/O, motion, tasks, network) in `main_init_*.cpp` and `main_tasks.cpp` |
 | `1db4520` | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
 | `28c3107` | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | 3 files, 53–465 lines; `update()` and the trace stamps are in `GantryEipRotaryAxisUpdate.cpp` |
-|  | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | 4 files, 50–457 lines; the arm and move phase machine is in `GantryEipLinearAxisPhases.cpp`, alarms and logging in `GantryEipLinearAxisAlarm.cpp` |
+| `e1c549b` | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | 4 files, 50–457 lines; the arm and move phase machine is in `GantryEipLinearAxisPhases.cpp`, alarms and logging in `GantryEipLinearAxisAlarm.cpp` |
+|  | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
 
 ## Planned splits
 
-15 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
+14 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
 
-### Production files (5)
+### Production files (4)
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
-| 2 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
-| 3 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
-| 4 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
-| 5 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+| 1 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
+| 2 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
+| 3 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
+| 4 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
 
 ### Headers (3)
 
@@ -116,7 +116,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 ## Order of work
 
 1. This record and the library review.
-2. The CellNet sender, then the Class 1 splits 2–5, each held until its on-cell soak passes.
+2. The Class 1 splits, each held until its on-cell soak passes.
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, the console decoupling, then `GantryConsole` once G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries.
@@ -164,7 +164,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/NvsStorage.cpp` | 150 | under 500 |
 | `src/NvsStorage.h` | 36 | under 500 |
 
-### `lib/CellNetL2/` (12 files, 2,855 lines)
+### `lib/CellNetL2/` (15 files, 2,935 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -174,8 +174,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/CellNetL2Framing.h` | 138 | under 500 |
 | `src/CellNetOtaReceiver.cpp` | 208 | under 500 |
 | `src/CellNetOtaReceiver.h` | 122 | under 500 |
-| `src/CellNetOtaSender.cpp` | 1209 | **over 500: planned** |
+| `src/CellNetOtaSender.cpp` | 418 | split done |
 | `src/CellNetOtaSender.h` | 95 | under 500 |
+| `src/CellNetOtaSenderInternal.h` | 360 | split done |
+| `src/CellNetOtaSenderPhases.cpp` | 424 | split done |
+| `src/CellNetOtaSenderReport.cpp` | 87 | split done |
 | `src/EspEthL2Transport.cpp` | 108 | under 500 |
 | `src/EspEthL2Transport.h` | 48 | under 500 |
 | `src/IL2Transport.h` | 62 | under 500 |
@@ -258,11 +261,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryEipBringUp.cpp` | 498 | split done (`3ca7df4`) |
 | `src/GantryEipHomeCal.cpp` | 417 | split done (`3ca7df4`) |
 | `src/GantryEipLimitSequence.h` | 103 | under 500 |
-| `src/GantryEipLinearAxis.cpp` | 457 | split done |
+| `src/GantryEipLinearAxis.cpp` | 457 | split done (`e1c549b`) |
 | `src/GantryEipLinearAxis.h` | 196 | under 500 |
-| `src/GantryEipLinearAxisAlarm.cpp` | 119 | split done |
-| `src/GantryEipLinearAxisInternal.h` | 50 | split done |
-| `src/GantryEipLinearAxisPhases.cpp` | 383 | split done |
+| `src/GantryEipLinearAxisAlarm.cpp` | 119 | split done (`e1c549b`) |
+| `src/GantryEipLinearAxisInternal.h` | 50 | split done (`e1c549b`) |
+| `src/GantryEipLinearAxisPhases.cpp` | 383 | split done (`e1c549b`) |
 | `src/GantryEipRotaryAxis.cpp` | 465 | split done (`28c3107`) |
 | `src/GantryEipRotaryAxis.h` | 216 | under 500 |
 | `src/GantryEipRotaryAxisInternal.h` | 53 | split done (`28c3107`) |

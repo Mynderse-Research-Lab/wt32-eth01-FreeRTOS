@@ -6,7 +6,7 @@ Firmware updates for the WT32 nodes over CellNet L2, sent by the supervisor ([N-
 |------|-------|
 | Receiver state machine (pure logic, host-tested) | `lib/CellNetL2/src/CellNetOtaReceiver.cpp`, `test/host/test_cellnet_ota_receiver.cpp` |
 | Gantry wiring: OTA-only mode, flash writes | `src/gantry_cellnet_ota.cpp` |
-| Sender (Linux) | `lib/CellNetL2/src/CellNetOtaSender.cpp`; CLI `tools/cellnet_ota_send.cpp`; the supervisor's `POST /api/ota` |
+| Sender (Linux) | `lib/CellNetL2/src/CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp`, `CellNetOtaSenderInternal.h`; CLI `tools/cellnet_ota_send.cpp`; the supervisor's `POST /api/ota` |
 | Message types and payloads | `include/cell_net_l2_protocol.h` |
 
 ## 1. Design basis

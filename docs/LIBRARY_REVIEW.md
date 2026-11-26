@@ -20,7 +20,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | [EtherNetIP](#ethernetip) | 7,306 | `EipScannerTask.cpp` 1,329, `EipMultiScanner.cpp` 829 | none | 11 files | Synchronous logs on the Class 1 send path (G-B16) |
 | [Gantry](#gantry) | 8,316 | `Gantry.h` 597 | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
 | [AppConfig](#appconfig) | 3,181 | none (split done) | none | `test_app_config` (27 cases) | Any NVS read error at boot overwrites the stored set with defaults (G-F7) |
-| [CellNetL2](#cellnetl2) | 2,855 | `CellNetOtaSender.cpp` 1,209 | 20 lines | 2 files | OTA sender (1,209 lines) has no test and is not built in CI |
+| [CellNetL2](#cellnetl2) | 2,935 | none (split done) | 20 lines | 2 files | OTA sender has no test and is not built in CI |
 | [MCP23S17](#mcp23s17) | 755 | none (split done) | 70 lines, stale pin map | none | Shadow cache diverges from the chip after a failed write; reads return 0 on error (G-D6) |
 | [Spi3Bus](#spi3bus) | 293 | none | none | `test_spi3_critical` | Two independent locks guard SPI3 (G-D6) |
 | [SpiDisplay](#spidisplay) | 2,340 | none | none | none | Reboot prompt restarts without saving; save failures are silent (G-E6) |
@@ -342,7 +342,7 @@ The legacy limit block in `updateAxisPositions` is not dead: it is A1.
 
 The message structs are in `include/cell_net_l2_protocol.h`.
 
-**Built into the firmware:** `CellNetL2Framing`, `CellNetL2`, `CellNetOtaReceiver` and `EspEthL2Transport`. `CellNetOtaSender.cpp` and `LinuxRawSocketL2Transport.h` are Linux-only and are compiled neither in the firmware nor in CI.
+**Built into the firmware:** `CellNetL2Framing`, `CellNetL2`, `CellNetOtaReceiver` and `EspEthL2Transport`. The OTA sender (`CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp`, `CellNetOtaSenderInternal.h`) and `LinuxRawSocketL2Transport.h` are Linux-only and are compiled neither in the firmware nor in CI.
 
 **Threading.**
 - `rxHook` runs in `emac_rx` (priority 15, core 0) and calls the user callbacks synchronously.
@@ -365,7 +365,7 @@ The message structs are in `include/cell_net_l2_protocol.h`.
 | N4 | risk | `CellNetL2.h:96-100`; `EspEthL2Transport.cpp:102-104` | Callback assignments race with dispatch in `emac_rx` if they happen after the hook is live; boot order keeps them apart today | Suggested | — |
 | N5 | bug, supervisor | `LinuxRawSocketL2Transport.h:40-49` | The destructor closes the socket before joining the receive thread; a second `begin()` calls `std::terminate`. Consistent with the N-2 note that stopping the service mid-update can crash it at exit | Confirmed | N-2 |
 | N6 | bug, supervisor | `LinuxRawSocketL2Transport.h:148-152` | The Linux transport receives its own outgoing frames (N-2 note) | Confirmed | N-2 |
-| N7 | test gap | `CellNetOtaSender.cpp` | 1,209 lines of protocol logic with no host test, not compiled in CI. A loopback test against `OtaReceiver` needs an interface for `Link` | Confirmed | — |
+| N7 | test gap | `CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp` | The sender has no host test and is not compiled in CI. A loopback test against `OtaReceiver` needs an interface for `Link` | Confirmed | — |
 | N8 | docs | `IL2Transport.h:48-50`; `cell_net_l2_protocol.h:5`; `CellNetL2.cpp:33-34` | `isLinkUp` claims link state but means only that a handle exists; an unmeasured "sub-50-microsecond" claim; a comment on undersized frames that contradicts the transport | Confirmed | — |
 | N9 | cleanup | `CMakeLists.txt`; `CellNetL2Framing.cpp:157-220`; `lib/CellNetL2/Untitled` | Unused `freertos` REQUIRES; `ERR_BUSY` never sent; five near-identical frame builders; no `static_assert` on wire sizes; the stray untracked `Untitled` file | Confirmed | X-5 |
 
