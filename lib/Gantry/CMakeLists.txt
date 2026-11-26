@@ -22,6 +22,8 @@ idf_component_register(
         "src/GantryKinematics.cpp"
         "src/GantryLimitSwitch.cpp"
         "src/GantryEipLinearAxis.cpp"
+        "src/GantryEipLinearAxisPhases.cpp"
+        "src/GantryEipLinearAxisAlarm.cpp"
         "src/GantryEipRotaryAxis.cpp"
         "src/GantryEipRotaryAxisUpdate.cpp"
         "src/GantryTrajectory.cpp"

@@ -559,7 +559,7 @@ Transport interfaces ([`EipTransport.h`](../lib/EtherNetIP/src/EipTransport.h)) 
 **Rejected for PTP:** OM=2 Speed + TM=10 + host StopMotion; Index/PR (OM=6) for dynamic picks; CIP Motion / Motion Group.
 
 PC prove: [`tools/eip_position_abs.py`](../tools/eip_position_abs.py).  
-Firmware SM: [`GantryEipLinearAxis`](../lib/Gantry/src/GantryEipLinearAxis.cpp) (ticks @ **100 Hz**).
+Firmware SM: [`GantryEipLinearAxisPhases`](../lib/Gantry/src/GantryEipLinearAxisPhases.cpp) (ticks @ **100 Hz**).
 
 ### ArmPhase (enable)
 

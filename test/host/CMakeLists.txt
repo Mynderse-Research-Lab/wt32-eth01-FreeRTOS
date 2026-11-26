@@ -148,6 +148,8 @@ add_test(NAME test_app_config COMMAND test_app_config)
 
 add_executable(test_eip_axis "test_eip_axis.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisPhases.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisAlarm.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxis.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxisUpdate.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"
