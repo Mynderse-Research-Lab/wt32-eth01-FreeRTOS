@@ -21,6 +21,7 @@ idf_component_register(
         "src/EipIoConnection.cpp"
         "src/EipScanner.cpp"
         "src/EipMultiScanner.cpp"
+        "src/EipMultiScannerConnect.cpp"
         "src/EipProcessImage.cpp"
         "src/EipSocketW5500.cpp"
         "src/EipScannerTask.cpp"
