@@ -41,17 +41,12 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `e4761cb` | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
 | `7cc157d` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-|  | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+|  | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–484 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 
 ## Planned splits
 
-11 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
-
-### Production files (1)
-
-| Order | File | Lines | Planned split | Gate |
-|---:|---|---:|---|---|
-| 1 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+10 files are over 500 lines. The headers come first, then the host tests.
 
 ### Headers (3)
 
@@ -184,7 +179,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/IL2Transport.h` | 62 | under 500 |
 | `src/LinuxRawSocketL2Transport.h` | 169 | under 500 |
 
-### `lib/EtherNetIP/` (53 files, 7,345 lines)
+### `lib/EtherNetIP/` (56 files, 7,532 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -219,9 +214,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EipRunTimeTrace.h` | 59 | under 500 |
 | `src/EipScanner.cpp` | 346 | under 500 |
 | `src/EipScanner.h` | 102 | under 500 |
+| `src/EipScannerConfig.cpp` | 160 | split done |
+| `src/EipScannerDiag.cpp` | 434 | split done |
 | `src/EipScannerPolicy.h` | 128 | under 500 |
-| `src/EipScannerTask.cpp` | 1329 | **over 500: planned** |
+| `src/EipScannerTask.cpp` | 484 | split done |
 | `src/EipScannerTask.h` | 49 | under 500 |
+| `src/EipScannerTaskInternal.h` | 438 | split done |
 | `src/EipSession.cpp` | 157 | under 500 |
 | `src/EipSession.h` | 46 | under 500 |
 | `src/EipSocketW5500.cpp` | 304 | under 500 |
@@ -352,10 +350,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500Init.cpp` | 312 | split done (`7cc157d`) |
 | `src/W5500Internal.h` | 16 | split done (`7cc157d`) |
 | `src/W5500Poll.h` | 115 | under 500 |
-| `src/W5500Socket.cpp` | 490 | split done |
+| `src/W5500Socket.cpp` | 490 | split done (`311d673`) |
 | `src/W5500Socket.h` | 135 | under 500 |
-| `src/W5500SocketInternal.h` | 136 | split done |
-| `src/W5500SocketTcp.cpp` | 466 | split done |
+| `src/W5500SocketInternal.h` | 136 | split done (`311d673`) |
+| `src/W5500SocketTcp.cpp` | 466 | split done (`311d673`) |
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 

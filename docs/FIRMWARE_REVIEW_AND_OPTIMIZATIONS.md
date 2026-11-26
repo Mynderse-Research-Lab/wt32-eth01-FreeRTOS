@@ -46,7 +46,7 @@ All issues were resolved across three structured phases, validated against 28 na
 
 2. **Removal of CPU Busy-Spin Loops**:
    - **Problem**: Sub-millisecond Class 1 pacing in `paceClass1RemainderUs()` utilized a tight `while (esp_timer_get_time() < deadline)` loop that saturated Core 1.
-   - **Solution** in [`lib/EtherNetIP/src/EipScannerTask.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerTask.cpp): Replaced the spinloop with `esp_rom_delay_us(rem_us)`.
+   - **Solution** in [`lib/EtherNetIP/src/EipScannerTaskInternal.h`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerTaskInternal.h): Replaced the spinloop with `esp_rom_delay_us(rem_us)`.
 
 3. **Elimination of Reconnect Heap Churn**:
    - **Solution** in [`lib/EtherNetIP/src/EipMultiScanner.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipMultiScanner.cpp): Preserved allocated `EipSession` and `EipIoConnection` instances across `disconnect()` calls, avoiding repetitive heap `new`/`delete` fragmentation on link retries.
@@ -61,7 +61,7 @@ All issues were resolved across three structured phases, validated against 28 na
 1. **Trajectory Mathematical Safety & Division-by-Zero Guards**:
    - **Solution** in [`lib/Gantry/src/GantryTrajectory.cpp`](file:///d:/Projects/wt32-eth01-base/lib/Gantry/src/GantryTrajectory.cpp): Added `std::isfinite()` and dynamic boundary checks on `start`, `target`, `max_speed`, `acceleration`, and `deceleration` in `calculateProfile()` and guarded divisions by `profile.t_accel` and `profile.t_decel` in `interpolate()`.
 2. **Compiler Warning Cleanup**:
-   - **Solution** in [`lib/EtherNetIP/src/EipScannerTask.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerTask.cpp): Added `[[maybe_unused]]` to `singleAxisTask` for `-Wunused-function` compliance under multi-axis Kconfig builds.
+   - **Solution** in [`lib/EtherNetIP/src/EipScannerConfig.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerConfig.cpp): Added `[[maybe_unused]]` to `singleAxisTask` for `-Wunused-function` compliance under multi-axis Kconfig builds.
 
 ---
 

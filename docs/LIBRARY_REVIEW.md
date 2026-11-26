@@ -17,7 +17,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | Library | Lines | Files over 500 | README | Host tests | Most important finding |
 |---|---:|---|---|---|---|
 | [W5500](#w5500) | 3,168 | none (split done) | none | 6 files | UDP length wrap hands a 65,535-byte view of a 512-byte buffer to the Class 1 parser (G-B15) |
-| [EtherNetIP](#ethernetip) | 7,345 | `EipScannerTask.cpp` 1,329 | none | 11 files | Synchronous logs on the Class 1 send path (G-B16) |
+| [EtherNetIP](#ethernetip) | 7,532 | none (split done) | none | 11 files | Synchronous logs on the Class 1 send path (G-B16) |
 | [Gantry](#gantry) | 8,316 | `Gantry.h` 597 | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
 | [AppConfig](#appconfig) | 3,181 | none (split done) | none | `test_app_config` (27 cases) | Any NVS read error at boot overwrites the stored set with defaults (G-F7) |
 | [CellNetL2](#cellnetl2) | 2,935 | none (split done) | 20 lines | 2 files | OTA sender has no test and is not built in CI |
@@ -120,7 +120,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | `EipClass1Timing.h`, `EipClass1TimingStats.h` | Pacing; stale at 10× RPI; grace 3× RPI; soft-miss policy of 2; 128-sample statistics |
 | `EipScannerTask.h` | `startScannerTask`, `pauseClass1`/`resumeClass1`, `dumpClass1TimingStats`, `printLastClass1GapReport` |
 
-**Tasks** (all in `EipScannerTask.cpp`):
+**Tasks** (`multiAxisTask` in `EipScannerTask.cpp`, `singleAxisTask` in `EipScannerConfig.cpp`, `class1LogTask` in `EipScannerDiag.cpp`, `keepaliveTask` in `EipScannerTaskInternal.h`):
 
 | Task | Core | Priority | Stack | Notes |
 |---|---:|---:|---:|---|
@@ -134,16 +134,16 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 |---:|---|---|---|---|---|
 | E1 | risk | `EipSocketW5500.cpp:128-153, 250-259` | `sendTo` logs `ESP_LOGW` synchronously on every failed send, and `p2pTxSockFor` logs on the first send to a destination. Both run inside `exchangeOnce` with the bus acquired and the SPI3 Class 1 critical section set. A failing theta send logs every 2 ms | Confirmed, rechecked | G-B16 |
 | E2 | risk | `EipProcessImage.cpp`; `EipClass1DeferredLog.h:49` | The process-image mutex taken in `sendAxisOutput`/`applyFeedback` is also taken from PickScheduler (core 0, priority 5) through `Gantry::drivesOnline`, and on every axis read in the Gantry update. The Class 1 log mutex is shared with EipLog (core 0, priority 2). Either holder, preempted by tcpip or emac_rx, keeps the core-1 scanner waiting. Same mechanism class as G-B6; not measured | Suggested: add hold and wait statistics as `BusMutex` has | G-B17 |
-| E3 | risk | `EipScannerTask.cpp:622-642` | Every 200 cycles the scanner builds four sorted ring snapshots for an `ESP_LOGD` that `CONFIG_LOG_MAXIMUM_LEVEL=3` compiles out | Confirmed (code); cost Suggested | G-B16 |
+| E3 | risk | `EipScannerTaskInternal.h:305-325` | Every 200 cycles the scanner builds four sorted ring snapshots for an `ESP_LOGD` that `CONFIG_LOG_MAXIMUM_LEVEL=3` compiles out | Confirmed (code); cost Suggested | G-B16 |
 | E4 | bug, latent | `EipMultiScannerConnect.cpp:161-166` | `bindSharedUdp()` never joins a multicast group, so `CONFIG_EIP_TO_POINT_TO_POINT=n` would leave every axis stale. Production uses P2P | Confirmed | — |
 | E5 | bug | `EipSession.cpp:64-88, 123-155` | One `recv` per transaction with no reassembly against the encapsulation length; neither the reply command nor the sender context is checked. A split reply fails to parse, and a late reply to a timed-out request is taken as the reply to the next request on that session | Confirmed (code); occurrence Suggested: host test with a delayed or split reply | G-B19 |
 | E6 | risk | `EipMultiScanner.cpp:175, 188` | The drain applies the oldest T->O frame per axis and discards newer ones read in the same cycle. The test asserts this | Confirmed; impact Suggested | — |
-| E7 | risk | `EipScannerTask.cpp:644-657, 705-724` | During a per-axis reopen (up to about 6.5 s: TCP connect, RegisterSession up to 5 s, attribute 13, Forward_Open) the keepalive helper never checks X/Z feedback age | Confirmed | — |
-| E8 | bug, low probability | `EipScannerTask.cpp:688-699` | `stopKeepalive` gives up after 50 ms while the helper still holds a pointer to a context on the caller's stack | Confirmed | — |
+| E7 | risk | `EipScannerTaskInternal.h:327-340, 391-410` | During a per-axis reopen (up to about 6.5 s: TCP connect, RegisterSession up to 5 s, attribute 13, Forward_Open) the keepalive helper never checks X/Z feedback age | Confirmed | — |
+| E8 | bug, low probability | `EipScannerTaskInternal.h:373-384` | `stopKeepalive` gives up after 50 ms while the helper still holds a pointer to a context on the caller's stack | Confirmed | — |
 | E9 | docs/risk | `EipScannerTask.h:36-41`; `gantry_console_cfg.cpp:13, 97-99` | If the 5 s `pauseClass1` timeout expires after the task broke out for the planned close, Class 1 is already closed yet `cfg save` reports that it did not close | Suggested: time a dropped-session save (G-B1) | — |
 | E10 | rule | `Hcs01ComwsClient.h:16` | The console uses the constant `kDefaultEngIp`. The stored `hcs01_eng_ip` has no effect, and no G-B5 row lists it | Confirmed | G-B5 |
 | E11 | error handling | `Hcs01ComwsClient.cpp:51-58, 98-186, 332-388` | `runCommand` ignores every `setVar` result. `runAutotune` ignores two arguments and always reports success. HTTP status is never checked and responses truncate at 1,023 bytes | Confirmed | — |
-| E12 | error handling | `EipScannerTask.cpp:800, 1076`; `Kinetix5100ParamAccess.cpp:24-31`; `EipMultiScannerConnect.cpp:261-265` | `acquireBus()` result discarded; empty payload for sizes other than 2 or 4; "CIP status 0x00" logged when the transport failed | Confirmed | — |
+| E12 | error handling | `EipScannerConfig.cpp:119`; `EipScannerTask.cpp:290`; `Kinetix5100ParamAccess.cpp:24-31`; `EipMultiScannerConnect.cpp:261-265` | `acquireBus()` result discarded; empty payload for sizes other than 2 or 4; "CIP status 0x00" logged when the transport failed | Confirmed | — |
 | E13 | docs, cross-library | `Kinetix5100Assembly.h:111` vs `GantryEipLinearAxisPhases.cpp:288, 364` | The header calls `actual_speed` RPM, as does the manual text extract (2198-UM004D, Table 106). Gantry's `kNearStopSpeedRef = 50` and `LOW_LEVEL_GANTRY_CONTROL.md:600` treat it as 0.1 RPM. If the manual is right, "near stop" is 50 RPM | Suggested: jog at a known speed reference, compare `actual_speed`, check the manual page | — |
 | E14 | docs | `EipScannerTask.h:5-7`, `EipMultiScanner.h:69`, `EipMultiScanner.cpp:135`, `EipTransport.h:111`, `Kconfig:10, 116-128, 198-209`; `LOW_LEVEL_GANTRY_CONTROL.md:498-540` | Stale: theta path, stale multiple (10×, not 3×), frame size (512, not 4 KiB), the MQTT mention, PUU help, run/idle help. The doc's recover-ladder and constants tables disagree with the code: soft misses 2 not 3; 10 s backoff, not a restart; cap 5,000 ms; reconnect idle 500 ms; multiplier 2; reset through MCP PB7 | Confirmed | — |
 | E15 | risk | `EipSocketW5500.cpp:32-37` | 7 of 8 W5500 sockets are in use. A second concurrent explicit or COMWS connection fails | Confirmed count | — |

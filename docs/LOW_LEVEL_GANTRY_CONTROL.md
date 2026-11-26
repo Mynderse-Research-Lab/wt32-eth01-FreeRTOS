@@ -193,7 +193,7 @@ App constants: [`gantry_app_constants.h`](../include/gantry_app_constants.h).
 Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
 (`CONSOLE_TCP_*` via [`ethernet_app_config.h`](../include/ethernet_app_config.h)).  
 Plant IP: menuconfig **LAN8720 plant Ethernet**.  
-Scanner / HoldKA: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp).  
+Scanner: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp). HoldKA: [`EipScannerTaskInternal.h`](../lib/EtherNetIP/src/EipScannerTaskInternal.h).  
 X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T (deferred SENDOK on cached dests) + batched T→O drain so exchange fits under 2 ms. Class 1 pacing uses `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs; FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/drain/cycle/cmd-to-StartMotion p50/p99, `pace overrun`/`yield`, plus
 reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 **GO/NO-GO** is exchange p99 vs granted/configured RPI.
@@ -419,7 +419,7 @@ ForwardOpen path (Kinetix X/Z): config assembly **191 (0xBF)** + O→T **104** +
 Transport class/trigger = Class 1 cyclic (`0x01`). Granted API (`ot_api_us` /
 `to_api_us`) drives RPI pacing and recv timeout (`API_ms * 8 + 50`).
 
-Firmware FO overrides in `makeKinetixConfig` ([`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp)):
+Firmware FO overrides in `makeKinetixConfig` ([`EipScannerConfig.cpp`](../lib/EtherNetIP/src/EipScannerConfig.cpp)):
 
 - CTM = **7** (RPI×512 ≈ 2.5 s of slack)
 - P2P T→O by default
@@ -498,7 +498,7 @@ Exchange outcomes:
 
 ### Recover ladder
 
-From [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp) / [`W5500::recover`](../lib/W5500/src/W5500.cpp):
+From [`EipScannerTaskInternal.h`](../lib/EtherNetIP/src/EipScannerTaskInternal.h) / [`W5500::recover`](../lib/W5500/src/W5500Init.cpp):
 
 | Step | Behavior |
 |------|----------|
@@ -535,7 +535,7 @@ Distinguish **silent drop** (no keypad fault) from **latched E602**. Same softwa
 | Soft T→O misses before teardown | 3 | `shouldTeardownAfterInputMisses` |
 | Max chip recovers then restart | 3 | `kMaxChipRecovers` |
 | HoldKA period | ~5 ms | `KeepaliveCtx` |
-| Link settle / reconnect idle | 300 ms / 2500 ms | `EipScannerTask.cpp` |
+| Link settle / reconnect idle | 300 ms / 2500 ms | `EipScannerTaskInternal.h` |
 | O→T CID seeds | `0x10000001` / `0x10000002` | same |
 | E602 / A603 | `0x0602` / `0x0603` | `KinetixFaultCodes.h` |
 | CPF item types | `0x8002`, `0x00B1` | `CpfItemType` |

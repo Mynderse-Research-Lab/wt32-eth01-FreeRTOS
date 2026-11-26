@@ -25,6 +25,8 @@ idf_component_register(
         "src/EipProcessImage.cpp"
         "src/EipSocketW5500.cpp"
         "src/EipScannerTask.cpp"
+        "src/EipScannerConfig.cpp"
+        "src/EipScannerDiag.cpp"
         "src/EipRunTimeTrace.cpp"
         "src/EipClass1TimingStats.cpp"
         "src/EipReliabilityStats.cpp"
