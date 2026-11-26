@@ -87,6 +87,11 @@ target_include_directories(ethernet_ip PUBLIC
 # --- AppConfig layer under test ------------------------------------------------
 add_library(app_config STATIC
     "${REPO_ROOT}/lib/AppConfig/src/AppConfig.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigAccess.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsCell.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsMotion.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigParamIo.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigText.cpp"
     "${REPO_ROOT}/lib/AppConfig/src/ConfigSchema.cpp"
 )
 target_include_directories(app_config PUBLIC
