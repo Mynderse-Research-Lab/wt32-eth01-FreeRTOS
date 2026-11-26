@@ -35,23 +35,23 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `d114630` | `src/gantry_net_console.cpp` | 555 | 2 files, 182 and 396 lines; login and the recent-peer cache are in `gantry_net_console_auth.cpp` |
 | `8339673` | `src/gantry_ota.cpp` | 562 | 2 files, 270 and 316 lines; the TCP OTA server task and `gantryOtaStartServer` are in `gantry_ota_tcp.cpp` |
 | `e971af4`, `fcb89c8` | `src/main.cpp` | 615 | 6 files, 53–231 lines; `app_main` calls five stage functions (config, I/O, motion, tasks, network) in `main_init_*.cpp` and `main_tasks.cpp` |
-|  | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
+| `1db4520` | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
+|  | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | 3 files, 53–465 lines; `update()` and the trace stamps are in `GantryEipRotaryAxisUpdate.cpp` |
 
 ## Planned splits
 
-17 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
+16 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
 
-### Production files (7)
+### Production files (6)
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
-| 2 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
-| 3 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
-| 4 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
-| 5 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
-| 6 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
-| 7 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+| 1 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
+| 2 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
+| 3 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
+| 4 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
+| 5 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
+| 6 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
 
 ### Headers (3)
 
@@ -116,7 +116,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 ## Order of work
 
 1. This record and the library review.
-2. Production splits 1–3, then the Class 1 splits 4–7, each held until its on-cell soak passes.
+2. Production splits 1–2, then the Class 1 splits 3–6, each held until its on-cell soak passes.
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, the console decoupling, then `GantryConsole` once G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries.
@@ -244,7 +244,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EthernetLink.cpp` | 404 | under 500 |
 | `src/EthernetLink.h` | 58 | under 500 |
 
-### `lib/Gantry/` (37 files, 8,227 lines)
+### `lib/Gantry/` (39 files, 8,262 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -260,8 +260,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryEipLimitSequence.h` | 103 | under 500 |
 | `src/GantryEipLinearAxis.cpp` | 955 | **over 500: planned** |
 | `src/GantryEipLinearAxis.h` | 196 | under 500 |
-| `src/GantryEipRotaryAxis.cpp` | 768 | **over 500: planned** |
+| `src/GantryEipRotaryAxis.cpp` | 465 | split done |
 | `src/GantryEipRotaryAxis.h` | 216 | under 500 |
+| `src/GantryEipRotaryAxisInternal.h` | 53 | split done |
+| `src/GantryEipRotaryAxisUpdate.cpp` | 285 | split done |
 | `src/GantryEndEffector.cpp` | 91 | under 500 |
 | `src/GantryEndEffector.h` | 34 | under 500 |
 | `src/GantryEndEffectorPolicy.h` | 31 | under 500 |
@@ -290,10 +292,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/MCP23S17.cpp` | 347 | split done |
+| `src/MCP23S17.cpp` | 347 | split done (`1db4520`) |
 | `src/MCP23S17.h` | 182 | under 500 |
-| `src/MCP23S17Bus.cpp` | 160 | split done |
-| `src/MCP23S17Internal.h` | 66 | split done |
+| `src/MCP23S17Bus.cpp` | 160 | split done (`1db4520`) |
+| `src/MCP23S17Internal.h` | 66 | split done (`1db4520`) |
 
 ### `lib/Spi3Bus/` (3 files, 293 lines)
 

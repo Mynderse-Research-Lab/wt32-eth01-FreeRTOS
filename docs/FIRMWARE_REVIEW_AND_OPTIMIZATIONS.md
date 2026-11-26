@@ -230,7 +230,7 @@ OK test_cycle PASS
 
 3. **$0.01^\circ$ Positioning Precision**:
    - **Requirement**: Enforce rotary positioning accuracy to $\pm 0.01^\circ$.
-   - **Implementation**: Tightened `kArrivalEpsDeg` from $0.5^\circ$ to $0.01^\circ$ in `GantryEipRotaryAxis.cpp`. Added settling synchronization in bring-up so subsequent kinematic moves never collide with a settling rotary axis.
+   - **Implementation**: Tightened `kArrivalEpsDeg` from $0.5^\circ$ to $0.01^\circ$ in `GantryEipRotaryAxisInternal.h`. Added settling synchronization in bring-up so subsequent kinematic moves never collide with a settling rotary axis.
 
 4. **Numerical Overflow Protection on Rotary PUU**:
    - **Implementation**: Clamped velocity commands to $360^\circ/\text{s}$ ($360,000,000\text{ PUU}$) and acceleration to $1800^\circ/\text{s}^2$ ($31416\text{ units}$), avoiding signed 32-bit integer overflow.

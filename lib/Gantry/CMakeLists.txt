@@ -23,6 +23,7 @@ idf_component_register(
         "src/GantryLimitSwitch.cpp"
         "src/GantryEipLinearAxis.cpp"
         "src/GantryEipRotaryAxis.cpp"
+        "src/GantryEipRotaryAxisUpdate.cpp"
         "src/GantryTrajectory.cpp"
     INCLUDE_DIRS
         "src"
