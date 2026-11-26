@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Recreate a full HCS01 SERCOS-ASCII parameter file from the live dump.
 
-Reads tools/hcs01_Parameter_all_1_cip22.par (MPB-20V30 / W0005, original block
-order) and writes the complete file with overlays:
+Reads hcs01_Parameter_all_1_cip22.par from
+driver_datasheets_and_calculations/driver_configs/hcs01/ (MPB-20V30 / W0005,
+original block order) and writes the complete file with overlays:
 
 - CIP / engineering IP 192.168.1.22, protocol 3, profile 0xFFFE, gw 0.0.0.0
 - SCHUNK ERD04 Motordatenblatt motor / encoder / loop values
@@ -17,9 +18,10 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "tools" / "hcs01_Parameter_all_1_cip22.par"
-OUT = ROOT / "tools" / "hcs01_ERD04_eip_192_168_1_22.par"
-OUT_ALIAS = ROOT / "tools" / "hcs01_cip_ip_192_168_1_22.par"
+PAR_DIR = ROOT / "driver_datasheets_and_calculations" / "driver_configs" / "hcs01"
+SRC = PAR_DIR / "hcs01_Parameter_all_1_cip22.par"
+OUT = PAR_DIR / "hcs01_ERD04_eip_192_168_1_22.par"
+OUT_ALIAS = PAR_DIR / "hcs01_cip_ip_192_168_1_22.par"
 
 HEADER = """\
 SERCOS-ASCII
