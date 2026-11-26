@@ -98,6 +98,15 @@ bool NvsStorage::getBlob(const char* key, void* out_buf, size_t& in_out_len) {
     return nvs_get_blob(static_cast<nvs_handle_t>(handle_), key, out_buf, &in_out_len) == ESP_OK;
 }
 
+BlobRead NvsStorage::readBlob(const char* key, void* out_buf, size_t& in_out_len) {
+    if (!initialized_) return BlobRead::kError;
+    const esp_err_t err =
+        nvs_get_blob(static_cast<nvs_handle_t>(handle_), key, out_buf, &in_out_len);
+    if (err == ESP_OK) return BlobRead::kOk;
+    if (err == ESP_ERR_NVS_NOT_FOUND) return BlobRead::kNotFound;
+    return BlobRead::kError;
+}
+
 bool NvsStorage::setBlob(const char* key, const void* data, size_t len) {
     if (!initialized_) return false;
     return nvs_set_blob(static_cast<nvs_handle_t>(handle_), key, data, len) == ESP_OK;
@@ -131,6 +140,7 @@ bool NvsStorage::setBool(const char*, bool) { return true; }
 bool NvsStorage::getString(const char*, char*, size_t) { return false; }
 bool NvsStorage::setString(const char*, const char*) { return true; }
 bool NvsStorage::getBlob(const char*, void*, size_t&) { return false; }
+BlobRead NvsStorage::readBlob(const char*, void*, size_t&) { return BlobRead::kNotFound; }
 bool NvsStorage::setBlob(const char*, const void*, size_t) { return true; }
 bool NvsStorage::eraseKey(const char*) { return true; }
 bool NvsStorage::commit() { return true; }

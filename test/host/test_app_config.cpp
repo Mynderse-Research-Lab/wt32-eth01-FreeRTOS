@@ -31,6 +31,12 @@ public:
     bool getString(const char* k, char* b, size_t n) override { return mem_.getString(k, b, n); }
     bool setString(const char* k, const char* v) override { return mem_.setString(k, v); }
     bool getBlob(const char* k, void* b, size_t& n) override { return mem_.getBlob(k, b, n); }
+    BlobRead readBlob(const char* k, void* b, size_t& n) override {
+        if (fail_blob_reads) {
+            return BlobRead::kError;
+        }
+        return mem_.readBlob(k, b, n);
+    }
     bool setBlob(const char* k, const void* d, size_t n) override {
         if (fail_blobs) {
             return false;
@@ -42,6 +48,7 @@ public:
     bool commit() override { return true; }
 
     static bool fail_blobs;
+    static bool fail_blob_reads;
     static uint32_t flash_writes;
 
 private:
@@ -49,6 +56,7 @@ private:
 };
 
 bool SharedStorage::fail_blobs = false;
+bool SharedStorage::fail_blob_reads = false;
 uint32_t SharedStorage::flash_writes = 0;
 MemoryStorage* s_nvs = nullptr;
 
@@ -56,6 +64,7 @@ void powerOn() {
     delete s_nvs;
     s_nvs = new MemoryStorage();
     SharedStorage::fail_blobs = false;
+    SharedStorage::fail_blob_reads = false;
 }
 
 // Boot without the confirmation that drops merged keys.
@@ -382,6 +391,34 @@ static void test_damaged_set_is_kept_until_an_operator_saves(void) {
     TEST_ASSERT_EQUAL_INT(222, speed());
 }
 
+// G-F7: a read error is not an empty store. The set is kept as damaged, the
+// machine runs on defaults, and nothing is written until an operator saves.
+static void test_unreadable_set_is_kept_not_overwritten(void) {
+    set("spd_mm_s", 111);
+    TEST_ASSERT_TRUE(AppConfig::instance().saveSet());
+    size_t len = kConfigSetMaxBytes;
+    std::vector<uint8_t> before(len);
+    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", before.data(), len));
+
+    SharedStorage::fail_blob_reads = true;
+    const uint32_t writes = SharedStorage::flash_writes;
+    boot();
+    TEST_ASSERT_TRUE(AppConfig::instance().activeSet().damaged);
+    TEST_ASSERT_EQUAL_INT(50, speed());
+    TEST_ASSERT_EQUAL_UINT32(writes, SharedStorage::flash_writes);
+
+    SharedStorage::fail_blob_reads = false;
+    std::vector<uint8_t> after(kConfigSetMaxBytes);
+    size_t after_len = after.size();
+    TEST_ASSERT_TRUE(s_nvs->getBlob("cfg_set", after.data(), after_len));
+    TEST_ASSERT_EQUAL_UINT32(len, after_len);
+    TEST_ASSERT_EQUAL_MEMORY(before.data(), after.data(), len);
+
+    boot();
+    TEST_ASSERT_FALSE(AppConfig::instance().activeSet().damaged);
+    TEST_ASSERT_EQUAL_INT(111, speed());
+}
+
 static void test_older_keys_move_into_the_first_set(void) {
     powerOn();
     s_nvs->setInt32("spd_mm_s", 200);
@@ -626,6 +663,7 @@ int main(void) {
     RUN_TEST(test_no_flash_write_without_a_real_change);
     RUN_TEST(test_save_stamps_the_set);
     RUN_TEST(test_damaged_set_is_kept_until_an_operator_saves);
+    RUN_TEST(test_unreadable_set_is_kept_not_overwritten);
     RUN_TEST(test_older_keys_move_into_the_first_set);
     RUN_TEST(test_crash_before_confirmation_loses_nothing);
     RUN_TEST(test_failed_save_keeps_the_changes_in_ram);

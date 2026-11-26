@@ -101,9 +101,12 @@ bool AppConfig::load() {
 
     std::vector<uint8_t> blob(kConfigSetMaxBytes);
     size_t len = blob.size();
-    const bool stored = storage_->getBlob(kSetKey, blob.data(), len);
+    const BlobRead read = storage_->readBlob(kSetKey, blob.data(), len);
+    const bool stored = read == BlobRead::kOk;
     set_valid_ = stored && parseConfigSet(blob.data(), len, set_);
-    set_damaged_ = stored && !set_valid_;
+    // A set that is there but cannot be read counts as damaged: it is kept, and
+    // only an operator save replaces it (G-F7). Only a missing key means none.
+    set_damaged_ = (stored && !set_valid_) || read == BlobRead::kError;
     if (set_valid_) {
         ConfigSetReader reader(blob.data() + sizeof(ConfigSetHeader), set_.payload_len);
         readParams(reader);

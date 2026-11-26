@@ -20,6 +20,7 @@ public:
     bool getString(const char* key, char* out_buf, size_t max_len) override;
     virtual bool setString(const char* key, const char* val) override;
     bool getBlob(const char* key, void* out_buf, size_t& in_out_len) override;
+    BlobRead readBlob(const char* key, void* out_buf, size_t& in_out_len) override;
     bool setBlob(const char* key, const void* data, size_t len) override;
     bool eraseKey(const char* key) override;
     bool commit() override;

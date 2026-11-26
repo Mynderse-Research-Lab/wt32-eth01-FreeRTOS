@@ -80,6 +80,12 @@ public:
         return true;
     }
 
+    BlobRead readBlob(const char* key, void* out_buf, size_t& in_out_len) override {
+        auto it = blobs_.find(key);
+        if (it == blobs_.end()) return BlobRead::kNotFound;
+        return getBlob(key, out_buf, in_out_len) ? BlobRead::kOk : BlobRead::kError;
+    }
+
     bool setBlob(const char* key, const void* data, size_t len) override {
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
         blobs_[key].assign(bytes, bytes + len);
