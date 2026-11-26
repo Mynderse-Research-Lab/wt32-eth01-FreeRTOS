@@ -28,30 +28,30 @@ This page records every source file, the plan to bring each one under 500 lines,
 
 | Commit | File | Before | After |
 |---|---|---:|---|
-| `3ca7df4` | `lib/Gantry/src/Gantry.cpp` | 3,336 | 9 files, 240â€“498 lines |
-| `64040cb`, `5890c1a` | `src/gantry_test_console.cpp` | 4,422 | 17 files, 98â€“463 lines; `processCommand` became a command table |
-| `285825e` | `src/pick_scheduler.cpp` | 2,785 | 9 files, 252â€“403 lines; the strike path stays in `pick_strike.cpp` |
-| `6bcb0ab` | `lib/AppConfig/src/AppConfig.cpp` | 1,841 | 6 files, 176â€“398 lines; `loadDefaults()` calls two section functions |
+| `3ca7df4` | `lib/Gantry/src/Gantry.cpp` | 3,336 | 9 files, 240–498 lines |
+| `64040cb`, `5890c1a` | `src/gantry_test_console.cpp` | 4,422 | 17 files, 98–463 lines; `processCommand` became a command table |
+| `285825e` | `src/pick_scheduler.cpp` | 2,785 | 9 files, 252–403 lines; the strike path stays in `pick_strike.cpp` |
+| `6bcb0ab` | `lib/AppConfig/src/AppConfig.cpp` | 1,841 | 6 files, 176–398 lines; `loadDefaults()` calls two section functions |
+| net console split | `src/gantry_net_console.cpp` | 555 | 2 files, 182 and 396 lines; login and the recent-peer cache are in `gantry_net_console_auth.cpp` |
 
 ## Planned splits
 
-21 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
+20 files are over 500 lines. The production files come first, lowest risk first, then the headers, then the host tests.
 
-### Production files (11)
+### Production files (10)
 
 | Order | File | Lines | Planned split | Gate |
 |---:|---|---:|---|---|
-| 1 | `src/gantry_net_console.cpp` | 555 | Authentication and peer cache into `gantry_net_console_auth.cpp` | Build; TCP console login and commands |
-| 2 | `src/gantry_ota.cpp` | 562 | TCP OTA server task and line reader into `gantry_ota_tcp.cpp` | OTA over TCP and over CellNet on the cell |
-| 3 | `src/main.cpp` | 615 | `app_main` (about 440 lines) into init stages (network, motion, UI, tasks) in `main_init_*.cpp`; a separate commit | Boot log; `eiptiming` after boot |
-| 4 | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | Lock, holder logging and register access into `MCP23S17Bus.cpp`; the pin API stays | Build; G-D3 is open on this bus |
-| 5 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
-| 6 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
-| 7 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
-| 8 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
-| 9 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
-| 10 | `lib/W5500/src/W5500Socket.cpp` | 989 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
-| 11 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
+| 1 | `src/gantry_ota.cpp` | 562 | TCP OTA server task and line reader into `gantry_ota_tcp.cpp` | OTA over TCP and over CellNet on the cell |
+| 2 | `src/main.cpp` | 615 | `app_main` (about 440 lines) into init stages (network, motion, UI, tasks) in `main_init_*.cpp`; a separate commit | Boot log; `eiptiming` after boot |
+| 3 | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | Lock, holder logging and register access into `MCP23S17Bus.cpp`; the pin API stays | Build; G-D3 is open on this bus |
+| 4 | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | `update()` and the trace stamps into `GantryEipRotaryAxisUpdate.cpp` | `test_eip_axis` |
+| 5 | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | Arm and move phase machine into `GantryEipLinearAxisPhases.cpp`; alarms and logging into `GantryEipLinearAxisAlarm.cpp` | `test_eip_axis` |
+| 6 | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | `Link`, statistics and reporting, and the sender phases into separate files | Not in the firmware (`tools/cellnet_ota_send.cpp` and the supervisor); tool build and `sync-cellnet.py` |
+| 7 | `lib/W5500/src/W5500.cpp` | 731 | Init, reset and recover into `W5500Init.cpp`; register, buffer and MACRAW access stay | **Class 1 bus**: soak |
+| 8 | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | Forward open, forward close and reopen into `EipMultiScannerConnect.cpp`; the exchange stays | **Class 1**: soak |
+| 9 | `lib/W5500/src/W5500Socket.cpp` | 990 | TCP path (connect, listen, send, receive) into `W5500SocketTcp.cpp`; the UDP fast path stays | **Class 1 hot path**: soak |
+| 10 | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | Diagnostics (run-time trace, gap report, log task, snapshot trickle) into `EipScannerDiag.cpp`; configuration builders into `EipScannerConfig.cpp`; then a separate commit breaks `multiAxisTask` (about 300 lines) into setup, cyclic and recover | **Class 1**: soak |
 
 ### Headers (3)
 
@@ -70,9 +70,9 @@ Each test file splits by test group into several sources for the **same executab
 | `test/host/test_eip_transport.cpp` | 1,891 |
 | `test/host/test_eip_axis.cpp` | 1,807 |
 | `test/host/test_pick_intercept.cpp` | 1,095 |
-| `test/host/test_gantry_orchestration.cpp` | 1,063 |
-| `test/host/test_w5500_socket_fastpath.cpp` | 993 |
-| `test/host/test_app_config.cpp` | 642 |
+| `test/host/test_gantry_orchestration.cpp` | 1,082 |
+| `test/host/test_w5500_socket_fastpath.cpp` | 1,055 |
+| `test/host/test_app_config.cpp` | 680 |
 | `test/host/test_cell_net_l2.cpp` | 576 |
 
 ## Organizing matured features into `lib/` components
@@ -116,7 +116,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 ## Order of work
 
 1. This record and the library review.
-2. Production splits 1â€“7, then the Class 1 splits 8â€“11, each held until its on-cell soak passes.
+2. Production splits 1–6, then the Class 1 splits 7–10, each held until its on-cell soak passes.
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, the console decoupling, then `GantryConsole` once G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries.
@@ -143,11 +143,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `strike_plan.h` | 307 | under 500 |
 | `theta_trace_analysis.h` | 142 | under 500 |
 
-### `lib/AppConfig/` (16 files, 3,181 lines)
+### `lib/AppConfig/` (16 files, 3,209 lines)
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/AppConfig.cpp` | 246 | split done (`6bcb0ab`) |
+| `src/AppConfig.cpp` | 249 | split done (`6bcb0ab`) |
 | `src/AppConfig.h` | 171 | split done (`6bcb0ab`) |
 | `src/AppConfigAccess.cpp` | 398 | split done (`6bcb0ab`) |
 | `src/AppConfigData.h` | 189 | under 500 |
@@ -159,10 +159,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/ConfigSchema.cpp` | 313 | under 500 |
 | `src/ConfigSchema.h` | 53 | under 500 |
 | `src/ConfigSet.h` | 200 | under 500 |
-| `src/ConfigStorage.h` | 36 | under 500 |
-| `src/MemoryStorage.h` | 107 | under 500 |
-| `src/NvsStorage.cpp` | 140 | under 500 |
-| `src/NvsStorage.h` | 35 | under 500 |
+| `src/ConfigStorage.h` | 44 | under 500 |
+| `src/MemoryStorage.h` | 113 | under 500 |
+| `src/NvsStorage.cpp` | 150 | under 500 |
+| `src/NvsStorage.h` | 36 | under 500 |
 
 ### `lib/CellNetL2/` (12 files, 2,855 lines)
 
@@ -244,13 +244,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EthernetLink.cpp` | 404 | under 500 |
 | `src/EthernetLink.h` | 58 | under 500 |
 
-### `lib/Gantry/` (37 files, 8,221 lines)
+### `lib/Gantry/` (37 files, 8,227 lines)
 
 | File | Lines | Status |
 |---|---:|---|
 | `src/Gantry.cpp` | 472 | split done (`3ca7df4`) |
 | `src/Gantry.h` | 597 | **over 500: planned** |
-| `src/GantryAxisState.cpp` | 421 | split done (`3ca7df4`) |
+| `src/GantryAxisState.cpp` | 427 | split done (`3ca7df4`) |
 | `src/GantryConfig.cpp` | 14 | under 500 |
 | `src/GantryConfig.h` | 174 | under 500 |
 | `src/GantryControlPeriod.h` | 46 | under 500 |
@@ -324,7 +324,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/UiRebootPrompt.cpp` | 72 | under 500 |
 | `src/UiRebootPrompt.h` | 27 | under 500 |
 
-### `lib/W5500/` (14 files, 3,032 lines)
+### `lib/W5500/` (14 files, 3,033 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -338,12 +338,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500Diag.h` | 149 | under 500 |
 | `src/W5500Hal.h` | 33 | under 500 |
 | `src/W5500Poll.h` | 115 | under 500 |
-| `src/W5500Socket.cpp` | 989 | **over 500: planned** |
+| `src/W5500Socket.cpp` | 990 | **over 500: planned** |
 | `src/W5500Socket.h` | 135 | under 500 |
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (43 files, 11,386 lines)
+### `src/` (45 files, 11,438 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -369,8 +369,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_console_status.cpp` | 378 | split done (`64040cb`) |
 | `gantry_console_testcycle.cpp` | 450 | split done (`64040cb`) |
 | `gantry_console_thetapath.cpp` | 98 | split done (`64040cb`) |
-| `gantry_net_console.cpp` | 555 | **over 500: planned** |
+| `gantry_net_console.cpp` | 396 | split done |
 | `gantry_net_console.h` | 23 | under 500 |
+| `gantry_net_console_auth.cpp` | 182 | split done |
+| `gantry_net_console_internal.h` | 29 | split done |
 | `gantry_ota.cpp` | 562 | **over 500: planned** |
 | `gantry_ota.h` | 131 | under 500 |
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
@@ -391,11 +393,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (42 files, 13,206 lines)
+### `test/host/` (42 files, 13,331 lines)
 
 | File | Lines | Status |
 |---|---:|---|
-| `fakes/FakeAxes.h` | 359 | under 500 |
+| `fakes/FakeAxes.h` | 365 | under 500 |
 | `stubs/driver/gpio.h` | 46 | under 500 |
 | `stubs/esp_err.h` | 21 | under 500 |
 | `stubs/esp_log.h` | 10 | under 500 |
@@ -406,7 +408,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `stubs/gpio_expander.h` | 50 | under 500 |
 | `stubs/host_test_clock.cpp` | 29 | under 500 |
 | `stubs/host_test_clock.h` | 17 | under 500 |
-| `test_app_config.cpp` | 642 | **over 500: planned** |
+| `test_app_config.cpp` | 680 | **over 500: planned** |
 | `test_cell_net_l2.cpp` | 576 | **over 500: planned** |
 | `test_cellnet_ota_receiver.cpp` | 403 | under 500 |
 | `test_cip_ethernet_link.cpp` | 95 | under 500 |
@@ -420,7 +422,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
 | `test_eip_transport.cpp` | 1891 | **over 500: planned** |
-| `test_gantry_orchestration.cpp` | 1063 | **over 500: planned** |
+| `test_gantry_orchestration.cpp` | 1082 | **over 500: planned** |
 | `test_hcs01_assembly.cpp` | 193 | under 500 |
 | `test_hcs01_comws_client.cpp` | 143 | under 500 |
 | `test_k5100_param_access.cpp` | 77 | under 500 |
@@ -435,5 +437,5 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_w5500_deferred_log.cpp` | 76 | under 500 |
 | `test_w5500_diag.cpp` | 325 | under 500 |
 | `test_w5500_poll.cpp` | 129 | under 500 |
-| `test_w5500_socket_fastpath.cpp` | 993 | **over 500: planned** |
+| `test_w5500_socket_fastpath.cpp` | 1055 | **over 500: planned** |
 | `test_w5500_spi.cpp` | 284 | under 500 |
