@@ -36,6 +36,7 @@ CI runs both lanes on every push and pull request (`.github/workflows/firmware-c
 | `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, ...) |
 | `test/host/` | Native Unity tests (primary regression) |
 | `docs/` | Canonical design docs and schematics |
+| `driver_datasheets_and_calculations/` | Drive parameter sets, Kinetix reference data, generated BOM and wire schedule; its `INDEX.md` catalogs the vendor manuals |
 | `tools/` | Python and Node helper scripts |
 
 This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or the Arduino core.
@@ -95,20 +96,11 @@ See `test/README` for details.
 - EtherNet/IP types: **`Eip*` / `Cip*` / `Kinetix5100*`**
 - Per-axis constants: **`include/axis_*_params.h`**
 
-## Documentation map
+## Documentation
 
-| Document | Use for |
-|----------|---------|
-| [`docs/LOW_LEVEL_GANTRY_CONTROL.md`](docs/LOW_LEVEL_GANTRY_CONTROL.md) | Build, APIs, EIP motion, console, tests |
-| [`docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics, drives, networks, endstops |
-| [`docs/HV_LV_SCHEMATICS.md`](docs/HV_LV_SCHEMATICS.md) | HV/LV schematics (preliminary) |
-| [`docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 protocol & deployment manual |
-| [`docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md`](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware quality review & 8-stage verification test cycle |
-| [`docs/OPEN_ITEMS.md`](docs/OPEN_ITEMS.md) | Open items, blockers and decisions (live list) |
-| [`docs/INDEX.md`](docs/INDEX.md) | Full documentation index |
-| [`test/README`](test/README) | Testing overview |
-
-When documents disagree, prefer the canonical docs under `docs/` listed above.
+Every document is listed in [`docs/INDEX.md`](docs/INDEX.md), and each library under
+`lib/` has a `README.md` and a `REFERENCE.md`. When documents disagree, prefer the
+canonical docs listed there.
 
 ## Pull requests
 

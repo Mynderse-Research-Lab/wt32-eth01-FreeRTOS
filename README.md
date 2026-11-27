@@ -6,16 +6,10 @@ Part of the distributed battery sorting cell:
 - **Closed Cell Bus (LAN8720 RMII):** High-speed peer-to-peer messaging (CellNet Layer-2 `0x88B5`) connecting Ubuntu Vision, Conveyor WT32, Gantry, and Raspberry Pi Gateway.
 - **Diagnostics:** UART0 console + TCP line console (password) on port `2323`.
 
-**Canonical docs:** see [`docs/INDEX.md`](docs/INDEX.md).
-
-| Doc | Role |
-|-----|------|
-| [Expected electro-mechanical assembly](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics / drives / networks |
-| [HV/LV schematics](docs/HV_LV_SCHEMATICS.md) | Electrical design basis (preliminary) |
-| [Low-level gantry control](docs/LOW_LEVEL_GANTRY_CONTROL.md) | Firmware / EIP / console |
-| [CellNet Layer-2 Communication Guide](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol & deployment manual |
-| [Pick Scheduler Kinematics](docs/PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate frames & timing math |
-| [Firmware Review & Optimizations](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Quality, integrity, and 8-stage verification test cycle |
+**Docs:** start with the [Knowledge Transfer page](docs/KNOWLEDGE_TRANSFER.md). Every
+document is listed in [`docs/INDEX.md`](docs/INDEX.md), and engineering rules and the
+test gate are in [`CONTRIBUTING.md`](CONTRIBUTING.md). Each library under `lib/` has its
+own `README.md` and `REFERENCE.md`.
 
 ## Console
 

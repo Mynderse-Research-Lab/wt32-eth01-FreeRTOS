@@ -135,5 +135,5 @@
 ## Links to repoint once the document exists
 
 - Firmware: `include/pick_intercept.h:5`.
-- Docs: `README.md`, `CONTRIBUTING.md`, `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `docs/LOW_LEVEL_GANTRY_CONTROL.md`, `docs/OPEN_ITEMS.md`, `docs/PICK_BENCH_RAMP.md`.
+- Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `docs/LOW_LEVEL_GANTRY_CONTROL.md`, `docs/OPEN_ITEMS.md`, `docs/PICK_BENCH_RAMP.md`.
 - Tools: the scripts listed under topic 12.
