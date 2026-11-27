@@ -3,7 +3,7 @@
  * @brief Linear axis backed by EtherNet/IP Kinetix 5100 assemblies 104/154.
  *
  * Production moves: OperatingMode=Position, TravelMode=2, Absolute
- * (drive-profiled PTP). See docs/LOW_LEVEL_GANTRY_CONTROL.md.
+ * (drive-profiled PTP). See lib/Gantry/REFERENCE.md.
  */
 
 #ifndef GANTRY_EIP_LINEAR_AXIS_H
@@ -174,6 +174,10 @@ class GantryEipLinearAxis : public GantryLinearAxis {
   // that same warning until it clears — otherwise back-off never runs.
   bool ignore_a014_abort_ = false;
   bool ignore_a015_abort_ = false;
+  // The move heads away from that switch, so its warning is not a new
+  // overtravel (G-A13). Set from the joint direction at each move start.
+  bool away_from_a014_ = false;
+  bool away_from_a015_ = false;
 
   eip::k5100::OutputAssembly104 buildSettleCommand(bool servo_on) const;
   eip::k5100::OutputAssembly104 buildHomeCommand(bool start_motion_edge) const;
@@ -184,6 +188,7 @@ class GantryEipLinearAxis : public GantryLinearAxis {
                        float decel_mm_per_s2, bool hold_start);
   void republishMoveCommand(bool start_motion_edge);
   void applyQueuedMove();
+  void noteMoveDirection(float from_mm, float to_mm);
   void enterAbortStop();
   void finishMoveHold();
   void advanceArmPhase();

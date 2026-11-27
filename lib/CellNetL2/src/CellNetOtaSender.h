@@ -4,12 +4,12 @@
  *
  * Drives one complete CellNet OTA update from a Linux host (the Raspberry Pi 5
  * supervisor) over an AF_PACKET raw socket. The protocol is
- * docs/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window of section
+ * lib/CellNetL2/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window of section
  * 5.1), as proven on hardware by tools/cellnet_ota_send.cpp, which is now a
  * thin CLI over runOtaSender().
  *
- * Linux only: off Linux this header declares nothing and
- * CellNetOtaSender.cpp compiles to nothing. Not part of the ESP component.
+ * Linux only: off Linux this header declares nothing and the sender
+ * sources compile to nothing. Not part of the ESP component.
  *
  * Steps:
  *   0. Wait up to 3 s for one GANTRY_STATUS (sender_id 0x03) from the node:

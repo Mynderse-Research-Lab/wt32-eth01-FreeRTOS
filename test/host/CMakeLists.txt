@@ -75,6 +75,7 @@ add_library(ethernet_ip STATIC
     "${REPO_ROOT}/lib/EtherNetIP/src/EipIoConnection.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipScanner.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScanner.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScannerConnect.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipProcessImage.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipClass1TimingStats.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipReliabilityStats.cpp"
@@ -87,6 +88,11 @@ target_include_directories(ethernet_ip PUBLIC
 # --- AppConfig layer under test ------------------------------------------------
 add_library(app_config STATIC
     "${REPO_ROOT}/lib/AppConfig/src/AppConfig.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigAccess.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsCell.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsMotion.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigParamIo.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/AppConfigText.cpp"
     "${REPO_ROOT}/lib/AppConfig/src/ConfigSchema.cpp"
 )
 target_include_directories(app_config PUBLIC
@@ -107,6 +113,8 @@ add_host_test(test_kinematics)
 add_host_test(test_trajectory)
 # thtrace summary of one HCS01 move (header-only, reuses TrajectoryPlanner)
 add_host_test(test_theta_trace_analysis)
+target_include_directories(test_theta_trace_analysis PRIVATE
+    "${REPO_ROOT}/lib/ThetaTrace/src")
 
 # EtherNet/IP encoding tests link the ethernet_ip lib instead of gantry_logic.
 add_executable(test_eip_encoding "test_eip_encoding.cpp")
@@ -133,17 +141,38 @@ add_executable(test_hcs01_comws_client "test_hcs01_comws_client.cpp")
 target_link_libraries(test_hcs01_comws_client PRIVATE ethernet_ip unity)
 add_test(NAME test_hcs01_comws_client COMMAND test_hcs01_comws_client)
 
-add_executable(test_eip_transport "test_eip_transport.cpp")
+add_executable(test_eip_transport
+    "test_eip_transport.cpp"
+    "test_eip_transport_session.cpp"
+    "test_eip_transport_close.cpp"
+    "test_eip_transport_drain.cpp"
+    "test_eip_transport_reopen.cpp"
+    "test_eip_transport_nop.cpp"
+)
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
 
-add_executable(test_app_config "test_app_config.cpp")
+add_executable(test_app_config
+    "test_app_config.cpp"
+    "test_app_config_values.cpp"
+    "test_app_config_store.cpp"
+    "test_app_config_schema.cpp"
+)
 target_link_libraries(test_app_config PRIVATE app_config unity)
 add_test(NAME test_app_config COMMAND test_app_config)
 
-add_executable(test_eip_axis "test_eip_axis.cpp"
+add_executable(test_eip_axis
+    "test_eip_axis.cpp"
+    "test_eip_axis_linear.cpp"
+    "test_eip_axis_alarm.cpp"
+    "test_eip_axis_limits.cpp"
+    "test_eip_axis_rotary.cpp"
+    "test_eip_axis_units.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisPhases.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisAlarm.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxisUpdate.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"
 )
 target_include_directories(test_eip_axis PRIVATE
@@ -155,7 +184,7 @@ target_include_directories(test_eip_axis PRIVATE
 target_link_libraries(test_eip_axis PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_axis COMMAND test_eip_axis)
 
-# EIP home/cal phase helpers (header-only policy shared with Gantry.cpp)
+# EIP home/cal phase helpers (header-only policy shared with the Gantry class)
 add_executable(test_eip_limit_sequence "test_eip_limit_sequence.cpp")
 target_include_directories(test_eip_limit_sequence PRIVATE
     "${REPO_ROOT}/lib/Gantry/src"
@@ -191,7 +220,11 @@ add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
 # W5500 Class 1 UDP send fast-path (dest cache / transaction diet)
 add_executable(test_w5500_socket_fastpath
     "test_w5500_socket_fastpath.cpp"
+    "test_w5500_socket_fastpath_send.cpp"
+    "test_w5500_socket_fastpath_recv.cpp"
+    "test_w5500_socket_fastpath_tcp.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500SocketTcp.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
@@ -225,6 +258,14 @@ add_test(NAME test_w5500_poll COMMAND test_w5500_poll)
 # --- Gantry orchestration (Gantry.cpp + fakes, ESP-IDF stubs) ---------------
 set(GANTRY_ORCH_SRCS
     "${REPO_ROOT}/lib/Gantry/src/Gantry.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryAxisState.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipBringUp.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryEipHomeCal.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryHoming.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryMotion.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryPath.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantryPathTheta.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/GantrySequential.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryLimitSwitch.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEndEffector.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"
@@ -248,11 +289,21 @@ endfunction()
 add_gantry_orch_lib(gantry_orch 0)
 add_gantry_orch_lib(gantry_orch_seq 1)
 
-add_executable(test_gantry_orchestration "test_gantry_orchestration.cpp")
+add_executable(test_gantry_orchestration
+    "test_gantry_orchestration.cpp"
+    "test_gantry_orchestration_move.cpp"
+    "test_gantry_orchestration_bringup.cpp"
+    "test_gantry_orchestration_fault.cpp"
+)
 target_link_libraries(test_gantry_orchestration PRIVATE gantry_orch unity)
 add_test(NAME test_gantry_orchestration COMMAND test_gantry_orchestration)
 
-add_executable(test_gantry_orchestration_seq "test_gantry_orchestration.cpp")
+add_executable(test_gantry_orchestration_seq
+    "test_gantry_orchestration.cpp"
+    "test_gantry_orchestration_move.cpp"
+    "test_gantry_orchestration_bringup.cpp"
+    "test_gantry_orchestration_fault.cpp"
+)
 target_link_libraries(test_gantry_orchestration_seq PRIVATE gantry_orch_seq unity)
 add_test(NAME test_gantry_orchestration_seq COMMAND test_gantry_orchestration_seq)
 
@@ -262,7 +313,13 @@ target_include_directories(test_console_parse PRIVATE "${REPO_ROOT}/src")
 target_link_libraries(test_console_parse PRIVATE unity)
 add_test(NAME test_console_parse COMMAND test_console_parse)
 
-add_executable(test_pick_intercept "test_pick_intercept.cpp")
+add_executable(test_pick_intercept
+    "test_pick_intercept.cpp"
+    "test_pick_intercept_belt.cpp"
+    "test_pick_intercept_geometry.cpp"
+    "test_pick_intercept_budget.cpp"
+    "test_pick_intercept_tracker.cpp"
+)
 target_include_directories(test_pick_intercept PRIVATE
     "${REPO_ROOT}/include"
     "${REPO_ROOT}/lib/Gantry/src")
@@ -308,6 +365,7 @@ add_executable(test_eip_socket_w5500
     "test_eip_socket_w5500.cpp"
     "${REPO_ROOT}/lib/EtherNetIP/src/EipSocketW5500.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/W5500SocketTcp.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
 )
@@ -329,6 +387,9 @@ add_test(NAME test_drivetrain_params COMMAND test_drivetrain_params)
 # CellNet Layer-2 framing and node dispatch tests
 add_executable(test_cell_net_l2
     "test_cell_net_l2.cpp"
+    "test_cell_net_l2_framing.cpp"
+    "test_cell_net_l2_node.cpp"
+    "test_cell_net_l2_ota.cpp"
     "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2Framing.cpp"
     "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2.cpp"
 )

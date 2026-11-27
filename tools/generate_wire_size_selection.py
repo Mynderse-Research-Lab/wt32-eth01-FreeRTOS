@@ -149,7 +149,7 @@ X_ROWS = [
         "Cat5e+", "—", "No", "—",
         1, "As required", "—", "Class 1 EIP",
         "Motion command/feedback via assemblies 104/154. No PTI production wiring.",
-        "docs/LOW_LEVEL_GANTRY_CONTROL.md",
+        "GANTRY_FIRMWARE.md",
     ),
     (
         6, "X axis", "EtherNet/IP (PORT2)",
@@ -236,7 +236,7 @@ Z_ROWS = [
         "Cat5e+", "—", "No", "—",
         1, "As required", "—", "Class 1 EIP",
         "Motion command/feedback via assemblies 104/154. No PTI production wiring.",
-        "docs/LOW_LEVEL_GANTRY_CONTROL.md",
+        "GANTRY_FIRMWARE.md",
     ),
     (
         6, "Z axis", "EtherNet/IP (PORT2)",
@@ -322,7 +322,7 @@ THETA_ROWS = [
         "Cat5e+", "—", "No", "—",
         1, "As required", "—", "Class 1 EIP (future)",
         "Theta EIP originator path deferred — factory SCHUNK power/encoder cables only for now. No PTI/step-dir production wiring.",
-        "docs/LOW_LEVEL_GANTRY_CONTROL.md",
+        "GANTRY_FIRMWARE.md",
     ),
     (
         6, "Theta", "Limit switches (optional)",
@@ -362,7 +362,7 @@ CONTROLLER_ROWS = [
         "26-28 AWG (short harness)", "—", "No", "—",
         4, "<0.3 m", "—", "SPI + reset/CS",
         "Keep SPI run short on controller PCB/harness. No Motion I/O IF / MCP production path.",
-        "docs/LOW_LEVEL_GANTRY_CONTROL.md",
+        "GANTRY_FIRMWARE.md",
     ),
     (
         2, "Controller", "EtherNet/IP originator link",

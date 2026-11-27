@@ -1,6 +1,6 @@
 // HCS01 / IndraDrive EtherNet/IP assembly (de)serialization.
 //
-// Recommended drive-controlled-positioning map from docs/LOW_LEVEL_GANTRY_CONTROL.md
+// Recommended drive-controlled-positioning map from lib/Gantry/REFERENCE.md (theta axis)
 // and IndraDrive Functions manual.
 // section 4.2 (Functions manual Tab. 4-21/4-22):
 //

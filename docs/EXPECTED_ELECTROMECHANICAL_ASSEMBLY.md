@@ -1,7 +1,11 @@
+*[README](../README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) › Gantry hardware*
+
 # Expected Electro-mechanical Assembly
 
+**Read this when** you work on the gantry's mechanics, drives, endstops, networks or wiring.
+
 **Status:** Canonical product-design document (EIP production architecture).  
-**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).  
+**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md).  
 **Vendor catalog:** [`driver_datasheets_and_calculations/INDEX.md`](../driver_datasheets_and_calculations/INDEX.md).
 
 This document describes the **expected** gantry electro-mechanical build for the
@@ -50,7 +54,7 @@ flowchart TB
   subgraph ctrl [Controller]
     WT32["WT32-ETH01"]
     W5500["WIZ850io W5500 EIP"]
-    LAN["LAN8720 MQTT plant net"]
+    LAN["LAN8720 CellNet L2 cell net"]
     Disp["I2C display stub"]
   end
   WT32 --> W5500
@@ -70,7 +74,7 @@ flowchart TB
 
 **Coordinate frames (right-handed):** the vision frame's origin is the bottom-right
 corner of the camera image, and the belt surface is Z = 0 for every subsystem.
-Details in [LOW_LEVEL_GANTRY_CONTROL.md §2](LOW_LEVEL_GANTRY_CONTROL.md#2-coordinate-frame-and-two-datums).
+Measured values are in [frame_and_geometry_measurements.md](captures/frame_and_geometry_measurements.md).
 
 
 | Axis  | Vision frame                                      | Gantry frame                    | Actuator        |
@@ -131,7 +135,7 @@ The WT32-ETH01 Gantry Controller operates across two physically isolated network
 
 | Interface | Role | Physical Link | Segment & Protocol |
 |-----------|------|---------------|--------------------|
-| **LAN8720 (RMII)** | Closed Cell Subsystem Bus | Onboard RJ45 $\rightarrow$ Unmanaged Switch | Closed Cell Switch: Zenoh-DDS / Layer-2 frames (`0x88B5`) to Vision, Conveyor, and Raspberry Pi |
+| **LAN8720 (RMII)** | Closed Cell Subsystem Bus | Onboard RJ45 $\rightarrow$ Unmanaged Switch | Closed Cell Switch: CellNet Layer-2 frames (`0x88B5`) to Vision, Conveyor, and Raspberry Pi |
 | **WIZ850io (W5500 SPI)** | Dedicated Motion Bus | SPI2 $\rightarrow$ Drive PORT1 daisy-chain | Private EIP segment: EtherNet/IP Class 1 cyclic I/O ($2\text{ ms}$ RPI) strictly to X/Z/Theta servo drives |
 | **SPI3 MCP23S17 + TFT** | Field I/O + Operator UI | SCLK14 MOSI4 MISO36 CS2 | Local 24 V Field I/O (gripper valve, sensors) + local ST7789 display |
 
@@ -187,9 +191,9 @@ adjusted so the end-effector cannot crash into the belt — measured Z home/cal
 length is a **safe envelope**, not product Z zero at the conveyor. Live
 precision home/cal (2026-08-10): joint max ≈ **147 mm**.
 
-**Future:** a dedicated **conveyor-height / belt-presence sensor** is present on the
-machine but **not yet wired** into Field I/O or either drive. Wire it (MCP Field DIN
-or spare TBIO) before relying on Z for production picks.
+**No conveyor-height sensor:** a conveyor-height / belt-presence sensor is on the
+machine but stays unwired. By decision (OPEN_ITEMS G-A3, 2026-10-31) none will be
+used; `col_x_min_mm` and `col_z_min_mm` set the conveyor region.
 
 **Wiring (sinking NC):** `+24 V → NC switch → INPUTx`; `DCOM / 0 V` common.
 Healthy travel: DI “on” (no overtravel). At limit: DI opens → A014/A015 →
@@ -238,26 +242,13 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel.
 Z Absolute invert so − seeks A015. SAFE_Z = 30 mm from Z− (traverse /
 retract band). Bring-up: `calibrate all`.
 Measured soft max ≈ **147 mm** (axis dead-center stroke — not conveyor height).
-Conveyor-height sensor remains **unwired** (future Field DIN / TBIO).
+No conveyor-height sensor is used (G-A3).
 
 ---
 
 ## 5. Field 24 V I/O and SPI3 UI
 
-ESP SPI3 (shared): SCLK14 MOSI4 MISO36; **CS_MCP=2** (default client);
-**TFT CS = MCP PB2** (software CS); **BLK hardwired ON**; KO = **MCP PB6**.
-W5500 RST = **MCP PB7** (external pull-up).
-Free ESP ADC: **12, 32, 33, 39**. ETH REFCLK = GPIO0_IN (not CLK-out on 17).
-
-| Channel | MCP pin | Role |
-|---------|---------|------|
-| DOUT0–3 | PA0–PA3 | Field 24 V outs (DOUT0 = gripper; boot LOW) |
-| DIN0–3 | PA4–PA7 | Field 24 V ins (isolator → 3.3 V) |
-| TFT DC / RES | PB0 / PB1 | Display control |
-| TFT CS | PB2 | Idle HIGH; assert only during display update |
-| Encoder A/B/PUSH | PB3–PB5 | Amazon TFT module UI |
-| KO | PB6 | Module key input |
-| W5500 RSTn | PB7 | Active-low; MCP-driven (not hardwired) |
+The SPI3, MCP23S17 and TFT pins are the `SPI3_*`, `MCP_*` and `TFT_*` constants in [`include/gantry_app_constants.h`](../include/gantry_app_constants.h) (lines 40–71, one comment per pin). Field DOUT0–3 are PA0–PA3 (DOUT0 is the gripper; all boot LOW), DIN0–3 are PA4–PA7, and the W5500 reset is PB7, active low.
 
 IO0 = ETH REFCLK IN after boot. **Deployment:** programming harness (incl. IO0) unplugged at runtime so plant LAN works — accepted limitation, no carrier PCB change. Bench flash: RTS→EN / DTR policy per LOW_LEVEL; UART0 on GPIO1/3. W5500 MOSI on GPIO17.
 Class 1 (SPI2) has priority over SPI3 (task prio + SPI3 deferral during exchange).
@@ -267,7 +258,7 @@ See [`pinout.csv`](../pinout.csv).
 
 1. `mcp_dump a` / `mcp_dump b` — Port A DOUT outs / DIN ins; Port B TFT + encoder + RST.
 2. `field_dout 0 1` / `field_dout 0 0` — DOUT0 toggles; all DOUT boot LOW.
-3. `field_din` — DIN and encoder A/B/PUSH/KO respond; TFT_CS(PB2) high idle; W5500_RST high idle.
+3. `field_din` — DIN and encoder A/B/PUSH/KO respond; TFT CS (GPIO32) high idle; W5500_RST high idle.
 4. Confirm TFT CS not stuck low after display stub; W5500 Class 1 still healthy.
 5. UART0 console + IO0 boot unchanged.
 
@@ -275,8 +266,46 @@ See [`pinout.csv`](../pinout.csv).
 
 ## 6. Scaling (firmware-facing)
 
-See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and
-[LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).
+See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and the
+[Gantry REFERENCE, Scaling](../lib/Gantry/REFERENCE.md#scaling).
 
 ---
 
+---
+
+## 7. Programming connector and boot pins
+
+Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII CLK-out).
+**Gotcha (2026-08-17):** USB-UART **DTR hard-wired to IO0** fights the 50 MHz REFCLK. Symptom: GPIO16 high but RJ45 LEDs dark + LAN8720 `power up timeout` / no MDIO.
+
+**DTR / RTS pin policy (no alternate ESP GPIO for DTR):**
+
+| Adapter signal | WT32 connection | Notes |
+|----------------|-----------------|--------|
+| TX | IO3 (RXD0) | Crossed |
+| RX | IO1 (TXD0) | Crossed |
+| GND | GND | |
+| **RTS** | **EN** via auto-reset transistor circuit (preferred) or reset button | Pulses reset for esptool |
+| **DTR** | **IO0** only via Espressif 2-transistor auto-reset circuit (idle = float) — **or leave DTR NC** | ROM bootloader samples **IO0 only**; cannot remap DTR to GPIO12/32/etc. |
+| BOOT (manual) | Momentary IO0→GND while EN reset | Use when DTR is NC |
+
+**Deployment (accepted limitation — no PCB change):** the field programming connector includes IO0. **Unplug that harness to run plant Ethernet** (TCP `:2323` and CellNet L2). Plug in only for flash/UART service. Do not permanently strap DTR→IO0.
+
+### Entering programming mode
+
+You will need a USB–TTL adapter (e.g. Waveshare USB to RS232/RS485/TTL).
+
+Pin names are the labels on the pinout below.
+
+1. Power: 5 V to `5V` (pin 12); ground to `GND` (pin 11).
+2. UART: adapter RX ↔ `TXD` (IO1); adapter TX ↔ `RXD` (IO3).
+3. Boot: jumper `IO0` (pin 24) to the `GND` beside it (pin 23).
+4. Reset: briefly ground `EN` (pin 1), then remove the IO0 jumper.
+5. Flash, then ground `EN` again to run normally.
+
+![WT32-ETH01 pinout](schematics/wt32_eth01_pinout.png)
+
+## Next
+
+- **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
+- **Also:** [Gantry firmware](../GANTRY_FIRMWARE.md), the software that drives this hardware.

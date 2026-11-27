@@ -70,7 +70,7 @@ separate measurements. Open checks are tracked in
 
 Times are from the solenoid valve's LED lighting up (t = 0). The firmware grip
 command reaches the valve output within about 5 ms
-([STRIKE_TIMING_MEASUREMENTS_2026-10-25.md](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md),
+([STRIKE_TIMING_MEASUREMENTS_2026-10-25.md](../../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md),
 Grip command electrical timing).
 
 | Item | Value |

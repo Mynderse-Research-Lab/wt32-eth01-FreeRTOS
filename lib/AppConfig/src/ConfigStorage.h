@@ -21,11 +21,19 @@ public:
     virtual bool setString(const char* key, const char* val) = 0;
 };
 
+// Result of reading a blob: a missing key is not the same as a failed read.
+enum class BlobRead { kOk, kNotFound, kError };
+
 class IConfigStorage : public IParamIo {
 public:
     virtual bool init() = 0;
     // in_out_len: buffer capacity in, bytes read out.
     virtual bool getBlob(const char* key, void* out_buf, size_t& in_out_len) = 0;
+    // Like getBlob, but tells a missing key from a failed read. The default can
+    // only report kOk or kNotFound; a backend whose reads can fail overrides it.
+    virtual BlobRead readBlob(const char* key, void* out_buf, size_t& in_out_len) {
+        return getBlob(key, out_buf, in_out_len) ? BlobRead::kOk : BlobRead::kNotFound;
+    }
     virtual bool setBlob(const char* key, const void* data, size_t len) = 0;
     virtual bool eraseKey(const char* key) = 0;
     virtual bool commit() = 0;

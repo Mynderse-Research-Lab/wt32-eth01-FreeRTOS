@@ -10,6 +10,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Gantry"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/GpioExpander"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/CellNetL2"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/EthernetLink"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/EtherNetIP"
@@ -18,6 +19,9 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Spi3Bus"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/SpiDisplay"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/AppConfig"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/BootLogRing"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/ThetaTrace"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/GantryOta"
 )
 
 # Compile-time defaults come from sdkconfig.defaults alone. The generated

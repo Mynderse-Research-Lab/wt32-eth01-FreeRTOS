@@ -2,7 +2,7 @@
  * @file CellNetOtaReceiver.h
  * @brief Pure-logic receiver state machine for OTA over CellNet (N-2).
  *
- * Implements docs/CELLNET_OTA_PROTOCOL.md sections 4 to 6 without I/O: the
+ * Implements lib/CellNetL2/CELLNET_OTA_PROTOCOL.md sections 4 to 6 without I/O: the
  * caller feeds parsed OTA frames in, sends the returned replies, and supplies
  * flash access through OtaFlash. Freestanding C++17, host-tested.
  */

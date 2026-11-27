@@ -1,4 +1,10 @@
+*[README](../README.md) › Doc index*
+
 # Project Documentation Index
+
+**Read this when** you are looking for one specific document. To learn the system, follow the reading path from the [README](../README.md) instead.
+
+Code documentation lives with the code: each library's docs are in `lib/<Name>/`, and the docs that cover the code in `src/` are at the repository root. This folder keeps the hardware docs, the knowledge transfer page, the open items and this index.
 
 Canonical product-design and software architecture set (EIP production architecture):
 
@@ -6,18 +12,22 @@ Canonical product-design and software architecture set (EIP production architect
 |----------|---------|----------|
 | [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) | Start here: subsystems, how they connect, components and working rules | New engineers |
 | [OPEN_ITEMS.md](OPEN_ITEMS.md) | Live list of open items, blockers and decisions, with closed items kept for reference | Everyone, before starting work |
+| [MATH_RELINK_INVENTORY.md](../MATH_RELINK_INVENTORY.md) | Every piece of code that implements system math, by topic, to be linked to the new math document | Firmware developers |
 | [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Expected mechanics, drives, networks, endstops, scaling, verification | Mechanical / panel / commissioning |
 | [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md) | HV/LV design basis + supplied panel image; logic-board schematic pending (**PRELIMINARY — NOT FOR CONSTRUCTION**) | Electrical review |
-| [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md) | Firmware design: bring-up, Gantry SMs, Class 1 UDP, Absolute PTP, UART + TCP console, host tests | Firmware developers |
-| [FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md](FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware review, data integrity fixes, memory optimizations, and 8-stage holistic test cycle | Firmware developers / QA |
-| [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md) | CellNet Layer-2 wire specification: framing, receive rules, payloads, library use and diagnostics | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
-| [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md) | Firmware updates over CellNet L2 (N-2): OTA-only mode, messages, flow control, timing | Gantry, Conveyor and Supervisor developers |
+| [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md) | How the gantry firmware works: what runs, boot, tasks, one move and one pick end to end, the console, runtime parameters | Firmware developers |
+| [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md) | CellNet Layer-2 wire specification: framing, receive rules, payloads, library use and diagnostics | Subsystem developers (Vision, Conveyor, Gantry, Supervisor) |
+| [CELLNET_OTA_PROTOCOL.md](../lib/CellNetL2/CELLNET_OTA_PROTOCOL.md) | Firmware updates over CellNet L2 (N-2): OTA-only mode, messages, flow control, timing | Gantry, Conveyor and Supervisor developers |
 | [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate conventions (+Y downstream, +Z down) and feasibility/timing algorithms ($\tau = D / v_{belt}$) for the Pick Scheduler. | Firmware / Subsystem developers |
 | [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) | End-to-end mathematical narrative of one pickup, from the camera observation through the belt, grasp, bin, and the following object. | Firmware / mechanical / vision |
-| [DEV_TRACKER.md](DEV_TRACKER.md) | Active hardware bring-up and firmware milestone tracker | Firmware / commissioning |
-| [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | Phase 5 & Phase 6 architecture roadmap (Network extraction, Zenoh-DDS migration) | System architects / developers |
 
 Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).
+
+## Dated records
+
+| Document | Summary |
+|----------|---------|
+| [STRIKE_TIMING_MEASUREMENTS_2026-10-25.md](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md) | On-gantry measurements of the Z strike against the strike plan |
 
 ---
 
@@ -26,21 +36,15 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 | Document | Summary |
 |----------|---------|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
-| [../test/README](../test/README) | Host unit tests & on-target test documentation |
-| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
+| [../lib/README.md](../lib/README.md) | Libraries in `lib/`; each has its own `README.md` and `REFERENCE.md` |
+| [../tools/README.md](../tools/README.md) | Helper scripts |
+| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Catalog of the vendor manuals (kept in a shared folder), drive parameter sets and generated panel files |
 
 ---
 
-## Vendor references (commonly cited)
+## Vendor references
 
-| File under `driver_datasheets_and_calculations/` | Topic |
-|--------------------------------------------------|-------|
-| `AB_Kinetix5100_user_manual.pdf` | K5100 commissioning / I/O |
-| `2198-in003_-en-p.pdf` | Kinetix installation |
-| `R911325518_07_EN_...HCS01_Commissioning Manual.pdf` | HCS01 connectors |
-| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code / control voltage |
-| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
-| `BOM.xlsx` / `WIRE_SIZE_SELECTION.xlsx` | Generated panel BOM / wire schedule |
+Vendor manuals are cited by publication number and section. The [vendor catalog](../driver_datasheets_and_calculations/INDEX.md) lists them and links the shared folder that holds them.
 
 ---
 

@@ -228,8 +228,14 @@ public:
 
     bool isA014WarningActive() const override { return a014; }
     bool isA015WarningActive() const override { return a015; }
-    void attachLimitSwitches(GantryLimitSwitch*, GantryLimitSwitch*) override {
+    // Kept so a test can set the drive-managed switches, as the EIP axis
+    // adapter does from drive feedback.
+    GantryLimitSwitch* min_sw = nullptr;
+    GantryLimitSwitch* max_sw = nullptr;
+    void attachLimitSwitches(GantryLimitSwitch* min, GantryLimitSwitch* max) override {
         ++attach_count;
+        min_sw = min;
+        max_sw = max;
     }
     void setJointMinWarningA015(bool enable) override { joint_min_a015 = enable; }
 

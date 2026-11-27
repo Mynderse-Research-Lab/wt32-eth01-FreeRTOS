@@ -24,7 +24,7 @@ idf.py build
 idf.py -p COM3 flash monitor
 ```
 
-CI runs both lanes on every push and pull request (`.github/workflows/firmware-ci.yml`).
+CI runs both lanes and a Markdown link check on every push and pull request (`.github/workflows/firmware-ci.yml`).
 
 ## Project structure
 
@@ -33,9 +33,10 @@ CI runs both lanes on every push and pull request (`.github/workflows/firmware-c
 | `idf/` | ESP-IDF project root (build here) |
 | `src/` | `app_main`, test console, pick scheduler |
 | `include/` | App-wide constants and headers |
-| `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, ...) |
-| `test/host/` | Native Unity tests (primary regression) |
-| `docs/` | Canonical design docs and schematics |
+| `lib/` | The 13 ESP-IDF components, listed by layer in [`lib/README.md`](lib/README.md) |
+| `test/host/` | Native Unity tests (primary regression); see Testing policy below |
+| `docs/` | Hardware docs, schematics, the knowledge transfer page, open items and the doc index. Code docs live with the code: in `lib/<Name>/`, and at the repo root for `src/` |
+| `driver_datasheets_and_calculations/` | Drive parameter sets, Kinetix reference data, generated BOM and wire schedule; its `INDEX.md` catalogs the vendor manuals |
 | `tools/` | Python and Node helper scripts |
 
 This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or the Arduino core.
@@ -58,7 +59,7 @@ This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or t
 2. **Follow existing patterns** — read surrounding code before adding new abstractions.
 3. **Test hardware-independent logic on the host** — kinematics, trajectory, protocol encoding.
 4. **Respect architecture boundaries** — motion goes through `Gantry`; network telemetry through `CellNetL2`.
-5. **Keep docs in sync** — update `docs/LOW_LEVEL_GANTRY_CONTROL.md` for API/build/console changes; update `docs/CELL_NET_L2_COMMUNICATION_GUIDE.md` for network framing changes; update `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` / `docs/HV_LV_SCHEMATICS.md` for mechanical or electrical design changes.
+5. **Keep docs in sync** — in the same commit, update the one doc that is the home of what you changed: the library's `README.md` or `REFERENCE.md`, `GANTRY_FIRMWARE.md` for `src/`, the hardware docs for mechanics and wiring, `docs/OPEN_ITEMS.md` for open items. Each fact has one home; link to it instead of restating it.
 
 ## Testing policy
 
@@ -76,7 +77,7 @@ ctest --test-dir build/host --output-on-failure
 ```
 
 Both must pass before a change is finalized. `.github/workflows/firmware-ci.yml` runs the same
-two commands on every push.
+two commands on every push, and checks every relative link in the Markdown files.
 
 
 ### Adding a host test
@@ -85,7 +86,29 @@ two commands on every push.
 2. Register it in `test/host/CMakeLists.txt` via `add_host_test()`.
 3. Only include code that compiles without ESP-IDF.
 
-See `test/README` for details.
+### Coverage report
+
+Optional, with no percentage gate:
+
+```powershell
+cmake -S test/host -B build/host -DGANTRY_HOST_COVERAGE=ON
+cmake --build build/host --target coverage
+```
+
+This rebuilds with `--coverage -O0`, re-runs ctest and writes `build/host/coverage/index.html` and `summary.txt`. Install gcovr first (`pip install gcovr`).
+
+### On-target selftest
+
+The console command `selftest` runs the kinematics, joint-limit and trajectory assertions on the gantry (`src/basic_tests.cpp`) and ends with `Selftest complete: passed=<N> failed=0`. It is built while `CONFIG_GANTRY_SELFTEST=y`, the default; set it to `n` for production builds.
+
+## Source files and components
+
+- **Source files stay under 500 lines.** A larger file is split by what its code does.
+- **A split moves code; it does not change it.** Each split is its own commit: function bodies are copied verbatim, every original line is used exactly once, and the only edits are to linkage (`static`, shared declarations in a private header, default arguments moved to the declaration). A function that is itself too long is broken up in a separate commit afterwards.
+- **Each split or move updates** the hand-kept source lists (`lib/*/CMakeLists.txt` SRCS, `idf/main/CMakeLists.txt`, `test/host/CMakeLists.txt`) and every `file:line` reference in the docs.
+- **Class 1 code needs extra care.** The firmware builds at `-Og` without link-time optimization, so a helper moved to another file is no longer inlined. Keep Class 1 helpers in their caller's file or `inline` in a private header, and count a Class 1 change as done only after an on-cell `eiptiming` and `gaptrace` soak.
+- **Gate for every commit:** host tests pass with unchanged Unity case counts, `idf.py build` shows no new warnings, and the touched files are under 500 lines.
+- **Matured features become components.** A feature is matured when it runs on the gantry and has no open blocker or decision in `docs/OPEN_ITEMS.md`. It then moves out of `src/` into `lib/<Feature>/` with a `CMakeLists.txt` (`idf_component_register` with explicit REQUIRES; app headers through `${APP_ROOT}/include`), its code in `src/`, a `README.md` and a `REFERENCE.md`. The test console is the next candidate, once G-C7 is decided (OPEN_ITEMS X-7).
 
 ## Naming conventions
 
@@ -95,21 +118,15 @@ See `test/README` for details.
 - EtherNet/IP types: **`Eip*` / `Cip*` / `Kinetix5100*`**
 - Per-axis constants: **`include/axis_*_params.h`**
 
-## Documentation map
+## Documentation
 
-| Document | Use for |
-|----------|---------|
-| [`docs/LOW_LEVEL_GANTRY_CONTROL.md`](docs/LOW_LEVEL_GANTRY_CONTROL.md) | Build, APIs, EIP motion, console, tests |
-| [`docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md) | Mechanics, drives, networks, endstops |
-| [`docs/HV_LV_SCHEMATICS.md`](docs/HV_LV_SCHEMATICS.md) | HV/LV schematics (preliminary) |
-| [`docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 protocol & deployment manual |
-| [`docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md`](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware quality review & 8-stage verification test cycle |
-| [`docs/OPEN_ITEMS.md`](docs/OPEN_ITEMS.md) | Open items, blockers and decisions (live list) |
-| [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md) | Architecture phases & Zenoh-DDS migration |
-| [`docs/INDEX.md`](docs/INDEX.md) | Full documentation index |
-| [`test/README`](test/README) | Testing overview |
-
-When documents disagree, prefer the canonical docs under `docs/` listed above.
+Each fact has one home, and other docs link to it. The reading path runs from the
+[README](README.md) to the [knowledge transfer page](docs/KNOWLEDGE_TRANSFER.md), the
+[gantry firmware page](GANTRY_FIRMWARE.md), [`lib/README.md`](lib/README.md), and each library's
+`README.md` and `REFERENCE.md`. Every doc on that path starts with a breadcrumb and a
+"Read this when" line and ends with a "Next" section. [`docs/INDEX.md`](docs/INDEX.md)
+lists every document. When documents disagree, trust the code, then the doc that is the
+topic's home.
 
 ## Pull requests
 

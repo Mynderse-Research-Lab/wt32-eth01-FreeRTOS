@@ -1,10 +1,14 @@
+*[README](../README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) › Panel electrics*
+
 # HV and LV Schematics
+
+**Read this when** you work on the panel's power, voltage domains or connection schedule.
 
 **Status:** Canonical electrical design basis.  
 **Panel schematic:** [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).  
 **Logic-board schematic:** Pending addition.  
 **Mechanical / software companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
-[LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).
+[GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md).
 
 > **PRELIMINARY — NOT FOR CONSTRUCTION.**  
 > This package documents the intended HV/LV architecture for review. It does
@@ -24,14 +28,14 @@
 | Motion control | **EtherNet/IP only** — no PTI/opto production harness |
 | Endstops | Drive TBIO / HCS01 X31 (NC sinking) |
 | Gripper | MCP23S17 PA0 (Field DOUT0) → R16 220 Ω → U11 VO14642AT solid-state relay (high side: 24VDC on S/S′, DC → FDO0) → valve coil. Turn-on 370 µs typ / 800 µs max at 30 V, 200 mA (Vishay doc 81646, Switching Characteristics). R14 10 kΩ pulls PA0 low. |
-| Networks | W5500 EIP daisy-chain **separate** from LAN8720 MQTT |
+| Networks | W5500 EIP daisy-chain **separate** from the LAN8720 cell network (CellNet L2) |
 
 Authoritative BOM / wire sizes: regenerate from
 [`tools/generate_bom.py`](../tools/generate_bom.py) and
 [`tools/generate_wire_size_selection.py`](../tools/generate_wire_size_selection.py).
 
 Vendor install references: Rockwell 2198-IN003 / UM004, Rexroth HCS01
-commissioning + project planning (under `driver_datasheets_and_calculations/`).
+commissioning + project planning (listed in the [vendor catalog](../driver_datasheets_and_calculations/INDEX.md)).
 
 ---
 
@@ -80,7 +84,7 @@ the generated BOM / wire schedule and the electrical-review register below.
 | PS1 +24 V | Drive CP, valves, E-stop coils, TBIO aux | #18 AWG class |
 | Drive motor connectors | MPL / ERD | Factory 2090 / SCHUNK cables |
 | W5500 RJ45 | X PORT1 → … → Z PORT2 | Cat5e+ EIP |
-| WT32 LAN8720 | Plant MQTT switch | Separate from EIP |
+| WT32 LAN8720 | Cell switch (CellNet L2) | Separate from EIP |
 | Limit NC | TBIO INPUT1–4 / X31.5–.6 | 22 AWG STP |
 | MCP23S17 PA0 (DOUT0) | CR1 coil → SV1 | 18–22 AWG |
 | WIZ850io RSTn | MCP23S17 PB7 | Active-low; external pull-up; not hardwired |
@@ -113,3 +117,8 @@ not replace or redraw the panel image.
 
 Until E1–E7 are closed, treat all schematics as **design intent for review**,
 not shop drawings.
+
+## Next
+
+- **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
+- **Also:** [Gantry firmware](../GANTRY_FIRMWARE.md), the software that drives this hardware.

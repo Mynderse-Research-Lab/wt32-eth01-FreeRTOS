@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/MCP23S17.cpp"
+        "src/MCP23S17Bus.cpp"
     INCLUDE_DIRS
         "src"
     REQUIRES

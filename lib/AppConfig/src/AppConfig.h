@@ -142,6 +142,11 @@ private:
     AppConfig(const AppConfig&) = delete;
     AppConfig& operator=(const AppConfig&) = delete;
 
+    // loadDefaults() in order: sections 1-5 (motion profile, axes, geometry,
+    // gripper; AppConfigDefaultsMotion.cpp), then 6-13 (conveyor through the
+    // developer password; AppConfigDefaultsCell.cpp).
+    void loadMotionDefaults();
+    void loadCellDefaults();
     void readParams(IParamIo& io);
     void writeParams(IParamIo& io) const;
     bool writeSet(const std::vector<uint8_t>& payload, uint16_t param_count, uint32_t unix_s);

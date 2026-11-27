@@ -7,14 +7,37 @@ set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 
 set(APP_SRCS
     "${APP_ROOT}/src/main.cpp"
+    "${APP_ROOT}/src/main_init_io.cpp"
+    "${APP_ROOT}/src/main_init_motion.cpp"
+    "${APP_ROOT}/src/main_init_net.cpp"
+    "${APP_ROOT}/src/main_tasks.cpp"
     "${APP_ROOT}/src/pick_scheduler.cpp"
-    "${APP_ROOT}/src/theta_trace.cpp"
-    "${APP_ROOT}/src/gantry_cellnet_ota.cpp"
+    "${APP_ROOT}/src/pick_belt.cpp"
+    "${APP_ROOT}/src/pick_bench.cpp"
+    "${APP_ROOT}/src/pick_console.cpp"
+    "${APP_ROOT}/src/pick_eval.cpp"
+    "${APP_ROOT}/src/pick_motion.cpp"
+    "${APP_ROOT}/src/pick_run.cpp"
+    "${APP_ROOT}/src/pick_strike.cpp"
+    "${APP_ROOT}/src/pick_trace.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
+    "${APP_ROOT}/src/gantry_console_bringup.cpp"
+    "${APP_ROOT}/src/gantry_console_cfg.cpp"
+    "${APP_ROOT}/src/gantry_console_cip.cpp"
+    "${APP_ROOT}/src/gantry_console_cmd_motion.cpp"
+    "${APP_ROOT}/src/gantry_console_cmd_pick.cpp"
+    "${APP_ROOT}/src/gantry_console_cmd_profile.cpp"
+    "${APP_ROOT}/src/gantry_console_commands.cpp"
+    "${APP_ROOT}/src/gantry_console_drive_diag.cpp"
+    "${APP_ROOT}/src/gantry_console_drv.cpp"
+    "${APP_ROOT}/src/gantry_console_homing.cpp"
+    "${APP_ROOT}/src/gantry_console_io.cpp"
+    "${APP_ROOT}/src/gantry_console_session.cpp"
+    "${APP_ROOT}/src/gantry_console_status.cpp"
+    "${APP_ROOT}/src/gantry_console_testcycle.cpp"
+    "${APP_ROOT}/src/gantry_console_thetapath.cpp"
     "${APP_ROOT}/src/gantry_net_console.cpp"
-    "${APP_ROOT}/src/gantry_ota.cpp"
-    "${APP_ROOT}/src/gpio_expander.c"
-    "${APP_ROOT}/src/boot_log_ring.cpp"
+    "${APP_ROOT}/src/gantry_net_console_auth.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -32,6 +55,7 @@ idf_component_register(
         "${APP_ROOT}/src"
     REQUIRES
         Gantry
+        GpioExpander
         CellNetL2
         EthernetLink
         EtherNetIP
@@ -39,6 +63,9 @@ idf_component_register(
         Spi3Bus
         SpiDisplay
         AppConfig
+        BootLogRing
+        ThetaTrace
+        GantryOta
         nvs_flash
         esp_driver_spi
         esp_driver_gpio
