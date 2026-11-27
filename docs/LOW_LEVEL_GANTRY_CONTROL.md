@@ -12,8 +12,7 @@ This document explains **how the firmware software works** end-to-end: bring-up,
 Gantry orchestration, process-image mailbox, Class 1 UDP lifecycle (including
 why bind/send/recv/close fails), Absolute PTP state machines, console gates, and
 host-test anchors. Electromechanical detail lives in the companions above.
-MQTT bridge design: [`MQTT_comms_subsys.md`](../MQTT_comms_subsys.md); pick wiring
-status is in §10.
+Pick wiring status is in §10.
 
 ---
 
@@ -170,11 +169,11 @@ From [`src/main.cpp`](../src/main.cpp), whose `app_main` calls the stages in [`s
    `CONFIG_EIP_AXIS_THETA=y`) → `Gantry::Gantry(..., PIN_GRIPPER)` → joint limits →
    `gantry.begin()`.
 5. **`gantry.enable()` is deferred** until Class 1 + `GantryUpdate` are running (operator `enable` / console).
-6. **Scanner** — `eip::startScannerTask(...)` **before** MQTT (priority **6**, above gantry/SPI3 users).
-7. **MQTT objects constructed** (not started yet).
+6. **Scanner** — `eip::startScannerTask(...)` **before** the LAN8720 network (priority **6**, above gantry/SPI3 users).
+7. **CellNet objects constructed** — `EthernetLink`, the L2 transport and the gantry's `CellNetL2Node` (not started yet).
 8. **FreeRTOS tasks** — PickScheduler → GantryUpdate (100 Hz) → SerialCmd (UART).
-9. **LAN8720 `EthernetLink::start()` + `waitForUp()`** — then **TCP net console** on port **2323**.
-10. **MQTT `Bridge::start()`** — non-fatal; reuses EthernetLink.
+9. **LAN8720 `EthernetLink::start()` + `waitForUp()`** — then **TCP net console** on port **2323** and the **OTA server** on **8032**.
+10. **CellNet L2** — the transport attaches to the EthernetLink handle and `l2Node.begin()` starts the node; a failure is logged, not fatal. Then the SNTP client starts.
 11. Print console help → `vTaskDelete(nullptr)`.
 
 ### Tasks and rates
@@ -226,7 +225,7 @@ reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 
 - **Joint:** `(x, z, theta)`. Joint Z=0 is the firmware soft-home datum (`zero_puu_`).
 - **Pose:** `(x, y, z, theta)` with `pose.z = joint.z + GANTRY_Z_DATUM_OFFSET_ABOVE_BED_MM`.
-- MQTT / pick planner owns belt **Y**; Gantry does not.
+- The pick scheduler owns belt **Y**; Gantry does not.
 
 ### 2.1 Option-A World Frame vs Vision Frame vs Joint Angle
 - **Option-A World Frame:** Right-handed: +X across belt, +Y downstream, +Z down. Angle \(\theta_{\mathrm{world}} = 0^\circ\) is oriented along **New +X** (across belt); \(\theta_{\mathrm{world}} = +90^\circ\) is oriented along **+Y** (downstream).
@@ -734,7 +733,7 @@ removed; do not rely on them.
 
 ---
 
-## 10. Theta (HCS01) and MQTT boundary
+## 10. Theta (HCS01) and the pick path
 
 ### Theta (HCS01)
 - Assemblies **101/102** (18 / 14 bytes), freely configurable profile (`P-0-4084 = 0xFFFE`). Map: `P-0-4081` = 4077, 0282, 0259, 0260, 0359; `P-0-4080` = 4078, 0051, 0040, 0390. See `Hcs01Assembly.h`.
@@ -867,7 +866,7 @@ Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII C
 | **DTR** | **IO0** only via Espressif 2-transistor auto-reset circuit (idle = float) — **or leave DTR NC** | ROM bootloader samples **IO0 only**; cannot remap DTR to GPIO12/32/etc. |
 | BOOT (manual) | Momentary IO0→GND while EN reset | Use when DTR is NC |
 
-**Deployment (accepted limitation — no PCB change):** the field programming connector includes IO0. **Unplug that harness to run plant Ethernet** (TCP `:2323` / MQTT). Plug in only for flash/UART service. Do not permanently strap DTR→IO0.
+**Deployment (accepted limitation — no PCB change):** the field programming connector includes IO0. **Unplug that harness to run plant Ethernet** (TCP `:2323` and CellNet L2). Plug in only for flash/UART service. Do not permanently strap DTR→IO0.
 
 ---
 

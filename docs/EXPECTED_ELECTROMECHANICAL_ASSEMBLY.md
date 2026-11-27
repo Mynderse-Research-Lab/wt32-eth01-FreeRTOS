@@ -50,7 +50,7 @@ flowchart TB
   subgraph ctrl [Controller]
     WT32["WT32-ETH01"]
     W5500["WIZ850io W5500 EIP"]
-    LAN["LAN8720 MQTT plant net"]
+    LAN["LAN8720 CellNet L2 cell net"]
     Disp["I2C display stub"]
   end
   WT32 --> W5500
@@ -129,7 +129,7 @@ The WT32-ETH01 Gantry Controller operates across two physically isolated network
 
 | Interface | Role | Physical Link | Segment & Protocol |
 |-----------|------|---------------|--------------------|
-| **LAN8720 (RMII)** | Closed Cell Subsystem Bus | Onboard RJ45 $\rightarrow$ Unmanaged Switch | Closed Cell Switch: Zenoh-DDS / Layer-2 frames (`0x88B5`) to Vision, Conveyor, and Raspberry Pi |
+| **LAN8720 (RMII)** | Closed Cell Subsystem Bus | Onboard RJ45 $\rightarrow$ Unmanaged Switch | Closed Cell Switch: CellNet Layer-2 frames (`0x88B5`) to Vision, Conveyor, and Raspberry Pi |
 | **WIZ850io (W5500 SPI)** | Dedicated Motion Bus | SPI2 $\rightarrow$ Drive PORT1 daisy-chain | Private EIP segment: EtherNet/IP Class 1 cyclic I/O ($2\text{ ms}$ RPI) strictly to X/Z/Theta servo drives |
 | **SPI3 MCP23S17 + TFT** | Field I/O + Operator UI | SCLK14 MOSI4 MISO36 CS2 | Local 24 V Field I/O (gripper valve, sensors) + local ST7789 display |
 
@@ -185,9 +185,9 @@ adjusted so the end-effector cannot crash into the belt — measured Z home/cal
 length is a **safe envelope**, not product Z zero at the conveyor. Live
 precision home/cal (2026-08-10): joint max ≈ **147 mm**.
 
-**Future:** a dedicated **conveyor-height / belt-presence sensor** is present on the
-machine but **not yet wired** into Field I/O or either drive. Wire it (MCP Field DIN
-or spare TBIO) before relying on Z for production picks.
+**No conveyor-height sensor:** a conveyor-height / belt-presence sensor is on the
+machine but stays unwired. By decision (OPEN_ITEMS G-A3, 2026-10-31) none will be
+used; `col_x_min_mm` and `col_z_min_mm` set the conveyor region.
 
 **Wiring (sinking NC):** `+24 V → NC switch → INPUTx`; `DCOM / 0 V` common.
 Healthy travel: DI “on” (no overtravel). At limit: DI opens → A014/A015 →
@@ -236,7 +236,7 @@ Safe speeds only (≤50 mm/s); STO ready; clear travel.
 Z Absolute invert so − seeks A015. SAFE_Z = 30 mm from Z− (traverse /
 retract band). Bring-up: `calibrate all`.
 Measured soft max ≈ **147 mm** (axis dead-center stroke — not conveyor height).
-Conveyor-height sensor remains **unwired** (future Field DIN / TBIO).
+No conveyor-height sensor is used (G-A3).
 
 ---
 

@@ -105,7 +105,6 @@ See `test/README` for details.
 | [`docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 protocol & deployment manual |
 | [`docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md`](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Firmware quality review & 8-stage verification test cycle |
 | [`docs/OPEN_ITEMS.md`](docs/OPEN_ITEMS.md) | Open items, blockers and decisions (live list) |
-| [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md) | Architecture phases & Zenoh-DDS migration |
 | [`docs/INDEX.md`](docs/INDEX.md) | Full documentation index |
 | [`test/README`](test/README) | Testing overview |
 

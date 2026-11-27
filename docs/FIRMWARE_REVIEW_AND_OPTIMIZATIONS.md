@@ -14,27 +14,27 @@ All issues were resolved across three structured phases, validated against 28 na
 
 1. **MCP23S17 Driver Shadow Cache Race Fix**:
    - **Problem**: `handle->port_a_output` and `handle->port_b_output` shadow caches were updated prior to acquiring driver mutex locks, leading to lost bit updates and corrupted pin states when multiple tasks concurrently toggled pins on the same 8-bit port.
-   - **Solution** in [`lib/MCP23S17/src/MCP23S17Bus.cpp`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/src/MCP23S17Bus.cpp) and [`MCP23S17.cpp`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/src/MCP23S17.cpp):
+   - **Solution** in `lib/MCP23S17/src/MCP23S17Bus.cpp` and `MCP23S17.cpp`:
      - Created internal helpers `mcp23s17_write_register_unlocked` and `mcp23s17_read_register_unlocked`.
      - Enclosed all read-modify-write operations across output, direction, pull-up, and interrupt registers in `mcp23s17_lock(handle)`.
      - Added checks for `spi3_class1_critical_active()` to defer non-realtime I/O during high-priority Class 1 EtherNet/IP frames.
-   - **CMake Dependency** in [`lib/MCP23S17/CMakeLists.txt`](file:///d:/Projects/wt32-eth01-base/lib/MCP23S17/CMakeLists.txt): Added `Spi3Bus` to component requirements.
+   - **CMake Dependency** in `lib/MCP23S17/CMakeLists.txt`: Added `Spi3Bus` to component requirements.
 
 2. **SPI3 Bus Class 1 Critical Section Query**:
-   - **Solution** in [`lib/Spi3Bus/src/Spi3Bus.h`](file:///d:/Projects/wt32-eth01-base/lib/Spi3Bus/src/Spi3Bus.h) & [`Spi3Bus.cpp`](file:///d:/Projects/wt32-eth01-base/lib/Spi3Bus/src/Spi3Bus.cpp): Exported `spi3_class1_critical_active(void)` with C linkage for driver checks.
+   - **Solution** in `lib/Spi3Bus/src/Spi3Bus.h` & `Spi3Bus.cpp`: Exported `spi3_class1_critical_active(void)` with C linkage for driver checks.
 
 3. **Thread Safety in Gantry Motion Controller**:
    - **Problem**: `Gantry::Gantry` was accessed concurrently by the 100 Hz `gantryUpdateTask` on Core 1 and serial/TCP console/scheduler tasks on Core 0 without synchronization.
-   - **Solution** in [`lib/Gantry/src/Gantry.h`](file:///d:/Projects/wt32-eth01-base/lib/Gantry/src/Gantry.h) & [`Gantry.cpp`](file:///d:/Projects/wt32-eth01-base/lib/Gantry/src/Gantry.cpp):
+   - **Solution** in `lib/Gantry/src/Gantry.h` & `Gantry.cpp`:
      - Added `mutable std::recursive_mutex mutex_;`.
      - Protected all public configuration, status, kinematics, and motion triggers (`moveTo()`, `home*()`, `calibrate*()`, `startEipBringUp()`, `isBusy()`, `isEnabled()`, `requestAbort()`, `grip()`).
      - Scoped mutex locks inside polling delay loops in `calibrateX()` and `calibrateZ()` to prevent starving `gantryUpdateTask`.
 
 4. **Multi-Task Atomic Lifecycle Flags**:
    - **Solution**:
-     - [`lib/MqttBridge/src/MqttBridge.h`](file:///d:/Projects/wt32-eth01-base/lib/MqttBridge/src/MqttBridge.h): `std::atomic<bool> connected_{false}`.
-     - [`lib/MqttBridge/src/EthernetLink.h`](file:///d:/Projects/wt32-eth01-base/lib/MqttBridge/src/EthernetLink.h): `std::atomic<bool> link_up_{false}`, `std::atomic<bool> phy_link_connected_{false}`.
-     - [`src/gantry_test_console.cpp`](file:///d:/Projects/wt32-eth01-base/src/gantry_test_console.cpp): Converted session and background worker state flags to `std::atomic<bool>`.
+     - `lib/MqttBridge/src/MqttBridge.h`: `std::atomic<bool> connected_{false}`.
+     - `lib/MqttBridge/src/EthernetLink.h`: `std::atomic<bool> link_up_{false}`, `std::atomic<bool> phy_link_connected_{false}`.
+     - `src/gantry_test_console.cpp`: Converted session and background worker state flags to `std::atomic<bool>`.
 
 ---
 
@@ -42,26 +42,26 @@ All issues were resolved across three structured phases, validated against 28 na
 
 1. **Stack Memory Footprint Reduction**:
    - **Problem**: Explicit messaging and Class 1 functions allocated 4096-byte arrays on the FreeRTOS task stack.
-   - **Solution** in [`lib/EtherNetIP/src/EipSession.h`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipSession.h): Reduced `kMaxFrameSize` from 4096 to 512 bytes, reclaiming 3.5 KiB of stack headroom per task call across `EipSession::transact` and `EipScanner::exchangeOnce`.
+   - **Solution** in `lib/EtherNetIP/src/EipSession.h`: Reduced `kMaxFrameSize` from 4096 to 512 bytes, reclaiming 3.5 KiB of stack headroom per task call across `EipSession::transact` and `EipScanner::exchangeOnce`.
 
 2. **Removal of CPU Busy-Spin Loops**:
    - **Problem**: Sub-millisecond Class 1 pacing in `paceClass1RemainderUs()` utilized a tight `while (esp_timer_get_time() < deadline)` loop that saturated Core 1.
-   - **Solution** in [`lib/EtherNetIP/src/EipScannerTaskInternal.h`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerTaskInternal.h): Replaced the spinloop with `esp_rom_delay_us(rem_us)`.
+   - **Solution** in `lib/EtherNetIP/src/EipScannerTaskInternal.h`: Replaced the spinloop with `esp_rom_delay_us(rem_us)`.
 
 3. **Elimination of Reconnect Heap Churn**:
-   - **Solution** in [`lib/EtherNetIP/src/EipMultiScanner.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipMultiScanner.cpp): Preserved allocated `EipSession` and `EipIoConnection` instances across `disconnect()` calls, avoiding repetitive heap `new`/`delete` fragmentation on link retries.
+   - **Solution** in `lib/EtherNetIP/src/EipMultiScanner.cpp`: Preserved allocated `EipSession` and `EipIoConnection` instances across `disconnect()` calls, avoiding repetitive heap `new`/`delete` fragmentation on link retries.
 
 4. **Decoupled TCP Console Log Sink Lifetimes**:
-   - **Solution** in [`src/gantry_net_console.cpp`](file:///d:/Projects/wt32-eth01-base/src/gantry_net_console.cpp): Replaced passing pointers to stack-allocated variables (`&sink_fd`) with passing `client_fd` by value converted to `void*` (`intptr_t`).
+   - **Solution** in `src/gantry_net_console.cpp`: Replaced passing pointers to stack-allocated variables (`&sink_fd`) with passing `client_fd` by value converted to `void*` (`intptr_t`).
 
 ---
 
 ### Phase 3: Numerical Safety & Resource Lifecycle
 
 1. **Trajectory Mathematical Safety & Division-by-Zero Guards**:
-   - **Solution** in [`lib/Gantry/src/GantryTrajectory.cpp`](file:///d:/Projects/wt32-eth01-base/lib/Gantry/src/GantryTrajectory.cpp): Added `std::isfinite()` and dynamic boundary checks on `start`, `target`, `max_speed`, `acceleration`, and `deceleration` in `calculateProfile()` and guarded divisions by `profile.t_accel` and `profile.t_decel` in `interpolate()`.
+   - **Solution** in `lib/Gantry/src/GantryTrajectory.cpp`: Added `std::isfinite()` and dynamic boundary checks on `start`, `target`, `max_speed`, `acceleration`, and `deceleration` in `calculateProfile()` and guarded divisions by `profile.t_accel` and `profile.t_decel` in `interpolate()`.
 2. **Compiler Warning Cleanup**:
-   - **Solution** in [`lib/EtherNetIP/src/EipScannerConfig.cpp`](file:///d:/Projects/wt32-eth01-base/lib/EtherNetIP/src/EipScannerConfig.cpp): Added `[[maybe_unused]]` to `singleAxisTask` for `-Wunused-function` compliance under multi-axis Kconfig builds.
+   - **Solution** in `lib/EtherNetIP/src/EipScannerConfig.cpp`: Added `[[maybe_unused]]` to `singleAxisTask` for `-Wunused-function` compliance under multi-axis Kconfig builds.
 
 ---
 
@@ -90,7 +90,7 @@ All issues were resolved across three structured phases, validated against 28 na
 
 ## 3. Holistic Multi-Stage Test Cycle (`test_cycle`)
 
-The serial test console command `test_cycle` in [`src/gantry_test_console.cpp`](file:///d:/Projects/wt32-eth01-base/src/gantry_test_console.cpp) was redesigned into a comprehensive 8-stage automated qualification suite:
+The serial test console command `test_cycle` in `src/gantry_test_console.cpp` was redesigned into a comprehensive 8-stage automated qualification suite:
 
 ```
 [Stage 1: Servo Arming] ──> [Stage 2: EIP Bring-Up] ──> [Stage 3: Safety Bounds Check]

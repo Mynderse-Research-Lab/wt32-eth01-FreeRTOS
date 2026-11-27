@@ -3,8 +3,8 @@
 ESP-IDF firmware for the SCHUNK multi-axis gantry pick-and-place motion controller on WT32-ETH01.
 Part of the distributed battery sorting cell:
 - **Motion Bus (W5500 SPI):** Hard real-time EtherNet/IP Class 1 originator ($2\text{ ms}$ RPI) for Kinetix X/Z and Rexroth Theta drives.
-- **Closed Cell Bus (LAN8720 RMII):** High-speed peer-to-peer messaging (CellNet Layer-2 `0x88B5` / Zenoh-DDS) connecting Ubuntu Vision, Conveyor WT32, Gantry, and Raspberry Pi Gateway.
-- **Diagnostics:** UART0 console + secure TCP line console on port `2323`.
+- **Closed Cell Bus (LAN8720 RMII):** High-speed peer-to-peer messaging (CellNet Layer-2 `0x88B5`) connecting Ubuntu Vision, Conveyor WT32, Gantry, and Raspberry Pi Gateway.
+- **Diagnostics:** UART0 console + TCP line console (password) on port `2323`.
 
 **Canonical docs:** see [`docs/INDEX.md`](docs/INDEX.md).
 
@@ -16,7 +16,6 @@ Part of the distributed battery sorting cell:
 | [CellNet Layer-2 Communication Guide](docs/CELL_NET_L2_COMMUNICATION_GUIDE.md) | OSI Layer-2 real-time protocol & deployment manual |
 | [Pick Scheduler Kinematics](docs/PICK_SCHEDULER_KINEMATICS.md) | Authoritative coordinate frames & timing math |
 | [Firmware Review & Optimizations](docs/FIRMWARE_REVIEW_AND_OPTIMIZATIONS.md) | Quality, integrity, and 8-stage verification test cycle |
-| [Development Roadmap](docs/DEVELOPMENT_ROADMAP.md) | Architecture phases & Zenoh-DDS migration |
 
 ## Console
 
