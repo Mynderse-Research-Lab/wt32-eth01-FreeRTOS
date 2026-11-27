@@ -24,7 +24,7 @@ idf.py build
 idf.py -p COM3 flash monitor
 ```
 
-CI runs both lanes on every push and pull request (`.github/workflows/firmware-ci.yml`).
+CI runs both lanes and a Markdown link check on every push and pull request (`.github/workflows/firmware-ci.yml`).
 
 ## Project structure
 
@@ -77,7 +77,7 @@ ctest --test-dir build/host --output-on-failure
 ```
 
 Both must pass before a change is finalized. `.github/workflows/firmware-ci.yml` runs the same
-two commands on every push.
+two commands on every push, and checks every relative link in the Markdown files.
 
 
 ### Adding a host test

@@ -137,3 +137,4 @@
 - Firmware: `include/pick_intercept.h:5`.
 - Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `docs/LOW_LEVEL_GANTRY_CONTROL.md`, `docs/OPEN_ITEMS.md`, `docs/PICK_BENCH_RAMP.md`.
 - Tools: the scripts listed under topic 12.
+- CI: remove the three `--exclude` entries in `.github/workflows/firmware-ci.yml`, which keep the link check from failing on these links meanwhile.

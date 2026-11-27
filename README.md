@@ -63,5 +63,5 @@ You will need a USB–TTL adapter (e.g. Waveshare USB to RS232/RS485/TTL).
 
 ## CI
 
-GitHub Actions (`.github/workflows/firmware-ci.yml`) runs host tests and the
-ESP-IDF build on push / PR.
+GitHub Actions (`.github/workflows/firmware-ci.yml`) runs host tests, the
+ESP-IDF build and a check of the Markdown links on push / PR.
