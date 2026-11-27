@@ -79,7 +79,10 @@ waits one FreeRTOS tick between samples (`vTaskDelayUntil` in
 `theta_trace.cpp`). `CONFIG_FREERTOS_HZ` is 1000 in `idf/sdkconfig.defaults`, so
 that wait is 1 ms. Class 1 refreshes the HCS01 feedback every 2 ms
 (`CONFIG_EIP_THETA_RPI_US` in the same file), so consecutive samples can repeat
-a value.
+a value. Each sample reads the feedback through `EipProcessImage::getFeedback`,
+which takes the process-image mutex that the Class 1 scanner takes to store
+feedback (`EipProcessImage.cpp:37–42`, `EipScanner.cpp:305`,
+`EipMultiScanner.cpp:201`).
 
 A raw dump prints at most 10 samples on a line, at most 300 samples per call,
 and waits 20 ms after each line (`kRawPerLine`, `kRawMaxPerCall`,

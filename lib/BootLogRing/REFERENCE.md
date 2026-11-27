@@ -35,7 +35,9 @@ forwards every line to the previous printer.
 
 The component starts no task. The hook runs on the caller of `esp_log`. The byte
 count is guarded by a FreeRTOS `portMUX_TYPE` spinlock. The frozen flag is an
-atomic.
+atomic. The hook stays installed for the whole uptime: until the ring freezes,
+each line is formatted a second time and copied inside the spinlock; after that,
+each line costs one atomic load before it is forwarded.
 
 ## AppConfig
 
