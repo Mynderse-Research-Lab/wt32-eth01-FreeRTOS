@@ -102,7 +102,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 2. The Class 1 splits, each held until its on-cell soak passes.
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta` and the console decoupling are done. `GantryConsole` waits until G-C7 is decided.
-5. `README.md` and `REFERENCE.md` for the existing libraries.
+5. `README.md` and `REFERENCE.md` for the existing libraries are done.
 
 ## Inventory
 
