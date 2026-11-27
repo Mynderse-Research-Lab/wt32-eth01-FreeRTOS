@@ -41,8 +41,6 @@ Hold keepalive period is 5 ms. Reopen keepalive is `kReopenKeepalivePeriodMs` = 
 | chip-recover backoff | start 1,000 ms, double, cap 5,000 ms | `EipScannerPolicy.h:13–14` |
 | overrun yield | every 8 consecutive overruns | `EipClass1Timing.h:50` |
 
-`docs/LOW_LEVEL_GANTRY_CONTROL.md` still says reconnect idle 2,500 ms, soft misses 3, and a recover cap of 30 s. Those sentences are not this table.
-
 After `kMaxChipRecovers`, `escalateChipRecover` waits 10 s, clears the streak and retries (`EipScannerTaskInternal.h:347–353`). It does not call `esp_restart`. The comment at `EipScannerTask.h:7` still says `esp_restart`.
 
 `ExchangeStatus` (`EipClass1Timing.h:119–123`): `kOk`, `kOutputSendFailed` (chip recover), `kInputMiss` (soft retry).
@@ -65,6 +63,17 @@ This component does not read the stored target IP, RPI or PUU keys. `hcs01_eng_i
 
 `ethlink` and `drv` are console commands in `src/gantry_console_commands.cpp` whose handlers use this library.
 
+## Errors
+
+`ExchangeStatus` above is the result of one Class 1 exchange. `pauseClass1` returns false when Class 1 does not close within its timeout, and `cfg save` then does not save (`src/gantry_console_cfg.cpp:97`). `startScannerTask` returns nothing.
+
+## Usage
+
+```cpp
+// src/main_init_motion.cpp, once w5500.init() has succeeded
+eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus, &eipImageX, &eipImageZ, &eipImageTheta);
+```
+
 ## Documents
 
-`docs/LOW_LEVEL_GANTRY_CONTROL.md` sections 5 and 6. Open items: G-B5, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.
+`docs/LOW_LEVEL_GANTRY_CONTROL.md` sections 5 and 6. Open items: G-A14, G-B5, G-B8, G-B9, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.

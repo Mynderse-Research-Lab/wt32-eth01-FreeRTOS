@@ -2,6 +2,28 @@
 
 Public headers under `lib/W5500/src/`: `W5500.h`, `W5500Hal.h`, `W5500SpiHal.h`, `W5500Socket.h`, `W5500BusMutex.h`, `W5500DeferredLog.h`, `W5500Diag.h`, `W5500Poll.h`.
 
+## API
+
+```cpp
+class W5500 {                     // W5500.h
+public:
+    bool init(const W5500Config& cfg);
+    bool recover();
+    void deinit();
+    bool isLinkUp();
+    uint8_t getVersion();
+    void getMacAddress(uint8_t mac[6]);
+    bool acquireBus();
+    void releaseBus();
+    bool openMacRaw(uint8_t sock = 0);
+    void closeSocket(uint8_t sock = 0);
+    int sendFrame(const uint8_t* data, uint16_t len);
+    int recvFrame(uint8_t* buf, uint16_t bufSize);
+};
+```
+
+`W5500Config` holds the SPI host, the CS, INT, RST, MOSI, MISO and SCLK GPIOs, the SPI clock in Hz, an optional reset callback (`rst_set_level`, `rst_ctx`) and the DMA choice. The socket layer is free functions in `W5500Socket.h` (namespace `w5500`) on a `W5500Hal`: `socketOpen`, `socketClose`, `socketConnect`, `socketListen`, `socketBind`, `socketSend`, `socketSendNoWait`, `socketRecv`, `socketSendTo`, `socketRecvFrom`, `socketRecvFromNonBlocking`, `socketIsConnected`, `socketIsOpen`, `socketRxAvailable`.
+
 ## Chip
 
 `W5500::init`, `recover`, `deinit`, `isLinkUp`. `recover` takes `spiBusMutex`, closes every socket, pulses the reset, and calls `configureAfterReset` (`W5500Init.cpp:271–293`).
@@ -49,6 +71,29 @@ From `W5500Poll.h`:
 ## Console
 
 None in this component. `gaptrace` and `eiptiming` print snapshots this driver captured; the commands live in `src/gantry_console_commands.cpp`.
+
+## AppConfig
+
+None read here. `bootInitMotion` applies the stored keys `eip_spi_khz`, `eip_spi_dma` and `eip_txwr_split` to `W5500Config` before `init`.
+
+## Errors
+
+`init` returns false when the SPI bus or device cannot be set up, or when the chip does not read VERSIONR `0x04` at any tried clock (`W5500Init.cpp:76–138, 216`). `recover` returns false before `init` and when VERSIONR fails again (`W5500Init.cpp:274–289`). The socket calls return a negative value on failure, and the `bool` ones false.
+
+## Usage
+
+```cpp
+// src/main_init_motion.cpp
+static W5500 w5500;
+W5500Config cfg = {};
+cfg.spi_host = W5500_SPI_HOST;
+cfg.cs_gpio = W5500_CS_GPIO;
+cfg.rst_gpio = W5500_RST_GPIO;   // -1: reset through MCP PB7
+cfg.sclk_hz = W5500_SCLK_HZ;
+if (w5500.init(cfg)) {
+    // hand the chip to eip::startScannerTask
+}
+```
 
 ## Documents
 

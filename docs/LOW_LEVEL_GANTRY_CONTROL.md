@@ -502,10 +502,10 @@ From [`EipScannerTaskInternal.h`](../lib/EtherNetIP/src/EipScannerTaskInternal.h
 | Step | Behavior |
 |------|----------|
 | Link gate | Wait `ILinkStatus::isUp()`; settle **300 ms** before FO (avoid ARP INIT→CLOSED) |
-| Soft T→O miss | **Per-axis** streak up to **3** consecutive misses before teardown; soft-miss `ESP_LOGW` rate-limited (~1 Hz) |
-| Hard O→T fail | Disconnect → GPIO **32** hard reset + reconfigure (`recover` under SPI bus mutex) |
-| Recover streak | Cap **3** consecutive recovers; then **`esp_restart()`** |
-| Backoff | Exponential on recover fail (cap 30 s); post-reset settle; reconnect idle **2500 ms** |
+| Soft T→O miss | **Per-axis** streak of **2** consecutive misses before teardown; soft-miss `ESP_LOGW` rate-limited (~1 Hz) |
+| Hard O→T fail | Disconnect → hard reset through MCP PB7 + reconfigure (`recover` under SPI bus mutex) |
+| Recover streak | After **3** consecutive failed recovers, wait 10 s, clear the streak and retry (no restart) |
+| Backoff | Exponential on recover fail from 1 s (cap 5 s); post-reset settle 100 ms; reconnect idle **500 ms** |
 | SENDOK wait | P2P cached dest: deferred to next send; dest-change **10 ms**; TCP still blocking; polling SPI under bus acquire |
 
 ### Failure modes (root cause → fix)
@@ -530,11 +530,11 @@ Distinguish **silent drop** (no keypad fault) from **latched E602**. Same softwa
 | O→T / T→O / config assemblies | 104 / 154 / 191 | `Kinetix5100Assembly.h` / Kconfig |
 | Assembled sizes | 40 B out / 52 B in | same |
 | X/Z RPI | 2000 µs | `CONFIG_EIP_X_RPI_US` (Kinetix FO 0x0112 rejects 1000; polling SPI + drain) |
-| CTM (firmware) | 7 | `makeKinetixConfig` |
-| Soft T→O misses before teardown | 3 | `shouldTeardownAfterInputMisses` |
-| Max chip recovers then restart | 3 | `kMaxChipRecovers` |
+| CTM (firmware) | 2 (timeout = RPI × 4 << 2) | `kClass1ConnectionTimeoutMultiplier` |
+| Soft T→O misses before teardown | 2 | `shouldTeardownAfterInputMisses` |
+| Max chip recovers, then a 10 s wait | 3 | `kMaxChipRecovers` |
 | HoldKA period | ~5 ms | `KeepaliveCtx` |
-| Link settle / reconnect idle | 300 ms / 2500 ms | `EipScannerTaskInternal.h` |
+| Link settle / reconnect idle | 300 ms / 500 ms | `EipScannerTaskInternal.h` |
 | O→T CID seeds | `0x10000001` / `0x10000002` | same |
 | E602 / A603 | `0x0602` / `0x0603` | `KinetixFaultCodes.h` |
 | CPF item types | `0x8002`, `0x00B1` | `CpfItemType` |
@@ -596,7 +596,7 @@ Done predicate (`kArrivalBandMm = 0.5`):
   || (inPositionBand && nearly_stopped)
 ```
 
-`nearly_stopped` = `isMotionStopped()` OR `|actual_speed| ≤ 50` (5.0 RPM in 0.1 RPM units).
+`nearly_stopped` = `isMotionStopped()` OR `|actual_speed| ≤ kNearStopSpeedRef` (8, `GantryEipLinearAxisInternal.h:43`). The unit of `actual_speed` is not settled (G-A14).
 
 Already-there short-circuit: `|here - target| ≤ 0.05 mm` → hold, no StartMotion.  
 `finishMoveHold` clears busy, republishes settle hold, keeps commanded Absolute target (for `puuinfo`).

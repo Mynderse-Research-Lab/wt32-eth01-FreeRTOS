@@ -20,7 +20,7 @@ The ring holds 12,288 bytes (`kRingBytes` in `boot_log_ring.cpp`). A line that w
 
 ## Task and timing
 
-The component starts no task. The hook runs on the caller of `esp_log`. The byte count is guarded by a FreeRTOS `portMUX`. The frozen flag is an atomic.
+The component starts no task. The hook runs on the caller of `esp_log`. The byte count is guarded by a FreeRTOS `portMUX_TYPE` spinlock. The frozen flag is an atomic.
 
 ## AppConfig
 

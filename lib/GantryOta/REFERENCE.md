@@ -64,7 +64,7 @@ In OTA-only mode the heartbeat period is 250 ms (`kHeartbeatMs`), `READY` repeat
 
 ## AppConfig
 
-None. The TCP port and password are arguments. G-B5 includes the stored `ota_port` and `con_pw`, which this component does not read.
+None. The TCP port and password are arguments. The stored `ota_port` and `con_pw` keys have no reader (G-F2); `cfg export` only hides `con_pw`.
 
 ## Errors
 

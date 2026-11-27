@@ -16,7 +16,7 @@ own `README.md` and `REFERENCE.md`.
 - **UART0** — flash and pre-link logs (USB–TTL).
 - **TCP** on LAN8720 — after plant link is up, gantry listens at
   **`10.42.0.100:2323`**. Password / remember TTL editable under menuconfig
-  **TCP gantry console (LAN8720)** (default password `LTU_1932`, 600 s / 4 IPs).
+  **TCP gantry console (LAN8720)** (default password `LTU_1932`, 60 s / 4 IPs).
 
 ```powershell
 ncat 10.42.0.100 2323
@@ -28,7 +28,7 @@ ncat 10.42.0.100 2323
 nc 10.42.0.100 2323
 ```
 
-Details: [LOW_LEVEL §9](docs/LOW_LEVEL_GANTRY_CONTROL.md).
+Details: [LOW_LEVEL §9](docs/LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract).
 
 ## Build & flash (ESP-IDF)
 
@@ -53,11 +53,13 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 You will need a USB–TTL adapter (e.g. Waveshare USB to RS232/RS485/TTL).
 
-1. Power: 5 V to pin 12; GND to board ground and pin 11.
-2. UART: adapter RX0 ↔ WT32 TX0; adapter TX0 ↔ WT32 RX0.
-3. Boot: jumper pin 24 (IO0) to pin 23 (GND).
-4. Reset: briefly ground pin 1 (EN), then remove the IO0 jumper.
-5. Flash, then ground EN again to run normally.
+Pin names are the labels on the pinout below.
+
+1. Power: 5 V to `5V` (pin 12); ground to `GND` (pin 11).
+2. UART: adapter RX ↔ `TXD` (IO1); adapter TX ↔ `RXD` (IO3).
+3. Boot: jumper `IO0` (pin 24) to the `GND` beside it (pin 23).
+4. Reset: briefly ground `EN` (pin 1), then remove the IO0 jumper.
+5. Flash, then ground `EN` again to run normally.
 
 ![WT32-ETH01 pinout](docs/schematics/wt32_eth01_pinout.png)
 

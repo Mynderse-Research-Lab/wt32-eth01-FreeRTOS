@@ -10,11 +10,11 @@ Production motion uses `EipMultiScanner` and `multiAxisTask`. `EipScanner` and `
 
 ## Maturity
 
-Runs on the gantry. G-B5, G-B16, G-B17 and G-B19 are open.
+Runs on the gantry. G-A14, G-B5, G-B8, G-B9, G-B16, G-B17 and G-B19 are open.
 
 ## Dependencies
 
-`W5500`, `Spi3Bus`, and ESP-IDF `esp_driver_gpio`, `esp_timer`, `log`, `freertos`, `lwip` (the HCS01 COMWS client). The component `CMakeLists.txt` is the full list.
+`W5500`, `Spi3Bus`, and ESP-IDF `esp_driver_gpio`, `esp_netif`, `esp_timer`, `log`, `freertos`, `lwip` (the HCS01 COMWS client). The component `CMakeLists.txt` is the full list.
 
 ## Consumers
 
@@ -26,4 +26,4 @@ Registered from `idf/CMakeLists.txt`. Host tests cover encoding, assemblies, the
 
 ## Open items
 
-G-B5, G-B16, G-B17, G-B19.
+G-A14 (the Kinetix speed unit), G-B5, G-B8, G-B9, G-B16, G-B17, G-B19.

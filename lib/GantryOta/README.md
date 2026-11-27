@@ -4,7 +4,7 @@ Writes a firmware image into the passive OTA slot, with the motors off. Two ways
 
 ## Maturity
 
-Matured. N-2 is done, and the feature runs on the gantry.
+Matured, and it runs on the gantry. The gantry side of N-2 is done; N-2 stays open until the supervisor branch `feat/cellnet-ota` is pushed.
 
 ## Dependencies
 
@@ -20,4 +20,4 @@ Registered from `idf/CMakeLists.txt`. The main component lists `GantryOta` in `R
 
 ## Open items
 
-N-2 is done. N-1 records gantry OTA as that item's done part. G-E7 is the link wait in `src/main_init_net.cpp` that decides whether the TCP server starts. C-2 is the conveyor.
+N-2 (gantry side done). N-1 records gantry OTA as that item's done part. G-E7 is the link wait in `src/main_init_net.cpp` that decides whether the TCP server starts. C-2 is the conveyor.

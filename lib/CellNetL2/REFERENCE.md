@@ -47,6 +47,31 @@ Callbacks (`onHeartbeat`, `onVisionDetect`, `onConveyorSpeed`, `onGantryStatus`,
 
 The Linux transport receives its own outgoing frames, and its destructor closes the socket before joining the receive thread. N-2.
 
+## Errors
+
+The `send*` calls return false before `begin` and when the transport does not send the frame. `processIncomingFrame` returns false for a frame that does not parse and counts it in `rx_invalid_frames`. `isReady` is false until `begin` and while the transport reports the link down.
+
+## AppConfig
+
+None.
+
+## Console
+
+None registered by this component.
+
+## Usage
+
+```cpp
+// src/main.cpp
+static CellNet::EspEthL2Transport l2Transport;
+static CellNet::CellNetL2Node l2Node(l2Transport, CellNodeId::GANTRY);
+// src/main_init_net.cpp, after the LAN8720 link is up
+if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNetif()) == ESP_OK &&
+    l2Node.begin()) {
+    // node active
+}
+```
+
 ## Documents
 
 `docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`, `docs/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in `docs/OPEN_ITEMS.md`.

@@ -2,13 +2,29 @@
 
 Public headers are under `lib/SpiDisplay/src/`. `SpiDisplay.h` holds `SpiDisplayConfig` and class `SpiDisplay`. The UI types are `St7789Driver`, `UiInput`, `UiDashboard`, `UiMenu`, `UiEditor`, `UiRebootPrompt` and `UiManager`.
 
+## API
+
+```cpp
+namespace display {
+class UiManager {
+public:
+    static UiManager& instance();
+    bool init(const SpiDisplayConfig& cfg);
+    void pollInput(uint8_t port_b_val);                                // about 100 Hz
+    void update(uint8_t port_b_val, const DashboardTelemetry& telem);  // display rate
+    St7789Driver& getDriver();
+};
+}
+```
+
+`SpiDisplayConfig` (`SpiDisplay.h:18`) holds the MCP handle, the chip-select, DC, RES and backlight pins and the SPI clock. `DashboardTelemetry` (`UiDashboard.h:9`) is what the dashboard shows: positions, the homed and motion flags, the link state.
+
 ## Call contract
 
-`TftUiTask` is the only caller (`src/main_tasks.cpp:51–107`):
+`bootInitIo` calls `UiManager::init` once (`src/main_init_io.cpp:138`), unless `disp_tft_en` is 0. After that the task function `tftUiTask` (task `TftUiTask`, from `src/main_tasks.cpp:53`) is the only caller:
 
 - `UiManager::pollInput(port_b)` every 10 ms.
 - `UiManager::update(port_b, telemetry)` every `1000/15` ms.
-- `UiManager::init` once, from that task.
 
 `UiInput::update` turns port B into `ROTATE_CW`, `ROTATE_CCW`, `PUSH_CLICK` or `BACK_CLICK`. Four quadrature steps make one detent (`UiInput.cpp:47–52`). Push and KO each need two samples (`UiInput.cpp:59–72`).
 
@@ -33,20 +49,37 @@ The menu is built from `ConfigSchema`.
 
 ## Dashboard flags
 
-`[H]` follows `!isBusy()` for each axis. `Plant LAN UP` follows `EthernetLink::isUp()` (G-E7). Both are filled in by `src/main_tasks.cpp` before `update`.
+`[H]` follows `!isBusy()` for each axis, so it marks an idle axis, not a homed one (G-E10). `Plant LAN UP` follows `EthernetLink::isUp()` (G-E7). Both are filled in by `src/main_tasks.cpp` before `update`.
 
 ## AppConfig
 
-The editor reads and writes keys through `AppConfig`. This component does not open NVS itself. `applyBacklight` reads `display_backlight_timeout_s` (`UiManager.cpp:70`).
+The editor reads and writes keys through `AppConfig`. This component does not open NVS itself. `applyBacklight` reads the `disp_bl_to_s` key (field `display_backlight_timeout_s`, `UiManager.cpp:70`).
 
 ## Errors
 
-`St7789Driver` writes do not check the `esp_err_t` from the SPI transfer. `init` can report success after a failed command. G-E6 does not cover that path.
+`St7789Driver` writes do not check the `esp_err_t` from the SPI transfer. `init` can report success after a failed command. G-E9.
 
 ## Console
 
 None. Parameter save and reboot rules for the console are in `src/gantry_console_cfg.cpp`, not here.
 
+## Usage
+
+```cpp
+// boot (src/main_init_io.cpp)
+display::SpiDisplayConfig cfg = {};
+cfg.mcp = gpio_expander_get_mcp_handle();
+cfg.esp_cs_pin = SPI3_CS_TFT_GPIO;
+cfg.mcp_dc_pin = MCP_TFT_DC;
+cfg.mcp_res_pin = MCP_TFT_RES;
+cfg.esp_blk_pin = TFT_BLK_GPIO;
+cfg.clock_hz = SPI3_TFT_CLOCK_HZ;
+display::UiManager::instance().init(cfg);
+// tftUiTask: poll at 100 Hz, redraw at 15 Hz
+display::UiManager::instance().pollInput(port_b);
+display::UiManager::instance().update(port_b, telem);
+```
+
 ## Documents
 
-Screens and the task rates are `src/main_tasks.cpp:51–62`. Open item: G-E6 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.
+The task rates are in `tftUiTask` (`src/main_tasks.cpp`); the screens are `UiManager`, `UiMenu`, `UiEditor` and `UiRebootPrompt`. Open items: G-E6, G-E9, G-E10, G-F9 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.

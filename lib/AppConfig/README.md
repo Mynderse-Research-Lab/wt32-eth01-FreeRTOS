@@ -4,7 +4,7 @@ The stored runtime-parameter set. Values start from compile-time defaults, are o
 
 ## Maturity
 
-Runs on the gantry. G-F7, the boot read path, was fixed and closed on 2026-11-27. G-F8, G-F1, G-F2 and G-B5 are open.
+Runs on the gantry. G-F7, the boot read path, was fixed and closed on 2026-11-27. G-F1, G-F2, G-F8, G-F9 and G-B5 are open.
 
 ## Dependencies
 
@@ -20,4 +20,4 @@ Registered from `idf/CMakeLists.txt`. Host test: `test_app_config`.
 
 ## Open items
 
-G-F1, G-F2, G-F7, G-F8, G-B5.
+G-F1, G-F2, G-F8, G-F9, G-B5.

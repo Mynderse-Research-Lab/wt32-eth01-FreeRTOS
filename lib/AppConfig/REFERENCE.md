@@ -68,7 +68,7 @@ One NVS key, `cfg_set` (`AppConfig.cpp:16`). There is no second slot.
 
 ## Threading
 
-`data()` returns the live struct with no lock (`AppConfig.h:93`). `pendingChanges` and the change lists take `change_mutex_`. Several tasks call `data()` while `load` or `factoryReset` can replace the struct. The row for that sharing is not a separate open item; G-F7 is the boot path.
+`data()` returns the live struct with no lock (`AppConfig.h:93`). `pendingChanges` and the change lists take `change_mutex_`. Several tasks call `data()` while `factoryReset`, from the console or the TFT menu, rewrites the struct in place. G-F9.
 
 ## Console
 
@@ -76,6 +76,24 @@ One NVS key, `cfg_set` (`AppConfig.cpp:16`). There is no second slot.
 
 `cfg <key> [value] | cfg unlock <pw> | cfg lock | cfg passwd <old> <new> | cfg save | cfg export | cfg time | cfg factory | cfg reboot [discard]`
 
+## Errors
+
+The getters and setters return false for an unknown key or a key of another type, and the setters also for a value outside the schema range (`AppConfigAccess.cpp:89–91, 225–227`); `out_reboot_required` is then not written. `saveSet` returns false without a storage backend (`AppConfig.cpp:186`). `requestSave` returns false when no save handler is installed (`AppConfig.cpp:203`). `unlockDeveloperMode` and `changeDeveloperPassword` return false for a null or wrong password.
+
+## Usage
+
+```c
+// boot (src/main_init_io.cpp)
+if (nvs_flash_init() == ESP_OK) {
+    Config::AppConfig::instance().init();
+}
+// any task
+const Config::AppConfigData& cfg = Config::AppConfig::instance().data();
+// console: change one value; `cfg save` writes the set
+bool reboot = false;
+Config::AppConfig::instance().setParamInt("spd_mm_s", 500, reboot);
+```
+
 ## Documents
 
-Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2, G-F8 and G-B5 in `docs/OPEN_ITEMS.md`; G-F7 is closed.
+Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2, G-F8, G-F9 and G-B5 in `docs/OPEN_ITEMS.md`; G-F7 is closed.

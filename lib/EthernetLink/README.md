@@ -6,11 +6,11 @@ This link carries CellNet L2, the TCP console and TCP OTA. EtherNet/IP stays on 
 
 ## Maturity
 
-Runs on the gantry. G-E7 is open and concerns link state. G-B5 covers the stored `eth_ip` key, which this component does not read.
+Runs on the gantry. G-E7 is open and concerns link state. The stored `eth_ip` key has no reader (G-F2).
 
 ## Dependencies
 
-ESP-IDF `esp_eth`, `esp_netif`, `esp_event`, `freertos`, `log`, `espressif__lan87xx` and `nvs_flash`. GPIO and `esp_timer` are private. Addresses come from `include/ethernet_app_config.h`.
+ESP-IDF `esp_eth`, `esp_netif`, `esp_event`, `freertos`, `log`, `espressif__lan87xx` and `nvs_flash`. `esp_driver_gpio` and `esp_timer` are private. Addresses come from `include/ethernet_app_config.h`.
 
 ## Consumers
 
@@ -22,4 +22,4 @@ Registered from `idf/CMakeLists.txt`. There is no host test.
 
 ## Open items
 
-G-E7, G-B5.
+G-E7, G-F2.

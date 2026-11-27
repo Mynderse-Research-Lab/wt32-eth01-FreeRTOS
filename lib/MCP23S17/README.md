@@ -40,7 +40,7 @@ From `include/gantry_app_constants.h:40–71`. The header comment in `MCP23S17.h
 | PB1 | Encoder push |
 | PB2 | Encoder B |
 | PB3 | Encoder A |
-| PB4 | Unused (backlight moved to GPIO17) |
+| PB4 | `MCP_TFT_BLK`: still set as a TFT output and read by a console command, but the backlight is GPIO17 |
 | PB5 | TFT D/C |
 | PB6 | TFT RES |
 | PB7 | W5500 RSTn, active low |

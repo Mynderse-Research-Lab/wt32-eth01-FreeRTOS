@@ -1,51 +1,30 @@
-This directory holds the project's private libraries, each registered as an
-ESP-IDF component.
+This directory holds the project's private libraries. Each one is an ESP-IDF
+component: lib/<Name>/ has a CMakeLists.txt that calls idf_component_register(),
+its sources in src/, a README.md (purpose, maturity, dependencies, consumers,
+tests, open items) and a REFERENCE.md (API, tasks and timing, AppConfig keys,
+errors, console commands, usage).
 
-Each library lives in its own directory ("lib/<YourLibrary>/") and contains a
-CMakeLists.txt that calls idf_component_register(). The top-level project picks
-them up via EXTRA_COMPONENT_DIRS in idf/CMakeLists.txt.
+The firmware project picks them up through EXTRA_COMPONENT_DIRS in
+idf/CMakeLists.txt, and idf/main/CMakeLists.txt lists them in REQUIRES. A
+component exposes its headers through INCLUDE_DIRS and names its own
+dependencies in REQUIRES.
 
-Typical layout:
-
-    |--lib
-    |  |
-    |  |--Gantry
-    |  |  |--src
-    |  |  |   |- Gantry.cpp
-    |  |  |   |- Gantry.h
-    |  |  |- CMakeLists.txt   (idf_component_register: SRCS / INCLUDE_DIRS / REQUIRES)
-    |  |
-    |  |--EtherNetIP
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |  |--W5500
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |  |--BootLogRing
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |  |--GpioExpander
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |  |--ThetaTrace
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |  |--GantryOta
-    |  |  |--src
-    |  |  |- CMakeLists.txt
-    |  |
-    |- README --> THIS FILE
-
-A component exposes its public headers via INCLUDE_DIRS and declares its
-dependencies via REQUIRES. Consumers add the component name to their own
-REQUIRES list to link against it.
+  AppConfig      Stored runtime parameters: one NVS set, the schema, cfg/TFT access
+  BootLogRing    Keeps the first log output after reset for the bootlog command
+  CellNetL2      Raw-Ethernet (0x88B5) cell messages, transports, OTA receiver
+  EtherNetIP     EtherNet/IP and CIP originator: codecs, Class 1 scanner tasks
+  EthernetLink   LAN8720 bring-up, static IP or DHCP, link events
+  Gantry         The motion API: Kinetix X/Z and HCS01 theta axes, homing, paths
+  GantryOta      Firmware updates into the passive OTA slot, over TCP or CellNet
+  GpioExpander   Field I/O, encoder, TFT lines and W5500 reset on the MCP23S17
+  MCP23S17       Driver for the MCP23S17 SPI GPIO expander
+  Spi3Bus        Owns SPI3 (MCP23S17 and TFT) and the Class 1 critical section
+  SpiDisplay     ST7789 TFT and its menu UI
+  ThetaTrace     1 kHz theta move trace and its summary (thtrace)
+  W5500          W5500 driver on SPI2: init, recovery, sockets, bus mutex
 
 Build the whole project from the repo root:
   idf.py -C idf build
 
-See CONTRIBUTING.md and docs/LOW_LEVEL_GANTRY_CONTROL.md for build/flash workflow.
+All documents are listed in docs/INDEX.md; the build and test workflow is in
+CONTRIBUTING.md.

@@ -5,7 +5,8 @@ The motion logic is tested in two complementary ways.
 
 1) Host unit tests (primary regression suite)
 ---------------------------------------------
-Hardware-independent logic (kinematics, trajectory) is compiled natively and
+Hardware-independent logic (kinematics, trajectory, EtherNet/IP and CellNet
+encoding, W5500 sockets, stored parameters, pick math) is compiled natively and
 checked with the Unity framework under test/host/. These run on any machine
 with CMake + a C/C++ compiler - no ESP-IDF, no hardware - and are the source of
 truth for the core math. They also run in CI on every push / pull request.
@@ -31,7 +32,7 @@ Optional line-coverage report (gcovr, no percentage gate):
 That rebuilds with `--coverage -O0`, re-runs ctest, and writes
 `build/host/coverage/index.html` plus `build/host/coverage/summary.txt`.
 Install gcovr first (`pip install gcovr`) if the coverage target reports it
-missing. The two-command gate above stays the CI / commit-hook default.
+missing. The two-command gate above stays the CI default.
 
 2) On-target selftest (prototype convenience)
 ---------------------------------------------

@@ -12,12 +12,12 @@ ESP-IDF `esp_driver_spi`, `esp_driver_gpio`, `esp_timer`, `log` and `freertos`.
 
 ## Consumers
 
-`bootInitMotion` in `src/main_init_motion.cpp` constructs the chip and applies `eip_w5500_spi_khz`, `eip_spi_dma` and `eip_txwr_split` before `init`. `EtherNetIP` is the socket and Class 1 caller. Reset is MCP PB7 (`W5500_RST_GPIO` is passed as -1).
+`bootInitMotion` in `src/main_init_motion.cpp` constructs the chip and applies the stored keys `eip_spi_khz`, `eip_spi_dma` and `eip_txwr_split` before `init`. `EtherNetIP` is the socket and Class 1 caller. Reset is MCP PB7 (`W5500_RST_GPIO` is passed as -1).
 
 ## Build and test
 
-Registered from `idf/CMakeLists.txt`. Host tests: `test_w5500_spi`, `test_w5500_diag`, `test_w5500_poll`, `test_w5500_socket_fastpath`, `test_w5500_deferred_log`.
+Registered from `idf/CMakeLists.txt`. Host tests: `test_w5500_spi`, `test_w5500_diag`, `test_w5500_poll`, `test_w5500_socket_fastpath`, `test_w5500_deferred_log`, and `test_eip_socket_w5500` through the EtherNetIP adapter.
 
 ## Open items
 
-G-B5, G-B15, G-B16, G-B17, G-B18.
+G-B5, G-B16, G-B17, G-B18.

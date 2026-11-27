@@ -37,7 +37,7 @@ On `ETHERNET_EVENT_DISCONNECTED` the handler clears `phy_link_connected_`. It cl
 
 ## Address
 
-With static IP (the default), `configureNetwork` stops DHCP and writes `ETH_STATIC_IP`, `ETH_STATIC_GATEWAY` and `ETH_STATIC_NETMASK` from `include/ethernet_app_config.h`. The defaults file sets the IP to `10.42.0.100`. The stored AppConfig key `eth_ip` is not read. G-B5.
+With static IP (the default), `configureNetwork` stops DHCP and writes `ETH_STATIC_IP`, `ETH_STATIC_GATEWAY` and `ETH_STATIC_NETMASK` from `include/ethernet_app_config.h`. The defaults file sets the IP to `10.42.0.100`. The stored AppConfig key `eth_ip` has no reader. G-F2.
 
 ## Task and timing
 
@@ -55,6 +55,16 @@ None inside this component. The compile-time address macros above are the values
 
 `boottime` (exact match) prints `ethernetBootTimes()` in milliseconds. The command is `cmdBootTime` in `src/gantry_console_commands.cpp`.
 
+## Usage
+
+```cpp
+Network::EthernetLink::enablePhyOscillator();   // bootInitIo
+static Network::EthernetLink ethernetLink;       // app_main
+if (ethernetLink.start() && ethernetLink.waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
+    // bootStartNetwork: TCP console, OTA server, CellNet
+}
+```
+
 ## Documents
 
-Wiring and the plant subnet are in `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-E7 and G-B5 in `docs/OPEN_ITEMS.md`.
+Wiring and the plant subnet are in `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-E7 and G-F2 in `docs/OPEN_ITEMS.md`.

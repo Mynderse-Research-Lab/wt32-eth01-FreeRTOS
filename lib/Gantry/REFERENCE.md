@@ -69,7 +69,7 @@ A switch ahead of the move still aborts it. The second rule lets a move leave a 
 | `kArrivalBandMm` | | 0.5 mm |
 | `kNearStopSpeedRef` | | 8 |
 
-`kNearStopSpeedRef` is 8 (`GantryEipLinearAxisInternal.h:43`). The comment above it says 0.8 RPM. `docs/LOW_LEVEL_GANTRY_CONTROL.md` says the same comparison uses 50. The code value is 8. `Kinetix5100Assembly.h` calls `actual_speed` RPM.
+`kNearStopSpeedRef` is 8 (`GantryEipLinearAxisInternal.h:43`), and the comment above it reads that as 0.8 RPM, while `Kinetix5100Assembly.h:111` calls `actual_speed` RPM. Which unit the drive sends is not settled. G-A14.
 
 `grip` takes `mutex_` and then writes the expander (`GantryMotion.cpp:475–480`). G-D3.
 
@@ -92,6 +92,25 @@ A switch ahead of the move still aborts it. The second rule lets a move leave a 
 
 The test console in `src/gantry_console_*.cpp` is the command surface: `move`, `home`, `calibrate`, `grip`, `stop`, `alarmreset`. This component does not register those commands.
 
+## Errors
+
+`moveTo`, the preload and retract calls and the homing calls return the `GantryError` above. `begin` returns false when the gantry cannot start, and `bootInitMotion` then stops the motion stage (`src/main_init_motion.cpp`).
+
+## Usage
+
+```cpp
+// src/main_init_motion.cpp
+static Gantry::Gantry gantry(std::move(xAxis), std::move(zAxis), std::move(thetaAxis), PIN_GRIPPER);
+gantry.setSafeZHeight(params.gantry_safe_z_height_mm);
+gantry.setRuntimeParams(gantryRuntimeParams(params));
+if (!gantry.begin()) {
+    return;
+}
+// later, motors enabled and axes calibrated
+Gantry::JointConfig target{120.0f, 40.0f, 90.0f};   // x mm, z mm (+down), theta deg
+const GantryError err = gantry.moveTo(target, 300, 90);
+```
+
 ## Documents
 
-`docs/LOW_LEVEL_GANTRY_CONTROL.md` for the drive profile and the path. `GantryKinematics.h` for the transforms. Open items: G-A9, G-A10, G-A11, G-C8, G-C14, G-C15, G-D3, G-F2 in `docs/OPEN_ITEMS.md`.
+`docs/LOW_LEVEL_GANTRY_CONTROL.md` for the drive profile and the path. `GantryKinematics.h` for the transforms. Open items: G-A9, G-A10, G-A11, G-A12, G-A13, G-A14, G-C8, G-C14, G-C15, G-D3, G-F2 in `docs/OPEN_ITEMS.md`.

@@ -2,11 +2,11 @@
 
 ST7789 320×240 TFT on SPI3, and the UI drawn on it: dashboard, parameter menu, value and password editors, reboot prompt, and an About screen. Input is the encoder and two buttons on MCP23S17 port B.
 
-The panel is driven only from `TftUiTask` (core 0, priority 2, stack 4096). That task is created in `src/main_tasks.cpp`.
+`bootInitIo` calls `UiManager::init` once at boot (`src/main_init_io.cpp`). After that the panel is driven only from the `TftUiTask` task (function `tftUiTask`, core 0, priority 2, stack 4096), created in `src/main_tasks.cpp`.
 
 ## Maturity
 
-Runs on the gantry. G-E6 is open and concerns this UI.
+Runs on the gantry. G-E6, G-E9, G-E10 and G-F9 are open and concern this UI.
 
 ## Dependencies
 
@@ -22,4 +22,4 @@ Registered from `idf/CMakeLists.txt`. There is no host test.
 
 ## Open items
 
-G-E6.
+G-E6, G-E9, G-E10, G-F9 (the menu's Factory Reset).
