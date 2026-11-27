@@ -47,6 +47,13 @@ extern "C" void app_main(void) {
         gantryOtaRunCellNetMode(ota_session);  // does not return
         return;
     }
+    // Before the console task starts. Registered tables are searched first.
+    size_t pick_n = 0;
+    gantryConsoleRegisterCommands(gantryConsolePickCommands(&pick_n), pick_n);
+#if CONFIG_GANTRY_SELFTEST
+    size_t selftest_n = 0;
+    gantryConsoleRegisterCommands(gantryConsoleSelfTestCommands(&selftest_n), selftest_n);
+#endif
     // First: keep start-up logs readable from the LAN console ('bootlog').
     bootLogRingInstall();
     ESP_LOGI(TAG, "\n========================================");

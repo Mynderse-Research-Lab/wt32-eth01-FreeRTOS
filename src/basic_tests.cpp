@@ -1,5 +1,7 @@
 #include "basic_tests.h"
 
+#include "gantry_test_console.h"
+
 #include "GantryConfig.h"
 #include "GantryKinematics.h"
 #include "GantryTrajectory.h"
@@ -78,4 +80,25 @@ BasicTestSummary runBasicTests() {
 
   ESP_LOGI(TAG, "Basic tests complete: passed=%d failed=%d", summary.passed, summary.failed);
   return summary;
+}
+
+namespace {
+
+void cmdSelfTest(const GantryTestConsoleConfig*, const char*, const char*) {
+    BasicTestSummary result = runBasicTests();
+    ESP_LOGI("GantryConsole", "Selftest complete: passed=%d failed=%d",
+             result.passed, result.failed);
+}
+
+const GantryConsoleCommand kSelfTestCommands[] = {
+    {"selftest", GantryConsoleMatch::kExact, cmdSelfTest},
+};
+
+}  // namespace
+
+const GantryConsoleCommand* gantryConsoleSelfTestCommands(size_t* count) {
+    if (count != nullptr) {
+        *count = sizeof(kSelfTestCommands) / sizeof(kSelfTestCommands[0]);
+    }
+    return kSelfTestCommands;
 }

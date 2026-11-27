@@ -2,6 +2,7 @@
 #define GANTRY_TEST_CONSOLE_H
 
 #include "Gantry.h"
+#include <stddef.h>
 #include <stdint.h>
 #include "W5500Hal.h"
 
@@ -63,5 +64,32 @@ void gantryTestPrintHelp();
 /** Load the console move profile from the stored parameters. Call once after
  *  AppConfig::init(); a 'cfg' change to the profile reloads it. */
 void gantryConsoleLoadStoredProfile();
+
+// How a command word matches the lowercased line. First match wins.
+enum class GantryConsoleMatch : uint8_t {
+    kExact,   // the whole line
+    kPrefix,  // the line starts with the word
+    kWord,    // the word, then end of line or a space
+    kWordWs,  // the word, then end of line, a space or a tab
+};
+
+using GantryConsoleCommandFn =
+    void (*)(const GantryTestConsoleConfig* cfg, const char* cmd, const char* cmdLower);
+
+struct GantryConsoleCommand {
+    const char* word;
+    GantryConsoleMatch match;
+    GantryConsoleCommandFn run;
+};
+
+// Extra command tables, searched before the console's own table.
+void gantryConsoleRegisterCommands(const GantryConsoleCommand* table, size_t n);
+
+// Pick, belt and trace commands. Defined in gantry_console_cmd_pick.cpp.
+const GantryConsoleCommand* gantryConsolePickCommands(size_t* count);
+
+// selftest. Defined in basic_tests.cpp, which is built only with
+// CONFIG_GANTRY_SELFTEST.
+const GantryConsoleCommand* gantryConsoleSelfTestCommands(size_t* count);
 
 #endif  // GANTRY_TEST_CONSOLE_H

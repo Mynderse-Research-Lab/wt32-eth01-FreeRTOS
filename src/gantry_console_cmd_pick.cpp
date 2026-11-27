@@ -8,6 +8,9 @@
 
 #include "gantry_console_internal.h"
 
+#include "pick_scheduler.h"
+#include "theta_trace.h"
+
 namespace GantryConsoleImpl {
 
 void cmdNetStat(const GantryTestConsoleConfig *, const char *, const char *cmdLower) {
@@ -174,4 +177,40 @@ void cmdBeltCal(const GantryTestConsoleConfig *, const char *, const char *cmdLo
   ESP_LOGI(TAG, "%s", line);
 }
 
+// Registered ahead of the console's own table, so gripmark matches before grip.
+static const GantryConsoleCommand kPickCommands[] = {
+    {"netstat", GantryConsoleMatch::kExact,
+     cmdNetStat},
+    {"netstat reset", GantryConsoleMatch::kExact,
+     cmdNetStat},
+    {"vismark", GantryConsoleMatch::kPrefix,
+     cmdVisMark},
+    {"gripmark", GantryConsoleMatch::kPrefix,
+     cmdGripMark},
+    {"picksim", GantryConsoleMatch::kPrefix,
+     cmdPickSim},
+    {"pickplan", GantryConsoleMatch::kPrefix,
+     cmdPickPlan},
+    {"pickcover", GantryConsoleMatch::kPrefix,
+     cmdPickCover},
+    {"pickcal", GantryConsoleMatch::kPrefix,
+     cmdPickCal},
+    {"beltsim", GantryConsoleMatch::kPrefix,
+     cmdBeltSim},
+    {"ztrace", GantryConsoleMatch::kPrefix,
+     cmdZTrace},
+    {"thtrace", GantryConsoleMatch::kPrefix,
+     cmdThTrace},
+    {"beltcal", GantryConsoleMatch::kPrefix,
+     cmdBeltCal},
+};
+
 }  // namespace GantryConsoleImpl
+
+const GantryConsoleCommand* gantryConsolePickCommands(size_t* count) {
+    if (count != nullptr) {
+        *count = sizeof(GantryConsoleImpl::kPickCommands) /
+                 sizeof(GantryConsoleImpl::kPickCommands[0]);
+    }
+    return GantryConsoleImpl::kPickCommands;
+}

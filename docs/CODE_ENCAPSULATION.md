@@ -79,13 +79,13 @@ A feature is **matured** when it runs on the gantry and has no open blocker or d
 | `gpio_expander.*` | Moved to `lib/GpioExpander`. G-D3 and G-D6 concern `MCP23S17` and `Spi3Bus`, not this wrapper | `lib/GpioExpander` |
 | `theta_trace.*` and `theta_trace_analysis.h` | Moved to `lib/ThetaTrace` | `lib/ThetaTrace` |
 | `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Moved to `lib/GantryOta` (N-2 done) | `lib/GantryOta` |
-| Test console (17 files) with `gantry_net_console.*` | **Not yet.** G-C7 (the `move` speed decision) is open, and the console includes `pick_scheduler.h` | `lib/GantryConsole`, after decoupling |
+| Test console (17 files) with `gantry_net_console.*` | **Not yet.** G-C7 (the `move` speed decision) is open. Pick commands and `selftest` stay in `src/` and register through `gantryConsoleRegisterCommands`; the console no longer includes `pick_scheduler.h` | `lib/GantryConsole`, once G-C7 is decided |
 | Pick scheduler (9 files) | **Not matured.** G-C1, G-C2, G-C11, G-C13 and G-C17 are open | Stays in `src/` |
 
-**Console decoupling** is a separate commit before the console moves:
-1. The command table gains a registration call (`gantryConsoleRegisterCommands(table, n)`).
+**Console decoupling** is done, ahead of moving the console:
+1. `gantryConsoleRegisterCommands(table, n)` adds a table. Registered tables are searched first.
 2. `gantry_console_cmd_pick.cpp` and the `selftest` command stay in `src/` and register from `main`.
-3. After that, the console includes no `src/` header.
+3. The console no longer includes `pick_scheduler.h`. Its own headers stay in `src/` until it moves.
 
 **Each move updates:**
 - `idf/main/CMakeLists.txt` (drop the `src` entries, add the component to REQUIRES)
@@ -101,7 +101,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 1. This record and the library review.
 2. The Class 1 splits, each held until its on-cell soak passes.
 3. Header splits, then test splits.
-4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, the console decoupling, then `GantryConsole` once G-C7 is decided.
+4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta` and the console decoupling are done. `GantryConsole` waits until G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries.
 
 ## Inventory
@@ -382,23 +382,23 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (42 files, 9,857 lines)
+### `src/` (42 files, 9,932 lines)
 
 | File | Lines | Status |
 |---|---:|---|
-| `basic_tests.cpp` | 81 | under 500 |
+| `basic_tests.cpp` | 104 | under 500 |
 | `basic_tests.h` | 11 | under 500 |
 | `gantry_console_bringup.cpp` | 217 | split done (`64040cb`) |
 | `gantry_console_cfg.cpp` | 309 | split done (`64040cb`) |
 | `gantry_console_cip.cpp` | 241 | split done (`64040cb`) |
 | `gantry_console_cmd_motion.cpp` | 247 | split done (`5890c1a`) |
-| `gantry_console_cmd_pick.cpp` | 177 | split done (`5890c1a`) |
+| `gantry_console_cmd_pick.cpp` | 216 | split done (`5890c1a`) |
 | `gantry_console_cmd_profile.cpp` | 208 | split done (`5890c1a`) |
-| `gantry_console_commands.cpp` | 330 | split done (`64040cb`) |
+| `gantry_console_commands.cpp` | 314 | split done (`64040cb`) |
 | `gantry_console_drive_diag.cpp` | 316 | split done (`64040cb`) |
 | `gantry_console_drv.cpp` | 463 | split done (`64040cb`) |
 | `gantry_console_homing.cpp` | 384 | split done (`64040cb`) |
-| `gantry_console_internal.h` | 218 | split done (`64040cb`) |
+| `gantry_console_internal.h` | 212 | split done (`64040cb`) |
 | `gantry_console_io.cpp` | 255 | split done (`64040cb`) |
 | `gantry_console_parse.h` | 193 | under 500 |
 | `gantry_console_session.cpp` | 365 | split done (`64040cb`) |
@@ -410,8 +410,8 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_net_console_auth.cpp` | 182 | split done |
 | `gantry_net_console_internal.h` | 29 | split done |
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
-| `gantry_test_console.h` | 67 | under 500 |
-| `main.cpp` | 105 | split done |
+| `gantry_test_console.h` | 95 | under 500 |
+| `main.cpp` | 112 | split done |
 | `main_init_io.cpp` | 143 | split done |
 | `main_init_motion.cpp` | 231 | split done |
 | `main_init_net.cpp` | 53 | split done |

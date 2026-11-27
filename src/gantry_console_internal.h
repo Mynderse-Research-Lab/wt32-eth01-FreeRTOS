@@ -7,10 +7,6 @@
 
 #include "gantry_test_console.h"
 
-#if CONFIG_GANTRY_SELFTEST
-#include "basic_tests.h"
-#endif
-
 // Console driver auto-tune (Kinetix Mode 1 / HCS01 C1800). Off for this version —
 // re-enable with -DGANTRY_CONSOLE_AUTOTUNE=1 when bring-up needs embedded tuning.
 #ifndef GANTRY_CONSOLE_AUTOTUNE
@@ -39,8 +35,6 @@
 #include "gpio_expander.h"
 #include "gantry_net_console.h"
 #include "gantry_ota.h"
-#include "pick_scheduler.h"
-#include "theta_trace.h"
 #include "boot_log_ring.h"
 #include "AppConfig.h"
 #include "gantry_runtime_params.h"

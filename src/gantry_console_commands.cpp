@@ -13,21 +13,13 @@ namespace GantryConsoleImpl {
 namespace {
 
 using Cfg = GantryTestConsoleConfig;
-using CommandFn = void (*)(const Cfg *cfg, const char *cmd, const char *cmdLower);
+using Match = GantryConsoleMatch;
+using ConsoleCommand = GantryConsoleCommand;
 
-// How a table entry's word matches the lowercased command line.
-enum class Match : uint8_t {
-  kExact,   // the whole line
-  kPrefix,  // the line starts with the word
-  kWord,    // the word, then end of line or a space
-  kWordWs,  // the word, then end of line, a space or a tab
-};
-
-struct ConsoleCommand {
-  const char *word;
-  Match match;
-  CommandFn run;
-};
+constexpr size_t kMaxRegisteredTables = 4;
+const GantryConsoleCommand* g_registered[kMaxRegisteredTables] = {};
+size_t g_registeredCount[kMaxRegisteredTables] = {};
+size_t g_registeredTables = 0;
 
 bool commandMatches(const ConsoleCommand &c, const char *cmdLower) {
   const size_t n = strlen(c.word);
@@ -110,15 +102,9 @@ void cmdBootLog(const GantryTestConsoleConfig *, const char *, const char *) {
       [](const char *line, void *) { ESP_LOGI(TAG, "boot| %s", line); }, nullptr);
 }
 
-#if CONFIG_GANTRY_SELFTEST
-void cmdSelfTest(const GantryTestConsoleConfig *, const char *, const char *) {
-  BasicTestSummary result = runBasicTests();
-  ESP_LOGI(TAG, "Selftest complete: passed=%d failed=%d", result.passed, result.failed);
-}
-#endif  // CONFIG_GANTRY_SELFTEST
-
 // First match wins, so order matters where one word is a prefix of
-// another (gripmark before grip).
+// another. Registered tables are searched first: gripmark is registered
+// there, ahead of grip in this table.
 const ConsoleCommand kCommands[] = {
 #if MCP_DEBUG_CMDS
     {"mcp_pin_mode", Match::kPrefix,
@@ -232,32 +218,8 @@ const ConsoleCommand kCommands[] = {
      cmdBootTime},
     {"flashstall ", Match::kPrefix,
      cmdFlashStall},
-    {"netstat", Match::kExact,
-     cmdNetStat},
-    {"netstat reset", Match::kExact,
-     cmdNetStat},
-    {"vismark", Match::kPrefix,
-     cmdVisMark},
-    {"gripmark", Match::kPrefix,
-     cmdGripMark},
     {"grip", Match::kPrefix,
      cmdGrip},
-    {"picksim", Match::kPrefix,
-     cmdPickSim},
-    {"pickplan", Match::kPrefix,
-     cmdPickPlan},
-    {"pickcover", Match::kPrefix,
-     cmdPickCover},
-    {"pickcal", Match::kPrefix,
-     cmdPickCal},
-    {"beltsim", Match::kPrefix,
-     cmdBeltSim},
-    {"ztrace", Match::kPrefix,
-     cmdZTrace},
-    {"thtrace", Match::kPrefix,
-     cmdThTrace},
-    {"beltcal", Match::kPrefix,
-     cmdBeltCal},
     {"netcon", Match::kExact,
      cmdNetCon},
     {"eiptiming", Match::kExact,
@@ -276,13 +238,22 @@ const ConsoleCommand kCommands[] = {
      cmdAlarmReset},
     {"arst", Match::kExact,
      cmdAlarmReset},
-#if CONFIG_GANTRY_SELFTEST
-    {"selftest", Match::kExact,
-     cmdSelfTest},
-#endif  // CONFIG_GANTRY_SELFTEST
 };
 
 }  // namespace
+
+void registerConsoleCommands(const GantryConsoleCommand* table, size_t n) {
+    if (table == nullptr || n == 0) {
+        return;
+    }
+    if (g_registeredTables >= kMaxRegisteredTables) {
+        ESP_LOGE(TAG, "console command registration full");
+        return;
+    }
+    g_registered[g_registeredTables] = table;
+    g_registeredCount[g_registeredTables] = n;
+    ++g_registeredTables;
+}
 
 void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
   if (cfg == nullptr || cmd == nullptr || strlen(cmd) == 0) {
@@ -317,6 +288,15 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
              "'status' to monitor");
     return;
   }
+  for (size_t i = 0; i < g_registeredTables; ++i) {
+    for (size_t j = 0; j < g_registeredCount[i]; ++j) {
+      const ConsoleCommand& c = g_registered[i][j];
+      if (commandMatches(c, cmdLower)) {
+        c.run(cfg, cmd, cmdLower);
+        return;
+      }
+    }
+  }
   for (const ConsoleCommand &c : kCommands) {
     if (commandMatches(c, cmdLower)) {
       c.run(cfg, cmd, cmdLower);
@@ -328,3 +308,7 @@ void processCommand(const GantryTestConsoleConfig *cfg, const char *cmd) {
 }
 
 }  // namespace GantryConsoleImpl
+
+void gantryConsoleRegisterCommands(const GantryConsoleCommand* table, size_t n) {
+    GantryConsoleImpl::registerConsoleCommands(table, n);
+}
