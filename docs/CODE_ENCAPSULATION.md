@@ -51,19 +51,13 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `eb833ce` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
 | `cf1efaf` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
 | `3d57817` | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
-|  | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
+| `75c8298` | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
+|  | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
 
 ## Planned splits
 
-1 file is over 500 lines. It is a host test.
+No file is over 500 lines.
 
-### Host tests (1)
-
-Each test file splits by test group into several sources for the **same executable**. Gate: the Unity case count per executable is unchanged.
-
-| File | Lines |
-|---|---:|
-| `test/host/test_eip_transport.cpp` | 1,891 |
 ## Organizing matured features into `lib/` components
 
 A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
@@ -415,7 +409,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (67 files, 13,917 lines)
+### `test/host/` (74 files, 14,068 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -444,18 +438,25 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_console_parse.cpp` | 175 | under 500 |
 | `test_coordinated_grasp.cpp` | 150 | under 500 |
 | `test_drivetrain_params.cpp` | 80 | under 500 |
-| `test_eip_axis.cpp` | 141 | split done |
-| `test_eip_axis_alarm.cpp` | 454 | split done |
-| `test_eip_axis_internal.h` | 244 | split done |
-| `test_eip_axis_linear.cpp` | 438 | split done |
-| `test_eip_axis_rotary.cpp` | 373 | split done |
-| `test_eip_axis_units.cpp` | 287 | split done |
+| `test_eip_axis.cpp` | 141 | split done (`75c8298`) |
+| `test_eip_axis_alarm.cpp` | 454 | split done (`75c8298`) |
+| `test_eip_axis_internal.h` | 244 | split done (`75c8298`) |
+| `test_eip_axis_linear.cpp` | 438 | split done (`75c8298`) |
+| `test_eip_axis_rotary.cpp` | 373 | split done (`75c8298`) |
+| `test_eip_axis_units.cpp` | 287 | split done (`75c8298`) |
 | `test_eip_encoding.cpp` | 478 | under 500 |
 | `test_eip_limit_sequence.cpp` | 76 | under 500 |
 | `test_eip_run_time_trace.cpp` | 96 | under 500 |
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
-| `test_eip_transport.cpp` | 1891 | **over 500: planned** |
+| `test_eip_transport.cpp` | 137 | split done |
+| `test_eip_transport_close.cpp` | 449 | split done |
+| `test_eip_transport_drain.cpp` | 212 | split done |
+| `test_eip_transport_internal.h` | 300 | split done |
+| `test_eip_transport_nop.cpp` | 53 | split done |
+| `test_eip_transport_reopen.cpp` | 365 | split done |
+| `test_eip_transport_rigs.h` | 236 | split done |
+| `test_eip_transport_session.cpp` | 290 | split done |
 | `test_gantry_orchestration.cpp` | 159 | split done (`cf1efaf`) |
 | `test_gantry_orchestration_bringup.cpp` | 245 | split done (`cf1efaf`) |
 | `test_gantry_orchestration_fault.cpp` | 348 | split done (`cf1efaf`) |

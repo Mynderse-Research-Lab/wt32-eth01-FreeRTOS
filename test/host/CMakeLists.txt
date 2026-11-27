@@ -139,7 +139,14 @@ add_executable(test_hcs01_comws_client "test_hcs01_comws_client.cpp")
 target_link_libraries(test_hcs01_comws_client PRIVATE ethernet_ip unity)
 add_test(NAME test_hcs01_comws_client COMMAND test_hcs01_comws_client)
 
-add_executable(test_eip_transport "test_eip_transport.cpp")
+add_executable(test_eip_transport
+    "test_eip_transport.cpp"
+    "test_eip_transport_session.cpp"
+    "test_eip_transport_close.cpp"
+    "test_eip_transport_drain.cpp"
+    "test_eip_transport_reopen.cpp"
+    "test_eip_transport_nop.cpp"
+)
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
 
