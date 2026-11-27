@@ -16,7 +16,7 @@
  * ballscrew pitch, or pinion circumference. Drivetrain-specific bookkeeping
  * (belt pulley teeth, belt tooth pitch, ballscrew shaft diameter, etc.) lives
  * in the commissioning notes below and - if the runtime driver needs it - in
- * the corresponding PulseMotor::DrivetrainConfig field inside src/main.cpp.
+ * the corresponding PulseMotor::DrivetrainConfig field inside src/main/main.cpp.
  *
  * Limit semantics:
  *   AXIS_*_HARD_LIMIT_MIN/MAX_*  = mechanical envelope the axis must never
@@ -32,7 +32,7 @@
  *                                  actual limit-switch positions and may be
  *                                  tighter than the hard envelope. See
  *                                  Gantry::calibrate() and the homing task in
- *                                  src/gantry_console_homing.cpp.
+ *                                  src/console/motion/gantry_console_homing.cpp.
  *
  * Scope of this header: kinematic lead, hard-limit envelope, motion caps,
  * position tolerance, kinematic offsets, gripper timing, default profile.

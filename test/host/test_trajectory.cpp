@@ -1,5 +1,5 @@
 // Host unit tests for the trapezoidal trajectory planner. Promoted from the
-// on-target selftest in src/basic_tests.cpp.
+// on-target selftest in src/console/system/basic_tests.cpp.
 
 #include "unity.h"
 
