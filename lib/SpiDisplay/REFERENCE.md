@@ -1,10 +1,16 @@
-*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [SpiDisplay](README.md) › Reference*
-
 # SpiDisplay reference
 
-**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
+*[README](/README.md) › [Knowledge transfer](/docs/KNOWLEDGE_TRANSFER.md) ›
+[Gantry firmware](/GANTRY_FIRMWARE.md) › [Libraries](/lib/README.md) ›
+[SpiDisplay](README.md) › Reference*
 
-Public headers are under `lib/SpiDisplay/src/`. `SpiDisplay.h` holds `SpiDisplayConfig` and class `SpiDisplay`. The UI types are `St7789Driver`, `UiInput`, `UiDashboard`, `UiMenu`, `UiEditor`, `UiRebootPrompt` and `UiManager`.
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key
+or a return value.
+
+Public headers are under `lib/SpiDisplay/src/`. `SpiDisplay.h` holds
+`SpiDisplayConfig` and class `SpiDisplay`. The UI types are `St7789Driver`,
+`UiInput`, `UiDashboard`, `UiMenu`, `UiEditor`, `UiRebootPrompt` and
+`UiManager`.
 
 ## API
 
@@ -21,24 +27,36 @@ public:
 }
 ```
 
-`SpiDisplayConfig` (`SpiDisplay.h:18`) holds the MCP handle, the chip-select, DC, RES and backlight pins and the SPI clock. `DashboardTelemetry` (`UiDashboard.h:9`) is what the dashboard shows: positions, the homed and motion flags, the link state.
+`SpiDisplayConfig` (`SpiDisplay.h:18`) holds the MCP handle, the chip-select,
+DC, RES and backlight pins and the SPI clock. `DashboardTelemetry`
+(`UiDashboard.h:9`) is what the dashboard shows: positions, the homed and motion
+flags, the link state.
 
 ## Call contract
 
-`bootInitIo` calls `UiManager::init` once (`src/main_init_io.cpp:138`), unless `disp_tft_en` is 0. After that the task function `tftUiTask` (task `TftUiTask`, from `src/main_tasks.cpp:53`) is the only caller:
+`bootInitIo` calls `UiManager::init` once (`src/main_init_io.cpp:138`), unless
+`disp_tft_en` is 0. After that the task function `tftUiTask` (task `TftUiTask`,
+from `src/main_tasks.cpp:53`) is the only caller:
 
-- `UiManager::pollInput(port_b)` every 10 ms.
-- `UiManager::update(port_b, telemetry)` every `1000/15` ms.
+-   `UiManager::pollInput(port_b)` every 10 ms.
+-   `UiManager::update(port_b, telemetry)` every `1000/15` ms.
 
-`UiInput::update` turns port B into `ROTATE_CW`, `ROTATE_CCW`, `PUSH_CLICK` or `BACK_CLICK`. Four quadrature steps make one detent (`UiInput.cpp:47–52`). Push and KO each need two samples (`UiInput.cpp:59–72`).
+`UiInput::update` turns port B into `ROTATE_CW`, `ROTATE_CCW`, `PUSH_CLICK` or
+`BACK_CLICK`. Four quadrature steps make one detent (`UiInput.cpp:47–52`). Push
+and KO each need two samples (`UiInput.cpp:59–72`).
 
-Port B bits are `MCP_UI_ENC_KO` (PB0), `MCP_UI_ENC_PUSH` (PB1), `MCP_UI_ENC_B` (PB2) and `MCP_UI_ENC_A` (PB3). See `include/gantry_app_constants.h:64–67`.
+Port B bits are `MCP_UI_ENC_KO` (PB0), `MCP_UI_ENC_PUSH` (PB1), `MCP_UI_ENC_B`
+(PB2) and `MCP_UI_ENC_A` (PB3). See `include/gantry_app_constants.h:64–67`.
 
-TFT chip select is ESP GPIO32 (`SPI3_CS_TFT_GPIO`). The comment at `SpiDisplay.h:11–13` still calls it an MCP pin. Backlight PWM is GPIO17.
+TFT chip select is ESP GPIO32 (`SPI3_CS_TFT_GPIO`). The comment at
+`SpiDisplay.h:11–13` still calls it an MCP pin. Backlight PWM is GPIO17.
 
 ## Locks
 
-Drawing and DC/RES changes go through `spi3::withTft`, which takes the Spi3Bus mutex after Class 1 is idle, then the MCP mutex for DC and RES. A full-screen fill holds that path for the whole transfer. G-D3. Cost of the bus wait is the Spi3Bus budget (8 ms Class 1, 50 ms mutex) plus the SPI transfer itself.
+Drawing and DC/RES changes go through `spi3::withTft`, which takes the Spi3Bus
+mutex after Class 1 is idle, then the MCP mutex for DC and RES. A full-screen
+fill holds that path for the whole transfer. G-D3. Cost of the bus wait is the
+Spi3Bus budget (8 ms Class 1, 50 ms mutex) plus the SPI transfer itself.
 
 ## Actions
 
@@ -53,19 +71,25 @@ The menu is built from `ConfigSchema`.
 
 ## Dashboard flags
 
-`[H]` follows `!isBusy()` for each axis, so it marks an idle axis, not a homed one (G-E10). `Plant LAN UP` follows `EthernetLink::isUp()` (G-E7). Both are filled in by `src/main_tasks.cpp` before `update`.
+`[H]` follows `!isBusy()` for each axis, so it marks an idle axis, not a homed
+one (G-E10). `Plant LAN UP` follows `EthernetLink::isUp()` (G-E7). Both are
+filled in by `src/main_tasks.cpp` before `update`.
 
 ## AppConfig
 
-The editor reads and writes keys through `AppConfig`. This component does not open NVS itself. `applyBacklight` reads the `disp_bl_to_s` key (field `display_backlight_timeout_s`, `UiManager.cpp:70`).
+The editor reads and writes keys through `AppConfig`. This component does not
+open NVS itself. `applyBacklight` reads the `disp_bl_to_s` key (field
+`display_backlight_timeout_s`, `UiManager.cpp:70`).
 
 ## Errors
 
-`St7789Driver` writes do not check the `esp_err_t` from the SPI transfer. `init` can report success after a failed command. G-E9.
+`St7789Driver` writes do not check the `esp_err_t` from the SPI transfer. `init`
+can report success after a failed command. G-E9.
 
 ## Console
 
-None. Parameter save and reboot rules for the console are in `src/gantry_console_cfg.cpp`, not here.
+None. Parameter save and reboot rules for the console are in
+`src/gantry_console_cfg.cpp`, not here.
 
 ## Usage
 
@@ -86,7 +110,8 @@ display::UiManager::instance().update(port_b, telem);
 
 ## Known issues
 
-Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
+items. Not re-checked since; confirm against the code before acting.
 
 | # | Category | Location | Finding | Evidence |
 |---|---|---|---|---|
@@ -96,12 +121,16 @@ Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
 | D7 | cleanup | `UiManager.cpp:34, 40, 44, 77-78` | LEDC calls unchecked; deprecated `ledc_channel_config_t::intr_type` at line 40 | Confirmed |
 | D8 | docs | `SpiDisplay.h:11-13`; `UiManager.cpp:142-143` | The header says the TFT chip select is an MCP pin (it is an ESP GPIO); the About screen hard-codes "ESP32-WROVER / Rev 3" and "v1.0.0 (Production)" | Confirmed; module name Suggested |
 
-**Dead code:** the `SpiDisplay` class (only its config struct is used), `UiManager::getDriver`, `UiEditor::getCurrentParamKey` and `getPasswordResult`, the MCP software-PWM backlight branch, and the two inverted orientations.
+**Dead code:** the `SpiDisplay` class (only its config struct is used),
+`UiManager::getDriver`, `UiEditor::getCurrentParamKey` and `getPasswordResult`,
+the MCP software-PWM backlight branch, and the two inverted orientations.
 
 ## Documents
 
-The task rates are in `tftUiTask` (`src/main_tasks.cpp`); the screens are `UiManager`, `UiMenu`, `UiEditor` and `UiRebootPrompt`. Open items: G-E6, G-E9, G-E10, G-F9 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.
+The task rates are in `tftUiTask` (`src/main_tasks.cpp`); the screens are
+`UiManager`, `UiMenu`, `UiEditor` and `UiRebootPrompt`. Open items: G-E6, G-E9,
+G-E10, G-F9 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.
 
-## Next
+## See also
 
-- **Up:** [SpiDisplay README](README.md), [Libraries](../README.md).
+-   **Up:** [SpiDisplay README](README.md), [Libraries](/lib/README.md).

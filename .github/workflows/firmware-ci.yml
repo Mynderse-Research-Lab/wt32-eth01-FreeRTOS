@@ -58,7 +58,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Relative links only: --offline makes no network requests. The three
+      # Local links only: --offline makes no network requests, and --root-dir
+      # resolves the repository-root links (/lib/...). The three
       # excluded documents were deleted on 2026-11-19 and wait for the new
       # math document (MATH_RELINK_INVENTORY.md). Drop the excludes
       # when those links are repointed.
@@ -67,6 +68,7 @@ jobs:
         with:
           args: >-
             --offline --no-progress
+            --root-dir "$(pwd)"
             --exclude 'PICK_SCHEDULER_KINEMATICS\.md'
             --exclude 'ON_THE_FLY_PICKUP\.md'
             --exclude 'PICK_COORDINATED_GRASP_VALIDATION\.md'

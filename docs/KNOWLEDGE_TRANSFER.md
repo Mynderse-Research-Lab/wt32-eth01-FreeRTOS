@@ -1,31 +1,47 @@
-*[README](../README.md) › Knowledge transfer*
+# Knowledge transfer
 
-# Knowledge Transfer
+*[README](/README.md) › Knowledge transfer*
 
-**Read this when** you are new to the cell, or need to know how its subsystems fit together before going into one of them.
+**Read this when** you are new to the cell, or need to know how its subsystems
+fit together before going into one of them.
 
-**Status:** Living template. Reviewed top to bottom against the code, live logs and project docs on 2026-11-05, at commit `8b59545`.
-**Audience:** Engineers continuing development on the battery sorting cell.
-**Companion docs:** [OPEN_ITEMS.md](OPEN_ITEMS.md), [INDEX.md](INDEX.md), [../CONTRIBUTING.md](../CONTRIBUTING.md).
+**Status:** Living template. Reviewed top to bottom against the code, live logs
+and project docs on 2026-11-05, at commit `8b59545`. **Audience:** Engineers
+continuing development on the battery sorting cell. **Companion docs:**
+[OPEN_ITEMS.md](OPEN_ITEMS.md), [INDEX.md](INDEX.md),
+[../CONTRIBUTING.md](/CONTRIBUTING.md).
 
-This page is the map, not the manual. It says what each subsystem is, how the pieces connect and where the source lives. Details stay in the canonical docs it links to. What is unfinished lives in one live list, [OPEN_ITEMS.md](OPEN_ITEMS.md).
+This page is the map, not the manual. It says what each subsystem is, how the
+pieces connect and where the source lives. Details stay in the canonical docs it
+links to. What is unfinished lives in one live list,
+[OPEN_ITEMS.md](OPEN_ITEMS.md).
 
 ## How to use and maintain this page
 
-1. Read sections 1 to 4 on day one.
-2. Read the section for your subsystem, then follow its **Go deeper** links down to the code docs.
-3. Before starting work, read [Blockers and decisions](OPEN_ITEMS.md#blockers-and-decisions) and your subsystem's open items. Update them in the same commit as your change.
-4. When a fix teaches a lasting rule, add it to the [working rules](#machine-safety-and-working-rules).
+1.  Read sections 1 to 4 on day one.
+2.  Read the section for your subsystem, then follow its **Go deeper** links
+    down to the code docs.
+3.  Before starting work, read
+    [Blockers and decisions](OPEN_ITEMS.md#blockers-and-decisions) and your
+    subsystem's open items. Update them in the same commit as your change.
+4.  When a fix teaches a lasting rule, add it to the
+    [working rules](#machine-safety-and-working-rules).
 
-Item IDs such as G-B2 or C-2 refer to [OPEN_ITEMS.md](OPEN_ITEMS.md). Fields marked `TBD` are gaps to fill in. Appendix A has a blank block for adding a component, or a second gantry.
+Item IDs such as G-B2 or C-2 refer to [OPEN_ITEMS.md](OPEN_ITEMS.md). Fields
+marked `TBD` are gaps to fill in. Appendix A has a blank block for adding a
+component, or a second gantry.
 
 ---
 
 ## 1. What the cell does
 
-The cell sorts batteries off a moving conveyor. Vision reports where a battery is and what it is, the conveyor reports how far the belt has moved, and the gantry intercepts the battery on the moving belt, grips it and drops it in a bin. The supervisor coordinates and gives engineers a way in.
+The cell sorts batteries off a moving conveyor. Vision reports where a battery
+is and what it is, the conveyor reports how far the belt has moved, and the
+gantry intercepts the battery on the moving belt, grips it and drops it in a
+bin. The supervisor coordinates and gives engineers a way in.
 
-**Wiring.** Every cell host plugs into one unmanaged switch. The motion bus is a separate daisy-chain on the gantry's own W5500 port.
+**Wiring.** Every cell host plugs into one unmanaged switch. The motion bus is a
+separate daisy-chain on the gantry's own W5500 port.
 
 ```mermaid
 flowchart TB
@@ -50,7 +66,9 @@ flowchart TB
   G ===|"W5500 .10, own port, never the switch"| X
 ```
 
-**Messages.** Solid arrows are CellNet Layer 2 frames (EtherType 0x88B5), dotted arrows are IP services, and the thick arrow is EtherNet/IP Class 1 on the motion bus. All cell traffic crosses the switch above.
+**Messages.** Solid arrows are CellNet Layer 2 frames (EtherType 0x88B5), dotted
+arrows are IP services, and the thick arrow is EtherNet/IP Class 1 on the motion
+bus. All cell traffic crosses the switch above.
 
 ```mermaid
 flowchart TB
@@ -72,13 +90,19 @@ flowchart TB
 
 **One pick, end to end:**
 
-1. Vision (today, the Gantry team's trigger-sensor workaround) sends `VISION_DETECT` with position, angle, size and class.
-2. The gantry places the part on the belt using `CONVEYOR_SPEED` displacement and the configured vision latency.
-3. The pick scheduler plans the approach and the strike, and moves to the hover pose.
-4. Timers release the Z plunge, fire the grip and start the retract, all timed from the part's arrival.
-5. The gantry carries the part to the bin, opens, and returns to staging.
+1.  Vision (today, the Gantry team's trigger-sensor workaround) sends
+    `VISION_DETECT` with position, angle, size and class.
+2.  The gantry places the part on the belt using `CONVEYOR_SPEED` displacement
+    and the configured vision latency.
+3.  The pick scheduler plans the approach and the strike, and moves to the hover
+    pose.
+4.  Timers release the Z plunge, fire the grip and start the retract, all timed
+    from the part's arrival.
+5.  The gantry carries the part to the bin, opens, and returns to staging.
 
-Maths and timing are in [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md).
+Maths and timing are in
+[PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and
+[ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md).
 
 ## 2. How the subsystems connect
 
@@ -88,16 +112,26 @@ Maths and timing are in [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS
 | Belt position | Conveyor → gantry, supervisor | CellNet L2 | `L2ConveyorSpeedPayload` | Picks held, stale belt |
 | Commands | Supervisor → gantry | CellNet L2 | `CELL_COMMAND` ids 1 to 6 | No response to START |
 | Status | Gantry → supervisor | CellNet L2 | `L2GantryStatusPayload` | `gantry1.online` is false in the supervisor's `/api/state` |
-| Console | Supervisor → gantry | TCP `:2323` | Console contract, [GANTRY_FIRMWARE §5](../GANTRY_FIRMWARE.md#5-console-contract) | Console `busy`; send `stop` |
-| OTA | Supervisor → gantry | CellNet L2 by default ([CELLNET_OTA_PROTOCOL.md](../lib/CellNetL2/CELLNET_OTA_PROTOCOL.md)); TCP `:8032` with `?transport=tcp` | `OTA_*` messages, `CELL_COMMAND` 7 | `/api/ota/status` `message`; `emac_missed` must be 0 |
-| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [Class 1 lifecycle](../lib/EtherNetIP/REFERENCE.md#class-1-lifecycle) | `E602`, `F4009`, `T->O stale` |
+| Console | Supervisor → gantry | TCP `:2323` | Console contract, [GANTRY_FIRMWARE §5](/GANTRY_FIRMWARE.md#5-console-contract) | Console `busy`; send `stop` |
+| OTA | Supervisor → gantry | CellNet L2 by default ([CELLNET_OTA_PROTOCOL.md](/lib/CellNetL2/CELLNET_OTA_PROTOCOL.md)); TCP `:8032` with `?transport=tcp` | `OTA_*` messages, `CELL_COMMAND` 7 | `/api/ota/status` `message`; `emac_missed` must be 0 |
+| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [Class 1 lifecycle](/lib/EtherNetIP/REFERENCE.md#class-1-lifecycle) | `E602`, `F4009`, `T->O stale` |
 | Time | Supervisor → gantry, vision | NTP | `ntp_server` key | `cfg time` shows `no clock` |
 
-Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md). The header is `include/cell_net_l2_protocol.h`, and this repository is its source. The supervisor copies it into its `vendor/cellnet` with its `scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has drifted (C-3).
+Wire format:
+[CELL_NET_L2_COMMUNICATION_GUIDE.md](/lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md).
+The header is `include/cell_net_l2_protocol.h`, and this repository is its
+source. The supervisor copies it into its `vendor/cellnet` with its
+`scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has
+drifted (C-3).
 
-**Direction (decided 2026-11-05):** CellNet L2 is to become the only transport between cell nodes; the OTA and time services above move onto it, OTA first (N-1, N-2). The supervisor web application stays on HTTP, and so does the gantry console on TCP `:2323` (amended 2026-11-15).
+**Direction (decided 2026-11-05):** CellNet L2 is to become the only transport
+between cell nodes; the OTA and time services above move onto it, OTA first
+(N-1, N-2). The supervisor web application stays on HTTP, and so does the gantry
+console on TCP `:2323` (amended 2026-11-15).
 
-**Never connect the motion bus to the cell switch.** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY §3](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md#3-networks--cell-topology) explains the isolation rule.
+**Never connect the motion bus to the cell switch.**
+[EXPECTED_ELECTROMECHANICAL_ASSEMBLY §3](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md#3-networks-and-cell-topology)
+explains the isolation rule.
 
 ## 3. Where everything lives
 
@@ -111,16 +145,20 @@ Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_C
 
 ## 4. First-day setup
 
-Ask the project lead for credentials. **Do not put passwords in docs, scripts or commits.** Tools read `ADSB_DEV_PASS` and `PI_PASS` from the environment.
+Ask the project lead for credentials. **Do not put passwords in docs, scripts or
+commits.** Tools read `ADSB_DEV_PASS` and `PI_PASS` from the environment.
 
 | Step | Command or place | Done means |
 |------|------------------|------------|
 | Reach the cell | A cable into the cell switch. The Pi's DHCP leases `10.42.0.50` to `.80`; a static address goes outside that range | Toolbox opens at `http://10.42.0.1/dev` |
-| Build and test | The quick start in [CONTRIBUTING.md](../CONTRIBUTING.md) | Host tests pass and the image builds |
-| Read the rules | [Working rules](#machine-safety-and-working-rules) below, and [CONTRIBUTING.md](../CONTRIBUTING.md) | You know what not to do |
+| Build and test | The quick start in [CONTRIBUTING.md](/CONTRIBUTING.md) | Host tests pass and the image builds |
+| Read the rules | [Working rules](#machine-safety-and-working-rules) below, and [CONTRIBUTING.md](/CONTRIBUTING.md) | You know what not to do |
 | Read the live log | Toolbox log view, or `/dev/log` | You can see `pick actual` lines |
 
-**Windows gotchas:** a fresh host build directory needs `-G "MinGW Makefiles"` on the first `cmake`, otherwise CMake picks NMake and fails. A PowerShell `python` alias can break ESP-IDF's `export.ps1`; run `Remove-Item alias:python` first.
+**Windows gotchas:** a fresh host build directory needs `-G "MinGW Makefiles"`
+on the first `cmake`, otherwise CMake picks NMake and fails. A PowerShell
+`python` alias can break ESP-IDF's `export.ps1`; run `Remove-Item alias:python`
+first.
 
 ### Machine safety and working rules
 
@@ -146,9 +184,13 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 
 ## 5. Gantry
 
-Moves the end effector on X, Z and theta, intercepts cells, and drops them in the bin. **There is one gantry today, and more are planned** (see G-A1). Copy this section for each new gantry.
+Moves the end effector on X, Z and theta, intercepts cells, and drops them in
+the bin. **There is one gantry today, and more are planned** (see G-A1). Copy
+this section for each new gantry.
 
-**Read:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
+**Read:** [GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md),
+[EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
+[HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
 
 ### 5.1 Axes and mechanics
 
@@ -158,19 +200,26 @@ Moves the end effector on X, Z and theta, intercepts cells, and drops them in th
 | Z, +Z down | SCHUNK Beta 80-SRS ballscrew | Kinetix 2198-E1004-ERS | `192.168.1.21` |
 | Theta, about Z | SCHUNK ERD 04-40-D-H-N | HCS01.1E-W0005-A-03-B-ET-EC | `192.168.1.23` |
 
-Code: `lib/Gantry`, with drive limits and homing at the drive. Y has no actuator; the belt provides it.
+Code: `lib/Gantry`, with drive limits and homing at the drive. Y has no
+actuator; the belt provides it.
 
-No conveyor-height sensor will be used. The conveyor region is set by parameters (`col_x_min_mm`, `col_z_min_mm`).
+No conveyor-height sensor will be used. The conveyor region is set by parameters
+(`col_x_min_mm`, `col_z_min_mm`).
 
-**Go deeper:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), the [Gantry library](../lib/Gantry/README.md).
+**Go deeper:**
+[EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
+the [Gantry library](/lib/Gantry/README.md).
 
 **Open items:** [G-A in OPEN_ITEMS.md](OPEN_ITEMS.md#g-a-axes-and-mechanics).
 
 ### 5.2 Motion bus (W5500, EtherNet/IP)
 
-WIZ850io on SPI2 runs the originator: Class 1 at a 2 ms RPI, timeout 16 × RPI = 32 ms. Code: `lib/EtherNetIP`, `lib/W5500`. Any stall over 32 ms drops the drives.
+WIZ850io on SPI2 runs the originator: Class 1 at a 2 ms RPI, timeout 16 × RPI =
+32 ms. Code: `lib/EtherNetIP`, `lib/W5500`. Any stall over 32 ms drops the
+drives.
 
-**EtherNet/IP background for the items below.** The gantry is the originator and the drives are targets.
+**EtherNet/IP background for the items below.** The gantry is the originator and
+the drives are targets.
 
 | Concept | What it means | On this machine | Source |
 |---------|---------------|-----------------|--------|
@@ -188,51 +237,98 @@ WIZ850io on SPI2 runs the originator: Class 1 at a 2 ms RPI, timeout 16 × RPI =
 | Device capacity | Recommended, not required: 3 concurrent encapsulation sessions and 3 TCP connections reserved for CIP on any device, and 2 simultaneous Class 1 connections on an adapter | The drives' real limits are not verified | PUB00070, §1.2 p. 1, §2.1 p. 3, §2.2 p. 3, §5.2 p. 9 |
 | `E602` | Kinetix fault, control connection lost | Seen on Class 1 loss | Repo only, `KinetixFaultCodes.h`. Not found in the manual's text search |
 
-Vol 1 and Vol 2 above are The CIP Networks Library: Volume 1, Common Industrial Protocol, Edition 3.3, November 2007 (ODVA PUB00001), and Volume 2, EtherNet/IP Adaptation of CIP, Edition 1.18, November 2014 (ODVA PUB00002). They are the authority here, and neither is in this repository. The terms on p. iii of Vol 2 allow one copy on one personal computer and prohibit other electronic copies and postings. Vol 1 is all rights reserved, with permission to reproduce excerpts only from ODVA. The copies cited here came from public archives (archive.org), Vol 2 as OCR text, so confirm anything load-bearing on the drives or against a copy from ODVA.
+Vol 1 and Vol 2 above are The CIP Networks Library: Volume 1, Common Industrial
+Protocol, Edition 3.3, November 2007 (ODVA PUB00001), and Volume 2, EtherNet/IP
+Adaptation of CIP, Edition 1.18, November 2014 (ODVA PUB00002). They are the
+authority here, and neither is in this repository. The terms on p. iii of Vol 2
+allow one copy on one personal computer and prohibit other electronic copies and
+postings. Vol 1 is all rights reserved, with permission to reproduce excerpts
+only from ODVA. The copies cited here came from public archives (archive.org),
+Vol 2 as OCR text, so confirm anything load-bearing on the drives or against a
+copy from ODVA.
 
-Both editions are old. Our Vol 1 predates our Vol 2 by seven years, and section numbers have moved: Vol 2 cites the multiplier as §3-5.5.1.6 and Forward_Close as §3-5.5.4, while our Vol 1 has them at §3-5.5.1.5 and §3-5.5.3. PUB00070 cites Vol 2 Ed. 1.20, so check a newer edition before relying on a detail that may have changed.
+Both editions are old. Our Vol 1 predates our Vol 2 by seven years, and section
+numbers have moved: Vol 2 cites the multiplier as §3-5.5.1.6 and Forward_Close
+as §3-5.5.4, while our Vol 1 has them at §3-5.5.1.5 and §3-5.5.3. PUB00070 cites
+Vol 2 Ed. 1.20, so check a newer edition before relying on a detail that may
+have changed.
 
-The other ODVA documents in the [vendor catalog](../driver_datasheets_and_calculations/INDEX.md) are overviews or recommendations, and PUB00213 says it does not replace the specification. The Vol 1 and Vol 2 references in `lib/EtherNetIP` comments have been checked against these editions.
+The other ODVA documents in the
+[vendor catalog](/driver_datasheets_and_calculations/INDEX.md) are overviews or
+recommendations, and PUB00213 says it does not replace the specification. The
+Vol 1 and Vol 2 references in `lib/EtherNetIP` comments have been checked
+against these editions.
 
-**Go deeper:** [GANTRY_FIRMWARE §4](../GANTRY_FIRMWARE.md#4-one-move-end-to-end), the [EtherNetIP](../lib/EtherNetIP/README.md) and [W5500](../lib/W5500/README.md) libraries.
+**Go deeper:** [GANTRY_FIRMWARE §4](/GANTRY_FIRMWARE.md#4-one-move-end-to-end),
+the [EtherNetIP](/lib/EtherNetIP/README.md) and [W5500](/lib/W5500/README.md)
+libraries.
 
-**Open items:** [G-B in OPEN_ITEMS.md](OPEN_ITEMS.md#g-b-motion-bus-w5500-ethernetip).
+**Open items:**
+[G-B in OPEN_ITEMS.md](OPEN_ITEMS.md#g-b-motion-bus-w5500-ethernetip).
 
 ### 5.3 Pick scheduler
 
-Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them), `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main_init_motion.cpp:163`).
+Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the
+other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them),
+`include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run
+at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by
+default), applied at boot (`main_init_motion.cpp:163`).
 
-The pick model, read from the code, is in [GANTRY_FIRMWARE §6](../GANTRY_FIRMWARE.md#pick-model-until-the-math-document) until the math document replaces it.
+The pick model, read from the code, is in
+[GANTRY_FIRMWARE §6](/GANTRY_FIRMWARE.md#pick-model-until-the-math-document)
+until the math document replaces it.
 
-**Go deeper:** [GANTRY_FIRMWARE §6](../GANTRY_FIRMWARE.md#6-the-pick-path).
+**Go deeper:** [GANTRY_FIRMWARE §6](/GANTRY_FIRMWARE.md#6-the-pick-path).
 
 **Open items:** [G-C in OPEN_ITEMS.md](OPEN_ITEMS.md#g-c-pick-scheduler).
 
 ### 5.4 Gripper and field I/O
 
-SCHUNK KGG 100-80 pneumatic gripper, driven through an MCP23S17 output (PA0) and a relay-isolated 24 V valve, on SPI3 shared with the TFT. Air regulator at 6 bar. Code: `lib/MCP23S17`, `lib/Spi3Bus`, `GantryEndEffector`.
+SCHUNK KGG 100-80 pneumatic gripper, driven through an MCP23S17 output (PA0) and
+a relay-isolated 24 V valve, on SPI3 shared with the TFT. Air regulator at 6
+bar. Code: `lib/MCP23S17`, `lib/Spi3Bus`, `GantryEndEffector`.
 
-Two locks guard SPI3: the MCP23S17 mutex, whose waiters give up after 8 ms, and the SPI3 bus mutex, 50 ms. The gripper write, the inputs and the MCP23S17 health check all take the MCP23S17 mutex.
+Two locks guard SPI3: the MCP23S17 mutex, whose waiters give up after 8 ms, and
+the SPI3 bus mutex, 50 ms. The gripper write, the inputs and the MCP23S17 health
+check all take the MCP23S17 mutex.
 
-**Go deeper:** the [GpioExpander](../lib/GpioExpander/README.md) and [MCP23S17](../lib/MCP23S17/README.md) libraries, [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md).
+**Go deeper:** the [GpioExpander](/lib/GpioExpander/README.md) and
+[MCP23S17](/lib/MCP23S17/README.md) libraries,
+[HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md).
 
-**Open items:** [G-D in OPEN_ITEMS.md](OPEN_ITEMS.md#g-d-gripper-field-io-and-panel).
+**Open items:**
+[G-D in OPEN_ITEMS.md](OPEN_ITEMS.md#g-d-gripper-field-io-and-panel).
 
 ### 5.5 Controller, cell network and tools
 
-WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`, `src/gantry_test_console.cpp`, `lib/GantryOta`. Flash with `python tools/supervisor_ota.py --host 10.42.0.1`, which goes over CellNet L2 by default; add `--transport tcp` for the TCP route.
+WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP
+console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`,
+`src/gantry_test_console.cpp`, `lib/GantryOta`. Flash with
+`python tools/supervisor_ota.py --host 10.42.0.1`, which goes over CellNet L2 by
+default; add `--transport tcp` for the TCP route.
 
-**Class 1 diagnostics.** `gaptrace` prints the last Class 1 gap of 10 ms or more: where the time went (exchange, receive drain, pace) and the CPU milliseconds of every task, from FreeRTOS run-time stats. Do not trace with a FreeRTOS tick hook: one stalled boot whenever the LAN8720 came up.
+**Class 1 diagnostics.** `gaptrace` prints the last Class 1 gap of 10 ms or
+more: where the time went (exchange, receive drain, pace) and the CPU
+milliseconds of every task, from FreeRTOS run-time stats. Do not trace with a
+FreeRTOS tick hook: one stalled boot whenever the LAN8720 came up.
 
-**Go deeper:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), the [EthernetLink](../lib/EthernetLink/README.md) and [CellNetL2](../lib/CellNetL2/README.md) libraries, [tools/README.md](../tools/README.md).
+**Go deeper:** [GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md), the
+[EthernetLink](/lib/EthernetLink/README.md) and
+[CellNetL2](/lib/CellNetL2/README.md) libraries,
+[tools/README.md](/tools/README.md).
 
-**Open items:** [G-E in OPEN_ITEMS.md](OPEN_ITEMS.md#g-e-controller-cell-network-and-tools).
+**Open items:**
+[G-E in OPEN_ITEMS.md](OPEN_ITEMS.md#g-e-controller-cell-network-and-tools).
 
 ### 5.6 Runtime parameters
 
-One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference: [GANTRY_FIRMWARE §14](../GANTRY_FIRMWARE.md#7-runtime-parameters).
+One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only;
+`cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used
+only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference:
+[GANTRY_FIRMWARE §14](/GANTRY_FIRMWARE.md#7-runtime-parameters).
 
-**Go deeper:** [GANTRY_FIRMWARE §7](../GANTRY_FIRMWARE.md#7-runtime-parameters), the [AppConfig library](../lib/AppConfig/README.md).
+**Go deeper:** [GANTRY_FIRMWARE §7](/GANTRY_FIRMWARE.md#7-runtime-parameters),
+the [AppConfig library](/lib/AppConfig/README.md).
 
 **Open items:** [G-F in OPEN_ITEMS.md](OPEN_ITEMS.md#g-f-runtime-parameters).
 
@@ -240,9 +336,13 @@ One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `
 
 ## 6. Vision
 
-**Owned entirely by the Computer Science team.** Vision finds and classifies cells and sends `VISION_DETECT`.
+**Owned entirely by the Computer Science team.** Vision finds and classifies
+cells and sends `VISION_DETECT`.
 
-The ML model is not ready yet. So that development does not stall, the Gantry team uses a workaround: a 1D sensor on the vision PC's Arduino fires one fixed 9V frame, the gantry takes X from `batt_x`, and all testing is 9V only. The workaround is not part of the vision system.
+The ML model is not ready yet. So that development does not stall, the Gantry
+team uses a workaround: a 1D sensor on the vision PC's Arduino fires one fixed
+9V frame, the gantry takes X from `batt_x`, and all testing is 9V only. The
+workaround is not part of the vision system.
 
 | Component | Detail | Location |
 |-----------|--------|----------|
@@ -251,9 +351,12 @@ The ML model is not ready yet. So that development does not stall, the Gantry te
 | Trigger sensor (Gantry team workaround) | Sharp GP2Y0A21YK0F on an Arduino, 130 mm upstream of camera centre | On the rig |
 | Frame sender (Gantry team workaround) | Reads the Arduino over serial and sends the frame | `~/vision_sim/simulate-vision-output.py` |
 
-**Trigger sensor workaround.** Chain latency is set in `vis_lat_ms`, measured with a Saleae capture: about 36 ms with the sensor delay. Rig offsets sit in code (G-C5).
+**Trigger sensor workaround.** Chain latency is set in `vis_lat_ms`, measured
+with a Saleae capture: about 36 ms with the sensor delay. Rig offsets sit in
+code (G-C5).
 
-**Read:** [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md).
+**Read:**
+[CELL_NET_L2_COMMUNICATION_GUIDE.md](/lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md).
 
 **Open items:** [V in OPEN_ITEMS.md](OPEN_ITEMS.md#vision).
 
@@ -261,7 +364,9 @@ The ML model is not ready yet. So that development does not stall, the Gantry te
 
 ## 7. Conveyor
 
-Carries cells past the gantry and reports belt position. The gantry treats `displacement_m` as the belt position; `speed_mm_s` only projects between samples. Recent running speed is about 290 mm/s.
+Carries cells past the gantry and reports belt position. The gantry treats
+`displacement_m` as the belt position; `speed_mm_s` only projects between
+samples. Recent running speed is about 290 mm/s.
 
 | Component | Detail | Location |
 |-----------|--------|----------|
@@ -271,7 +376,8 @@ Carries cells past the gantry and reports belt position. The gantry treats `disp
 | Display | 16x2 I2C LCD, PCF8574 at `0x27` | Conveyor WT32 |
 | OTA | HTTP on `:8080`: `tools/ota_update.py <conveyor IP> <app .bin>` from a PC on the cell switch | Conveyor WT32 |
 
-**Read:** that repository's `README.md`, `docs/architecture.md`, `docs/hardware.md`.
+**Read:** that repository's `README.md`, `docs/architecture.md`,
+`docs/hardware.md`.
 
 **Open items:** [C in OPEN_ITEMS.md](OPEN_ITEMS.md#conveyor).
 
@@ -279,7 +385,9 @@ Carries cells past the gantry and reports belt position. The gantry treats `disp
 
 ## 8. Supervisor
 
-Raspberry Pi, CellNet node `0x04`. Sends heartbeats and `CELL_COMMAND`, records traffic, runs the dashboard and developer toolbox, relays the gantry console, runs OTA uploads, and serves time.
+Raspberry Pi, CellNet node `0x04`. Sends heartbeats and `CELL_COMMAND`, records
+traffic, runs the dashboard and developer toolbox, relays the gantry console,
+runs OTA uploads, and serves time.
 
 | Component | Detail | Location |
 |-----------|--------|----------|
@@ -289,9 +397,14 @@ Raspberry Pi, CellNet node `0x04`. Sends heartbeats and `CELL_COMMAND`, records 
 | `chrony` | NTP server for `10.42.0.0/24`; replaced `systemd-timesyncd` on 2026-10-30 | `/etc/chrony/conf.d/gantry-cell.conf` |
 | Web UI | `index.html` dashboard, `dev.html` toolbox: console, motion, offsets, parameter download, upload and save, firmware | `/usr/local/share/adsb-cell`, source `~/ADSB-PI-base/web` |
 
-Static web files take effect without a restart. Build the service with `scripts/build.sh`. The repository's `README.md` has the deploy steps; log each deploy in its `docs/DEPLOYED_STATE.md`. The supervisor stays in its own repository, never merged into this one. `D:\Projects\ADSB-PI-base` is an old copy; do not edit it.
+Static web files take effect without a restart. Build the service with
+`scripts/build.sh`. The repository's `README.md` has the deploy steps; log each
+deploy in its `docs/DEPLOYED_STATE.md`. The supervisor stays in its own
+repository, never merged into this one. `D:\Projects\ADSB-PI-base` is an old
+copy; do not edit it.
 
-**Read:** in the supervisor repository, `README.md`, `docs/NETWORK.md`, `docs/INTEGRATION_WT32.md`, `docs/DEPLOYED_STATE.md`.
+**Read:** in the supervisor repository, `README.md`, `docs/NETWORK.md`,
+`docs/INTEGRATION_WT32.md`, `docs/DEPLOYED_STATE.md`.
 
 **Open items:** [S in OPEN_ITEMS.md](OPEN_ITEMS.md#supervisor).
 
@@ -299,9 +412,13 @@ Static web files take effect without a restart. Build the service with `scripts/
 
 ## 9. Repository and documentation
 
-The reading path runs from the [README](../README.md) through this page to [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), [lib/README.md](../lib/README.md) and each library's README and REFERENCE. The doc index is [INDEX.md](INDEX.md), and the engineering rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The reading path runs from the [README](/README.md) through this page to
+[GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md), [lib/README.md](/lib/README.md) and
+each library's README and REFERENCE. The doc index is [INDEX.md](INDEX.md), and
+the engineering rules are in [CONTRIBUTING.md](/CONTRIBUTING.md).
 
-**Open items:** [X in OPEN_ITEMS.md](OPEN_ITEMS.md#repository-and-documentation).
+**Open items:**
+[X in OPEN_ITEMS.md](OPEN_ITEMS.md#repository-and-documentation).
 
 ---
 
@@ -327,10 +444,13 @@ What it does, in one or two sentences.
 **Open items:** [P in OPEN_ITEMS.md](OPEN_ITEMS.md#section-anchor).
 ```
 
-Then give the component an ID prefix and its own section in [OPEN_ITEMS.md](OPEN_ITEMS.md), and point the link above at it.
+Then give the component an ID prefix and its own section in
+[OPEN_ITEMS.md](OPEN_ITEMS.md), and point the link above at it.
 
-## Next
+## See also
 
-- **Down:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), how the gantry firmware works.
-- **Up:** [README](../README.md).
-- **Also:** [open items](OPEN_ITEMS.md), [contributing](../CONTRIBUTING.md), [doc index](INDEX.md).
+-   **Down:** [GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md), how the gantry firmware
+    works.
+-   **Up:** [README](/README.md).
+-   **Also:** [open items](OPEN_ITEMS.md), [contributing](/CONTRIBUTING.md),
+    [doc index](INDEX.md).

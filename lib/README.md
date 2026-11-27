@@ -1,10 +1,16 @@
-*[README](../README.md) › [Knowledge transfer](../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../GANTRY_FIRMWARE.md) › Libraries*
-
 # Libraries
 
-**Read this when** you are looking for the library that does a job, before opening its README.
+*[README](/README.md) › [Knowledge transfer](/docs/KNOWLEDGE_TRANSFER.md) ›
+[Gantry firmware](/GANTRY_FIRMWARE.md) › Libraries*
 
-Each folder is an ESP-IDF component: a `CMakeLists.txt`, the code in `src/`, a `README.md` (what it does, where it sits, who uses it, tests, open items) and a `REFERENCE.md` (API, timing, keys, errors, console commands, usage). The firmware finds them through `EXTRA_COMPONENT_DIRS` in `idf/CMakeLists.txt`, and `idf/main/CMakeLists.txt` lists them in `REQUIRES`.
+**Read this when** you are looking for the library that does a job, before
+opening its README.
+
+Each folder is an ESP-IDF component: a `CMakeLists.txt`, the code in `src/`, a
+`README.md` (what it does, where it sits, who uses it, tests, open items) and a
+`REFERENCE.md` (API, timing, keys, errors, console commands, usage). The
+firmware finds them through `EXTRA_COMPONENT_DIRS` in `idf/CMakeLists.txt`, and
+`idf/main/CMakeLists.txt` lists them in `REQUIRES`.
 
 | Layer | Library | What it does |
 |---|---|---|
@@ -22,7 +28,8 @@ Each folder is an ESP-IDF component: a `CMakeLists.txt`, the code in `src/`, a `
 |  | [ThetaTrace](ThetaTrace/README.md) | 1 kHz theta move trace and its summary (`thtrace`) |
 |  | [BootLogRing](BootLogRing/README.md) | Keeps the first log output after reset for `bootlog` |
 
-## Next
+## See also
 
-- **Down:** open a library's README from the table.
-- **Up:** [Gantry firmware](../GANTRY_FIRMWARE.md), how the libraries work together.
+-   **Down:** open a library's README from the table.
+-   **Up:** [Gantry firmware](/GANTRY_FIRMWARE.md), how the libraries work
+    together.

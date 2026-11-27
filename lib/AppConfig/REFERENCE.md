@@ -1,10 +1,15 @@
-*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [AppConfig](README.md) › Reference*
-
 # AppConfig reference
 
-**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
+*[README](/README.md) › [Knowledge transfer](/docs/KNOWLEDGE_TRANSFER.md) ›
+[Gantry firmware](/GANTRY_FIRMWARE.md) › [Libraries](/lib/README.md) ›
+[AppConfig](README.md) › Reference*
 
-Public headers: `lib/AppConfig/src/AppConfig.h`, `AppConfigData.h`, `ConfigSchema.h`, `ConfigSet.h`, `ConfigStorage.h`, `NvsStorage.h`, `MemoryStorage.h`. Namespace `Config`.
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key
+or a return value.
+
+Public headers: `lib/AppConfig/src/AppConfig.h`, `AppConfigData.h`,
+`ConfigSchema.h`, `ConfigSet.h`, `ConfigStorage.h`, `NvsStorage.h`,
+`MemoryStorage.h`. Namespace `Config`.
 
 ## API
 
@@ -39,7 +44,9 @@ void lockDeveloperMode();
 bool changeDeveloperPassword(const char* old_pw, const char* new_pw);
 ```
 
-`init` with a null storage builds `NvsStorage`. `factoryReset` reloads compile-time defaults in RAM and does not write NVS. `requestSave` calls the handler set by `setSaveHandler` when one is installed.
+`init` with a null storage builds `NvsStorage`. `factoryReset` reloads
+compile-time defaults in RAM and does not write NVS. `requestSave` calls the
+handler set by `setSaveHandler` when one is installed.
 
 ## Set format
 
@@ -56,33 +63,50 @@ One NVS key, `cfg_set` (`AppConfig.cpp:16`). There is no second slot.
 | `payload_len`, `param_count` | bytes and record count after the header |
 | `format` | `kConfigSetFormat` = 1 |
 
-`kConfigSetMaxBytes` is 2,048 (`ConfigSet.h:19`). A record key is `configKeyHash` of the name. `dev_pw` is read and written with the set (`AppConfigParamIo.cpp:212, 370`) and is not a `ConfigSchema` row.
+`kConfigSetMaxBytes` is 2,048 (`ConfigSet.h:19`). A record key is
+`configKeyHash` of the name. `dev_pw` is read and written with the set
+(`AppConfigParamIo.cpp:212, 370`) and is not a `ConfigSchema` row.
 
 ## Boot and save
 
-`load` (`AppConfig.cpp:98–138`) always starts from `loadDefaults`. `readBlob` results:
+`load` (`AppConfig.cpp:98–138`) always starts from `loadDefaults`. `readBlob`
+results:
 
-- `kOk` and a hash that matches: the payload is applied.
-- `kOk` and a hash or length that does not match, or `kError`: `set_damaged_` is set and the function returns without `writeSet`. G-F7.
-- a missing key is not damaged. The following `writeSet` stores the defaults plus any leftover per-key values.
+-   `kOk` and a hash that matches: the payload is applied.
+-   `kOk` and a hash or length that does not match, or `kError`: `set_damaged_`
+    is set and the function returns without `writeSet`. G-F7.
+-   a missing key is not damaged. The following `writeSet` stores the defaults
+    plus any leftover per-key values.
 
-`setParamFloat` rejects a value outside the schema range. Both comparisons are false for a NaN, so a NaN is stored (`AppConfigAccess.cpp:227`, `AppConfigText.cpp:162–168`). G-F8.
+`setParamFloat` rejects a value outside the schema range. Both comparisons are
+false for a NaN, so a NaN is stored (`AppConfigAccess.cpp:227`,
+`AppConfigText.cpp:162–168`). G-F8.
 
 `formatParamValue` prints a float with `%.2f` (`AppConfigText.cpp:92`).
 
 ## Threading
 
-`data()` returns the live struct with no lock (`AppConfig.h:93`). `pendingChanges` and the change lists take `change_mutex_`. Several tasks call `data()` while `factoryReset`, from the console or the TFT menu, rewrites the struct in place. G-F9.
+`data()` returns the live struct with no lock (`AppConfig.h:93`).
+`pendingChanges` and the change lists take `change_mutex_`. Several tasks call
+`data()` while `factoryReset`, from the console or the TFT menu, rewrites the
+struct in place. G-F9.
 
 ## Console
 
-`cfg` is handled in `src/gantry_console_cfg.cpp`, not in this component. The help line is:
+`cfg` is handled in `src/gantry_console_cfg.cpp`, not in this component. The
+help line is:
 
 `cfg <key> [value] | cfg unlock <pw> | cfg lock | cfg passwd <old> <new> | cfg save | cfg export | cfg time | cfg factory | cfg reboot [discard]`
 
 ## Errors
 
-The getters and setters return false for an unknown key or a key of another type, and the setters also for a value outside the schema range (`AppConfigAccess.cpp:89–91, 225–227`); `out_reboot_required` is then not written. `saveSet` returns false without a storage backend (`AppConfig.cpp:186`). `requestSave` returns false when no save handler is installed (`AppConfig.cpp:203`). `unlockDeveloperMode` and `changeDeveloperPassword` return false for a null or wrong password.
+The getters and setters return false for an unknown key or a key of another
+type, and the setters also for a value outside the schema range
+(`AppConfigAccess.cpp:89–91, 225–227`); `out_reboot_required` is then not
+written. `saveSet` returns false without a storage backend
+(`AppConfig.cpp:186`). `requestSave` returns false when no save handler is
+installed (`AppConfig.cpp:203`). `unlockDeveloperMode` and
+`changeDeveloperPassword` return false for a null or wrong password.
 
 ## Usage
 
@@ -100,7 +124,8 @@ Config::AppConfig::instance().setParamInt("spd_mm_s", 500, reboot);
 
 ## Known issues
 
-Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
+items. Not re-checked since; confirm against the code before acting.
 
 | # | Category | Location | Finding | Evidence |
 |---|---|---|---|---|
@@ -111,16 +136,17 @@ Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
 | C9 | cleanup | `AppConfigParamIo.cpp:149-150, 307-308`; `CMakeLists.txt:16` | Two empty `for` loops; unused `mutableData()`; an unneeded `${APP_ROOT}/include` export; two keys for the W5500 clock (`w5500_spi_hz` unread, `eip_spi_khz` read) | Confirmed |
 
 **Not covered by host tests:**
-- an NVS read error other than "not found" (C1)
-- NaN and infinity (C3)
-- a malformed payload given straight to the reader
-- hash collisions including `dev_pw` and the old renamed keys
-- set size with maximum-length strings
+-   an NVS read error other than "not found" (C1)
+-   NaN and infinity (C3)
+-   a malformed payload given straight to the reader
+-   hash collisions including `dev_pw` and the old renamed keys
+-   set size with maximum-length strings
 
 ## Documents
 
-Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2, G-F8, G-F9 and G-B5 in `docs/OPEN_ITEMS.md`; G-F7 is closed.
+Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2,
+G-F8, G-F9 and G-B5 in `docs/OPEN_ITEMS.md`; G-F7 is closed.
 
-## Next
+## See also
 
-- **Up:** [AppConfig README](README.md), [Libraries](../README.md).
+-   **Up:** [AppConfig README](README.md), [Libraries](/lib/README.md).
