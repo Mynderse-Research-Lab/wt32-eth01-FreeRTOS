@@ -90,150 +90,34 @@ void holdClass1WhilePaused() {
   g_class1_paused.store(false);
 }
 
-void multiAxisTask(void* arg) {
-  auto* ctx = static_cast<ScannerTaskCtx*>(arg);
-  uint32_t backoff_ms = 1000;
-  unsigned recover_streak = 0;
-  int64_t link_down_us = 0;  // set when the cyclic loop saw LNK=0
-
-  MultiAxisSlot slots[EipMultiScanner::kMaxAxes];
-  size_t n = 0;
-
-#if defined(CONFIG_EIP_AXIS_X)
-  slots[n].config =
-      makeKinetixConfig(CONFIG_EIP_TARGET_IP_X, 0x0001, 0x10000001);
-  slots[n].image = ctx->image_x;
-  ++n;
-#endif
-#if defined(CONFIG_EIP_AXIS_Z)
-  slots[n].config =
-      makeKinetixConfig(CONFIG_EIP_TARGET_IP_Z, 0x0002, 0x10000002);
-  slots[n].image = ctx->image_z;
-  ++n;
-#endif
-#if defined(CONFIG_EIP_AXIS_THETA)
-  if (ctx->image_theta != nullptr) {
-    slots[n].config = makeThetaConfig();
-    slots[n].image = ctx->image_theta;
-    ++n;
-  }
-#endif
-
-  if (n == 0) {
-    ESP_LOGW(TAG, "No X/Z axes enabled; scanner idle");
-    vTaskDelete(nullptr);
-    return;
-  }
-
-  ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
-
-  while (true) {
-    holdClass1WhilePaused();
-    uint32_t link_wait_polls = 0;
-    while (!ctx->link->isUp()) {
-      holdClass1WhilePaused();
-      backoff_ms = 1000;
-      // This wait is otherwise silent: report a W5500 that never shows link
-      // (unreadable chip, held in reset, cable) every 5 s.
-      if (++link_wait_polls % 10 == 0) {
-        uint8_t phy = 0;
-        {
-          std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
-          phy = ctx->hal->readReg(kBlockCommon(), REG_PHYCFGR);
-        }
-        ESP_LOGW(TAG, "W5500 link not up after %lu s (phy=0x%02X) — waiting",
-                 static_cast<unsigned long>(link_wait_polls * kLinkPollMs / 1000), phy);
-      }
-      vTaskDelay(pdMS_TO_TICKS(kLinkPollMs));
-    }
-    if (link_down_us != 0) {
-      // Upper bound: teardown plus the link poll period sit in between.
-      ESP_LOGW(TAG, "W5500 link up again (seen %lld ms after it dropped)",
-               static_cast<long long>((esp_timer_get_time() - link_down_us) / 1000));
-      link_down_us = 0;
-    }
-    // PHYCFGR can assert LNK before the partner finishes auto-neg; brief settle
-    // avoids INIT→CLOSED ARP failures right after cable/drive recovery.
-    vTaskDelay(pdMS_TO_TICKS(kLinkSettleMs));
-    if (!ctx->link->isUp()) {
-      continue;
+void multiAxisRecover(ScannerTaskCtx* ctx, EipMultiScanner& scanner,
+                      bool planned_close, bool need_chip_recover, int64_t& link_down_us, unsigned& recover_streak, uint32_t& backoff_ms) {
+    if (planned_close) {
+      setLogScanner(nullptr);
+      closeClass1InOrder(scanner);
+      (void)scanner.flushDeferredLogs();
+      scanner.disconnect();
+      return;
     }
 
-    EipSocketW5500Tcp tcp0(*ctx->hal);
-    EipSocketW5500Tcp tcp1(*ctx->hal);
-    EipSocketW5500Tcp tcp2(*ctx->hal);
-    EipSocketW5500Udp udp(*ctx->hal);
-    ITcpClient* tcps[EipMultiScanner::kMaxAxes] = {&tcp0, &tcp1, &tcp2};
-
-    EipMultiScanner scanner(tcps, n, udp, slots);
-
-    // Stage connect so keepalive can run during later ForwardOpens.
-    bool ok = scanner.openAxis(0);
-    if (ok) ok = scanner.bindSharedUdp();
-
-    KeepaliveCtx ka{&scanner, false, false, 5};
-    TaskHandle_t ka_handle = nullptr;
-    if (ok && n > 1) {
-      ka.run = true;
-      if (xTaskCreatePinnedToCore(keepaliveTask, "EipHoldKA", kKeepaliveStack, &ka,
-                                  kKeepalivePriority, &ka_handle,
-                                  kScannerCore) != pdPASS) {
-        ESP_LOGE(TAG, "EipHoldKA create failed — peer FO without keepalive");
-        ka.run = false;
-        ka.exited = true;
-      }
-      for (size_t i = 1; i < n; ++i) {
-        const bool opened = scanner.openAxis(i);
-        if (opened) {
-          continue;
-        }
-        if (slots[i].config.drive_family ==
-            ScannerConfig::DriveFamily::kHcs01) {
-          ESP_LOGW(TAG,
-                   "Theta ForwardOpen failed — X/Z stay up; check HCS01 "
-                   "map/FO sizes (per-axis reopen will retry)");
-          scanner.requestAxisReopen(i);
-          continue;
-        }
-        ok = false;
-        break;
-      }
-      stopKeepalive(ka);
-      if (ka.failed) {
-        ESP_LOGW(TAG, "HoldKA O->T send failed during peer FO");
-        ok = false;
-      }
+    // Every other break sets need_chip_recover, so a plain exit is a
+    // confirmed LNK=0. A chip that reset itself also needs its config back.
+    if (!need_chip_recover) {
+      link_down_us = logW5500LinkDown(*ctx->hal);
+      need_chip_recover = w5500LostConfig(*ctx->hal);
     }
-
-    // Connect events print here. From the last priming keepalive below to the
-    // first cyclic O->T this task must not log: a log that blocked (UART ring
-    // full of the boot help text) left a drive without O->T long enough for
-    // its connection to time out (G-B12).
+    setLogScanner(nullptr);
     (void)scanner.flushDeferredLogs();
-
-    if (!ok && w5500LostConfig(*ctx->hal)) {
-      // Not a CIP reject: the chip lost its MAC/IP, so soft retries can
-      // never connect. Restore it through the existing chip recover.
-      scanner.disconnect();
+    scanner.disconnect();
+    reliabilityStats().noteReconnect();
+    vTaskDelay(pdMS_TO_TICKS(kReconnectIdleMs));
+    if (need_chip_recover) {
       escalateChipRecover(ctx, recover_streak, backoff_ms);
-      continue;
     }
-    if (!ok) {
-      // CIP ForwardOpen reject (ownership / RPI / size) is not a W5500 fault.
-      // Chip recover + esp_restart() only masks the real extended status and
-      // can fight a PC hold. Soft-backoff and retry instead.
-      ESP_LOGW(TAG,
-               "Multi-axis connect failed — soft retry (no chip recover); "
-               "check FO extended status / PC exclusive hold / RPI");
-      scanner.disconnect();
-      recover_streak = 0;
-      vTaskDelay(pdMS_TO_TICKS(backoff_ms));
-      backoff_ms = (backoff_ms < 15000) ? backoff_ms * 2 : 15000;
-      continue;
-    }
+}
 
-    recover_streak = 0;
-    backoff_ms = 1000;
+void multiAxisCyclic(ScannerTaskCtx* ctx, EipMultiScanner& scanner,
+                     int64_t& link_down_us, unsigned& recover_streak, uint32_t& backoff_ms) {
     const uint32_t rpi_us =
         (scanner.openReply(0).to_api_us > 0) ? scanner.openReply(0).to_api_us
                                             : CONFIG_EIP_X_RPI_US;
@@ -369,28 +253,159 @@ void multiAxisTask(void* arg) {
       pacedClass1Cycle(last_wake, rpi_us);
     }
 
-    if (planned_close) {
-      setLogScanner(nullptr);
-      closeClass1InOrder(scanner);
-      (void)scanner.flushDeferredLogs();
-      scanner.disconnect();
-      continue;
+    multiAxisRecover(ctx, scanner, planned_close, need_chip_recover, link_down_us, recover_streak, backoff_ms);
+}
+
+void multiAxisSetup(ScannerTaskCtx* ctx, MultiAxisSlot* slots, size_t n,
+                    uint32_t& backoff_ms, unsigned& recover_streak, int64_t& link_down_us) {
+    holdClass1WhilePaused();
+    uint32_t link_wait_polls = 0;
+    while (!ctx->link->isUp()) {
+      holdClass1WhilePaused();
+      backoff_ms = 1000;
+      // This wait is otherwise silent: report a W5500 that never shows link
+      // (unreadable chip, held in reset, cable) every 5 s.
+      if (++link_wait_polls % 10 == 0) {
+        uint8_t phy = 0;
+        {
+          std::lock_guard<w5500::BusMutex> lock(w5500::spiBusMutex());
+          phy = ctx->hal->readReg(kBlockCommon(), REG_PHYCFGR);
+        }
+        ESP_LOGW(TAG, "W5500 link not up after %lu s (phy=0x%02X) — waiting",
+                 static_cast<unsigned long>(link_wait_polls * kLinkPollMs / 1000), phy);
+      }
+      vTaskDelay(pdMS_TO_TICKS(kLinkPollMs));
+    }
+    if (link_down_us != 0) {
+      // Upper bound: teardown plus the link poll period sit in between.
+      ESP_LOGW(TAG, "W5500 link up again (seen %lld ms after it dropped)",
+               static_cast<long long>((esp_timer_get_time() - link_down_us) / 1000));
+      link_down_us = 0;
+    }
+    // PHYCFGR can assert LNK before the partner finishes auto-neg; brief settle
+    // avoids INIT→CLOSED ARP failures right after cable/drive recovery.
+    vTaskDelay(pdMS_TO_TICKS(kLinkSettleMs));
+    if (!ctx->link->isUp()) {
+      return;
     }
 
-    // Every other break sets need_chip_recover, so a plain exit is a
-    // confirmed LNK=0. A chip that reset itself also needs its config back.
-    if (!need_chip_recover) {
-      link_down_us = logW5500LinkDown(*ctx->hal);
-      need_chip_recover = w5500LostConfig(*ctx->hal);
+    EipSocketW5500Tcp tcp0(*ctx->hal);
+    EipSocketW5500Tcp tcp1(*ctx->hal);
+    EipSocketW5500Tcp tcp2(*ctx->hal);
+    EipSocketW5500Udp udp(*ctx->hal);
+    ITcpClient* tcps[EipMultiScanner::kMaxAxes] = {&tcp0, &tcp1, &tcp2};
+
+    EipMultiScanner scanner(tcps, n, udp, slots);
+
+    // Stage connect so keepalive can run during later ForwardOpens.
+    bool ok = scanner.openAxis(0);
+    if (ok) ok = scanner.bindSharedUdp();
+
+    KeepaliveCtx ka{&scanner, false, false, 5};
+    TaskHandle_t ka_handle = nullptr;
+    if (ok && n > 1) {
+      ka.run = true;
+      if (xTaskCreatePinnedToCore(keepaliveTask, "EipHoldKA", kKeepaliveStack, &ka,
+                                  kKeepalivePriority, &ka_handle,
+                                  kScannerCore) != pdPASS) {
+        ESP_LOGE(TAG, "EipHoldKA create failed — peer FO without keepalive");
+        ka.run = false;
+        ka.exited = true;
+      }
+      for (size_t i = 1; i < n; ++i) {
+        const bool opened = scanner.openAxis(i);
+        if (opened) {
+          continue;
+        }
+        if (slots[i].config.drive_family ==
+            ScannerConfig::DriveFamily::kHcs01) {
+          ESP_LOGW(TAG,
+                   "Theta ForwardOpen failed — X/Z stay up; check HCS01 "
+                   "map/FO sizes (per-axis reopen will retry)");
+          scanner.requestAxisReopen(i);
+          continue;
+        }
+        ok = false;
+        break;
+      }
+      stopKeepalive(ka);
+      if (ka.failed) {
+        ESP_LOGW(TAG, "HoldKA O->T send failed during peer FO");
+        ok = false;
+      }
     }
-    setLogScanner(nullptr);
+
+    // Connect events print here. From the last priming keepalive below to the
+    // first cyclic O->T this task must not log: a log that blocked (UART ring
+    // full of the boot help text) left a drive without O->T long enough for
+    // its connection to time out (G-B12).
     (void)scanner.flushDeferredLogs();
-    scanner.disconnect();
-    reliabilityStats().noteReconnect();
-    vTaskDelay(pdMS_TO_TICKS(kReconnectIdleMs));
-    if (need_chip_recover) {
+
+    if (!ok && w5500LostConfig(*ctx->hal)) {
+      // Not a CIP reject: the chip lost its MAC/IP, so soft retries can
+      // never connect. Restore it through the existing chip recover.
+      scanner.disconnect();
       escalateChipRecover(ctx, recover_streak, backoff_ms);
+      return;
     }
+    if (!ok) {
+      // CIP ForwardOpen reject (ownership / RPI / size) is not a W5500 fault.
+      // Chip recover + esp_restart() only masks the real extended status and
+      // can fight a PC hold. Soft-backoff and retry instead.
+      ESP_LOGW(TAG,
+               "Multi-axis connect failed — soft retry (no chip recover); "
+               "check FO extended status / PC exclusive hold / RPI");
+      scanner.disconnect();
+      recover_streak = 0;
+      vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+      backoff_ms = (backoff_ms < 15000) ? backoff_ms * 2 : 15000;
+      return;
+    }
+
+    recover_streak = 0;
+    backoff_ms = 1000;
+    multiAxisCyclic(ctx, scanner, link_down_us, recover_streak, backoff_ms);
+}
+
+void multiAxisTask(void* arg) {
+  auto* ctx = static_cast<ScannerTaskCtx*>(arg);
+  uint32_t backoff_ms = 1000;
+  unsigned recover_streak = 0;
+  int64_t link_down_us = 0;  // set when the cyclic loop saw LNK=0
+
+  MultiAxisSlot slots[EipMultiScanner::kMaxAxes];
+  size_t n = 0;
+
+#if defined(CONFIG_EIP_AXIS_X)
+  slots[n].config =
+      makeKinetixConfig(CONFIG_EIP_TARGET_IP_X, 0x0001, 0x10000001);
+  slots[n].image = ctx->image_x;
+  ++n;
+#endif
+#if defined(CONFIG_EIP_AXIS_Z)
+  slots[n].config =
+      makeKinetixConfig(CONFIG_EIP_TARGET_IP_Z, 0x0002, 0x10000002);
+  slots[n].image = ctx->image_z;
+  ++n;
+#endif
+#if defined(CONFIG_EIP_AXIS_THETA)
+  if (ctx->image_theta != nullptr) {
+    slots[n].config = makeThetaConfig();
+    slots[n].image = ctx->image_theta;
+    ++n;
+  }
+#endif
+
+  if (n == 0) {
+    ESP_LOGW(TAG, "No X/Z axes enabled; scanner idle");
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
+
+  while (true) {
+    multiAxisSetup(ctx, slots, n, backoff_ms, recover_streak, link_down_us);
   }
 }
 

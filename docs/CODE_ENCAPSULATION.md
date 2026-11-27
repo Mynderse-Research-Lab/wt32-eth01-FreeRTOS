@@ -42,7 +42,7 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `7cc157d` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-|  | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–484 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `f62efb9`, scanner task split | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 
 ## Planned splits
 
@@ -179,7 +179,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/IL2Transport.h` | 62 | under 500 |
 | `src/LinuxRawSocketL2Transport.h` | 169 | under 500 |
 
-### `lib/EtherNetIP/` (56 files, 7,532 lines)
+### `lib/EtherNetIP/` (56 files, 7,547 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -214,12 +214,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EipRunTimeTrace.h` | 59 | under 500 |
 | `src/EipScanner.cpp` | 346 | under 500 |
 | `src/EipScanner.h` | 102 | under 500 |
-| `src/EipScannerConfig.cpp` | 160 | split done |
-| `src/EipScannerDiag.cpp` | 434 | split done |
+| `src/EipScannerConfig.cpp` | 160 | split done (`f62efb9`) |
+| `src/EipScannerDiag.cpp` | 434 | split done (`f62efb9`) |
 | `src/EipScannerPolicy.h` | 128 | under 500 |
-| `src/EipScannerTask.cpp` | 484 | split done |
+| `src/EipScannerTask.cpp` | 499 | split done (`f62efb9`) |
 | `src/EipScannerTask.h` | 49 | under 500 |
-| `src/EipScannerTaskInternal.h` | 438 | split done |
+| `src/EipScannerTaskInternal.h` | 438 | split done (`f62efb9`) |
 | `src/EipSession.cpp` | 157 | under 500 |
 | `src/EipSession.h` | 46 | under 500 |
 | `src/EipSocketW5500.cpp` | 304 | under 500 |
