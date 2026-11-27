@@ -46,13 +46,14 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `bc18d32` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
 | `31c85c9` | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
 | `b32c42d` | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
-|  | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
+| `9aa2af3` | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
+|  | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
 
 ## Planned splits
 
-6 files are over 500 lines. They are the host tests.
+5 files are over 500 lines. They are the host tests.
 
-### Host tests (6)
+### Host tests (5)
 
 Each test file splits by test group into several sources for the **same executable**. Gate: the Unity case count per executable is unchanged.
 
@@ -63,7 +64,6 @@ Each test file splits by test group into several sources for the **same executab
 | `test/host/test_pick_intercept.cpp` | 1,095 |
 | `test/host/test_gantry_orchestration.cpp` | 1,082 |
 | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 |
-| `test/host/test_app_config.cpp` | 680 |
 ## Organizing matured features into `lib/` components
 
 A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
@@ -415,7 +415,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (45 files, 13,391 lines)
+### `test/host/` (49 files, 13,477 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -430,11 +430,15 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `stubs/gpio_expander.h` | 50 | under 500 |
 | `stubs/host_test_clock.cpp` | 29 | under 500 |
 | `stubs/host_test_clock.h` | 17 | under 500 |
-| `test_app_config.cpp` | 680 | **over 500: planned** |
-| `test_cell_net_l2.cpp` | 57 | split done |
-| `test_cell_net_l2_framing.cpp` | 279 | split done |
-| `test_cell_net_l2_node.cpp` | 162 | split done |
-| `test_cell_net_l2_ota.cpp` | 138 | split done |
+| `test_app_config.cpp` | 87 | split done |
+| `test_app_config_internal.h` | 110 | split done |
+| `test_app_config_schema.cpp` | 144 | split done |
+| `test_app_config_store.cpp` | 214 | split done |
+| `test_app_config_values.cpp` | 211 | split done |
+| `test_cell_net_l2.cpp` | 57 | split done (`9aa2af3`) |
+| `test_cell_net_l2_framing.cpp` | 279 | split done (`9aa2af3`) |
+| `test_cell_net_l2_node.cpp` | 162 | split done (`9aa2af3`) |
+| `test_cell_net_l2_ota.cpp` | 138 | split done (`9aa2af3`) |
 | `test_cellnet_ota_receiver.cpp` | 403 | under 500 |
 | `test_cip_ethernet_link.cpp` | 95 | under 500 |
 | `test_console_parse.cpp` | 175 | under 500 |

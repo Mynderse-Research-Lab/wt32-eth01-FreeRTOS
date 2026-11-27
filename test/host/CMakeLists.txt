@@ -143,7 +143,12 @@ add_executable(test_eip_transport "test_eip_transport.cpp")
 target_link_libraries(test_eip_transport PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_transport COMMAND test_eip_transport)
 
-add_executable(test_app_config "test_app_config.cpp")
+add_executable(test_app_config
+    "test_app_config.cpp"
+    "test_app_config_values.cpp"
+    "test_app_config_store.cpp"
+    "test_app_config_schema.cpp"
+)
 target_link_libraries(test_app_config PRIVATE app_config unity)
 add_test(NAME test_app_config COMMAND test_app_config)
 
