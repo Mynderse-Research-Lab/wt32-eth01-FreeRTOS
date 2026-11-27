@@ -35,11 +35,6 @@
 #include <vector>
 
 namespace cellnet_ota_sender {
-constexpr uint8_t code(Ota::Status s)
-{
-    return static_cast<uint8_t>(s);
-}
-
 int64_t nowUs()
 {
     timespec ts{};

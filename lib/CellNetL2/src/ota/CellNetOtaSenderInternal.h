@@ -13,6 +13,7 @@
 
 #include "CellNetOtaSender.h"
 #include "CellNetL2Framing.h"
+#include "CellNetOtaReceiver.h"
 #include "cell_net_l2_protocol.h"
 
 #include <arpa/inet.h>
@@ -77,7 +78,10 @@ std::string strf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 int64_t nowUs();
 double toMs(int64_t us);
 const char* statusName(uint8_t s);
-constexpr uint8_t code(Ota::Status s);
+constexpr uint8_t code(Ota::Status s)
+{
+    return static_cast<uint8_t>(s);
+}
 std::string macStr(const Mac& m);
 bool fromMac(const ParsedFrame& pf, const Mac& m);
 
