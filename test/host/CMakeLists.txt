@@ -561,6 +561,8 @@ add_executable(test_cell_net_l2
 )
 target_include_directories(test_cell_net_l2 PRIVATE
     "${REPO_ROOT}/lib/CellNetL2/src"
+    "${REPO_ROOT}/lib/CellNetL2/src/transport"
+    "${REPO_ROOT}/lib/CellNetL2/src/ota"
     "${REPO_ROOT}/include"
     "${REPO_ROOT}/src/pick_scheduler"
     "${REPO_ROOT}/src/pick_scheduler/intercept"
@@ -573,9 +575,12 @@ add_test(NAME test_cell_net_l2 COMMAND test_cell_net_l2)
 
 add_executable(test_cellnet_ota_receiver
     "test_cellnet_ota_receiver.cpp"
-    "${REPO_ROOT}/lib/CellNetL2/src/CellNetOtaReceiver.cpp"
+    "${REPO_ROOT}/lib/CellNetL2/src/ota/CellNetOtaReceiver.cpp"
 )
-target_include_directories(test_cellnet_ota_receiver PRIVATE "${REPO_ROOT}/lib/CellNetL2/src")
+target_include_directories(test_cellnet_ota_receiver PRIVATE
+    "${REPO_ROOT}/lib/CellNetL2/src"
+    "${REPO_ROOT}/lib/CellNetL2/src/transport"
+    "${REPO_ROOT}/lib/CellNetL2/src/ota")
 target_link_libraries(test_cellnet_ota_receiver PRIVATE unity)
 add_test(NAME test_cellnet_ota_receiver COMMAND test_cellnet_ota_receiver)
 

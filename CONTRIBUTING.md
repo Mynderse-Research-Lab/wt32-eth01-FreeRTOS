@@ -129,7 +129,7 @@ assertions on the gantry (`src/console/system/basic_tests.cpp`) and ends with
     library header, the module's main `.cpp`) stay at the top, the same limit
     applies to each subfolder, and every subfolder goes into the include
     directories so includes keep bare file names. In `src/`, each module has its
-    own folder. `lib/CellNetL2/src/` waits for X-11 in `docs/OPEN_ITEMS.md`.
+    own folder.
 -   **A split moves code; it does not change it.** Each split is its own commit:
     function bodies are copied verbatim, every original line is used exactly
     once, and the only edits are to linkage (`static`, shared declarations in a
