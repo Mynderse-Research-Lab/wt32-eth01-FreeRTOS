@@ -9,7 +9,7 @@ fit together before going into one of them.
 and project docs on 2026-11-05, at commit `8b59545`. **Audience:** Engineers
 continuing development on the battery sorting cell. **Companion docs:**
 [OPEN_ITEMS.md](OPEN_ITEMS.md), [INDEX.md](INDEX.md),
-[../CONTRIBUTING.md](/CONTRIBUTING.md).
+[CONTRIBUTING.md](/CONTRIBUTING.md).
 
 This page is the map, not the manual. It says what each subsystem is, how the
 pieces connect and where the source lives. Details stay in the canonical docs it
