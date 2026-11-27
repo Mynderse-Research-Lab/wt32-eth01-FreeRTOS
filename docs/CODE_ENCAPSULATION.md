@@ -48,13 +48,14 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `b32c42d` | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
 | `9aa2af3` | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
 | `7fea7b5` | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
-|  | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
+| `eb833ce` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
+|  | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
 
 ## Planned splits
 
-4 files are over 500 lines. They are the host tests.
+3 files are over 500 lines. They are the host tests.
 
-### Host tests (4)
+### Host tests (3)
 
 Each test file splits by test group into several sources for the **same executable**. Gate: the Unity case count per executable is unchanged.
 
@@ -63,7 +64,6 @@ Each test file splits by test group into several sources for the **same executab
 | `test/host/test_eip_transport.cpp` | 1,891 |
 | `test/host/test_eip_axis.cpp` | 1,807 |
 | `test/host/test_pick_intercept.cpp` | 1,095 |
-| `test/host/test_gantry_orchestration.cpp` | 1,082 |
 ## Organizing matured features into `lib/` components
 
 A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
@@ -415,7 +415,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (53 files, 13,560 lines)
+### `test/host/` (57 files, 13,680 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -451,7 +451,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
 | `test_eip_transport.cpp` | 1891 | **over 500: planned** |
-| `test_gantry_orchestration.cpp` | 1082 | **over 500: planned** |
+| `test_gantry_orchestration.cpp` | 159 | split done |
+| `test_gantry_orchestration_bringup.cpp` | 245 | split done |
+| `test_gantry_orchestration_fault.cpp` | 348 | split done |
+| `test_gantry_orchestration_internal.h` | 88 | split done |
+| `test_gantry_orchestration_move.cpp` | 362 | split done |
 | `test_hcs01_assembly.cpp` | 193 | under 500 |
 | `test_hcs01_comws_client.cpp` | 143 | under 500 |
 | `test_k5100_param_access.cpp` | 77 | under 500 |
@@ -466,9 +470,9 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_w5500_deferred_log.cpp` | 76 | under 500 |
 | `test_w5500_diag.cpp` | 325 | under 500 |
 | `test_w5500_poll.cpp` | 129 | under 500 |
-| `test_w5500_socket_fastpath.cpp` | 100 | split done |
-| `test_w5500_socket_fastpath_internal.h` | 302 | split done |
-| `test_w5500_socket_fastpath_recv.cpp` | 318 | split done |
-| `test_w5500_socket_fastpath_send.cpp` | 360 | split done |
-| `test_w5500_socket_fastpath_tcp.cpp` | 58 | split done |
+| `test_w5500_socket_fastpath.cpp` | 100 | split done (`eb833ce`) |
+| `test_w5500_socket_fastpath_internal.h` | 302 | split done (`eb833ce`) |
+| `test_w5500_socket_fastpath_recv.cpp` | 318 | split done (`eb833ce`) |
+| `test_w5500_socket_fastpath_send.cpp` | 360 | split done (`eb833ce`) |
+| `test_w5500_socket_fastpath_tcp.cpp` | 58 | split done (`eb833ce`) |
 | `test_w5500_spi.cpp` | 284 | under 500 |

@@ -274,11 +274,21 @@ endfunction()
 add_gantry_orch_lib(gantry_orch 0)
 add_gantry_orch_lib(gantry_orch_seq 1)
 
-add_executable(test_gantry_orchestration "test_gantry_orchestration.cpp")
+add_executable(test_gantry_orchestration
+    "test_gantry_orchestration.cpp"
+    "test_gantry_orchestration_move.cpp"
+    "test_gantry_orchestration_bringup.cpp"
+    "test_gantry_orchestration_fault.cpp"
+)
 target_link_libraries(test_gantry_orchestration PRIVATE gantry_orch unity)
 add_test(NAME test_gantry_orchestration COMMAND test_gantry_orchestration)
 
-add_executable(test_gantry_orchestration_seq "test_gantry_orchestration.cpp")
+add_executable(test_gantry_orchestration_seq
+    "test_gantry_orchestration.cpp"
+    "test_gantry_orchestration_move.cpp"
+    "test_gantry_orchestration_bringup.cpp"
+    "test_gantry_orchestration_fault.cpp"
+)
 target_link_libraries(test_gantry_orchestration_seq PRIVATE gantry_orch_seq unity)
 add_test(NAME test_gantry_orchestration_seq COMMAND test_gantry_orchestration_seq)
 
