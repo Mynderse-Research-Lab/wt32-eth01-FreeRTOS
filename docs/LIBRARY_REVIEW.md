@@ -18,7 +18,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 |---|---:|---|---|---|---|
 | [W5500](#w5500) | 3,168 | none (split done) | none | 6 files | UDP length wrap hands a 65,535-byte view of a 512-byte buffer to the Class 1 parser (G-B15) |
 | [EtherNetIP](#ethernetip) | 7,547 | none (split done) | none | 11 files | Synchronous logs on the Class 1 send path (G-B16) |
-| [Gantry](#gantry) | 8,316 | `Gantry.h` 597 | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
+| [Gantry](#gantry) | 8,337 | none (split done) | 13 lines, stale | 7 files | A drive fault-stop while X moves toward min re-zeroes X (G-A9) |
 | [AppConfig](#appconfig) | 3,181 | none (split done) | none | `test_app_config` (27 cases) | Any NVS read error at boot overwrites the stored set with defaults (G-F7) |
 | [CellNetL2](#cellnetl2) | 2,935 | none (split done) | 20 lines | 2 files | OTA sender has no test and is not built in CI |
 | [MCP23S17](#mcp23s17) | 755 | none (split done) | 70 lines, stale pin map | none | Shadow cache diverges from the chip after a failed write; reads return 0 on error (G-D6) |
@@ -192,6 +192,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | Header | Contents |
 |---|---|
 | `Gantry.h` | `Gantry`: lifecycle; configuration (`setJointLimits`, `setSafeZHeight` mm, `setRuntimeParams`); motion (`moveTo` with mm/s, deg/s, mm/s², deg/s², `preloadJointMove`, `releasePreloadedMotion`, `retractToSafeZ`, `queueRetractToSafeZ`, `chainMoveAfterRetract`, `requestAbort`, `update`); homing (`homeX/Z/Theta`, `calibrateX/Z/Theta`, `startEipBringUp`); status and lock-free trace getters; `grip` |
+| `GantryTypes.h` | `GantryError`, `HomingStatus`, `GantryStatus`, `MotionState`, `BringUpPhase`, `Waypoint`, `WaypointQueue` |
 | `GantryConfig.h` | `JointConfig {x mm, z mm (+down), theta deg}`, `JointLimits`, `EndEffectorPose` |
 | `GantryUtils.h` | `RuntimeParams`, constants |
 | `GantryKinematics.h` | Forward and inverse kinematics; theta pose = joint + 90° |
@@ -220,7 +221,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | A3 | risk | `GantryMotion.cpp:191-195, 234` | `retractToSafeZ` writes a stop image and overwrites it with the new preload in the same call, so StopMotion probably never reaches the wire | Suggested: `ztrace` of a retract during a slow descent | — |
 | A4 | risk, motion safety | `GantryHoming.cpp:108-144`; `gantry_console_homing.cpp:248-257` | `homeTheta` calls `moveToDeg(0)` with no SAFE_Z band check and no busy check, and `captureSoftHome` resets an in-flight theta move | Confirmed, rechecked | G-A11 |
 | A5 | risk | `GantryHoming.cpp:35-52`; `gantry_console_homing.cpp:116-150` vs `:196-200` | `homeX` has no busy guard and the console `home x` lacks the busy check that `home z` has; `update()` then runs the home sequence and the path state machine on X together | Confirmed, rechecked | G-A11 |
-| A6 | docs | `GantryPathTheta.cpp:203-216`, `GantryPath.cpp:174-187` vs `Gantry.h:19-20, 166, 221` | The early retract lead moves X and theta below the band; the headers say they move only in the band (G-C14) | Confirmed | G-C14 |
+| A6 | docs | `GantryPathTheta.cpp:203-216`, `GantryPath.cpp:174-187` vs `Gantry.h:19-20, 127, 182` | The early retract lead moves X and theta below the band; the headers say they move only in the band (G-C14) | Confirmed | G-C14 |
 | A7 | risk | `GantryPath.cpp:45-47`; `GantrySequential.cpp:124-143` | With X deferred, a path whose Z goes idle outside the band without an alarm stays busy forever: there is no overall path timeout | Confirmed (logic); trigger Suggested: host test | — |
 | A8 | bug | `GantrySequential.cpp:56-79`; `GantryMotion.cpp:101-102` | `startSequentialMotion()` returns `void`; a failed arm or a refused theta interlock still makes `moveTo` return `OK`. `test_orchestrator_bubbles_up_axis_rejection` asserts `OK` | Confirmed, rechecked | — |
 | A9 | bug | `GantrySequential.cpp:72`, `GantryPath.cpp:264` | A failed grip in the pose-move PnP sequence still proceeds to retract | Confirmed | — |
@@ -232,7 +233,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 | A15 | risk | `GantryEipLinearAxis.cpp:296-306`; `Gantry.cpp:177-200` | `stopMotion()` on an idle linear axis publishes a Position-mode image with StopMotion to a drive in settle mode and holds busy for 200 ms. `enable()` has no busy guard and `disable()` replaces the stop image with ServoOff in the same call | Confirmed (code); consequence Suggested: watch for A603 after `stop` with the axes idle | — |
 | A16 | risk | `GantryEipLinearAxisInternal.h:44`; `GantryEipLinearAxisPhases.cpp:263-278`; `GantryEipRotaryAxisInternal.h:40`; `GantryEipRotaryAxisUpdate.cpp:159-166` | Per-tick thresholds (0.005 mm, 0.015°) do not scale with the control period that Kconfig allows down to 2 ms | Suggested | — |
 | A17 | risk | `GantryEipBringUp.cpp:320, 455`; `GantryEipHomeCal.cpp:183` | Measured strokes are rounded to whole mm and feed `x_max` and the kinematic `x_stroke_mm`, so the world-to-joint X map shifts by up to 0.5 mm with every calibration | Confirmed (code); impact Suggested | — |
-| A18 | docs | `Gantry.h:124, 189-197, 250-251`; `GantryRotaryAxis.h:96-99, 116`; `GantryThetaOrigin.h:1-15`; `GantryUtils.h:23-24`; `GantryConfig.h:12-14, 43, 111-112`; `GantryKinematics.h:9`; `CHANGELOG.md` | Stale: the aligned/unaligned origin with a shrunk thetalim (the code always uses ±36000, G-C15); settled tolerance 0.1° (code 0.5°); "retract stops motion first"; MCP23S17 "removed"; lock-free trace; the band formula; the Z pose formula (code: `pose.z = z_stroke − joint.z`); CHANGELOG home speeds, PUU and safe Z | Confirmed | — |
+| A18 | docs | `Gantry.h:85, 150-158, 211-212`; `GantryRotaryAxis.h:96-99, 116`; `GantryThetaOrigin.h:1-15`; `GantryUtils.h:23-24`; `GantryConfig.h:12-14, 43, 111-112`; `GantryKinematics.h:9`; `CHANGELOG.md` | Stale: the aligned/unaligned origin with a shrunk thetalim (the code always uses ±36000, G-C15); settled tolerance 0.1° (code 0.5°); "retract stops motion first"; MCP23S17 "removed"; lock-free trace; the band formula; the Z pose formula (code: `pose.z = z_stroke − joint.z`); CHANGELOG home speeds, PUU and safe Z | Confirmed | — |
 | A19 | cleanup | `GantryEndEffector.cpp:10, 62, 69`; `GantryLimitSwitch.cpp:5, 12` | The library calls `gpio_expander_*` from the app (`src/gpio_expander.c`), an undeclared dependency on the main component | Confirmed | — |
 
 **Open items checked against the code:**

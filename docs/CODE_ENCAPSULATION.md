@@ -43,17 +43,17 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-|  | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
+| `bc18d32` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
+|  | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
 
 ## Planned splits
 
-9 files are over 500 lines. The headers come first, then the host tests.
+8 files are over 500 lines. The headers come first, then the host tests.
 
-### Headers (2)
+### Headers (1)
 
 | File | Lines | Planned split |
 |---|---:|---|
-| `lib/Gantry/src/Gantry.h` | 597 | Nested types (`RuntimeParams`, the enums, the trace structs) into `GantryTypes.h` |
 | `include/coordinated_grasp.h` | 504 | The reference-fixture loader apart from the model |
 
 ### Host tests (7)
@@ -134,13 +134,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_kconfig.h` | 19 | under 500 |
 | `gantry_runtime_params.h` | 40 | under 500 |
 | `gpio_expander.h` | 50 | under 500 |
-| `pick_intercept.h` | 27 | split done |
-| `pick_intercept_belt.h` | 194 | split done |
-| `pick_intercept_clearance.h` | 191 | split done |
-| `pick_intercept_plan.h` | 230 | split done |
-| `pick_intercept_strike.h` | 406 | split done |
-| `pick_intercept_tracker.h` | 218 | split done |
-| `pick_intercept_vision.h` | 357 | split done |
+| `pick_intercept.h` | 27 | split done (`bc18d32`) |
+| `pick_intercept_belt.h` | 194 | split done (`bc18d32`) |
+| `pick_intercept_clearance.h` | 191 | split done (`bc18d32`) |
+| `pick_intercept_plan.h` | 230 | split done (`bc18d32`) |
+| `pick_intercept_strike.h` | 406 | split done (`bc18d32`) |
+| `pick_intercept_tracker.h` | 218 | split done (`bc18d32`) |
+| `pick_intercept_vision.h` | 357 | split done (`bc18d32`) |
 | `strike_plan.h` | 307 | under 500 |
 | `theta_trace_analysis.h` | 142 | under 500 |
 
@@ -253,12 +253,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EthernetLink.cpp` | 404 | under 500 |
 | `src/EthernetLink.h` | 58 | under 500 |
 
-### `lib/Gantry/` (42 files, 8,316 lines)
+### `lib/Gantry/` (43 files, 8,337 lines)
 
 | File | Lines | Status |
 |---|---:|---|
 | `src/Gantry.cpp` | 472 | split done (`3ca7df4`) |
-| `src/Gantry.h` | 597 | **over 500: planned** |
+| `src/Gantry.h` | 474 | split done |
 | `src/GantryAxisState.cpp` | 427 | split done (`3ca7df4`) |
 | `src/GantryConfig.cpp` | 14 | under 500 |
 | `src/GantryConfig.h` | 174 | under 500 |
@@ -298,6 +298,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryThetaOrigin.h` | 71 | under 500 |
 | `src/GantryTrajectory.cpp` | 106 | under 500 |
 | `src/GantryTrajectory.h` | 103 | under 500 |
+| `src/GantryTypes.h` | 144 | split done |
 | `src/GantryUtils.h` | 110 | under 500 |
 
 ### `lib/MCP23S17/` (4 files, 755 lines)
