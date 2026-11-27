@@ -191,7 +191,7 @@ The other ODVA documents in `driver_datasheets_and_calculations` are overviews o
 
 ### 5.3 Pick scheduler
 
-Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them), `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`).
+Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them), `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main_init_motion.cpp:163`).
 
 The model below was read from the code at `ee7b6a7` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
 
