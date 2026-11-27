@@ -35,6 +35,9 @@ using eip::Bytes;
 using namespace eip_axis_test;
 
 void test_process_image_command_feedback(void);
+void test_linear_escape_from_a014_at_joint_max_is_not_aborted(void);
+void test_linear_escape_from_a014_at_joint_min_is_not_aborted(void);
+void test_linear_seek_toward_a015_still_aborts_on_a015(void);
 void test_process_image_online(void);
 void test_linear_x_belt_move_command(void);
 void test_linear_held_start_waits_for_release(void);
@@ -137,5 +140,8 @@ int main(void) {
   RUN_TEST(test_rotary_move_stamp_and_trace_sample);
   RUN_TEST(test_axis_log_due_period);
   RUN_TEST(test_scanner_process_image_exchange);
+  RUN_TEST(test_linear_escape_from_a014_at_joint_max_is_not_aborted);
+  RUN_TEST(test_linear_escape_from_a014_at_joint_min_is_not_aborted);
+  RUN_TEST(test_linear_seek_toward_a015_still_aborts_on_a015);
   return UNITY_END();
 }

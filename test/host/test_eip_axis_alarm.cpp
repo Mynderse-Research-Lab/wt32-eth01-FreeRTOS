@@ -422,6 +422,9 @@ void test_abort_image_differs_from_move_only_by_stop_bit(void) {
   cfg.puu_per_mm = 1000.0;
   cfg.speed_ref_per_mm_s = 15.0;
   Gantry::GantryEipLinearAxis axis(image, cfg);
+  // Z mapping: A014 is joint max, so it lies ahead of this move toward +600.
+  // A limit behind a move does not abort it (G-A13).
+  axis.setJointMinWarningA015(true);
   TEST_ASSERT_TRUE(axis.begin());
   TEST_ASSERT_TRUE(axis.enable());
   armAxisForMove(axis, image, 0);

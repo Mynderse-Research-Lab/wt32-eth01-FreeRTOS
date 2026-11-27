@@ -165,6 +165,7 @@ add_executable(test_eip_axis
     "test_eip_axis.cpp"
     "test_eip_axis_linear.cpp"
     "test_eip_axis_alarm.cpp"
+    "test_eip_axis_limits.cpp"
     "test_eip_axis_rotary.cpp"
     "test_eip_axis_units.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"

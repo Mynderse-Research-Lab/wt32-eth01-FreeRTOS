@@ -211,6 +211,7 @@ bool GantryEipLinearAxis::queueHeldMm(float target_mm, float speed_mm_per_s,
 }
 
 void GantryEipLinearAxis::applyQueuedMove() {
+  noteMoveDirection(getCurrentMm(), queued_target_mm_);
   target_mm_ = queued_target_mm_;
   command_position_puu_ = toAbsPuu(mmToPuu(queued_target_mm_));
   last_speed_mm_s_ = queued_speed_mm_s_;
@@ -224,6 +225,20 @@ void GantryEipLinearAxis::applyQueuedMove() {
   queued_ = QueuedMove::kReady;
   queued_at_us_ = eip::class1NowUs();
   republishMoveCommand(/*start_motion_edge=*/false);
+}
+
+// A drive allows motion away from an active limit switch (Kinetix 5100
+// 2198-UM004D, ch. 15, DI functions 0x22/0x23), but it raises the A014 or
+// A015 warning only once the axis moves. A move that starts on a switch
+// would otherwise see that warning as a fresh trip and abort (G-A13), so a
+// switch behind the move never aborts it. Which switch sits at which joint
+// end follows joint_min_warning_a015_ (X: A014 = min; Z: A015 = min).
+void GantryEipLinearAxis::noteMoveDirection(float from_mm, float to_mm) {
+    const bool toward_max = to_mm > from_mm;
+    const bool toward_min = to_mm < from_mm;
+    const bool a014_at_min = !joint_min_warning_a015_;
+    away_from_a014_ = a014_at_min ? toward_max : toward_min;
+    away_from_a015_ = a014_at_min ? toward_min : toward_max;
 }
 
 bool GantryEipLinearAxis::startAbsoluteMm(float target_mm, float speed_mm_per_s,
@@ -268,6 +283,7 @@ bool GantryEipLinearAxis::startAbsoluteMm(float target_mm, float speed_mm_per_s,
   if (move_speed_ref_ < 1) move_speed_ref_ = 1;
 
   const float here = getCurrentMm();
+  noteMoveDirection(here, target_mm);
   if (std::fabs(here - target_mm) <= 0.05f) {
     motion_commanded_ = false;
     move_phase_ = MovePhase::kIdle;

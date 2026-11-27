@@ -343,8 +343,8 @@ void GantryEipLinearAxis::advanceMovePhase(
         fb.warning_present && eip::k5100::isWarningA015(fb.warning_code);
     if (!a014) ignore_a014_abort_ = false;
     if (!a015) ignore_a015_abort_ = false;
-    const bool trip_a014 = a014 && !ignore_a014_abort_;
-    const bool trip_a015 = a015 && !ignore_a015_abort_;
+    const bool trip_a014 = a014 && !ignore_a014_abort_ && !away_from_a014_;
+    const bool trip_a015 = a015 && !ignore_a015_abort_ && !away_from_a015_;
     if (fb.isLikelyLimitStop() || fb.hasDriveFault() || trip_a014 || trip_a015) {
       const char* tag = (log_tag_ && log_tag_[0]) ? log_tag_ : kEipAxisTag;
       ESP_LOGW(tag,
