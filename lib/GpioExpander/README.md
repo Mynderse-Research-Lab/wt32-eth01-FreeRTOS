@@ -12,7 +12,7 @@ Matured. G-D3 and G-D6 do not concern this wrapper. G-D3 is the SPI3 priority ce
 
 ## Consumers
 
-`Gantry` (end effector and limit switches) requires this component. `app_main` initialises it and passes the handle to the display. The test console and the pick scheduler call it from `src/`.
+`Gantry` (end effector and limit switches) requires this component. `bootInitIo` in `src/main_init_io.cpp` initialises it and passes the handle to the display; `app_main` calls `bootInitIo`. The test console and the pick scheduler call it from `src/`.
 
 ## Build and test
 

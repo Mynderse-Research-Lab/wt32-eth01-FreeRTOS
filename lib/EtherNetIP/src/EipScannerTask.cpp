@@ -256,7 +256,7 @@ void multiAxisCyclic(ScannerTaskCtx* ctx, EipMultiScanner& scanner,
     multiAxisRecover(ctx, scanner, planned_close, need_chip_recover, link_down_us, recover_streak, backoff_ms);
 }
 
-void multiAxisSetup(ScannerTaskCtx* ctx, MultiAxisSlot* slots, size_t n,
+void multiAxisConnectAndRun(ScannerTaskCtx* ctx, MultiAxisSlot* slots, size_t n,
                     uint32_t& backoff_ms, unsigned& recover_streak, int64_t& link_down_us) {
     holdClass1WhilePaused();
     uint32_t link_wait_polls = 0;
@@ -405,7 +405,7 @@ void multiAxisTask(void* arg) {
   ESP_LOGI(TAG, "Multi-axis scanner: %u slot(s)", static_cast<unsigned>(n));
 
   while (true) {
-    multiAxisSetup(ctx, slots, n, backoff_ms, recover_streak, link_down_us);
+    multiAxisConnectAndRun(ctx, slots, n, backoff_ms, recover_streak, link_down_us);
   }
 }
 

@@ -11,7 +11,7 @@ This page records every source file, the plan to bring each one under 500 lines,
   - Function bodies are copied verbatim.
   - Every original line is used exactly once.
   - The only edits are to linkage: `static` added or dropped, shared declarations in a private header, default arguments moved to the declaration.
-  - A function that is itself too long is broken up in a separate commit afterwards.
+  - A function that is itself too long is broken up in a separate commit afterwards. `5f8eb76` does this: `multiAxisTask` calls `multiAxisConnectAndRun`, which calls `multiAxisCyclic`, which calls `multiAxisRecover`.
 - **Each split commit updates:**
   - the hand-kept source lists (`lib/*/CMakeLists.txt` SRCS, `idf/main/CMakeLists.txt` APP_SRCS, `test/host/CMakeLists.txt`)
   - every `file:line` reference in the docs, found by its code text
@@ -42,7 +42,7 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `7cc157d` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisConnectAndRun` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `bc18d32` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
 | `31c85c9` | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
 | `b32c42d` | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
