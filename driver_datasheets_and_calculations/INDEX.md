@@ -1,81 +1,54 @@
-# driver_datasheets_and_calculations
+# Vendor catalog
 
-Drive parameter sets and Kinetix reference data for the gantry.
-
-**The vendor manuals are kept outside this repository.** The PDFs and their text
-extracts moved to a shared folder on 2026-11-27, with the same paths they had
-here. **Shared folder:** [`wt32-eth01-vendor-docs`][shared] in the project's
-Design Work drive.
-
-Ten PDFs were already in Design Work and were not copied there. They are in
-`Gantry Mechanical System (v2 SCHUNK Components)/`: the four `AB_Kinetix_*` PDFs
-in its `Servo Motor + Drive Docs/` subfolder, and
-`SCHUNK_design_technical_info.pdf`, the three `Technical Information_` PDFs for
-the Beta 100, the Beta 80 and the KGG 100-80, `OA 1693058*.pdf` and
-`McMc order acknowledgement.pdf` in the folder itself.
-
-Docs and code cite the manuals by name or publication number, for example in
-`include/axis_drivetrain_params.h`. Production motion is **EtherNet/IP** (see
-`docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md`).
+Drive parameter sets in this folder, and where the vendor manuals are.
 
 ## In this folder
 
-| Path | Contents |
-|------|----------|
-| `driver_configs/` | Kinetix 5100 parameter sets and exports (`knx5100c_*`), HCS01 parameter sets (`hcs01/`), EDS files, IndraWorks project |
-| `SCHUNK_ERD_motor_parameter-commissioning.zip` (+ extracted tree) | SCHUNK ERD motor package as received. The extracted tree keeps its `.par`, `.xls` and `.csv` files; its PDFs are in the shared folder |
-| `2198-rd001_-en-p.xlsx`, `2198-RD001_-en-p/` | Kinetix 5100 Fault Codes (Rockwell 2198-RD001); `tools/eip_test.py` reads the CSV |
-| `2198-rd002_-en-p.xlsx`, `2198-RD002_-en-p/` | Kinetix 5100 Servo Drive Parameters Reference Data (Rockwell 2198-RD002), one CSV per sheet |
+-   `driver_configs/`: Kinetix 5100 and HCS01 parameter sets, EDS files, the
+    IndraWorks project.
+-   `SCHUNK_ERD_motor_parameter-commissioning.zip` and its extracted tree: the
+    SCHUNK ERD motor package, without its PDFs.
+-   `2198-RD001_-en-p/` and `2198-RD002_-en-p/`, with their `.xlsx`: Kinetix
+    5100 fault codes and parameter reference as CSV; `tools/eip_test.py` reads
+    the fault codes.
 
-## In the shared folder
+## Vendor manuals
 
-| File | Role |
-|------|------|
-| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
-| `Technical Information_SCHUNK_ERD_04 Catalog section.pdf` | Theta ERD 04 catalog chapter |
-| `Technical Information_SCHUNK_ERD Catalog section.pdf` | Full ERD series catalog chapter |
-| `SCHUNK_ERD_Operating_Manual.pdf` | ERD assembly / operating manual |
-| `Optimization_Manual_Axis.pdf` | ERD manual tuning heuristic for Bosch-Rexroth/IndraWorks |
-| `SCHUNK_ERD-ERT_IndraDrive_CS_Commissioning_instructions.pdf` | IndraDrive CS commissioning |
-| `SCHUNK_ERD04_Motordatenblatt_IndraDrive.pdf` / `SCHUNK_ERD04_Datasheet_IndraDrive.pdf` | ERD04 IndraDrive motor data (from zip) |
-| `Technical Information_Beta 100-ZRS*.pdf` | X belt actuator |
-| `Technical Information_Beta 80-SRS*.pdf` | Z ballscrew actuator |
-| `Technical Information_SCHUNK KGG 100-80*.pdf` | Gripper |
-| `AB_Kinetix5100_user_manual.pdf` | Kinetix 5100 |
-| `PUB00213R0_EtherNetIP_Developers_Guide.pdf` | ODVA EtherNet/IP Quick Start for Vendors Handbook |
-| `PUB00123R1_Common-Industrial_Protocol_and_Family_of_CIP_Networks.pdf` | ODVA overview of CIP and EtherNet/IP (2016) |
-| `PUB00028R1-Recommended-IP-Addressing-Methods-for-EtherNetIP-Devices.pdf` | ODVA IP addressing recommendations |
-| `EtherNetIP Interoperabiltiy Recommendations.pdf.pdf` | ODVA 2009 conference paper on interoperability and performance testing |
-| `PUB00070_Recommended-Functionality-for-EIP-Devices-v10.pdf` | ODVA Roundtable recommendations for EtherNet/IP devices (R10, 2018) |
-| `AB_Kinetix_drive_specs.pdf` / `AB_Kinetix_motor_specs.pdf` | Drive / motor specs |
-| `2198-in003_-en-p.pdf` | Kinetix installation |
-| `R911325518_*HCS01_Commissioning Manual.pdf` | HCS01 connectors |
-| `Rexroth HCS-01 Drive Project Planning Manual*.pdf` | HCS01 type code |
-| `OA 1693058*.pdf` / `McMc order acknowledgement.pdf` | Purchase records |
-| `SDF08NK8X_manual_V3.0_2024.pdf` | Legacy pulse driver (reference only) |
-| `AB_Kinetix_motion_control_selection_guide.pdf` | Kinetix motion control selection guide |
-| `R911338673_01_EN_Rexroth IndraDrive MPx-18 Functions_Application Manual.pdf` | IndraDrive MPx-18 functions |
-| `R911328651_15_EN_IndraDrive MPx-16 to MPx-21 and PSB Parameters_Reference Book.pdf` | IndraDrive parameter reference |
-| `wiz850io.pdf` | WIZ850io (W5500) module |
-| `driver_configs/HCS01.1-W0005-MPB20V30-parameter-doc.pdf` | HCS01 parameter document |
-| `SCHUNK_ERD_motor_parameter-commissioning/…/*.pdf` | ERD motor data sheets per controller (26 files) |
-| Text extracts of the Kinetix 5100 user manual, the WIZ850io datasheet and the HCS01 parameter document (Markdown and CSV), with the three scripts that made them | Search aids, not sources: cite the PDF |
+The PDFs are in the shared folder [`wt32-eth01-vendor-docs`][shared], at the
+paths they had here. The four `AB_Kinetix_*` PDFs,
+`SCHUNK_design_technical_info.pdf`, the Beta 100, Beta 80 and KGG 100-80 data
+and the two purchase records are in
+`Design Work/Gantry Mechanical System (v2 SCHUNK Components)/` instead.
 
-## Local copies only
+-   **Rockwell Kinetix 5100:** user manual, installation (`2198-in003`), drive
+    and motor specs, selection guide.
+-   **Rexroth HCS01 and IndraDrive:** commissioning (R911325518), project
+    planning (R911322210), MPx-18 functions (R911338673), MPx-16 to MPx-21
+    parameters (R911328651), the HCS01 parameter document.
+-   **SCHUNK:** ERD catalog sections, operating manual, IndraDrive CS
+    commissioning, axis optimization manual, ERD04 and per-controller motor
+    data, Beta 100 (X), Beta 80 (Z), KGG 100-80 (gripper).
+-   **ODVA:** PUB00213 (EtherNet/IP quick start for vendors), PUB00123 (CIP
+    overview), PUB00028 (IP addressing), PUB00070 (device recommendations), a
+    2009 interoperability paper.
+-   **Other:** WIZ850io (W5500 module), SDF08NK8X (legacy pulse driver),
+    purchase records.
+-   **Text extracts** of three manuals, with the scripts that made them: search
+    aids; cite the PDF.
 
-Neither in the repository nor in the shared folder.
+The CIP Networks Library Vol 1 (Ed. 3.3, all rights reserved) and Vol 2 (Ed.
+1.18, single-subscription licence) are local copies only: never commit or share
+them.
 
-| Document | Note |
-|----------|------|
-| CIP Networks Library Vol 1, Ed. 3.3 | ODVA CIP specification (2007). All rights reserved: local copy only, do not commit |
-| CIP Networks Library Vol 2, Ed. 1.18 | ODVA EtherNet/IP specification. Single-subscription licence, p. iii: local copy only, do not commit |
+## Missing
 
-## Missing / pending
+-   SCHUNK Trap Move attachments: the inertia and torque commissioning slots in
+    `axis_drivetrain_params.h`.
+-   2198-IN020: the TBIO pin drawing.
+-   MPB-xxVRS functional description: HCS01 X31, if needed beyond EtherNet/IP.
 
-| Document | Needed for |
-|----------|------------|
-| SCHUNK Trap Move attachments | Inertia / torque commissioning slots in `axis_drivetrain_params.h` |
-| 2198-IN020 | Formal TBIO pin drawing |
-| MPB-xxVRS Functional Description | HCS01 X31 details if needed beyond EIP |
+## See also
+
+-   [Doc index](/docs/INDEX.md).
 
 [shared]: https://drive.google.com/drive/folders/1NL5sW1CT2gorexiiKgt4eoGlQNMBzlNm
