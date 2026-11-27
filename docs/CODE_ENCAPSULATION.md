@@ -63,7 +63,7 @@ Image `9891df5`, flashed over CellNet on 2026-11-27 (slot `ota_0` to `ota_1`, 8.
 | Idle, motors off | 4 snapshots over 15 min, up to 28 min after boot | `eiptiming` GO every time, exchange p99 1,129–1,307 µs; `soft_miss`, `sendok_fail`, `chip_recover` and `reconnect` 0; `gaptrace`: no gap of 10 ms or more |
 | Motion | 15 min: 46 loops of `test_cycle`'s legs through `move` (414 moves, Z capped at 90 mm), 48 snapshots | every move reached its pose (X and Z within 1.5 mm, theta within 0.1°); GO every time, exchange p99 1,120–1,719 µs; the same counters 0; no gap |
 
-So the Class 1 splits (`7cc157d`, `6a97e0d`, `311d673`, `f62efb9`, `5f8eb76`) count as done. The boot log and console checks also covered the boot stages (`fcb89c8`), the console decoupling (`9bf8409`) and the component moves. `test_cycle` itself does not pass on this machine, for reasons that predate this work (OPEN_ITEMS G-E8). Z has no brake, so the `stop` that ends a run drops it to A014 (G-A12, G-A13).
+So the Class 1 splits (`7cc157d`, `6a97e0d`, `311d673`, `f62efb9`, `5f8eb76`) count as done. The boot log and console checks also covered the boot stages (`fcb89c8`), the console decoupling (`9bf8409`) and the component moves. `test_cycle` itself does not pass on this machine, for reasons that predate this work (OPEN_ITEMS G-E8). Z has no brake, so the `stop` that ends a run can let it fall to A014 (G-A12, G-A13).
 
 ## Planned splits
 
