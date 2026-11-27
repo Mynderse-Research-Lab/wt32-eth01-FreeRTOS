@@ -4,7 +4,7 @@ The stored runtime-parameter set. Values start from compile-time defaults, are o
 
 ## Maturity
 
-Runs on the gantry. G-F7 records the boot read path; the row is not closed. G-F8, G-F1, G-F2 and G-B5 are open.
+Runs on the gantry. G-F7, the boot read path, was fixed and closed on 2026-11-27. G-F8, G-F1, G-F2 and G-B5 are open.
 
 ## Dependencies
 

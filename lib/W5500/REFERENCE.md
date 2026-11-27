@@ -22,7 +22,7 @@ The datagram length is the 16-bit big-endian field at header bytes 6 and 7 (`W55
 const uint32_t packetBytes = kUdpHeaderSize + static_cast<uint32_t>(payloadLen);
 ```
 
-`kUdpHeaderSize` is 8 (`W5500SocketInternal.h:50`). A length of `0xFFF8` or more does not wrap that sum (`W5500Socket.cpp:260–261` and `312–314`). G-B15 records the earlier 16-bit sum. The row is not closed.
+`kUdpHeaderSize` is 8 (`W5500SocketInternal.h:50`). A length of `0xFFF8` or more does not wrap that sum (`W5500Socket.cpp:260–261` and `312–314`). G-B15 records the earlier 16-bit sum; it was closed on 2026-11-27.
 
 `readUdpDatagramUnlocked` peeks at most 8 + 256 bytes (`kUdpFastBurstMax`). `readUdpBatchUnlocked` refuses a buffer longer than `0xFFFF` and treats a length that does not fit the burst as malformed when the burst was the whole RX.
 
@@ -52,4 +52,4 @@ None in this component. `gaptrace` and `eiptiming` print snapshots this driver c
 
 ## Documents
 
-Class 1 use of these sockets is `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-B5, G-B15, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`.
+Class 1 use of these sockets is `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-B5, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`; G-B15 is closed.

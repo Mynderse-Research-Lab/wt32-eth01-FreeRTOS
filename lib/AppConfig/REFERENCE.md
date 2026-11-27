@@ -78,4 +78,4 @@ One NVS key, `cfg_set` (`AppConfig.cpp:16`). There is no second slot.
 
 ## Documents
 
-Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2, G-F7, G-F8 and G-B5 in `docs/OPEN_ITEMS.md`.
+Key names, units and ranges are `ConfigSchema.cpp`. Open items: G-F1, G-F2, G-F8 and G-B5 in `docs/OPEN_ITEMS.md`; G-F7 is closed.

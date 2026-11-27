@@ -124,6 +124,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 | Rule | Why |
 |------|-----|
 | Send `stop`, then `status`, before every OTA flash | Motors must be off and the gantry idle |
+| Keep the space below Z clear whenever the motors may be disabled | Z has no brake: `stop`, an OTA flash or a drive fault lets it fall to A014 (G-A12). Bring-up from there needs G-A13's workaround |
 | Test with the 9V cell only | The trigger-sensor workaround sends one fixed frame until the ML model is ready |
 | Space vision detections at least 7 s apart in demonstrations | A demonstration control, not a safety measure: it gives the unoptimized planner room to complete each pick. Several detections per second is the goal (G-C10) |
 | Gripper regulator at 6 bar | The KGG 100-80 closing time of 0.19 s is specified at 6 bar |

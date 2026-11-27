@@ -4,7 +4,7 @@ Driver for the WIZnet W5500 on SPI2, the bus that carries EtherNet/IP Class 1. I
 
 ## Maturity
 
-Runs on the gantry. G-B15 records the UDP length field; the row is not closed. G-B16, G-B17 and G-B18 are open. G-B5 covers the address, which comes from Kconfig.
+Runs on the gantry. G-B15, the UDP length field, was fixed and closed on 2026-11-27. G-B16, G-B17 and G-B18 are open. G-B5 covers the address, which comes from Kconfig.
 
 ## Dependencies
 

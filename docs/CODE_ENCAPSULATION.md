@@ -54,6 +54,17 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `75c8298` | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
 | `9745207` | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
 
+## On-cell verification
+
+Image `9891df5`, flashed over CellNet on 2026-11-27 (slot `ota_0` to `ota_1`, 8.8 s, `emac_missed 0`).
+
+| Run | Length | Result |
+|---|---|---|
+| Idle, motors off | 4 snapshots over 15 min, up to 28 min after boot | `eiptiming` GO every time, exchange p99 1,129–1,307 µs; `soft_miss`, `sendok_fail`, `chip_recover` and `reconnect` 0; `gaptrace`: no gap of 10 ms or more |
+| Motion | 15 min: 46 loops of `test_cycle`'s legs through `move` (414 moves, Z capped at 90 mm), 48 snapshots | every move reached its pose (X and Z within 1.5 mm, theta within 0.1°); GO every time, exchange p99 1,120–1,719 µs; the same counters 0; no gap |
+
+So the Class 1 splits (`7cc157d`, `6a97e0d`, `311d673`, `f62efb9`, `5f8eb76`) count as done. The boot log and console checks also covered the boot stages (`fcb89c8`), the console decoupling (`9bf8409`) and the component moves. `test_cycle` itself does not pass on this machine, for reasons that predate this work (OPEN_ITEMS G-E8). Z has no brake, so the `stop` that ends a run drops it to A014 (G-A12, G-A13).
+
 ## Planned splits
 
 No file is over 500 lines.
@@ -99,7 +110,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 ## Order of work
 
 1. This record and the library review.
-2. The Class 1 splits, each held until its on-cell soak passes.
+2. The Class 1 splits are done; their on-cell soak passed on 2026-11-27 ([On-cell verification](#on-cell-verification)).
 3. Header splits, then test splits.
 4. Component moves: `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta` and the console decoupling are done. `GantryConsole` waits until G-C7 is decided.
 5. `README.md` and `REFERENCE.md` for the existing libraries are done.
