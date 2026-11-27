@@ -25,7 +25,7 @@ firmware finds them through `EXTRA_COMPONENT_DIRS` in `idf/CMakeLists.txt`, and
 |  | [GpioExpander](GpioExpander/README.md) | Field I/O, gripper valve, encoder, TFT lines and W5500 reset on the MCP23S17 |
 |  | [SpiDisplay](SpiDisplay/README.md) | ST7789 TFT and its menu |
 |  | [GantryOta](GantryOta/README.md) | Firmware updates into the passive OTA slot, over TCP or CellNet |
-|  | [ThetaTrace](ThetaTrace/README.md) | 1 kHz theta move trace and its summary (`thtrace`) |
+| Diagnostics | [ThetaTrace](ThetaTrace/README.md) | 1 kHz theta move trace and its summary (`thtrace`) |
 |  | [BootLogRing](BootLogRing/README.md) | Keeps the first log output after reset for `bootlog` |
 
 ## See also
