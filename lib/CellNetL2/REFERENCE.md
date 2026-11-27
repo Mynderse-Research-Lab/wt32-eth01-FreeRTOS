@@ -74,4 +74,4 @@ if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNet
 
 ## Documents
 
-`docs/CELL_NET_L2_COMMUNICATION_GUIDE.md`, `docs/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in `docs/OPEN_ITEMS.md`.
+`lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md`, `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in `docs/OPEN_ITEMS.md`.

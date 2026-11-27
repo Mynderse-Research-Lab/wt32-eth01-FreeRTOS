@@ -3,7 +3,7 @@
 // Pure C++17 encoders (EipEncapsulation, EipCpf, CIP MR, assemblies) compile on
 // the host and are regression-tested in test/host/. ESP-IDF-only pieces
 // (EipSocketW5500, EipScannerTask) live alongside them but are not included
-// here — see docs/LOW_LEVEL_GANTRY_CONTROL.md for phase boundaries.
+// here — see LOW_LEVEL_GANTRY_CONTROL.md for phase boundaries.
 
 #ifndef ETHERNET_IP_ETHERNET_IP_H
 #define ETHERNET_IP_ETHERNET_IP_H

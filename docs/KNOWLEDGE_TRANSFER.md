@@ -84,12 +84,12 @@ Maths and timing are in [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS
 | Belt position | Conveyor → gantry, supervisor | CellNet L2 | `L2ConveyorSpeedPayload` | Picks held, stale belt |
 | Commands | Supervisor → gantry | CellNet L2 | `CELL_COMMAND` ids 1 to 6 | No response to START |
 | Status | Gantry → supervisor | CellNet L2 | `L2GantryStatusPayload` | `gantry1.online` is false in the supervisor's `/api/state` |
-| Console | Supervisor → gantry | TCP `:2323` | Console contract, [LOW_LEVEL §9](LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract) | Console `busy`; send `stop` |
-| OTA | Supervisor → gantry | CellNet L2 by default ([CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md)); TCP `:8032` with `?transport=tcp` | `OTA_*` messages, `CELL_COMMAND` 7 | `/api/ota/status` `message`; `emac_missed` must be 0 |
-| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [LOW_LEVEL §5](LOW_LEVEL_GANTRY_CONTROL.md#5-class-1-io--wire-format-and-udp-lifecycle) | `E602`, `F4009`, `T->O stale` |
+| Console | Supervisor → gantry | TCP `:2323` | Console contract, [LOW_LEVEL §9](../LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract) | Console `busy`; send `stop` |
+| OTA | Supervisor → gantry | CellNet L2 by default ([CELLNET_OTA_PROTOCOL.md](../lib/CellNetL2/CELLNET_OTA_PROTOCOL.md)); TCP `:8032` with `?transport=tcp` | `OTA_*` messages, `CELL_COMMAND` 7 | `/api/ota/status` `message`; `emac_missed` must be 0 |
+| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [LOW_LEVEL §5](../LOW_LEVEL_GANTRY_CONTROL.md#5-class-1-io--wire-format-and-udp-lifecycle) | `E602`, `F4009`, `T->O stale` |
 | Time | Supervisor → gantry, vision | NTP | `ntp_server` key | `cfg time` shows `no clock` |
 
-Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md). The header is `include/cell_net_l2_protocol.h`, and this repository is its source. The supervisor copies it into its `vendor/cellnet` with its `scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has drifted (C-3).
+Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md). The header is `include/cell_net_l2_protocol.h`, and this repository is its source. The supervisor copies it into its `vendor/cellnet` with its `scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has drifted (C-3).
 
 **Direction (decided 2026-11-05):** CellNet L2 is to become the only transport between cell nodes; the OTA and time services above move onto it, OTA first (N-1, N-2). The supervisor web application stays on HTTP, and so does the gantry console on TCP `:2323` (amended 2026-11-15).
 
@@ -144,7 +144,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 
 Moves the end effector on X, Z and theta, intercepts cells, and drops them in the bin. **There is one gantry today, and more are planned** (see G-A1). Copy this section for each new gantry.
 
-**Read:** [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md), [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
+**Read:** [LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md), [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
 
 ### 5.1 Axes and mechanics
 
@@ -334,7 +334,7 @@ $$\text{pace} = \begin{cases} \text{slow} & t_a + T_{cyc} + T_{app}^{slow} \le t
 
 On 2026-10-25, strikes 7101–7105 picked a 9V on its side with its length along the belt ($\theta = 90^\circ$, $w$ = 17.5, $h$ = 26.5). The inputs were: belt Z 122, so $z_g$ = 119.0; hover 35.7, that day's ceiling; $v_z$ = 950; $a_z = d_z$ = 3000; belt 150 mm/s; offsets 0. The current code, compiled with those inputs, gives:
 
-| Z release to… | Model | Measured ([STRIKE_TIMING](STRIKE_TIMING_MEASUREMENTS_2026-10-25.md)) |
+| Z release to… | Model | Measured ([STRIKE_TIMING](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md)) |
 |---|---|---|
 | Grip valve fires | +169.5 ms | +169.5 to +170.1 ms (7102–7105); +172.2 ms (7101, whose MCP write took 2.0 ms) |
 | Retract commanded | +333.3 ms ($\tau_p$, 83.3 mm triangle) | +333.8 ms (7101) |
@@ -402,7 +402,7 @@ WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP
 
 ### 5.6 Runtime parameters
 
-One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference: [LOW_LEVEL §14](LOW_LEVEL_GANTRY_CONTROL.md#14-runtime-parameters).
+One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference: [LOW_LEVEL §14](../LOW_LEVEL_GANTRY_CONTROL.md#14-runtime-parameters).
 
 **Open items:** [G-F in OPEN_ITEMS.md](OPEN_ITEMS.md#g-f-runtime-parameters).
 
@@ -423,7 +423,7 @@ The ML model is not ready yet. So that development does not stall, the Gantry te
 
 **Trigger sensor workaround.** Chain latency is set in `vis_lat_ms`, measured with a Saleae capture: about 36 ms with the sensor delay. Rig offsets sit in code (G-C5).
 
-**Read:** [CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
+**Read:** [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md).
 
 **Open items:** [V in OPEN_ITEMS.md](OPEN_ITEMS.md#vision).
 

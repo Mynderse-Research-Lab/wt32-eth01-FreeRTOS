@@ -3,7 +3,7 @@
 **Status:** Canonical wire specification for CellNet  
 **EtherType:** `0x88B5`  
 **Source of truth:** `include/cell_net_l2_protocol.h` (the supervisor vendors a copy)  
-**Companion Docs:** [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md), [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md), [INDEX.md](INDEX.md)
+**Companion Docs:** [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md), [LOW_LEVEL_GANTRY_CONTROL.md](../../LOW_LEVEL_GANTRY_CONTROL.md), [INDEX.md](../../docs/INDEX.md)
 
 ---
 

@@ -4,7 +4,7 @@
  *
  * Drives one complete CellNet OTA update from a Linux host (the Raspberry Pi 5
  * supervisor) over an AF_PACKET raw socket. The protocol is
- * docs/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window of section
+ * lib/CellNetL2/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window of section
  * 5.1), as proven on hardware by tools/cellnet_ota_send.cpp, which is now a
  * thin CLI over runOtaSender().
  *

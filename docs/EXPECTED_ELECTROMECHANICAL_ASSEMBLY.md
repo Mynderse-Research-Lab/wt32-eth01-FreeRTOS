@@ -1,7 +1,7 @@
 # Expected Electro-mechanical Assembly
 
 **Status:** Canonical product-design document (EIP production architecture).  
-**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).  
+**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).  
 **Vendor catalog:** [`driver_datasheets_and_calculations/INDEX.md`](../driver_datasheets_and_calculations/INDEX.md).
 
 This document describes the **expected** gantry electro-mechanical build for the
@@ -274,7 +274,7 @@ See [`pinout.csv`](../pinout.csv).
 ## 6. Scaling (firmware-facing)
 
 See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and
-[LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).
+[LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).
 
 ---
 

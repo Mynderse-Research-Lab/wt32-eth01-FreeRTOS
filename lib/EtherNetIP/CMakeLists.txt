@@ -1,7 +1,7 @@
 # EtherNetIP component - EtherNet/IP + CIP originator encoding and transport.
 #
 # Pure C++17 encoding (host-testable) plus ESP-IDF socket/scanner scaffolding.
-# Scanner is Kconfig-gated (default off); see docs/LOW_LEVEL_GANTRY_CONTROL.md.
+# Scanner is Kconfig-gated (default off); see LOW_LEVEL_GANTRY_CONTROL.md.
 
 idf_component_register(
     SRCS

@@ -2,7 +2,7 @@
 
 **Not runnable yet.** The pick path does not call `coordinated_grasp.h`, and the firmware has no bench switch or close-trigger trim. The stored keys once meant for them (`pk_bench`, `pk_voff_ms`, `pk_tr_*`) were read by nothing and were removed on 2026-11-16. The ladder below needs that path built first.
 
-Production timed picks stay off. `pk_dropin` stays off and is not the switch. The bench switch is to allow one selected case at a time. The paper grid is in [PICK_COORDINATED_GRASP_VALIDATION.md](PICK_COORDINATED_GRASP_VALIDATION.md). Simulation is not a bench result.
+Production timed picks stay off. `pk_dropin` stays off and is not the switch. The bench switch is to allow one selected case at a time. The paper grid is in [PICK_COORDINATED_GRASP_VALIDATION.md](docs/PICK_COORDINATED_GRASP_VALIDATION.md). Simulation is not a bench result.
 
 Do this at 6 bar, with finger width 10 mm and finger length 50 mm (`fin_wid_mm`, `fin_len_mm`).
 

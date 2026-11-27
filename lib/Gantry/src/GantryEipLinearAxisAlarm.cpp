@@ -98,7 +98,7 @@ void GantryEipLinearAxis::logAlarmEdge(const eip::k5100::InputAssembly154& fb) {
     if (eip::k5100::isWarningA603(fb.warning_code)) {
       ESP_LOGW(tag,
                "A603 hint: need Active; Absolute moves use OM=1 TM=2 after "
-               "Home34 (see docs/LOW_LEVEL_GANTRY_CONTROL.md)");
+               "Home34 (see LOW_LEVEL_GANTRY_CONTROL.md)");
     }
     eip::k5100::DriveCodeInfo info{};
     char disp[8];

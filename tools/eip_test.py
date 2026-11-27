@@ -2680,7 +2680,7 @@ def run_servo_state_command(client: EipClient, enable: bool, rpi_us: int = 5000,
     params.ot_rpi_us = rpi_us
     params.to_rpi_us = rpi_us
     params.raw_ot_conn_size = 40 + 2 + 4
-    # docs/LOW_LEVEL_GANTRY_CONTROL.md / EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md
+    # LOW_LEVEL_GANTRY_CONTROL.md / EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md
     # indicate Kinetix requires the 32-bit Run/Idle header on O->T cyclic data.
     params.include_run_idle_header = True
 
@@ -2786,7 +2786,7 @@ def run_servo_state_command(client: EipClient, enable: bool, rpi_us: int = 5000,
     if enable and ok and not active_seen:
         print("  [WARN] Active bit never asserted during enable attempts.")
         print("  If shaft is still free, verify STO/SON wiring and drive enable chain")
-        print("  per docs/LOW_LEVEL_GANTRY_CONTROL.md and docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md.")
+        print("  per LOW_LEVEL_GANTRY_CONTROL.md and docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md.")
     if not status_seen:
         print("  [WARN] No valid status frames received while applying servo command.")
 

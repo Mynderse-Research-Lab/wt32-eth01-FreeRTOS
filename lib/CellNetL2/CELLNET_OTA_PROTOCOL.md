@@ -1,6 +1,6 @@
 # CellNet OTA Protocol
 
-Firmware updates for the WT32 nodes over CellNet L2, sent by the supervisor ([N-2](OPEN_ITEMS.md#cell-transport)). It is the default OTA transport; TCP port 8032 stays as the fallback (`POST /api/ota?transport=tcp`).
+Firmware updates for the WT32 nodes over CellNet L2, sent by the supervisor ([N-2](../../docs/OPEN_ITEMS.md#cell-transport)). It is the default OTA transport; TCP port 8032 stays as the fallback (`POST /api/ota?transport=tcp`).
 
 | Part | Where |
 |------|-------|

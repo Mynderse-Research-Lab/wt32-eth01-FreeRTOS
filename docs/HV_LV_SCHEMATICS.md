@@ -4,7 +4,7 @@
 **Panel schematic:** [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).  
 **Logic-board schematic:** Pending addition.  
 **Mechanical / software companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
-[LOW_LEVEL_GANTRY_CONTROL.md](LOW_LEVEL_GANTRY_CONTROL.md).
+[LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).
 
 > **PRELIMINARY — NOT FOR CONSTRUCTION.**  
 > This package documents the intended HV/LV architecture for review. It does

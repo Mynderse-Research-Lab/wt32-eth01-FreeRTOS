@@ -97,4 +97,4 @@ if (w5500.init(cfg)) {
 
 ## Documents
 
-Class 1 use of these sockets is `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-B5, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`; G-B15 is closed.
+Class 1 use of these sockets is `LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-B5, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`; G-B15 is closed.

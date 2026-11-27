@@ -1,8 +1,8 @@
 # Low-Level Gantry Control (for software)
 
 **Status:** Canonical software design document (EIP production architecture).  
-**Companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
-[HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [`pinout.csv`](../pinout.csv).
+**Companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
+[HV_LV_SCHEMATICS.md](docs/HV_LV_SCHEMATICS.md), [`pinout.csv`](pinout.csv).
 
 Application code commands motion **only** through `Gantry::Gantry`. There is no
 supported PulseMotor / step-dir production path. MCP23S17 is used for Field I/O
@@ -64,15 +64,15 @@ flowchart TD
 
 | Layer | Path |
 |-------|------|
-| Application | [`src/main.cpp`](../src/main.cpp), [`src/gantry_test_console.cpp`](../src/gantry_test_console.cpp) |
-| Motion API | [`lib/Gantry/src/Gantry.h`](../lib/Gantry/src/Gantry.h) |
-| X/Z adapters | [`GantryEipLinearAxis`](../lib/Gantry/src/GantryEipLinearAxis.cpp) |
-| Theta adapter | [`GantryEipRotaryAxis`](../lib/Gantry/src/GantryEipRotaryAxis.cpp) (`CONFIG_EIP_AXIS_THETA`) |
-| SPI3 / Field / TFT | [`lib/Spi3Bus/`](../lib/Spi3Bus/), [`lib/MCP23S17/`](../lib/MCP23S17/), [`lib/SpiDisplay/`](../lib/SpiDisplay/) |
-| Scanner / Class 1 | [`lib/EtherNetIP/`](../lib/EtherNetIP/) |
-| SPI Ethernet | [`lib/W5500/`](../lib/W5500/) |
-| Pins / tasks | [`include/gantry_app_constants.h`](../include/gantry_app_constants.h) |
-| Mechanics | [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) |
+| Application | [`src/main.cpp`](src/main.cpp), [`src/gantry_test_console.cpp`](src/gantry_test_console.cpp) |
+| Motion API | [`lib/Gantry/src/Gantry.h`](lib/Gantry/src/Gantry.h) |
+| X/Z adapters | [`GantryEipLinearAxis`](lib/Gantry/src/GantryEipLinearAxis.cpp) |
+| Theta adapter | [`GantryEipRotaryAxis`](lib/Gantry/src/GantryEipRotaryAxis.cpp) (`CONFIG_EIP_AXIS_THETA`) |
+| SPI3 / Field / TFT | [`lib/Spi3Bus/`](lib/Spi3Bus/), [`lib/MCP23S17/`](lib/MCP23S17/), [`lib/SpiDisplay/`](lib/SpiDisplay/) |
+| Scanner / Class 1 | [`lib/EtherNetIP/`](lib/EtherNetIP/) |
+| SPI Ethernet | [`lib/W5500/`](lib/W5500/) |
+| Pins / tasks | [`include/gantry_app_constants.h`](include/gantry_app_constants.h) |
+| Mechanics | [`include/axis_drivetrain_params.h`](include/axis_drivetrain_params.h) |
 
 **Decision:** EIP — drive-native Position Absolute meets ±1 mm
 at 200 mm/s; host Speed+TM10 StopMotion does **not** meet that accuracy at speed.
@@ -160,7 +160,7 @@ For buffer copies the largest useful FDM length is **4 bytes** (`OM=11`). Regist
 
 ### Boot order (`CONFIG_EIP_SCANNER_ENABLED`)
 
-From [`src/main.cpp`](../src/main.cpp), whose `app_main` calls the stages in [`src/main_init_io.cpp`](../src/main_init_io.cpp), [`src/main_init_motion.cpp`](../src/main_init_motion.cpp), [`src/main_tasks.cpp`](../src/main_tasks.cpp) and [`src/main_init_net.cpp`](../src/main_init_net.cpp):
+From [`src/main.cpp`](src/main.cpp), whose `app_main` calls the stages in [`src/main_init_io.cpp`](src/main_init_io.cpp), [`src/main_init_motion.cpp`](src/main_init_motion.cpp), [`src/main_tasks.cpp`](src/main_tasks.cpp) and [`src/main_init_net.cpp`](src/main_init_net.cpp):
 
 1. **SPI3 + MCP** — bus init, Field/UI/TFT CS/W5500 RST; optional TFT stub.
 2. **W5500** — `w5500.init(...)` with MCP-driven RST (static; must outlive the scanner).
@@ -188,12 +188,12 @@ From [`src/main.cpp`](../src/main.cpp), whose `app_main` calls the stages in [`s
 | `TftUiTask` | 2 | 0 | 4096 | Encoder poll **100 Hz**, ST7789 draw **15 Hz** (SPI3; skips sample while Class 1 critical) |
 | `NetConsole` | **3** | 0 | 4096 | TCP line console on LAN8720 `:2323` |
 
-App constants: [`gantry_app_constants.h`](../include/gantry_app_constants.h).  
+App constants: [`gantry_app_constants.h`](include/gantry_app_constants.h).  
 Net console port / auth: menuconfig **TCP gantry console (LAN8720)**
-(`CONSOLE_TCP_*` via [`ethernet_app_config.h`](../include/ethernet_app_config.h)).  
+(`CONSOLE_TCP_*` via [`ethernet_app_config.h`](include/ethernet_app_config.h)).  
 Plant IP: menuconfig **LAN8720 plant Ethernet**.  
-Scanner: [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp). HoldKA: [`EipScannerTaskInternal.h`](../lib/EtherNetIP/src/EipScannerTaskInternal.h).  
-X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](../lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T (deferred SENDOK on cached dests) + batched T→O drain so exchange fits under 2 ms. Class 1 pacing uses `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs; FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/drain/cycle/cmd-to-StartMotion p50/p99, `pace overrun`/`yield`, plus
+Scanner: [`EipScannerTask.cpp`](lib/EtherNetIP/src/EipScannerTask.cpp). HoldKA: [`EipScannerTaskInternal.h`](lib/EtherNetIP/src/EipScannerTaskInternal.h).  
+X/Z RPI default: `CONFIG_EIP_X_RPI_US` = **2000** µs ([`lib/EtherNetIP/Kconfig`](lib/EtherNetIP/Kconfig)). Kinetix rejects **1000** µs with FO extended **0x0112** (RPI not acceptable). Class 1 path uses polling SPI + dest-cached O→T (deferred SENDOK on cached dests) + batched T→O drain so exchange fits under 2 ms. Class 1 pacing uses `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs; FreeRTOS stays at 1000 Hz). Console `eiptiming` dumps exchange/O→T/drain/cycle/cmd-to-StartMotion p50/p99, `pace overrun`/`yield`, plus
 reliability counters (soft_miss / sendok_fail / chip_recover / reconnect);
 **GO/NO-GO** is exchange p99 vs granted/configured RPI.
 
@@ -291,7 +291,7 @@ are derived from path direction:
 
 `v_i = V · |d_i| / L`, `a_i = A · |d_i| / L`, with `L = hypot(dx, dz)`.
 
-Helpers live in [`GantryPathProfile.h`](../lib/Gantry/src/GantryPathProfile.h)
+Helpers live in [`GantryPathProfile.h`](lib/Gantry/src/GantryPathProfile.h)
 (`decompose`, `planSegments`). Z cap: `armCurrentPathSegment` lowers each
 segment's path speed with `Path::zCappedPathSpeed` so the Z component stays under
 `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` (ballscrew critical speed) and the
@@ -345,7 +345,7 @@ Pass requires linear pose error within 1.5 mm (typical $< 1\text{ }\mu\text{m}$)
 
 ### Orchestration state machine
 
-`MotionState` in [`GantryTypes.h`](../lib/Gantry/src/GantryTypes.h), driven from [`GantryPath.cpp`](../lib/Gantry/src/GantryPath.cpp), [`GantryPathTheta.cpp`](../lib/Gantry/src/GantryPathTheta.cpp), [`GantrySequential.cpp`](../lib/Gantry/src/GantrySequential.cpp) and [`GantryMotion.cpp`](../lib/Gantry/src/GantryMotion.cpp):
+`MotionState` in [`GantryTypes.h`](lib/Gantry/src/GantryTypes.h), driven from [`GantryPath.cpp`](lib/Gantry/src/GantryPath.cpp), [`GantryPathTheta.cpp`](lib/Gantry/src/GantryPathTheta.cpp), [`GantrySequential.cpp`](lib/Gantry/src/GantrySequential.cpp) and [`GantryMotion.cpp`](lib/Gantry/src/GantryMotion.cpp):
 
 | State | Role |
 |-------|------|
@@ -380,7 +380,7 @@ Arm Z first, then X (or defer X until the interlock is true) before publishing
 
 ## 4. Process image mailbox
 
-[`EipProcessImage`](../lib/EtherNetIP/src/EipProcessImage.h) is the **only** coupling between Gantry axes and the scanner task.
+[`EipProcessImage`](lib/EtherNetIP/src/EipProcessImage.h) is the **only** coupling between Gantry axes and the scanner task.
 
 | API | Writer | Reader | Meaning |
 |-----|--------|--------|---------|
@@ -407,18 +407,18 @@ This section is the normative explanation of cyclic EtherNet/IP on this project.
 | Explicit (TCP) | **44818** | Encap header + RegisterSession / SendRRData(ForwardOpen 0x54) / ForwardClose 0x4E / UnRegisterSession | Only for open/close and rare explicit CIP |
 | Implicit Class 1 (UDP) | **2222** | **Raw CPF only** — no 24-byte encap header | Every RPI for as long as torque must hold |
 
-Session + FO live in [`EipSession`](../lib/EtherNetIP/src/EipSession.cpp) /
-[`EipConnectionManager`](../lib/EtherNetIP/src/EipConnectionManager.cpp) /
-[`EipScanner`](../lib/EtherNetIP/src/EipScanner.cpp).  
-Cyclic frames live in [`EipIoConnection`](../lib/EtherNetIP/src/EipIoConnection.cpp) /
-[`EipCpf`](../lib/EtherNetIP/src/EipCpf.cpp).
+Session + FO live in [`EipSession`](lib/EtherNetIP/src/EipSession.cpp) /
+[`EipConnectionManager`](lib/EtherNetIP/src/EipConnectionManager.cpp) /
+[`EipScanner`](lib/EtherNetIP/src/EipScanner.cpp).  
+Cyclic frames live in [`EipIoConnection`](lib/EtherNetIP/src/EipIoConnection.cpp) /
+[`EipCpf`](lib/EtherNetIP/src/EipCpf.cpp).
 
 ForwardOpen path (Kinetix X/Z): config assembly **191 (0xBF)** + O→T **104** + T→O **154**
 (`buildAssemblyConnectionPath`; EDS-style path `20 04 24 BF 2C 68 2C 9A`).
 Transport class/trigger = Class 1 cyclic (`0x01`). Granted API (`ot_api_us` /
 `to_api_us`) drives RPI pacing and recv timeout (`API_ms * 8 + 50`).
 
-Firmware FO overrides in `makeKinetixConfig` ([`EipScannerConfig.cpp`](../lib/EtherNetIP/src/EipScannerConfig.cpp)):
+Firmware FO overrides in `makeKinetixConfig` ([`EipScannerConfig.cpp`](lib/EtherNetIP/src/EipScannerConfig.cpp)):
 
 - CTM = **7** (RPI×512 ≈ 2.5 s of slack)
 - P2P T→O by default
@@ -467,13 +467,13 @@ Why wrong fails:
 2. The host stack replies **ICMP port unreachable**.
 3. The drive tears down Class 1 and **releases torque with no keypad fault**.
 
-PC harness history (same invariant): [`tools/eip_test.py`](../tools/eip_test.py) module docstring — fixed with `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent `io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and opens one TX socket per dest IP so DIPR stays cached ([`EipSocketW5500Udp`](../lib/EtherNetIP/src/EipSocketW5500.cpp)).
+PC harness history (same invariant): [`tools/eip_test.py`](tools/eip_test.py) module docstring — fixed with `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent `io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and opens one TX socket per dest IP so DIPR stays cached ([`EipSocketW5500Udp`](lib/EtherNetIP/src/EipSocketW5500.cpp)).
 
 A Class 1 connection only holds torque while O→T keeps arriving within the connection timeout. Stalling longer than CTM×RPI silently drops the connection.
 
 ### Dual-axis scanner loop
 
-[`EipMultiScanner`](../lib/EtherNetIP/src/EipMultiScanner.cpp) + task in [`EipScannerTask.cpp`](../lib/EtherNetIP/src/EipScannerTask.cpp):
+[`EipMultiScanner`](lib/EtherNetIP/src/EipMultiScanner.cpp) + task in [`EipScannerTask.cpp`](lib/EtherNetIP/src/EipScannerTask.cpp):
 
 1. `openAxis(0)` (TCP FO on X).
 2. `bindSharedUdp()` — one socket on 2222 for both axes.
@@ -485,7 +485,7 @@ A Class 1 connection only holds torque while O→T keeps arriving within the con
    - Drain T→O in **one RX burst** (settled Sn_RX_RSR+Sn_RX_RD, one payload read, one `Sn_RX_RD` advance + `RECV`). Iterate datagram views until each connected axis has one datagram this cycle (or RX empty / `kMaxDrainPerCycle`). First packet per axis wins (`last_got_[]`). Surplus frames in the burst are consumed so they cannot stale-feed the next cycle.
    - Demux by connection ID (`matchAxisByConnectionId`; fallback O→T CID).
    - Track **per-axis** T→O miss streaks. Kinetix stale still tears down. **HCS01-only stale does not chip-recover X/Z.**
-7. Pace with `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs). Cutting serialized SENDOK/RECV waits targets exchange p99 near **1000 µs**, which is meant to leave ~1 ms of slack so on-time cycles always block on the 2-tick grid. Live 2026-08-18 image `0x9c6c0` (n=128, 6 s settle): exchange p99 **938 GO**, cycle min/p50/p99 **1342/1999/2659**, ot_send p99 **452**, drain p99 **421**, `pace overrun=23 yield=2`, `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one tick every 8 consecutive overruns ([`EipClass1Timing.h`](../lib/EtherNetIP/src/EipClass1Timing.h) `class1OverrunAction`) as the TWDT safety net. `eiptiming` prints a `drain` line and `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns dominate.
+7. Pace with `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs). Cutting serialized SENDOK/RECV waits targets exchange p99 near **1000 µs**, which is meant to leave ~1 ms of slack so on-time cycles always block on the 2-tick grid. Live 2026-08-18 image `0x9c6c0` (n=128, 6 s settle): exchange p99 **938 GO**, cycle min/p50/p99 **1342/1999/2659**, ot_send p99 **452**, drain p99 **421**, `pace overrun=23 yield=2`, `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one tick every 8 consecutive overruns ([`EipClass1Timing.h`](lib/EtherNetIP/src/EipClass1Timing.h) `class1OverrunAction`) as the TWDT safety net. `eiptiming` prints a `drain` line and `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns dominate.
 
 Exchange outcomes:
 
@@ -497,7 +497,7 @@ Exchange outcomes:
 
 ### Recover ladder
 
-From [`EipScannerTaskInternal.h`](../lib/EtherNetIP/src/EipScannerTaskInternal.h) / [`W5500::recover`](../lib/W5500/src/W5500Init.cpp):
+From [`EipScannerTaskInternal.h`](lib/EtherNetIP/src/EipScannerTaskInternal.h) / [`W5500::recover`](lib/W5500/src/W5500Init.cpp):
 
 | Step | Behavior |
 |------|----------|
@@ -539,7 +539,7 @@ Distinguish **silent drop** (no keypad fault) from **latched E602**. Same softwa
 | E602 / A603 | `0x0602` / `0x0603` | `KinetixFaultCodes.h` |
 | CPF item types | `0x8002`, `0x00B1` | `CpfItemType` |
 
-Transport interfaces ([`EipTransport.h`](../lib/EtherNetIP/src/EipTransport.h)) allow host fakes; production uses [`EipSocketW5500`](../lib/EtherNetIP/src/EipSocketW5500.cpp). SPI register access stays inside [`W5500Socket`](../lib/W5500/src/W5500Socket.cpp) (mutex must not be held across recv wait so O→T can proceed).
+Transport interfaces ([`EipTransport.h`](lib/EtherNetIP/src/EipTransport.h)) allow host fakes; production uses [`EipSocketW5500`](lib/EtherNetIP/src/EipSocketW5500.cpp). SPI register access stays inside [`W5500Socket`](lib/W5500/src/W5500Socket.cpp) (mutex must not be held across recv wait so O→T can proceed).
 
 ---
 
@@ -557,8 +557,8 @@ Transport interfaces ([`EipTransport.h`](../lib/EtherNetIP/src/EipTransport.h)) 
 **Still used (not PTP):** OM=0 + TM=10 for settle / hold / abort StopMotion.  
 **Rejected for PTP:** OM=2 Speed + TM=10 + host StopMotion; Index/PR (OM=6) for dynamic picks; CIP Motion / Motion Group.
 
-PC prove: [`tools/eip_position_abs.py`](../tools/eip_position_abs.py).  
-Firmware SM: [`GantryEipLinearAxisPhases`](../lib/Gantry/src/GantryEipLinearAxisPhases.cpp) (ticks @ **100 Hz**).
+PC prove: [`tools/eip_position_abs.py`](tools/eip_position_abs.py).  
+Firmware SM: [`GantryEipLinearAxisPhases`](lib/Gantry/src/GantryEipLinearAxisPhases.cpp) (ticks @ **100 Hz**).
 
 ### ArmPhase (enable)
 
@@ -603,7 +603,7 @@ Already-there short-circuit: `|here - target| ≤ 0.05 mm` → hold, no StartMot
 
 ### Assembly 104 / 154 (essentials)
 
-Full maps: [`Kinetix5100Assembly.h`](../lib/EtherNetIP/src/Kinetix5100Assembly.h).
+Full maps: [`Kinetix5100Assembly.h`](lib/EtherNetIP/src/Kinetix5100Assembly.h).
 
 **Output 104:** OM @0, control bits @1 (ServoOn / StopMotion / StartMotion / FaultReset / …),
 HomingMethod @3, Speed/Accel/Decel refs @4/8/12 (0.1 RPM / 0.1 RPM/s),
@@ -650,7 +650,7 @@ Menuconfig: **Gantry kinematics** + EtherNet/IP originator (IPs, PUU/mm,
 | Hard envelope | Measured stroke from calibrate, or SCHUNK `AXIS_*_HARD_LIMIT_*` via soft-calibrate |
 | Abort | See §3 abort matrix |
 
-**Bench procedure:** see [EXPECTED §4](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md).  
+**Bench procedure:** see [EXPECTED §4](docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md).  
 **Author invariants:** motion only via `Gantry`; respect hard limits; never bypass
 STO / Servo On checks when debugging EIP arm failures.
 
@@ -659,15 +659,15 @@ STO / Servo On checks when debugging EIP arm failures.
 ## 9. Console contract
 
 Shared command core: `gantryConsoleProcessLine()` in
-[`gantry_test_console.cpp`](../src/gantry_test_console.cpp). Transports:
+[`gantry_test_console.cpp`](src/gantry_test_console.cpp). Transports:
 
 | Transport | Path | Notes |
 |-----------|------|-------|
 | **UART0** | `SerialCmd` / `getchar` | Flash + pre-link logs; always available |
-| **TCP :2323** | [`gantry_net_console.cpp`](../src/gantry_net_console.cpp) on **LAN8720** | After plant ETH IP up; **not** on W5500/EIP |
+| **TCP :2323** | [`gantry_net_console.cpp`](src/gantry_net_console.cpp) on **LAN8720** | After plant ETH IP up; **not** on W5500/EIP |
 
 Config (idf.py menuconfig): **LAN8720 plant Ethernet** and **TCP gantry console
-(LAN8720)** — bridged by [`ethernet_app_config.h`](../include/ethernet_app_config.h).
+(LAN8720)** — bridged by [`ethernet_app_config.h`](include/ethernet_app_config.h).
 Defaults: gantry IP **`10.42.0.100/24`** (gateway `10.42.0.1`), TCP **`:2323`**, password **`LTU_1932`**,
 up to **4** remembered IPs for **600 s** (timer resets on reconnect). UART has no
 password. Single TCP client (backlog 1).
@@ -812,8 +812,8 @@ from `esp_timer` one-shots, re-timed from the newest belt state on every conveyo
   (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and `pk_guard_ms` stay tunable.
 
 For real-time protocol specs, see
-[CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md).
-For kinematics, see [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md).
+[CELL_NET_L2_COMMUNICATION_GUIDE.md](lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md).
+For kinematics, see [PICK_SCHEDULER_KINEMATICS.md](docs/PICK_SCHEDULER_KINEMATICS.md).
 
 
 ---
@@ -831,10 +831,10 @@ ctest --test-dir build/host --output-on-failure
 
 | Suite | Locks |
 |-------|-------|
-| [`test_eip_encoding.cpp`](../test/host/test_eip_encoding.cpp) | Encap, CPF, FO, Kinetix 104/154 wire bytes |
-| [`test_eip_transport.cpp`](../test/host/test_eip_transport.cpp) | Session, Class 1 frames, multi-scanner demux, RPI miss policy |
-| [`test_eip_axis.cpp`](../test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, HCS01 rotary soft-home/halt, A603, scanner↔image |
-| [`test_path_profile.cpp`](../test/host/test_path_profile.cpp) | 2-D path decompose + clearance segment planner |
+| [`test_eip_encoding.cpp`](test/host/test_eip_encoding.cpp) | Encap, CPF, FO, Kinetix 104/154 wire bytes |
+| [`test_eip_transport.cpp`](test/host/test_eip_transport.cpp) | Session, Class 1 frames, multi-scanner demux, RPI miss policy |
+| [`test_eip_axis.cpp`](test/host/test_eip_axis.cpp) | Process image, soft-home joint frame, Absolute busy/target, HCS01 rotary soft-home/halt, A603, scanner↔image |
+| [`test_path_profile.cpp`](test/host/test_path_profile.cpp) | 2-D path decompose + clearance segment planner |
 | W5500 / SOEM / kinematics suites | SPI HAL, OSAL, trajectory math |
 
 **Bench acceptance (2026-07-20):** `speed 200` / `accel 3000`;

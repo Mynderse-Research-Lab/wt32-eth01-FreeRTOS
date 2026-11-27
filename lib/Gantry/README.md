@@ -28,7 +28,7 @@ Z has no brake: with the motors disabled it can fall to A014 (G-A12). Keep the s
 
 ## Documents
 
-- Motion and the drive profile: [docs/LOW_LEVEL_GANTRY_CONTROL.md](../../docs/LOW_LEVEL_GANTRY_CONTROL.md)
+- Motion and the drive profile: [LOW_LEVEL_GANTRY_CONTROL.md](../../LOW_LEVEL_GANTRY_CONTROL.md)
 - Mechanics: [docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](../../docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md)
 
 Kinematics are `GantryKinematics.h`. This page does not restate them.

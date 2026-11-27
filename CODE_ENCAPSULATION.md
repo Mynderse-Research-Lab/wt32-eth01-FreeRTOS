@@ -71,7 +71,7 @@ No file is over 500 lines.
 
 ## Organizing matured features into `lib/` components
 
-A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
+A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](docs/OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
 - **`CMakeLists.txt`**: `idf_component_register` with explicit REQUIRES. App headers come in through `${APP_ROOT}/include`, as in `lib/Gantry/CMakeLists.txt`.
 - **`src/`**: the code.
 - **`README.md`**: purpose, maturity status, dependencies, consumers, build and test, and the open items that concern it.

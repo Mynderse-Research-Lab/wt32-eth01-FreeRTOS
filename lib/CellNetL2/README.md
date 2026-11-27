@@ -30,5 +30,5 @@ N-1, N-2, C-3.
 
 ## Documents
 
-- Wire specification: [docs/CELL_NET_L2_COMMUNICATION_GUIDE.md](../../docs/CELL_NET_L2_COMMUNICATION_GUIDE.md)
-- Firmware update: [docs/CELLNET_OTA_PROTOCOL.md](../../docs/CELLNET_OTA_PROTOCOL.md)
+- Wire specification: [lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md)
+- Firmware update: [lib/CellNetL2/CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md)

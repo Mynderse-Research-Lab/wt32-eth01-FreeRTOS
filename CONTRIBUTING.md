@@ -35,7 +35,7 @@ CI runs both lanes and a Markdown link check on every push and pull request (`.g
 | `include/` | App-wide constants and headers |
 | `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, `BootLogRing`, `GpioExpander`, `ThetaTrace`, `GantryOta`, ...) |
 | `test/host/` | Native Unity tests (primary regression) |
-| `docs/` | Canonical design docs and schematics |
+| `docs/` | Hardware docs, schematics, the knowledge transfer page, open items and the doc index. Code docs live with the code: in `lib/<Name>/`, and at the repo root for `src/` |
 | `driver_datasheets_and_calculations/` | Drive parameter sets, Kinetix reference data, generated BOM and wire schedule; its `INDEX.md` catalogs the vendor manuals |
 | `tools/` | Python and Node helper scripts |
 
@@ -59,7 +59,7 @@ This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or t
 2. **Follow existing patterns** — read surrounding code before adding new abstractions.
 3. **Test hardware-independent logic on the host** — kinematics, trajectory, protocol encoding.
 4. **Respect architecture boundaries** — motion goes through `Gantry`; network telemetry through `CellNetL2`.
-5. **Keep docs in sync** — update `docs/LOW_LEVEL_GANTRY_CONTROL.md` for API/build/console changes; update `docs/CELL_NET_L2_COMMUNICATION_GUIDE.md` for network framing changes; update `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` / `docs/HV_LV_SCHEMATICS.md` for mechanical or electrical design changes.
+5. **Keep docs in sync** — update `LOW_LEVEL_GANTRY_CONTROL.md` for API/build/console changes; update `lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md` for network framing changes; update `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` / `docs/HV_LV_SCHEMATICS.md` for mechanical or electrical design changes.
 
 ## Testing policy
 

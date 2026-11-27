@@ -113,4 +113,4 @@ const GantryError err = gantry.moveTo(target, 300, 90);
 
 ## Documents
 
-`docs/LOW_LEVEL_GANTRY_CONTROL.md` for the drive profile and the path. `GantryKinematics.h` for the transforms. Open items: G-A9, G-A10, G-A11, G-A12, G-A13, G-A14, G-C8, G-C14, G-C15, G-D3, G-F2 in `docs/OPEN_ITEMS.md`.
+`LOW_LEVEL_GANTRY_CONTROL.md` for the drive profile and the path. `GantryKinematics.h` for the transforms. Open items: G-A9, G-A10, G-A11, G-A12, G-A13, G-A14, G-C8, G-C14, G-C15, G-D3, G-F2 in `docs/OPEN_ITEMS.md`.

@@ -116,7 +116,7 @@ esp_err_t gantryOtaFlashStallTest(Gantry::Gantry *gantry, bool erase, int writes
  * @brief CELL_COMMAND 7 (REBOOT_TO_OTA): refuse while busy or while the running
  *        image is not marked valid; otherwise disable the motors, store the
  *        session in noinit RAM and restart into OTA-only mode (does not return).
- *        docs/CELLNET_OTA_PROTOCOL.md section 3.
+ *        lib/CellNetL2/CELLNET_OTA_PROTOCOL.md section 3.
  */
 esp_err_t gantryOtaRebootToCellNetMode(Gantry::Gantry *gantry, uint16_t session);
 

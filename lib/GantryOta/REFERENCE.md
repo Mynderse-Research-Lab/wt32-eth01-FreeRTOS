@@ -42,7 +42,7 @@ void gantryOtaRunCellNetMode(uint16_t session);
 
 `gantryOtaFlashStallTest` writes one line into `out`. It returns `ESP_ERR_INVALID_STATE` when the motors are enabled or the gantry is busy, `ESP_ERR_NOT_FOUND` when the passive slot is missing or no larger than the 1.5 MB offset (`0x180000`), and `ESP_ERR_INVALID_ARG` when `writes` is outside `1 .. (slot size - offset) / 4096`. `erase` true erases that many 4 KB blocks. `erase` false writes them. The summary line includes the elapsed time.
 
-`gantryOtaRebootToCellNetMode` returns `ESP_ERR_INVALID_STATE` when the gantry is busy, when the running partition is missing, or when its image state was read and is neither `ESP_OTA_IMG_VALID` nor `ESP_OTA_IMG_UNDEFINED`. It returns the `gantryOtaDisableMotors` error if that fails. Otherwise it stores the session in noinit RAM and calls `esp_restart`. The header states the contract; the message layout is `docs/CELLNET_OTA_PROTOCOL.md` section 3.
+`gantryOtaRebootToCellNetMode` returns `ESP_ERR_INVALID_STATE` when the gantry is busy, when the running partition is missing, or when its image state was read and is neither `ESP_OTA_IMG_VALID` nor `ESP_OTA_IMG_UNDEFINED`. It returns the `gantryOtaDisableMotors` error if that fails. Otherwise it stores the session in noinit RAM and calls `esp_restart`. The header states the contract; the message layout is `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md` section 3.
 
 `gantryOtaCellNetModeRequested` is true only after a software reset whose noinit flag matches the magic and the session complement. It clears the flag either way. A null `session` still returns the flag result and writes nothing.
 
@@ -86,4 +86,4 @@ gantryOtaStartServer(gantry, 8032, "LTU_1932");
 
 ## Documents
 
-TCP behaviour and the partition map are section 13 of `docs/LOW_LEVEL_GANTRY_CONTROL.md`. CellNet OTA-only mode is `docs/CELLNET_OTA_PROTOCOL.md`. The receiver state machine is `lib/CellNetL2/src/CellNetOtaReceiver.h`.
+TCP behaviour and the partition map are section 13 of `LOW_LEVEL_GANTRY_CONTROL.md`. CellNet OTA-only mode is `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. The receiver state machine is `lib/CellNetL2/src/CellNetOtaReceiver.h`.

@@ -46,4 +46,4 @@ void app_main(void) {
 
 ## Documents
 
-The behaviour is the header comment in `boot_log_ring.h`. Dated history of the command is in `docs/ISSUES_AND_RESOLUTIONS_2026-10-20.md`.
+The behaviour is the header comment in `boot_log_ring.h`. Dated history of the command is in `ISSUES_AND_RESOLUTIONS_2026-10-20.md`.

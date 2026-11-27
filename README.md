@@ -28,7 +28,7 @@ ncat 10.42.0.100 2323
 nc 10.42.0.100 2323
 ```
 
-Details: [LOW_LEVEL §9](docs/LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract).
+Details: [LOW_LEVEL §9](LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract).
 
 ## Build & flash (ESP-IDF)
 

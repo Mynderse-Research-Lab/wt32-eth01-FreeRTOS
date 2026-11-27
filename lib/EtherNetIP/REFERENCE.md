@@ -1,6 +1,6 @@
 # EtherNetIP reference
 
-Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in those headers. The motion math is `docs/LOW_LEVEL_GANTRY_CONTROL.md`, not this page.
+Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in those headers. The motion math is `LOW_LEVEL_GANTRY_CONTROL.md`, not this page.
 
 ## Layers
 
@@ -76,4 +76,4 @@ eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus, &eipImageX, &eipImageZ, 
 
 ## Documents
 
-`docs/LOW_LEVEL_GANTRY_CONTROL.md` sections 5 and 6. Open items: G-A14, G-B5, G-B8, G-B9, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.
+`LOW_LEVEL_GANTRY_CONTROL.md` sections 5 and 6. Open items: G-A14, G-B5, G-B8, G-B9, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.

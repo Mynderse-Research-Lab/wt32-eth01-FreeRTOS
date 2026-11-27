@@ -42,7 +42,7 @@ enum class CellMsgType : uint8_t {
   CONVEYOR_SPEED = 0x02,   // Conveyor -> Gantry / Supervisor
   GANTRY_STATUS = 0x03,    // Gantry -> Supervisor
   CELL_COMMAND = 0x04,     // Supervisor -> Gantry / Conveyor
-  // Firmware update over CellNet (docs/CELLNET_OTA_PROTOCOL.md, N-2)
+  // Firmware update over CellNet (lib/CellNetL2/CELLNET_OTA_PROTOCOL.md, N-2)
   OTA_BEGIN = 0x05,        // Supervisor -> node in OTA mode
   OTA_DATA = 0x06,         // Supervisor -> node; variable length, up to 508 bytes
   OTA_STATUS = 0x07,       // Node -> Supervisor
@@ -146,7 +146,7 @@ struct L2HeartbeatPayload {
  * @brief Full Wire Frames.
  */
 /**
- * @brief OTA payloads (docs/CELLNET_OTA_PROTOCOL.md section 4).
+ * @brief OTA payloads (lib/CellNetL2/CELLNET_OTA_PROTOCOL.md section 4).
  */
 struct L2OtaBeginPayload {
   uint16_t session;

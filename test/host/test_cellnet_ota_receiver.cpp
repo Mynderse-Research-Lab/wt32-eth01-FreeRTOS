@@ -2,7 +2,7 @@
  * @file test_cellnet_ota_receiver.cpp
  * @brief Host tests for the CellNet OTA receiver state machine (N-2), including
  *        the loss, duplicate and reorder sequences from the 2026-11-13 reviews
- *        of docs/CELLNET_OTA_PROTOCOL.md.
+ *        of lib/CellNetL2/CELLNET_OTA_PROTOCOL.md.
  */
 
 #include "CellNetOtaReceiver.h"

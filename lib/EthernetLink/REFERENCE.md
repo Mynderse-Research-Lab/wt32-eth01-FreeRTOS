@@ -67,4 +67,4 @@ if (ethernetLink.start() && ethernetLink.waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
 
 ## Documents
 
-Wiring and the plant subnet are in `docs/LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-E7 and G-F2 in `docs/OPEN_ITEMS.md`.
+Wiring and the plant subnet are in `LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-E7 and G-F2 in `docs/OPEN_ITEMS.md`.

@@ -1,7 +1,7 @@
 /**
  * @file gantry_cellnet_ota.cpp
  * @brief OTA over CellNet L2 (N-2): entry from normal mode, and the OTA-only
- *        mode the node reboots into. Protocol: docs/CELLNET_OTA_PROTOCOL.md.
+ *        mode the node reboots into. Protocol: lib/CellNetL2/CELLNET_OTA_PROTOCOL.md.
  *
  * The receiver logic is CellNet::Ota::OtaReceiver (host-tested); this file is
  * the ESP32 wiring around it: the noinit flag across esp_restart, the private

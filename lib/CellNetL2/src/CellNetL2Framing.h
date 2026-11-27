@@ -50,7 +50,7 @@ class CellNetL2Framing {
   /// (esp_eth_mac_esp_dma.c), so on the WT32 nodes those 4 bytes can carry payload.
   static constexpr size_t kMaxPaddedRxLen = 64;
   /// OTA_DATA alone may be longer: one 512-byte EMAC buffer holds 508 bytes plus
-  /// the FCS (docs/CELLNET_OTA_PROTOCOL.md section 5).
+  /// the FCS (lib/CellNetL2/CELLNET_OTA_PROTOCOL.md section 5).
   static constexpr size_t kMaxOtaDataFrameLen = 508;
 
   /**

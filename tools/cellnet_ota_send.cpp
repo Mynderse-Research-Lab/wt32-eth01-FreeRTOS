@@ -4,7 +4,7 @@
  *
  * Test tool for N-2: it drives one complete CellNet OTA update from a Linux
  * host (the Raspberry Pi 5) so the node side can be proven end to end. The
- * protocol is docs/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window
+ * protocol is lib/CellNetL2/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window
  * of section 5.1). The sender itself is CellNet::Ota::runOtaSender
  * (lib/CellNetL2/src/CellNetOtaSender.cpp, plus the phase and report
  * sources beside it), shared with the supervisor's
