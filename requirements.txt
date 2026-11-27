@@ -2,6 +2,3 @@
 
 # BOM / spreadsheet generators in tools/
 openpyxl>=3.1.0
-
-# PDF -> markdown conversion (tools/convert_pdfs_to_markdown.py)
-pymupdf4llm>=1.27.0

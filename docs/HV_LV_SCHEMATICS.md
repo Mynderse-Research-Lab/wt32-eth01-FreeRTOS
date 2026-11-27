@@ -31,7 +31,7 @@ Authoritative BOM / wire sizes: regenerate from
 [`tools/generate_wire_size_selection.py`](../tools/generate_wire_size_selection.py).
 
 Vendor install references: Rockwell 2198-IN003 / UM004, Rexroth HCS01
-commissioning + project planning (under `driver_datasheets_and_calculations/`).
+commissioning + project planning (listed in the [vendor catalog](../driver_datasheets_and_calculations/INDEX.md)).
 
 ---
 

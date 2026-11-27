@@ -29,20 +29,13 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 |----------|---------|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
 | [../test/README](../test/README) | Host unit tests & on-target test documentation |
-| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Vendor PDF catalog |
+| [../driver_datasheets_and_calculations/INDEX.md](../driver_datasheets_and_calculations/INDEX.md) | Catalog of the vendor manuals (kept in a shared folder), drive parameter sets and generated panel files |
 
 ---
 
-## Vendor references (commonly cited)
+## Vendor references
 
-| File under `driver_datasheets_and_calculations/` | Topic |
-|--------------------------------------------------|-------|
-| `AB_Kinetix5100_user_manual.pdf` | K5100 commissioning / I/O |
-| `2198-in003_-en-p.pdf` | Kinetix installation |
-| `R911325518_07_EN_...HCS01_Commissioning Manual.pdf` | HCS01 connectors |
-| `Rexroth HCS-01 Drive Project Planning Manual R911322210_03.pdf` | HCS01 type code / control voltage |
-| `SCHUNK_design_technical_info.pdf` | Actuator / gripper selection |
-| `BOM.xlsx` / `WIRE_SIZE_SELECTION.xlsx` | Generated panel BOM / wire schedule |
+Vendor manuals are cited by publication number and section. The [vendor catalog](../driver_datasheets_and_calculations/INDEX.md) lists them and links the shared folder that holds them.
 
 ---
 
