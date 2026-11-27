@@ -33,7 +33,7 @@ CI runs both lanes on every push and pull request (`.github/workflows/firmware-c
 | `idf/` | ESP-IDF project root (build here) |
 | `src/` | `app_main`, test console, pick scheduler |
 | `include/` | App-wide constants and headers |
-| `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, `BootLogRing`, ...) |
+| `lib/` | ESP-IDF components (`Gantry`, `EtherNetIP`, `CellNetL2`, `EthernetLink`, `W5500`, `BootLogRing`, `GpioExpander`, ...) |
 | `test/host/` | Native Unity tests (primary regression) |
 | `docs/` | Canonical design docs and schematics |
 | `tools/` | Python and Node helper scripts |

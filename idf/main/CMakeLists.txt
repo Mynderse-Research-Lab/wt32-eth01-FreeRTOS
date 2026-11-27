@@ -42,7 +42,6 @@ set(APP_SRCS
     "${APP_ROOT}/src/gantry_net_console_auth.cpp"
     "${APP_ROOT}/src/gantry_ota.cpp"
     "${APP_ROOT}/src/gantry_ota_tcp.cpp"
-    "${APP_ROOT}/src/gpio_expander.c"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -60,6 +59,7 @@ idf_component_register(
         "${APP_ROOT}/src"
     REQUIRES
         Gantry
+        GpioExpander
         CellNetL2
         EthernetLink
         EtherNetIP

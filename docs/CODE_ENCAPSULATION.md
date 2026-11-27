@@ -76,7 +76,7 @@ A feature is **matured** when it runs on the gantry and has no open blocker or d
 | Feature (today in `src/`) | Status | Component |
 |---|---|---|
 | `boot_log_ring.*` | Moved to `lib/BootLogRing` | `lib/BootLogRing` |
-| `gpio_expander.*` | Matured; G-D3 concerns `MCP23S17` and `Spi3Bus`, not this wrapper (to be confirmed at the move) | `lib/GpioExpander` |
+| `gpio_expander.*` | Moved to `lib/GpioExpander`. G-D3 and G-D6 concern `MCP23S17` and `Spi3Bus`, not this wrapper | `lib/GpioExpander` |
 | `theta_trace.*` with `include/theta_trace_analysis.h` | Matured | `lib/ThetaTrace` |
 | `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Matured (N-2 done) | `lib/GantryOta` |
 | Test console (17 files) with `gantry_net_console.*` | **Not yet.** G-C7 (the `move` speed decision) is open, and the console includes `pick_scheduler.h` | `lib/GantryConsole`, after decoupling |
@@ -108,7 +108,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 
 Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host/`, with its line count on 2026-11-26.
 
-### `include/` (20 files, 3,863 lines)
+### `include/` (19 files, 3,813 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -122,7 +122,6 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_app_constants.h` | 127 | under 500 |
 | `gantry_kconfig.h` | 19 | under 500 |
 | `gantry_runtime_params.h` | 40 | under 500 |
-| `gpio_expander.h` | 50 | under 500 |
 | `pick_intercept.h` | 27 | split done (`bc18d32`) |
 | `pick_intercept_belt.h` | 194 | split done (`bc18d32`) |
 | `pick_intercept_clearance.h` | 191 | split done (`bc18d32`) |
@@ -297,6 +296,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryTypes.h` | 144 | split done (`31c85c9`) |
 | `src/GantryUtils.h` | 110 | under 500 |
 
+### `lib/GpioExpander/` (2 files, 256 lines)
+
+| File | Lines | Status |
+|---|---:|---|
+| `src/gpio_expander.c` | 206 | under 500 |
+| `src/gpio_expander.h` | 50 | under 500 |
+
 ### `lib/MCP23S17/` (4 files, 755 lines)
 
 | File | Lines | Status |
@@ -360,7 +366,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (49 files, 11,509 lines)
+### `src/` (48 files, 11,303 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -393,7 +399,6 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_ota_tcp.cpp` | 270 | split done |
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
 | `gantry_test_console.h` | 67 | under 500 |
-| `gpio_expander.c` | 206 | under 500 |
 | `main.cpp` | 105 | split done |
 | `main_init_io.cpp` | 143 | split done |
 | `main_init_motion.cpp` | 231 | split done |

@@ -32,6 +32,7 @@ idf_component_register(
         "${APP_ROOT}/include"
     REQUIRES
         EtherNetIP
+        GpioExpander
         esp_common
         esp_timer
         log
