@@ -6,16 +6,17 @@
  * host (the Raspberry Pi 5) so the node side can be proven end to end. The
  * protocol is lib/CellNetL2/CELLNET_OTA_PROTOCOL.md (sections 3 to 7, variant B, window
  * of section 5.1). The sender itself is CellNet::Ota::runOtaSender
- * (lib/CellNetL2/src/CellNetOtaSender.cpp, plus the phase and report
+ * (lib/CellNetL2/src/ota/CellNetOtaSender.cpp, plus the phase and report
  * sources beside it), shared with the supervisor's
  * /api/ota; this file is a thin CLI over it.
  *
  * Build on the Pi, from the repository root:
- *   g++ -O2 -std=c++17 -Wall -Wextra -I lib/CellNetL2/src -I include \
+ *   g++ -O2 -std=c++17 -Wall -Wextra -I lib/CellNetL2/src -I lib/CellNetL2/src/ota \
+ *       -I lib/CellNetL2/src/transport -I include \
  *       tools/cellnet_ota_send.cpp \
- *       lib/CellNetL2/src/CellNetOtaSender.cpp \
- *       lib/CellNetL2/src/CellNetOtaSenderPhases.cpp \
- *       lib/CellNetL2/src/CellNetOtaSenderReport.cpp \
+ *       lib/CellNetL2/src/ota/CellNetOtaSender.cpp \
+ *       lib/CellNetL2/src/ota/CellNetOtaSenderPhases.cpp \
+ *       lib/CellNetL2/src/ota/CellNetOtaSenderReport.cpp \
  *       lib/CellNetL2/src/CellNetL2Framing.cpp -o cellnet_ota_send
  *
  * Usage (raw socket, needs CAP_NET_RAW: run as root, or

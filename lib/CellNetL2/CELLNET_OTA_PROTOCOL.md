@@ -12,9 +12,9 @@ TCP port 8032 stays as the fallback (`POST /api/ota?transport=tcp`).
 
 | Part | Where |
 |------|-------|
-| Receiver state machine (pure logic, host-tested) | `lib/CellNetL2/src/CellNetOtaReceiver.cpp`, `test/host/test_cellnet_ota_receiver.cpp` |
+| Receiver state machine (pure logic, host-tested) | `lib/CellNetL2/src/ota/CellNetOtaReceiver.cpp`, `test/host/test_cellnet_ota_receiver.cpp` |
 | Gantry wiring: OTA-only mode, flash writes | `lib/GantryOta/src/gantry_cellnet_ota.cpp` |
-| Sender (Linux) | `lib/CellNetL2/src/CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp`, `CellNetOtaSenderInternal.h`; CLI `tools/cellnet_ota_send.cpp`; the supervisor's `POST /api/ota` |
+| Sender (Linux) | `lib/CellNetL2/src/ota/CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp`, `CellNetOtaSenderInternal.h`; CLI `tools/cellnet_ota_send.cpp`; the supervisor's `POST /api/ota` |
 | Message types and payloads | `include/cell_net_l2_protocol.h` |
 
 ## 1. Design basis

@@ -209,11 +209,12 @@ EMAC receive task; keep them short and hand work to a queue.
 `EspEthL2Transport::isLinkUp()` only reports that a handle is attached, not the
 PHY link.
 
-**Linux.** Use `lib/CellNetL2/src/LinuxRawSocketL2Transport.h` (an `AF_PACKET`
-socket bound to one interface and to `0x88B5`). Callbacks run on its receive
-thread. Compile `CellNetL2.cpp` and `CellNetL2Framing.cpp` with
-`-I include -I lib/CellNetL2/src`, C++17, `-lpthread`. The binary needs
-`CAP_NET_RAW` (`sudo setcap cap_net_raw+ep <binary>`) or root.
+**Linux.** Use `lib/CellNetL2/src/transport/LinuxRawSocketL2Transport.h` (an
+`AF_PACKET` socket bound to one interface and to `0x88B5`). Callbacks run on its
+receive thread. Compile `CellNetL2.cpp` and `CellNetL2Framing.cpp` with
+`-I include -I lib/CellNetL2/src -I lib/CellNetL2/src/transport`, C++17,
+`-lpthread`. The binary needs `CAP_NET_RAW`
+(`sudo setcap cap_net_raw+ep <binary>`) or root.
 
 ---
 

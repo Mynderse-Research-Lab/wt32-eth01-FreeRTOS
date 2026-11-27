@@ -110,8 +110,8 @@ waits 300 ms before restart (`kRestartDelayMs`). The receive queue holds 24
 frames (`kRxQueueDepth`). The mode ends at 120 s (`kHardCapMs`) even if the
 receiver does not. The receiver's own deadlines, 30 s to `OTA_BEGIN` and 2 s
 without progress, are `kBeginDeadlineMs` and `expired` in
-`lib/CellNetL2/src/CellNetOtaReceiver.h`. Ethernet must be up within 10 s or the
-mode reboots.
+`lib/CellNetL2/src/ota/CellNetOtaReceiver.h`. Ethernet must be up within 10 s or
+the mode reboots.
 
 ## AppConfig
 
@@ -196,7 +196,7 @@ ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
 
 The partition map and the flashing steps are above. CellNet OTA-only mode is
 `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. The receiver state machine is
-`lib/CellNetL2/src/CellNetOtaReceiver.h`.
+`lib/CellNetL2/src/ota/CellNetOtaReceiver.h`.
 
 ## See also
 
