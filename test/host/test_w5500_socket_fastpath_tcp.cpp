@@ -5,6 +5,8 @@
 
 #include "test_w5500_socket_fastpath_internal.h"
 
+#include "W5500Poll.h"
+
 using namespace w5500_fastpath_test;
 
 void test_tcp_send_nowait_skips_sendok_poll(void) {
@@ -51,8 +53,16 @@ void test_bus_stats_take_does_not_need_the_bus_mutex(void) {
     w5500::BusMutex m;
     m.lock();
     const w5500::BusHoldStats first = m.take();
+    // unlock() records a hold only when it is longer than the window's
+    // longest so far (0 after take()), and the host clock counts whole
+    // microseconds. A faster lock/unlock measured 0 us and left the holder
+    // empty, so hold until the clock has ticked.
+    const int64_t t0 = w5500::pollNowUs();
+    while (w5500::pollNowUs() == t0) {
+    }
     m.unlock();
     (void)first;
     const w5500::BusHoldStats s = m.take();
+    TEST_ASSERT_GREATER_THAN_UINT32(0, s.max_hold_us);
     TEST_ASSERT_EQUAL_STRING("host", s.holder);  // the hold just released
 }
