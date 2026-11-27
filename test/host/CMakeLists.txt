@@ -348,6 +348,9 @@ add_test(NAME test_drivetrain_params COMMAND test_drivetrain_params)
 # CellNet Layer-2 framing and node dispatch tests
 add_executable(test_cell_net_l2
     "test_cell_net_l2.cpp"
+    "test_cell_net_l2_framing.cpp"
+    "test_cell_net_l2_node.cpp"
+    "test_cell_net_l2_ota.cpp"
     "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2Framing.cpp"
     "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2.cpp"
 )
