@@ -50,20 +50,20 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `7fea7b5` | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
 | `eb833ce` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
 | `cf1efaf` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
-|  | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
+| `3d57817` | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
+|  | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
 
 ## Planned splits
 
-2 files are over 500 lines. They are the host tests.
+1 file is over 500 lines. It is a host test.
 
-### Host tests (2)
+### Host tests (1)
 
 Each test file splits by test group into several sources for the **same executable**. Gate: the Unity case count per executable is unchanged.
 
 | File | Lines |
 |---|---:|
 | `test/host/test_eip_transport.cpp` | 1,891 |
-| `test/host/test_eip_axis.cpp` | 1,807 |
 ## Organizing matured features into `lib/` components
 
 A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
@@ -415,7 +415,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (62 files, 13,787 lines)
+### `test/host/` (67 files, 13,917 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -444,7 +444,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_console_parse.cpp` | 175 | under 500 |
 | `test_coordinated_grasp.cpp` | 150 | under 500 |
 | `test_drivetrain_params.cpp` | 80 | under 500 |
-| `test_eip_axis.cpp` | 1807 | **over 500: planned** |
+| `test_eip_axis.cpp` | 141 | split done |
+| `test_eip_axis_alarm.cpp` | 454 | split done |
+| `test_eip_axis_internal.h` | 244 | split done |
+| `test_eip_axis_linear.cpp` | 438 | split done |
+| `test_eip_axis_rotary.cpp` | 373 | split done |
+| `test_eip_axis_units.cpp` | 287 | split done |
 | `test_eip_encoding.cpp` | 478 | under 500 |
 | `test_eip_limit_sequence.cpp` | 76 | under 500 |
 | `test_eip_run_time_trace.cpp` | 96 | under 500 |
@@ -462,12 +467,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_kinematics.cpp` | 214 | under 500 |
 | `test_limit_switch_policy.cpp` | 109 | under 500 |
 | `test_path_profile.cpp` | 405 | under 500 |
-| `test_pick_intercept.cpp` | 117 | split done |
-| `test_pick_intercept_belt.cpp` | 120 | split done |
-| `test_pick_intercept_budget.cpp` | 242 | split done |
-| `test_pick_intercept_geometry.cpp` | 283 | split done |
-| `test_pick_intercept_internal.h` | 69 | split done |
-| `test_pick_intercept_tracker.cpp` | 371 | split done |
+| `test_pick_intercept.cpp` | 117 | split done (`3d57817`) |
+| `test_pick_intercept_belt.cpp` | 120 | split done (`3d57817`) |
+| `test_pick_intercept_budget.cpp` | 242 | split done (`3d57817`) |
+| `test_pick_intercept_geometry.cpp` | 283 | split done (`3d57817`) |
+| `test_pick_intercept_internal.h` | 69 | split done (`3d57817`) |
+| `test_pick_intercept_tracker.cpp` | 371 | split done (`3d57817`) |
 | `test_spi3_critical.cpp` | 78 | under 500 |
 | `test_strike_plan.cpp` | 313 | under 500 |
 | `test_theta_trace_analysis.cpp` | 158 | under 500 |

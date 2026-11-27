@@ -152,7 +152,12 @@ add_executable(test_app_config
 target_link_libraries(test_app_config PRIVATE app_config unity)
 add_test(NAME test_app_config COMMAND test_app_config)
 
-add_executable(test_eip_axis "test_eip_axis.cpp"
+add_executable(test_eip_axis
+    "test_eip_axis.cpp"
+    "test_eip_axis_linear.cpp"
+    "test_eip_axis_alarm.cpp"
+    "test_eip_axis_rotary.cpp"
+    "test_eip_axis_units.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisPhases.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisAlarm.cpp"
