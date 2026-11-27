@@ -37,7 +37,7 @@ CI runs both lanes and a Markdown link check on every push and pull request
 | `lib/` | The 13 ESP-IDF components, listed by layer in [`lib/README.md`](lib/README.md) |
 | `test/host/` | Native Unity tests (primary regression); see Testing policy below |
 | `docs/` | Hardware docs, schematics, the knowledge transfer page, open items and the doc index. Code docs live with the code: in `lib/<Name>/`, and at the repo root for `src/` |
-| `driver_datasheets_and_calculations/` | Drive parameter sets, Kinetix reference data, generated BOM and wire schedule; its `INDEX.md` catalogs the vendor manuals |
+| `driver_datasheets_and_calculations/` | Drive parameter sets and Kinetix reference data; its `INDEX.md` catalogs the vendor manuals |
 | `tools/` | Python and Node helper scripts |
 
 This is an **ESP-IDF-only** firmware project. Do not reintroduce PlatformIO or

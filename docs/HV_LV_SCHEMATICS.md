@@ -38,10 +38,6 @@ schedule.
 | Gripper | MCP23S17 PA0 (Field DOUT0) → R16 220 Ω → U11 VO14642AT solid-state relay (high side: 24VDC on S/S′, DC → FDO0) → valve coil. Turn-on 370 µs typ / 800 µs max at 30 V, 200 mA (Vishay doc 81646, Switching Characteristics). R14 10 kΩ pulls PA0 low. |
 | Networks | W5500 EIP daisy-chain **separate** from the LAN8720 cell network (CellNet L2) |
 
-Authoritative BOM / wire sizes: regenerate from
-[`tools/generate_bom.py`](/tools/generate_bom.py) and
-[`tools/generate_wire_size_selection.py`](/tools/generate_wire_size_selection.py).
-
 Vendor install references: Rockwell 2198-IN003 / UM004, Rexroth HCS01
 commissioning + project planning (listed in the
 [vendor catalog](/driver_datasheets_and_calculations/INDEX.md)).
@@ -64,9 +60,8 @@ The image covers:
 -   WT32-ETH01 / WIZ850io control sub-panel and EIP links;
 -   gripper relay and E-stop stations.
 
-The PNG is the panel overview, not a netlist-bearing construction drawing. Part
-numbers, conductor sizes and unresolved safety details remain governed by the
-generated BOM / wire schedule and the electrical-review register below.
+The PNG is the panel overview, not a netlist-bearing construction drawing.
+Unresolved safety details are in the electrical-review register below.
 
 ---
 
@@ -84,7 +79,7 @@ generated BOM / wire schedule and the electrical-review register below.
 
 | From | To | Medium |
 |------|----|--------|
-| Utility | CB0 → PDB (the three phases go straight to CB0; no separate disconnect) | Feeder / #8 class per BOM |
+| Utility | CB0 → PDB (the three phases go straight to CB0; no separate disconnect) | Feeder / #8 class |
 | CB1/K1/LF1 | X drive L1/L2/L3 | Branch AC |
 | CB2/K2/LF2 | Z drive | Branch AC |
 | CB3/K3/LF3 | HCS01 | Branch AC (theta deferred) |
@@ -97,8 +92,6 @@ generated BOM / wire schedule and the electrical-review register below.
 | MCP23S17 PA0 (DOUT0) | CR1 coil → SV1 | 18–22 AWG |
 | WIZ850io RSTn | MCP23S17 PB7 | Active-low; external pull-up; not hardwired |
 | Free ADC 12/32/33/39 | Isolator → 0..3.3 V | Field analog (optional) |
-
-Full AWG / length / inventory: `WIRE_SIZE_SELECTION.xlsx`.
 
 ---
 
@@ -117,7 +110,7 @@ KiCad; it does not replace or redraw the panel image.
 |----|------|--------|
 | E1 | Dual-channel E-stop + safety relay / safety PLC architecture | **OPEN** — panel image does not establish a validated safety category |
 | E2 | STO wiring for Kinetix / HCS01 vs contactor-only stop | **OPEN** — STO out of early scope; confirm for production |
-| E3 | CB3 (theta) and CB4 (PSU) final ampacity / inrush | **OPEN** — BOM notes undersize risks |
+| E3 | CB3 (theta) and CB4 (PSU) final ampacity / inrush | **OPEN** — possible undersize |
 | E4 | SCCR / source wye-vs-delta for Type-E breakers | **OPEN** |
 | E5 | Final TBIO / X31 terminal landings vs panel image and as-built harness | **OPEN** |
 | E6 | PE / shield bonding rules for factory motor cables | **OPEN** |
