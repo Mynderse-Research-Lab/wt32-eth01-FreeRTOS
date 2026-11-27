@@ -77,7 +77,7 @@ A feature is **matured** when it runs on the gantry and has no open blocker or d
 |---|---|---|
 | `boot_log_ring.*` | Moved to `lib/BootLogRing` | `lib/BootLogRing` |
 | `gpio_expander.*` | Moved to `lib/GpioExpander`. G-D3 and G-D6 concern `MCP23S17` and `Spi3Bus`, not this wrapper | `lib/GpioExpander` |
-| `theta_trace.*` with `include/theta_trace_analysis.h` | Matured | `lib/ThetaTrace` |
+| `theta_trace.*` and `theta_trace_analysis.h` | Moved to `lib/ThetaTrace` | `lib/ThetaTrace` |
 | `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Matured (N-2 done) | `lib/GantryOta` |
 | Test console (17 files) with `gantry_net_console.*` | **Not yet.** G-C7 (the `move` speed decision) is open, and the console includes `pick_scheduler.h` | `lib/GantryConsole`, after decoupling |
 | Pick scheduler (9 files) | **Not matured.** G-C1, G-C2, G-C11, G-C13 and G-C17 are open | Stays in `src/` |
@@ -108,7 +108,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 
 Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host/`, with its line count on 2026-11-26.
 
-### `include/` (19 files, 3,813 lines)
+### `include/` (18 files, 3,671 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -130,7 +130,6 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `pick_intercept_tracker.h` | 218 | split done (`bc18d32`) |
 | `pick_intercept_vision.h` | 357 | split done (`bc18d32`) |
 | `strike_plan.h` | 307 | under 500 |
-| `theta_trace_analysis.h` | 142 | under 500 |
 
 ### `lib/AppConfig/` (16 files, 3,209 lines)
 
@@ -343,6 +342,14 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/UiRebootPrompt.cpp` | 72 | under 500 |
 | `src/UiRebootPrompt.h` | 27 | under 500 |
 
+### `lib/ThetaTrace/` (3 files, 469 lines)
+
+| File | Lines | Status |
+|---|---:|---|
+| `src/theta_trace.cpp` | 307 | under 500 |
+| `src/theta_trace.h` | 20 | under 500 |
+| `src/theta_trace_analysis.h` | 142 | under 500 |
+
 ### `lib/W5500/` (18 files, 3,168 lines)
 
 | File | Lines | Status |
@@ -366,7 +373,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (48 files, 11,303 lines)
+### `src/` (46 files, 10,976 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -416,8 +423,6 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `pick_scheduler_internal.h` | 239 | split done (`285825e`) |
 | `pick_strike.cpp` | 347 | split done (`285825e`) |
 | `pick_trace.cpp` | 252 | split done (`285825e`) |
-| `theta_trace.cpp` | 307 | under 500 |
-| `theta_trace.h` | 20 | under 500 |
 
 ### `test/host/` (74 files, 14,068 lines)
 

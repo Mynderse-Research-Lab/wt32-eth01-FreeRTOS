@@ -46,7 +46,7 @@
 
 | Code | Host test |
 |------|-----------|
-| `lib/Gantry/src/GantryTrajectory.cpp:7` `calculateProfile`, `:65` `interpolate` (also used by `include/theta_trace_analysis.h`) | `test_trajectory`, `test_theta_trace_analysis` |
+| `lib/Gantry/src/GantryTrajectory.cpp:7` `calculateProfile`, `:65` `interpolate` (also used by `lib/ThetaTrace/src/theta_trace_analysis.h`) | `test_trajectory`, `test_theta_trace_analysis` |
 | `include/pick_intercept_clearance.h:115` `profileSeconds`, `:134` `timeAlongProfile`, `:178` `zToTopS` | `test_pick_intercept` |
 | `include/strike_plan.h:96` `trapezoidSeconds`, `:111` `trapezoidTimeToDistance` | `test_strike_plan` |
 | `include/coordinated_grasp.h:83` `profileSeconds`, `:98` `timeAlong` | `test_coordinated_grasp` |
@@ -112,7 +112,7 @@
 
 | Code | What it computes | Host test |
 |------|------------------|-----------|
-| `include/theta_trace_analysis.h` `analyze` | Ideal trapezoid alignment, latency, overshoot, following error, settling (`thtrace`) | `test_theta_trace_analysis` |
+| `lib/ThetaTrace/src/theta_trace_analysis.h` `analyze` | Ideal trapezoid alignment, latency, overshoot, following error, settling (`thtrace`) | `test_theta_trace_analysis` |
 | `src/pick_trace.cpp:144` `traceSummary` | Strike trace events: plunge start, reach, peak, retract (`ztrace`) | — |
 
 ## 12. Outside the firmware (tools and simulation)

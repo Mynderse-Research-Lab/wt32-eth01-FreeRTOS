@@ -31,6 +31,10 @@ Typical layout:
     |  |  |--src
     |  |  |- CMakeLists.txt
     |  |
+    |  |--ThetaTrace
+    |  |  |--src
+    |  |  |- CMakeLists.txt
+    |  |
     |- README --> THIS FILE
 
 A component exposes its public headers via INCLUDE_DIRS and declares its

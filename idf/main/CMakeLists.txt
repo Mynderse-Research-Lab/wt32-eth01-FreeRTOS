@@ -20,7 +20,6 @@ set(APP_SRCS
     "${APP_ROOT}/src/pick_run.cpp"
     "${APP_ROOT}/src/pick_strike.cpp"
     "${APP_ROOT}/src/pick_trace.cpp"
-    "${APP_ROOT}/src/theta_trace.cpp"
     "${APP_ROOT}/src/gantry_cellnet_ota.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
     "${APP_ROOT}/src/gantry_console_bringup.cpp"
@@ -68,6 +67,7 @@ idf_component_register(
         SpiDisplay
         AppConfig
         BootLogRing
+        ThetaTrace
         nvs_flash
         esp_driver_spi
         esp_driver_gpio
