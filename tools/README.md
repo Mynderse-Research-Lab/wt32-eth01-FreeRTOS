@@ -20,7 +20,7 @@ in the sibling **ADSB-PI-base** project.
 Canonical design docs: [`docs/INDEX.md`](../docs/INDEX.md).
 
 ```powershell
-pip install openpyxl
+pip install -r tools/requirements.txt
 py -3 tools/generate_bom.py
 py -3 tools/generate_wire_size_selection.py
 

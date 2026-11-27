@@ -158,7 +158,7 @@ Findings that need action have an OPEN_ITEMS row; the ID is in the last column. 
 - production-dead: `EipScanner` and `singleAxisTask`, theta-only builds
 - unread Kconfig options: `EIP_TARGET_IP`, `EIP_INCLUDE_RUN_IDLE_HEADER`
 - four unused parameter IDs
-- the stray root-level `autotune_cmd.cpp` (X-5)
+- the stray root-level `autotune_cmd.cpp` (X-5, deleted 2026-11-27)
 
 **Not covered by host tests:**
 - the `multiAxisTask` state machine, pause and resume, reopen and planned close

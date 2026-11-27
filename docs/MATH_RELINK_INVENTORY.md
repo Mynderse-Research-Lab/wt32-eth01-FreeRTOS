@@ -1,6 +1,6 @@
 # Math Relink Inventory
 
-**Status:** working list, 2026-11-19, read from the code at `c9a88b3`. Not committed.
+**Status:** working list, 2026-11-19, read from the code at `c9a88b3`.
 **Purpose:** every piece of code that implements system mathematics, grouped by topic, so each can be linked to a section of the new canonical mathematical foundation document. This list names *what* the code computes; it contains no derivations or equations.
 
 **How to use it:** give each topic a section with a stable anchor in the new document, then add one comment per function, for example `// Math: <doc>#belt-odometer`. The "Doc link today" column shows what has to be repointed.
@@ -117,7 +117,7 @@
 
 ## 12. Outside the firmware (tools and simulation)
 
-`tools/simulate_coordinated_grasp.py`, `tools/generate_grasp_timing_pdfs.py`, `tools/render_grasp_math_figures.py`, `tools/render_pickup_figures.py`, `tools/sim/gantry_twin.py` and the rest of `tools/sim/` re-implement parts of topics 2–7. Several still reference the deleted documents (`generate_grasp_timing_pdfs.py:6`, `:1229`, `:1376`; `render_grasp_math_figures.py:6`; `render_pickup_figures.py:1`; `simulate_coordinated_grasp.py:687`; `test_pdf_loader.py:4`).
+`tools/simulate_coordinated_grasp.py`, `tools/sim/gantry_twin.py` and the rest of `tools/sim/` re-implement parts of topics 2–7. `simulate_coordinated_grasp.py:687` still writes its report to a deleted document. The figure and PDF generators for the deleted documents (`generate_grasp_timing_pdfs.py`, `render_grasp_math_figures.py`, `render_pickup_figures.py` and `test_pdf_loader.py`) were removed on 2026-11-27.
 
 ---
 

@@ -66,7 +66,7 @@ You will need a USB–TTL adapter (e.g. Waveshare USB to RS232/RS485/TTL).
 4. Reset: briefly ground pin 1 (EN), then remove the IO0 jumper.
 5. Flash, then ground EN again to run normally.
 
-![Programming wiring](<Screenshot from 2025-06-28 18-05-10-1.png>)
+![WT32-ETH01 pinout](docs/schematics/wt32_eth01_pinout.png)
 
 ## CI
 
