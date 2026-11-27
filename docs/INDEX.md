@@ -29,7 +29,6 @@ Panel reference: [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry p
 |----------|---------|
 | [ISSUES_AND_RESOLUTIONS_2026-10-20.md](../ISSUES_AND_RESOLUTIONS_2026-10-20.md) | Class 1 dropout campaign (2026-10-20/21): each issue with its evidence and resolution |
 | [STRIKE_TIMING_MEASUREMENTS_2026-10-25.md](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md) | On-gantry measurements of the Z strike against the strike plan |
-| [REXROTH_SUPPORT_HCS01_CIP_IP.md](REXROTH_SUPPORT_HCS01_CIP_IP.md) | Rexroth support request (2026-08): the HCS01 EtherNet/IP fieldbus IP was not writable, with later updates |
 
 ---
 
