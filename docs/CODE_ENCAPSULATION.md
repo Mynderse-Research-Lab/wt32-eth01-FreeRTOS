@@ -42,17 +42,17 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `7cc157d` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `f62efb9`, scanner task split | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+|  | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
 
 ## Planned splits
 
-10 files are over 500 lines. The headers come first, then the host tests.
+9 files are over 500 lines. The headers come first, then the host tests.
 
-### Headers (3)
+### Headers (2)
 
 | File | Lines | Planned split |
 |---|---:|---|
-| `include/pick_intercept.h` | 1,531 | Themed headers (belt clock, part tracker, intercept and strike leads, vision contract). `pick_intercept.h` stays as the umbrella include, so callers do not change. Host-tested by `test_pick_intercept` |
 | `lib/Gantry/src/Gantry.h` | 597 | Nested types (`RuntimeParams`, the enums, the trace structs) into `GantryTypes.h` |
 | `include/coordinated_grasp.h` | 504 | The reference-fixture loader apart from the model |
 
@@ -120,7 +120,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 
 Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host/`, with its line count on 2026-11-26.
 
-### `include/` (13 files, 3,755 lines)
+### `include/` (19 files, 3,847 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -134,7 +134,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_kconfig.h` | 19 | under 500 |
 | `gantry_runtime_params.h` | 40 | under 500 |
 | `gpio_expander.h` | 50 | under 500 |
-| `pick_intercept.h` | 1531 | **over 500: planned** |
+| `pick_intercept.h` | 27 | split done |
+| `pick_intercept_belt.h` | 194 | split done |
+| `pick_intercept_clearance.h` | 191 | split done |
+| `pick_intercept_plan.h` | 230 | split done |
+| `pick_intercept_strike.h` | 406 | split done |
+| `pick_intercept_tracker.h` | 218 | split done |
+| `pick_intercept_vision.h` | 357 | split done |
 | `strike_plan.h` | 307 | under 500 |
 | `theta_trace_analysis.h` | 142 | under 500 |
 
@@ -217,7 +223,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EipScannerConfig.cpp` | 160 | split done (`f62efb9`) |
 | `src/EipScannerDiag.cpp` | 434 | split done (`f62efb9`) |
 | `src/EipScannerPolicy.h` | 128 | under 500 |
-| `src/EipScannerTask.cpp` | 499 | split done (`f62efb9`) |
+| `src/EipScannerTask.cpp` | 499 | split done (`f62efb9`, `5f8eb76`) |
 | `src/EipScannerTask.h` | 49 | under 500 |
 | `src/EipScannerTaskInternal.h` | 438 | split done (`f62efb9`) |
 | `src/EipSession.cpp` | 157 | under 500 |

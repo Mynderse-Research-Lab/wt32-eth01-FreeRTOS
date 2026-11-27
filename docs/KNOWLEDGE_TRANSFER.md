@@ -373,7 +373,7 @@ Defaults are the compiled ones; the live stored set differs where noted.
 | $t_{close}, t_{open}$ | Grip close and open dwell | `grp_close_ms`, `grp_open_ms` | 190 ms each |
 | — | Trigger stand-in | `vis_batt_x`, `batt_x` | 0, 382.5 mm |
 
-Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clearance 6 mm, entry margin 2 mm, entry guard 5 ms, depth cap 15 ms or 20 mm of belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rule 3 mm, 30 mm and 25.4 mm (`zPlan`). Frame period 250 ms, stale after 500 ms, 8-frame delay window (`pick_intercept.h`). Trigger geometry −130 and 6 mm (`pick_belt.cpp:15,20`).
+Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clearance 6 mm, entry margin 2 mm, entry guard 5 ms, depth cap 15 ms or 20 mm of belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rule 3 mm, 30 mm and 25.4 mm (`zPlan`). Frame period 250 ms, stale after 500 ms, 8-frame delay window (`pick_intercept_vision.h`). Trigger geometry −130 and 6 mm (`pick_belt.cpp:15,20`).
 
 #### 5.3.11 Limits of the model
 
@@ -381,7 +381,7 @@ Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clear
 - **Belt:** constant speed between 250 ms frames.
 - **Open loop:** the plunge is assumed to follow (10) exactly, and the jaw (12) with the simulation's 15 ms valve constant. The real drive lags 30–35 ms. Simulation gains are not facts; the three offsets absorb what the model misses.
 - **Provisional constants:** the 6 mm hover clearance, 2 mm entry margin, 5 ms guard, 8 ms retract lead and the 15 ms / 20 mm depth cap are not yet measured.
-- **Unused model:** `include/pick_intercept.h` also holds an earlier EarlyZ/LateZ strike model (`planPick`, `strikeLeads`, `retimePick`). Only the host tests call it (G-C8).
+- **Unused model:** `include/pick_intercept_strike.h` and `include/pick_intercept_plan.h` hold an earlier EarlyZ/LateZ strike model (`planPick`, `strikeLeads`, `retimePick`), still included through `pick_intercept.h`. Only the host tests call it (G-C8).
 
 ### 5.4 Gripper and field I/O
 
