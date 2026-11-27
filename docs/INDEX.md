@@ -41,10 +41,10 @@ Panel reference:
 
 | Document | Summary |
 |----------|---------|
-| [../CONTRIBUTING.md](/CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
-| [../lib/README.md](/lib/README.md) | Libraries in `lib/`; each has its own `README.md` and `REFERENCE.md` |
-| [../tools/README.md](/tools/README.md) | Helper scripts |
-| [../driver_datasheets_and_calculations/INDEX.md](/driver_datasheets_and_calculations/INDEX.md) | Catalog of the vendor manuals (kept in a shared folder), drive parameter sets and generated panel files |
+| [CONTRIBUTING.md](/CONTRIBUTING.md) | Engineering rules, testing policy, git workflow |
+| [lib/README.md](/lib/README.md) | Libraries in `lib/`; each has its own `README.md` and `REFERENCE.md` |
+| [tools/README.md](/tools/README.md) | Helper scripts |
+| [driver_datasheets_and_calculations/INDEX.md](/driver_datasheets_and_calculations/INDEX.md) | Catalog of the vendor manuals (kept in a shared folder), drive parameter sets and Kinetix reference data |
 
 ---
 

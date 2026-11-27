@@ -1,11 +1,18 @@
 # driver_datasheets_and_calculations
 
-Drive parameter sets, Kinetix reference data and generated panel files for the
-gantry.
+Drive parameter sets and Kinetix reference data for the gantry.
 
 **The vendor manuals are kept outside this repository.** The PDFs and their text
 extracts moved to a shared folder on 2026-11-27, with the same paths they had
-here. **Shared folder:** link to be added (OPEN_ITEMS X-8).
+here. **Shared folder:** [`wt32-eth01-vendor-docs`][shared] in the project's
+Design Work drive.
+
+Ten PDFs were already in Design Work and were not copied there. They are in
+`Gantry Mechanical System (v2 SCHUNK Components)/`: the four `AB_Kinetix_*` PDFs
+in its `Servo Motor + Drive Docs/` subfolder, and
+`SCHUNK_design_technical_info.pdf`, the three `Technical Information_` PDFs for
+the Beta 100, the Beta 80 and the KGG 100-80, `OA 1693058*.pdf` and
+`McMc order acknowledgement.pdf` in the folder itself.
 
 Docs and code cite the manuals by name or publication number, for example in
 `include/axis_drivetrain_params.h`. Production motion is **EtherNet/IP** (see
@@ -52,7 +59,7 @@ Docs and code cite the manuals by name or publication number, for example in
 | `wiz850io.pdf` | WIZ850io (W5500) module |
 | `driver_configs/HCS01.1-W0005-MPB20V30-parameter-doc.pdf` | HCS01 parameter document |
 | `SCHUNK_ERD_motor_parameter-commissioning/…/*.pdf` | ERD motor data sheets per controller (26 files) |
-| Text extracts of the Kinetix 5100 user manual, the WIZ850io datasheet and the HCS01 parameter document (Markdown and CSV), with the four scripts that made them | Search aids, not sources: cite the PDF |
+| Text extracts of the Kinetix 5100 user manual, the WIZ850io datasheet and the HCS01 parameter document (Markdown and CSV), with the three scripts that made them | Search aids, not sources: cite the PDF |
 
 ## Local copies only
 
@@ -70,3 +77,5 @@ Neither in the repository nor in the shared folder.
 | SCHUNK Trap Move attachments | Inertia / torque commissioning slots in `axis_drivetrain_params.h` |
 | 2198-IN020 | Formal TBIO pin drawing |
 | MPB-xxVRS Functional Description | HCS01 X31 details if needed beyond EIP |
+
+[shared]: https://drive.google.com/drive/folders/1NL5sW1CT2gorexiiKgt4eoGlQNMBzlNm
