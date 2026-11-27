@@ -1,6 +1,6 @@
 # Knowledge Transfer
 
-**Status:** Living template. Reviewed top to bottom against the code, live logs and project docs on 2026-11-05, at commit `ee99fce`.
+**Status:** Living template. Reviewed top to bottom against the code, live logs and project docs on 2026-11-05, at commit `a8f9848`.
 **Audience:** Engineers continuing development on the battery sorting cell.
 **Companion docs:** [OPEN_ITEMS.md](OPEN_ITEMS.md), [INDEX.md](INDEX.md), [../CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -128,7 +128,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 | Space vision detections at least 7 s apart in demonstrations | A demonstration control, not a safety measure: it gives the unoptimized planner room to complete each pick. Several detections per second is the goal (G-C10) |
 | Gripper regulator at 6 bar | The KGG 100-80 closing time of 0.19 s is specified at 6 bar |
 | Eliminate Class 1 drops; never add auto-recovery | A hidden link fault on a motion system is a safety problem |
-| Keep core 1 for Class 1; the TFT and other SPI3 work stay on core 0 | With the TFT task on core 1, the reports for two Class 1 gaps of 38 and 46 ms showed it using 39 to 47 ms of core 1, and one gap dropped X (2026-11-03, reverted in `30ac0dd`) |
+| Keep core 1 for Class 1; the TFT and other SPI3 work stay on core 0 | With the TFT task on core 1, the reports for two Class 1 gaps of 38 and 46 ms showed it using 39 to 47 ms of core 1, and one gap dropped X (2026-11-03, reverted in `bf31ed9`) |
 | Below the scanner's priority, hold the W5500 bus mutex only for a transaction | A statistics read that held it while preempted caused Class 1 gaps of 30 to 90 ms and dropped drives (G-B6) |
 | Stored parameters are the only runtime source | Primary objective: avoid NVS read and write delays, so values are loaded once and motion uses RAM. Motion and pick code also never reads a macro for a value with a stored key |
 | Pick code never keeps its own copy of a gantry parameter | One unified source of parameters |
@@ -193,7 +193,7 @@ The other ODVA documents in `driver_datasheets_and_calculations` are overviews o
 
 Turns detections into timed strikes. Code: `src/pick_scheduler.cpp`, `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main.cpp:432`).
 
-The model below was read from the code at `ee7b6a7` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
+The model below was read from the code at `46702fa` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
 
 **Open items:** [G-C in OPEN_ITEMS.md](OPEN_ITEMS.md#g-c-pick-scheduler).
 
