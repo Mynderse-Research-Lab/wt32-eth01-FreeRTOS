@@ -78,9 +78,9 @@ None.
 ## Console
 
 `mcp_pin_mode`, `mcp_dump`, `mcp_reg`, `field_dout` and `field_din` are in
-`src/gantry_console_commands.cpp` under `MCP_DEBUG_CMDS`. That macro defaults to
-1 (`src/gantry_console_internal.h:51–52`), so the current firmware includes
-them.
+`src/console/gantry_console_commands.cpp` under `MCP_DEBUG_CMDS`. That macro
+defaults to 1 (`src/console/gantry_console_internal.h:51–52`), so the current
+firmware includes them.
 
 ## Usage
 

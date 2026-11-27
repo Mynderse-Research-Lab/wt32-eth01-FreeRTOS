@@ -1,14 +1,14 @@
 # Strike timing measurements
 
 On-gantry readings of the Z strike against the strike plan
-(`include/strike_plan.h`), taken to put measured latency terms into the timing
-model. Simulation gains are not used; every number here is measured on the
-gantry unless marked otherwise.
+(`src/pick_scheduler/strike/strike_plan.h`), taken to put measured latency terms
+into the timing model. Simulation gains are not used; every number here is
+measured on the gantry unless marked otherwise.
 
 ## Setup
 
 -   Firmware: branch `feat/conveyor-traffic-debug` plus the uncommitted
-    `beltsim` / `ztrace` support (`src/pick_scheduler.cpp`) and
+    `beltsim` / `ztrace` support (`src/pick_scheduler/pick_scheduler.cpp`) and
     `Gantry::sampleZFeedbackMm()`.
 -   Conveyor stopped. `beltsim <mm_s>` fed synthetic conveyor frames at the real
     cadence (`kConveyorPeriodUs` = 250 ms). Belt speeds 50 / 150 / 250 mm/s
@@ -317,8 +317,8 @@ the belt speed logged from the supervisor's `/api/state` during the capture (304
     offset depends on the battery's pose.
 -   **Y override `y_bat` = −130 − 6 = −136 mm** for `vis_batt_x` frames
     (`2ac4b8c`, `kTriggerSensorYFromCamMm`, `kTriggerCentreBehindMm` in
-    `src/pick_scheduler.cpp`). It was −114 mm. The frame's own y is a fixed
-    placeholder from the vision script.
+    `src/pick_scheduler/pick_scheduler.cpp`). It was −114 mm. The frame's own y
+    is a fixed placeholder from the vision script.
 -   **Scatter:** the chain's sd (about 10 ms) and the sensor's update steps
     together give about 15–18 ms sd, about ±5 mm at 300 mm/s. An offset cannot
     remove it.

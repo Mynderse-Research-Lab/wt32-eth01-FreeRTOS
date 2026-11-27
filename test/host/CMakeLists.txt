@@ -46,42 +46,61 @@ endif()
 # --- Hardware-independent logic under test ------------------------------------
 # Only sources that compile without ESP-IDF / FreeRTOS belong here.
 add_library(gantry_logic STATIC
-    "${REPO_ROOT}/lib/Gantry/src/GantryKinematics.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryTrajectory.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics/GantryKinematics.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/motion/GantryTrajectory.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryConfig.cpp"
 )
 target_include_directories(gantry_logic PUBLIC
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 
 # --- EtherNet/IP encoding layer under test ------------------------------------
 # Pure, freestanding C++17 (no ESP-IDF). Same sources the firmware will link in
 # a later phase; here they are regression-tested byte-for-byte on the host.
 add_library(ethernet_ip STATIC
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipEncapsulation.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipCpf.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/CipMessageRouter.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/CipEthernetLink.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/CipTcpIpInterface.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipRunTimeTrace.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipConnectionManager.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100Assembly.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/Kinetix5100ParamAccess.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01ControlStatus.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01Assembly.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/Hcs01ComwsClient.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipSession.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipIoConnection.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipScanner.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScanner.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipMultiScannerConnect.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipProcessImage.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipClass1TimingStats.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipReliabilityStats.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol/EipEncapsulation.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol/EipCpf.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip/CipMessageRouter.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip/CipEthernetLink.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip/CipTcpIpInterface.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing/EipRunTimeTrace.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol/EipConnectionManager.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix/Kinetix5100Assembly.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix/Kinetix5100ParamAccess.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01/Hcs01ControlStatus.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01/Hcs01Assembly.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01/Hcs01ComwsClient.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session/EipSession.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner/EipIoConnection.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner/EipScanner.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task/EipMultiScanner.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task/EipMultiScannerConnect.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner/EipProcessImage.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing/EipClass1TimingStats.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing/EipReliabilityStats.cpp"
 )
 target_include_directories(ethernet_ip PUBLIC
     "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01"
 )
 # Reliability + timing helpers are header/cpp already in ethernet_ip SRCS via EipReliabilityStats
 
@@ -89,16 +108,29 @@ target_include_directories(ethernet_ip PUBLIC
 add_library(app_config STATIC
     "${REPO_ROOT}/lib/AppConfig/src/AppConfig.cpp"
     "${REPO_ROOT}/lib/AppConfig/src/AppConfigAccess.cpp"
-    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsCell.cpp"
-    "${REPO_ROOT}/lib/AppConfig/src/AppConfigDefaultsMotion.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/schema/AppConfigDefaultsCell.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/schema/AppConfigDefaultsMotion.cpp"
     "${REPO_ROOT}/lib/AppConfig/src/AppConfigParamIo.cpp"
     "${REPO_ROOT}/lib/AppConfig/src/AppConfigText.cpp"
-    "${REPO_ROOT}/lib/AppConfig/src/ConfigSchema.cpp"
+    "${REPO_ROOT}/lib/AppConfig/src/schema/ConfigSchema.cpp"
 )
 target_include_directories(app_config PUBLIC
     "${REPO_ROOT}/lib/AppConfig/src"
+    "${REPO_ROOT}/lib/AppConfig/src/schema"
+    "${REPO_ROOT}/lib/AppConfig/src/storage"
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 
 # --- Test executables ---------------------------------------------------------
@@ -168,18 +200,37 @@ add_executable(test_eip_axis
     "test_eip_axis_limits.cpp"
     "test_eip_axis_rotary.cpp"
     "test_eip_axis_units.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxis.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisPhases.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipLinearAxisAlarm.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxis.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipRotaryAxisUpdate.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis/GantryEipLinearAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis/GantryEipLinearAxisPhases.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis/GantryEipLinearAxisAlarm.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis/GantryEipRotaryAxis.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis/GantryEipRotaryAxisUpdate.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"
 )
 target_include_directories(test_eip_axis PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/stubs"
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
     "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 target_link_libraries(test_eip_axis PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_axis COMMAND test_eip_axis)
@@ -188,6 +239,12 @@ add_test(NAME test_eip_axis COMMAND test_eip_axis)
 add_executable(test_eip_limit_sequence "test_eip_limit_sequence.cpp")
 target_include_directories(test_eip_limit_sequence PRIVATE
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
 )
 target_link_libraries(test_eip_limit_sequence PRIVATE unity)
 add_test(NAME test_eip_limit_sequence COMMAND test_eip_limit_sequence)
@@ -196,6 +253,12 @@ add_test(NAME test_eip_limit_sequence COMMAND test_eip_limit_sequence)
 add_executable(test_path_profile "test_path_profile.cpp")
 target_include_directories(test_path_profile PRIVATE
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
 )
 target_link_libraries(test_path_profile PRIVATE unity)
 add_test(NAME test_path_profile COMMAND test_path_profile)
@@ -203,9 +266,13 @@ add_test(NAME test_path_profile COMMAND test_path_profile)
 # W5500 deferred log for real-time paths (G-B13)
 add_executable(test_w5500_deferred_log
     "test_w5500_deferred_log.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500DeferredLog.cpp"
+    "${REPO_ROOT}/lib/W5500/src/diag/W5500DeferredLog.cpp"
 )
-target_include_directories(test_w5500_deferred_log PRIVATE "${REPO_ROOT}/lib/W5500/src")
+target_include_directories(test_w5500_deferred_log PRIVATE
+    "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag")
 target_link_libraries(test_w5500_deferred_log PRIVATE unity)
 add_test(NAME test_w5500_deferred_log COMMAND test_w5500_deferred_log)
 
@@ -213,6 +280,9 @@ add_test(NAME test_w5500_deferred_log COMMAND test_w5500_deferred_log)
 add_executable(test_w5500_spi "test_w5500_spi.cpp")
 target_include_directories(test_w5500_spi PRIVATE
     "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag"
 )
 target_link_libraries(test_w5500_spi PRIVATE unity)
 add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
@@ -223,13 +293,16 @@ add_executable(test_w5500_socket_fastpath
     "test_w5500_socket_fastpath_send.cpp"
     "test_w5500_socket_fastpath_recv.cpp"
     "test_w5500_socket_fastpath_tcp.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500SocketTcp.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+    "${REPO_ROOT}/lib/W5500/src/socket/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/socket/W5500SocketTcp.cpp"
+    "${REPO_ROOT}/lib/W5500/src/diag/W5500Diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/hal/W5500BusMutex.cpp"
 )
 target_include_directories(test_w5500_socket_fastpath PRIVATE
     "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag"
 )
 target_link_libraries(test_w5500_socket_fastpath PRIVATE unity)
 add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
@@ -237,11 +310,14 @@ add_test(NAME test_w5500_socket_fastpath COMMAND test_w5500_socket_fastpath)
 # W5500 dropout diagnostics (failure snapshot + SPI read-back check)
 add_executable(test_w5500_diag
     "test_w5500_diag.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+    "${REPO_ROOT}/lib/W5500/src/diag/W5500Diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/hal/W5500BusMutex.cpp"
 )
 target_include_directories(test_w5500_diag PRIVATE
     "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag"
 )
 target_link_libraries(test_w5500_diag PRIVATE unity)
 add_test(NAME test_w5500_diag COMMAND test_w5500_diag)
@@ -250,7 +326,18 @@ add_test(NAME test_w5500_diag COMMAND test_w5500_diag)
 add_executable(test_w5500_poll "test_w5500_poll.cpp")
 target_include_directories(test_w5500_poll PRIVATE
     "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag"
     "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01"
 )
 target_link_libraries(test_w5500_poll PRIVATE ethernet_ip unity)
 add_test(NAME test_w5500_poll COMMAND test_w5500_poll)
@@ -259,22 +346,33 @@ add_test(NAME test_w5500_poll COMMAND test_w5500_poll)
 set(GANTRY_ORCH_SRCS
     "${REPO_ROOT}/lib/Gantry/src/Gantry.cpp"
     "${REPO_ROOT}/lib/Gantry/src/GantryAxisState.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipBringUp.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEipHomeCal.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryHoming.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryMotion.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryPath.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryPathTheta.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantrySequential.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryLimitSwitch.cpp"
-    "${REPO_ROOT}/lib/Gantry/src/GantryEndEffector.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/homing/GantryEipBringUp.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/homing/GantryEipHomeCal.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/homing/GantryHoming.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/motion/GantryMotion.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/motion/GantryPath.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/motion/GantryPathTheta.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/motion/GantrySequential.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/io/GantryLimitSwitch.cpp"
+    "${REPO_ROOT}/lib/Gantry/src/io/GantryEndEffector.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/stubs/host_test_clock.cpp"
 )
 set(GANTRY_ORCH_INCLUDES
     "${CMAKE_CURRENT_LIST_DIR}/stubs"
     "${CMAKE_CURRENT_LIST_DIR}/fakes"
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 
 function(add_gantry_orch_lib name sequential)
@@ -309,7 +407,18 @@ add_test(NAME test_gantry_orchestration_seq COMMAND test_gantry_orchestration_se
 
 # Console parse (header-only, lives in src/)
 add_executable(test_console_parse "test_console_parse.cpp")
-target_include_directories(test_console_parse PRIVATE "${REPO_ROOT}/src")
+target_include_directories(test_console_parse PRIVATE
+    "${REPO_ROOT}/src/main"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
+    "${REPO_ROOT}/src/console"
+    "${REPO_ROOT}/src/console/net"
+    "${REPO_ROOT}/src/console/motion"
+    "${REPO_ROOT}/src/console/drives"
+    "${REPO_ROOT}/src/console/system")
 target_link_libraries(test_console_parse PRIVATE unity)
 add_test(NAME test_console_parse COMMAND test_console_parse)
 
@@ -322,14 +431,36 @@ add_executable(test_pick_intercept
 )
 target_include_directories(test_pick_intercept PRIVATE
     "${REPO_ROOT}/include"
-    "${REPO_ROOT}/lib/Gantry/src")
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
+    "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io")
 target_link_libraries(test_pick_intercept PRIVATE unity)
 add_test(NAME test_pick_intercept COMMAND test_pick_intercept)
 
 add_executable(test_coordinated_grasp "test_coordinated_grasp.cpp")
 target_include_directories(test_coordinated_grasp PRIVATE
     "${REPO_ROOT}/include"
-    "${REPO_ROOT}/lib/Gantry/src")
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
+    "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io")
 target_compile_definitions(test_coordinated_grasp PRIVATE
     COORDINATED_JSON="${REPO_ROOT}/test/host/data/coordinated_grasp_reference.json")
 target_link_libraries(test_coordinated_grasp PRIVATE unity)
@@ -339,7 +470,18 @@ add_test(NAME test_coordinated_grasp COMMAND test_coordinated_grasp)
 add_executable(test_limit_switch_policy "test_limit_switch_policy.cpp")
 target_include_directories(test_limit_switch_policy PRIVATE
     "${REPO_ROOT}/lib/Gantry/src"
+    "${REPO_ROOT}/lib/Gantry/src/motion"
+    "${REPO_ROOT}/lib/Gantry/src/homing"
+    "${REPO_ROOT}/lib/Gantry/src/kinematics"
+    "${REPO_ROOT}/lib/Gantry/src/linear_axis"
+    "${REPO_ROOT}/lib/Gantry/src/rotary_axis"
+    "${REPO_ROOT}/lib/Gantry/src/io"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 target_link_libraries(test_limit_switch_policy PRIVATE unity)
 add_test(NAME test_limit_switch_policy COMMAND test_limit_switch_policy)
@@ -348,6 +490,14 @@ add_test(NAME test_limit_switch_policy COMMAND test_limit_switch_policy)
 add_executable(test_eip_scanner_policy "test_eip_scanner_policy.cpp")
 target_include_directories(test_eip_scanner_policy PRIVATE
     "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01"
 )
 target_link_libraries(test_eip_scanner_policy PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_scanner_policy COMMAND test_eip_scanner_policy)
@@ -363,15 +513,26 @@ add_test(NAME test_spi3_critical COMMAND test_spi3_critical)
 # EipSocketW5500 over the same mock HAL as the W5500 socket fast-path tests
 add_executable(test_eip_socket_w5500
     "test_eip_socket_w5500.cpp"
-    "${REPO_ROOT}/lib/EtherNetIP/src/EipSocketW5500.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500SocketTcp.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
-    "${REPO_ROOT}/lib/W5500/src/W5500BusMutex.cpp"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session/EipSocketW5500.cpp"
+    "${REPO_ROOT}/lib/W5500/src/socket/W5500Socket.cpp"
+    "${REPO_ROOT}/lib/W5500/src/socket/W5500SocketTcp.cpp"
+    "${REPO_ROOT}/lib/W5500/src/diag/W5500Diag.cpp"
+    "${REPO_ROOT}/lib/W5500/src/hal/W5500BusMutex.cpp"
 )
 target_include_directories(test_eip_socket_w5500 PRIVATE
     "${REPO_ROOT}/lib/EtherNetIP/src"
+    "${REPO_ROOT}/lib/EtherNetIP/src/cip"
+    "${REPO_ROOT}/lib/EtherNetIP/src/protocol"
+    "${REPO_ROOT}/lib/EtherNetIP/src/session"
+    "${REPO_ROOT}/lib/EtherNetIP/src/scanner"
+    "${REPO_ROOT}/lib/EtherNetIP/src/task"
+    "${REPO_ROOT}/lib/EtherNetIP/src/timing"
+    "${REPO_ROOT}/lib/EtherNetIP/src/kinetix"
+    "${REPO_ROOT}/lib/EtherNetIP/src/hcs01"
     "${REPO_ROOT}/lib/W5500/src"
+    "${REPO_ROOT}/lib/W5500/src/hal"
+    "${REPO_ROOT}/lib/W5500/src/socket"
+    "${REPO_ROOT}/lib/W5500/src/diag"
 )
 target_link_libraries(test_eip_socket_w5500 PRIVATE ethernet_ip unity)
 add_test(NAME test_eip_socket_w5500 COMMAND test_eip_socket_w5500)
@@ -380,6 +541,11 @@ add_test(NAME test_eip_socket_w5500 COMMAND test_eip_socket_w5500)
 add_executable(test_drivetrain_params "test_drivetrain_params.cpp")
 target_include_directories(test_drivetrain_params PRIVATE
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 target_link_libraries(test_drivetrain_params PRIVATE unity)
 add_test(NAME test_drivetrain_params COMMAND test_drivetrain_params)
@@ -396,6 +562,11 @@ add_executable(test_cell_net_l2
 target_include_directories(test_cell_net_l2 PRIVATE
     "${REPO_ROOT}/lib/CellNetL2/src"
     "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag"
 )
 target_link_libraries(test_cell_net_l2 PRIVATE unity)
 add_test(NAME test_cell_net_l2 COMMAND test_cell_net_l2)
@@ -434,6 +605,12 @@ endif()
 
 # Simulation strike planner port (strike_plan.h) against gantry_twin.py values
 add_executable(test_strike_plan "test_strike_plan.cpp")
-target_include_directories(test_strike_plan PRIVATE "${REPO_ROOT}/include")
+target_include_directories(test_strike_plan PRIVATE
+    "${REPO_ROOT}/include"
+    "${REPO_ROOT}/src/pick_scheduler"
+    "${REPO_ROOT}/src/pick_scheduler/intercept"
+    "${REPO_ROOT}/src/pick_scheduler/strike"
+    "${REPO_ROOT}/src/pick_scheduler/grasp"
+    "${REPO_ROOT}/src/pick_scheduler/diag")
 target_link_libraries(test_strike_plan PRIVATE unity)
 add_test(NAME test_strike_plan COMMAND test_strike_plan)

@@ -202,7 +202,7 @@ callback per message type `0x00`–`0x04`, plus `begin()`, `isReady()`,
 
 **ESP-IDF.** Once the LAN8720 is up, call
 `EspEthL2Transport::attachEthHandle(eth_handle, netif)` and then
-`CellNetL2Node::begin()` (`src/main_init_net.cpp`). The transport hooks the
+`CellNetL2Node::begin()` (`src/main/main_init_net.cpp`). The transport hooks the
 Ethernet input path: `0x88B5` frames go to CellNet, every other frame goes on to
 lwIP, so the TCP console and OTA server share the port. Callbacks run in the
 EMAC receive task; keep them short and hand work to a queue.

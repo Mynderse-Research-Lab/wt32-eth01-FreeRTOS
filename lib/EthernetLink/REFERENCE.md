@@ -82,7 +82,7 @@ fails. `start` returns false when netif, MAC, PHY or driver install fails.
 ## Console
 
 `boottime` (exact match) prints `ethernetBootTimes()` in milliseconds. The
-command is `cmdBootTime` in `src/gantry_console_commands.cpp`.
+command is `cmdBootTime` in `src/console/gantry_console_commands.cpp`.
 
 ## Usage
 

@@ -34,9 +34,9 @@ flags, the link state.
 
 ## Call contract
 
-`bootInitIo` calls `UiManager::init` once (`src/main_init_io.cpp:138`), unless
-`disp_tft_en` is 0. After that the task function `tftUiTask` (task `TftUiTask`,
-from `src/main_tasks.cpp:53`) is the only caller:
+`bootInitIo` calls `UiManager::init` once (`src/main/main_init_io.cpp:138`),
+unless `disp_tft_en` is 0. After that the task function `tftUiTask` (task
+`TftUiTask`, from `src/main/main_tasks.cpp:53`) is the only caller:
 
 -   `UiManager::pollInput(port_b)` every 10 ms.
 -   `UiManager::update(port_b, telemetry)` every `1000/15` ms.
@@ -73,7 +73,7 @@ The menu is built from `ConfigSchema`.
 
 `[H]` follows `!isBusy()` for each axis, so it marks an idle axis, not a homed
 one (G-E10). `Plant LAN UP` follows `EthernetLink::isUp()` (G-E7). Both are
-filled in by `src/main_tasks.cpp` before `update`.
+filled in by `src/main/main_tasks.cpp` before `update`.
 
 ## AppConfig
 
@@ -89,12 +89,12 @@ can report success after a failed command. G-E9.
 ## Console
 
 None. Parameter save and reboot rules for the console are in
-`src/gantry_console_cfg.cpp`, not here.
+`src/console/system/gantry_console_cfg.cpp`, not here.
 
 ## Usage
 
 ```cpp
-// boot (src/main_init_io.cpp)
+// boot (src/main/main_init_io.cpp)
 display::SpiDisplayConfig cfg = {};
 cfg.mcp = gpio_expander_get_mcp_handle();
 cfg.esp_cs_pin = SPI3_CS_TFT_GPIO;
@@ -127,7 +127,7 @@ the MCP software-PWM backlight branch, and the two inverted orientations.
 
 ## Documents
 
-The task rates are in `tftUiTask` (`src/main_tasks.cpp`); the screens are
+The task rates are in `tftUiTask` (`src/main/main_tasks.cpp`); the screens are
 `UiManager`, `UiMenu`, `UiEditor` and `UiRebootPrompt`. Open items: G-E6, G-E9,
 G-E10, G-F9 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.
 

@@ -78,22 +78,22 @@ G-B5.
 |---|---|
 | `eiptiming` | `dumpClass1TimingStats` |
 | `gaptrace` | `printLastClass1GapReport` |
-| `cfg save` | `pauseClass1` (`src/gantry_console_cfg.cpp:97`) |
+| `cfg save` | `pauseClass1` (`src/console/system/gantry_console_cfg.cpp:97`) |
 
-`ethlink` and `drv` are console commands in `src/gantry_console_commands.cpp`
-whose handlers use this library.
+`ethlink` and `drv` are console commands in
+`src/console/gantry_console_commands.cpp` whose handlers use this library.
 
 ## Errors
 
 `ExchangeStatus` above is the result of one Class 1 exchange. `pauseClass1`
 returns false when Class 1 does not close within its timeout, and `cfg save`
-then does not save (`src/gantry_console_cfg.cpp:97`). `startScannerTask` returns
-nothing.
+then does not save (`src/console/system/gantry_console_cfg.cpp:97`).
+`startScannerTask` returns nothing.
 
 ## Usage
 
 ```cpp
-// src/main_init_motion.cpp, once w5500.init() has succeeded
+// src/main/main_init_motion.cpp, once w5500.init() has succeeded
 eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus, &eipImageX, &eipImageZ, &eipImageTheta);
 ```
 
@@ -145,12 +145,12 @@ This section is the normative explanation of cyclic EtherNet/IP on this project.
 | Explicit (TCP) | **44818** | Encap header + RegisterSession / SendRRData(ForwardOpen 0x54) / ForwardClose 0x4E / UnRegisterSession | Only for open/close and rare explicit CIP |
 | Implicit Class 1 (UDP) | **2222** | **Raw CPF only** — no 24-byte encap header | Every RPI for as long as torque must hold |
 
-Session + FO live in [`EipSession`](src/EipSession.cpp) /
-[`EipConnectionManager`](src/EipConnectionManager.cpp) /
-[`EipScanner`](src/EipScanner.cpp).
+Session + FO live in [`EipSession`](src/session/EipSession.cpp) /
+[`EipConnectionManager`](src/protocol/EipConnectionManager.cpp) /
+[`EipScanner`](src/scanner/EipScanner.cpp).
 
-Cyclic frames live in [`EipIoConnection`](src/EipIoConnection.cpp) /
-[`EipCpf`](src/EipCpf.cpp).
+Cyclic frames live in [`EipIoConnection`](src/scanner/EipIoConnection.cpp) /
+[`EipCpf`](src/protocol/EipCpf.cpp).
 
 ForwardOpen path (Kinetix X/Z): config assembly **191 (0xBF)** + O→T **104** +
 T→O **154** (`buildAssemblyConnectionPath`; EDS-style path
@@ -159,7 +159,7 @@ Granted API (`ot_api_us` / `to_api_us`) drives RPI pacing and recv timeout
 (`API_ms * 8 + 50`).
 
 Firmware FO overrides in `makeKinetixConfig`
-([`EipScannerConfig.cpp`](src/EipScannerConfig.cpp)):
+([`EipScannerConfig.cpp`](src/scanner/EipScannerConfig.cpp)):
 
 -   CTM = **2**: connection timeout = RPI × 4 << 2 = 16 × RPI, 32 ms at 2 ms
     (`kClass1ConnectionTimeoutMultiplier`, `EipScannerPolicy.h`)
@@ -221,7 +221,7 @@ module docstring — fixed with
 `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent
 `io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and
 opens one TX socket per dest IP so DIPR stays cached
-([`EipSocketW5500Udp`](src/EipSocketW5500.cpp)).
+([`EipSocketW5500Udp`](src/session/EipSocketW5500.cpp)).
 
 A Class 1 connection only holds torque while O→T keeps arriving within the
 connection timeout. Stalling longer than that timeout silently drops the
@@ -229,8 +229,8 @@ connection.
 
 ### Dual-axis scanner loop
 
-[`EipMultiScanner`](src/EipMultiScanner.cpp) + task in
-[`EipScannerTask.cpp`](src/EipScannerTask.cpp):
+[`EipMultiScanner`](src/task/EipMultiScanner.cpp) + task in
+[`EipScannerTask.cpp`](src/task/EipScannerTask.cpp):
 
 1.  `openAxis(0)` (TCP FO on X).
 2.  `bindSharedUdp()` — one socket on 2222 for both axes.
@@ -264,8 +264,8 @@ connection.
     `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse
     onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one
     tick every 8 consecutive overruns
-    ([`EipClass1Timing.h`](src/EipClass1Timing.h) `class1OverrunAction`) as the
-    TWDT safety net. `eiptiming` prints a `drain` line and
+    ([`EipClass1Timing.h`](src/timing/EipClass1Timing.h) `class1OverrunAction`)
+    as the TWDT safety net. `eiptiming` prints a `drain` line and
     `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns
     dominate.
 
@@ -306,15 +306,16 @@ software invariant on PC and ESP: **never leave 2222 unbound between frames**.
 | E602 / A603 | `0x0602` / `0x0603` | `KinetixFaultCodes.h` |
 | CPF item types | `0x8002`, `0x00B1` | `CpfItemType` |
 
-Transport interfaces ([`EipTransport.h`](src/EipTransport.h)) allow host fakes;
-production uses [`EipSocketW5500`](src/EipSocketW5500.cpp). SPI register access
-stays inside [`W5500Socket`](/lib/W5500/src/W5500Socket.cpp) (mutex must not be
-held across recv wait so O→T can proceed).
+Transport interfaces ([`EipTransport.h`](src/session/EipTransport.h)) allow host
+fakes; production uses [`EipSocketW5500`](src/session/EipSocketW5500.cpp). SPI
+register access stays inside
+[`W5500Socket`](/lib/W5500/src/socket/W5500Socket.cpp) (mutex must not be held
+across recv wait so O→T can proceed).
 
 ## Process image mailbox
 
-[`EipProcessImage`](src/EipProcessImage.h) is the **only** coupling between
-Gantry axes and the scanner task.
+[`EipProcessImage`](src/scanner/EipProcessImage.h) is the **only** coupling
+between Gantry axes and the scanner task.
 
 | API | Writer | Reader | Meaning |
 |-----|--------|--------|---------|
@@ -332,7 +333,7 @@ Gantry axes and the scanner task.
 
 ## Kinetix assemblies 104 and 154
 
-Full maps: [`Kinetix5100Assembly.h`](src/Kinetix5100Assembly.h).
+Full maps: [`Kinetix5100Assembly.h`](src/kinetix/Kinetix5100Assembly.h).
 
 **Output 104:** OM @0, control bits @1 (ServoOn / StopMotion / StartMotion /
 FaultReset / …), HomingMethod @3, Speed/Accel/Decel refs @4/8/12 (0.1 RPM / 0.1

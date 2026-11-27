@@ -32,8 +32,8 @@ ESP-IDF `log` and `freertos`. The capture hook is `esp_log_set_vprintf`.
 ## Consumers
 
 `app_main` calls `bootLogRingInstall` before any other `esp_log_set_vprintf`
-user (`src/main.cpp`). The test console command `bootlog` reads the ring
-(`src/gantry_console_commands.cpp`).
+user (`src/main/main.cpp`). The test console command `bootlog` reads the ring
+(`src/console/gantry_console_commands.cpp`).
 
 ## Build and test
 

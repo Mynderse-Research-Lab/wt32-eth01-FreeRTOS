@@ -6,45 +6,45 @@
 set(APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 
 set(APP_SRCS
-    "${APP_ROOT}/src/main.cpp"
-    "${APP_ROOT}/src/main_init_io.cpp"
-    "${APP_ROOT}/src/main_init_motion.cpp"
-    "${APP_ROOT}/src/main_init_net.cpp"
-    "${APP_ROOT}/src/main_tasks.cpp"
-    "${APP_ROOT}/src/pick_scheduler.cpp"
-    "${APP_ROOT}/src/pick_belt.cpp"
-    "${APP_ROOT}/src/pick_bench.cpp"
-    "${APP_ROOT}/src/pick_console.cpp"
-    "${APP_ROOT}/src/pick_eval.cpp"
-    "${APP_ROOT}/src/pick_motion.cpp"
-    "${APP_ROOT}/src/pick_run.cpp"
-    "${APP_ROOT}/src/pick_strike.cpp"
-    "${APP_ROOT}/src/pick_trace.cpp"
-    "${APP_ROOT}/src/gantry_test_console.cpp"
-    "${APP_ROOT}/src/gantry_console_bringup.cpp"
-    "${APP_ROOT}/src/gantry_console_cfg.cpp"
-    "${APP_ROOT}/src/gantry_console_cip.cpp"
-    "${APP_ROOT}/src/gantry_console_cmd_motion.cpp"
-    "${APP_ROOT}/src/gantry_console_cmd_pick.cpp"
-    "${APP_ROOT}/src/gantry_console_cmd_profile.cpp"
-    "${APP_ROOT}/src/gantry_console_commands.cpp"
-    "${APP_ROOT}/src/gantry_console_drive_diag.cpp"
-    "${APP_ROOT}/src/gantry_console_drv.cpp"
-    "${APP_ROOT}/src/gantry_console_homing.cpp"
-    "${APP_ROOT}/src/gantry_console_io.cpp"
-    "${APP_ROOT}/src/gantry_console_session.cpp"
-    "${APP_ROOT}/src/gantry_console_status.cpp"
-    "${APP_ROOT}/src/gantry_console_testcycle.cpp"
-    "${APP_ROOT}/src/gantry_console_thetapath.cpp"
-    "${APP_ROOT}/src/gantry_net_console.cpp"
-    "${APP_ROOT}/src/gantry_net_console_auth.cpp"
+    "${APP_ROOT}/src/main/main.cpp"
+    "${APP_ROOT}/src/main/main_init_io.cpp"
+    "${APP_ROOT}/src/main/main_init_motion.cpp"
+    "${APP_ROOT}/src/main/main_init_net.cpp"
+    "${APP_ROOT}/src/main/main_tasks.cpp"
+    "${APP_ROOT}/src/pick_scheduler/pick_scheduler.cpp"
+    "${APP_ROOT}/src/pick_scheduler/intercept/pick_belt.cpp"
+    "${APP_ROOT}/src/pick_scheduler/diag/pick_bench.cpp"
+    "${APP_ROOT}/src/pick_scheduler/diag/pick_console.cpp"
+    "${APP_ROOT}/src/pick_scheduler/pick_eval.cpp"
+    "${APP_ROOT}/src/pick_scheduler/strike/pick_motion.cpp"
+    "${APP_ROOT}/src/pick_scheduler/pick_run.cpp"
+    "${APP_ROOT}/src/pick_scheduler/strike/pick_strike.cpp"
+    "${APP_ROOT}/src/pick_scheduler/diag/pick_trace.cpp"
+    "${APP_ROOT}/src/console/gantry_test_console.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_bringup.cpp"
+    "${APP_ROOT}/src/console/system/gantry_console_cfg.cpp"
+    "${APP_ROOT}/src/console/drives/gantry_console_cip.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_cmd_motion.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_cmd_pick.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_cmd_profile.cpp"
+    "${APP_ROOT}/src/console/gantry_console_commands.cpp"
+    "${APP_ROOT}/src/console/drives/gantry_console_drive_diag.cpp"
+    "${APP_ROOT}/src/console/drives/gantry_console_drv.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_homing.cpp"
+    "${APP_ROOT}/src/console/system/gantry_console_io.cpp"
+    "${APP_ROOT}/src/console/gantry_console_session.cpp"
+    "${APP_ROOT}/src/console/system/gantry_console_status.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_testcycle.cpp"
+    "${APP_ROOT}/src/console/motion/gantry_console_thetapath.cpp"
+    "${APP_ROOT}/src/console/net/gantry_net_console.cpp"
+    "${APP_ROOT}/src/console/net/gantry_net_console_auth.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
 # assertions run host-side in CI (test/host/), so it is only compiled in when
 # CONFIG_GANTRY_SELFTEST is enabled (default y; set n for production builds).
 if(CONFIG_GANTRY_SELFTEST)
-    list(APPEND APP_SRCS "${APP_ROOT}/src/basic_tests.cpp")
+    list(APPEND APP_SRCS "${APP_ROOT}/src/console/system/basic_tests.cpp")
 endif()
 
 idf_component_register(
@@ -52,7 +52,17 @@ idf_component_register(
         ${APP_SRCS}
     INCLUDE_DIRS
         "${APP_ROOT}/include"
-        "${APP_ROOT}/src"
+        "${APP_ROOT}/src/main"
+        "${APP_ROOT}/src/pick_scheduler"
+        "${APP_ROOT}/src/pick_scheduler/intercept"
+        "${APP_ROOT}/src/pick_scheduler/strike"
+        "${APP_ROOT}/src/pick_scheduler/grasp"
+        "${APP_ROOT}/src/pick_scheduler/diag"
+        "${APP_ROOT}/src/console"
+        "${APP_ROOT}/src/console/net"
+        "${APP_ROOT}/src/console/motion"
+        "${APP_ROOT}/src/console/drives"
+        "${APP_ROOT}/src/console/system"
     REQUIRES
         Gantry
         GpioExpander

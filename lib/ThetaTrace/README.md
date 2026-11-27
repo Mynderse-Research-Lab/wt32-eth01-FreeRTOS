@@ -35,8 +35,9 @@ blocker or a decision for this component.
 
 ## Consumers
 
-`cmdThTrace` in `src/gantry_console_cmd_pick.cpp` calls `thetaTraceCommand`. The
-host test `test_theta_trace_analysis` compiles `theta_trace_analysis.h`.
+`cmdThTrace` in `src/console/motion/gantry_console_cmd_pick.cpp` calls
+`thetaTraceCommand`. The host test `test_theta_trace_analysis` compiles
+`theta_trace_analysis.h`.
 
 ## Build and test
 

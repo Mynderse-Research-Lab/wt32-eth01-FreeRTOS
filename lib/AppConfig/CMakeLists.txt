@@ -6,14 +6,16 @@ idf_component_register(
     SRCS
         "src/AppConfig.cpp"
         "src/AppConfigAccess.cpp"
-        "src/AppConfigDefaultsCell.cpp"
-        "src/AppConfigDefaultsMotion.cpp"
+        "src/schema/AppConfigDefaultsCell.cpp"
+        "src/schema/AppConfigDefaultsMotion.cpp"
         "src/AppConfigParamIo.cpp"
         "src/AppConfigText.cpp"
-        "src/ConfigSchema.cpp"
-        "src/NvsStorage.cpp"
+        "src/schema/ConfigSchema.cpp"
+        "src/storage/NvsStorage.cpp"
     INCLUDE_DIRS
         "src"
+        "src/schema"
+        "src/storage"
         "${APP_ROOT}/include"
     REQUIRES
         nvs_flash

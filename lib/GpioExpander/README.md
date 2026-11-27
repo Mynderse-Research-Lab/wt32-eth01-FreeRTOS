@@ -27,9 +27,9 @@ come from `include/gantry_app_constants.h`.
 ## Consumers
 
 `Gantry` (end effector and limit switches) requires this component. `bootInitIo`
-in `src/main_init_io.cpp` initialises it and passes the handle to the display;
-`app_main` calls `bootInitIo`. The test console and the pick scheduler call it
-from `src/`.
+in `src/main/main_init_io.cpp` initialises it and passes the handle to the
+display; `app_main` calls `bootInitIo`. The test console and the pick scheduler
+call it from `src/`.
 
 ## Build and test
 

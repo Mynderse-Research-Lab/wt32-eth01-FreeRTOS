@@ -20,6 +20,7 @@ reading path from the [README](/README.md).
 |----------|--------|
 | [Gantry firmware](/GANTRY_FIRMWARE.md) | Boot, tasks, one move and one pick, console, parameters |
 | [Libraries](/lib/README.md) | The 13 libraries, each with a README and a REFERENCE |
+| [Application sources](/src/README.md) | The modules still in `src/` |
 | [CellNet L2 wire guide](/lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md) | Framing, payloads, receive rules |
 | [CellNet OTA protocol](/lib/CellNetL2/CELLNET_OTA_PROTOCOL.md) | Firmware updates over CellNet |
 | [Math relink inventory](/MATH_RELINK_INVENTORY.md) | Code that implements the system math |

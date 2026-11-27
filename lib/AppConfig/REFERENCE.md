@@ -93,8 +93,8 @@ struct in place. G-F9.
 
 ## Console
 
-`cfg` is handled in `src/gantry_console_cfg.cpp`, not in this component. The
-help line is:
+`cfg` is handled in `src/console/system/gantry_console_cfg.cpp`, not in this
+component. The help line is:
 
 `cfg <key> [value] | cfg unlock <pw> | cfg lock | cfg passwd <old> <new> | cfg save | cfg export | cfg time | cfg factory | cfg reboot [discard]`
 
@@ -111,7 +111,7 @@ installed (`AppConfig.cpp:203`). `unlockDeveloperMode` and
 ## Usage
 
 ```c
-// boot (src/main_init_io.cpp)
+// boot (src/main/main_init_io.cpp)
 if (nvs_flash_init() == ESP_OK) {
     Config::AppConfig::instance().init();
 }

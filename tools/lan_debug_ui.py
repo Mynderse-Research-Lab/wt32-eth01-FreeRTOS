@@ -2,7 +2,7 @@
 """LAN8720 gantry debug UI - ESP_LOG stream + full console command surface over TCP.
 
 Covers every command in the firmware `help` menu (`gantryTestPrintHelp` in
-`src/gantry_test_console.cpp`), grouped into tabs, with an always-visible STOP.
+`src/console/gantry_test_console.cpp`), grouped into tabs, with an always-visible STOP.
 Diagnostics Dual-OTA streams a `.bin` to the LAN8720 OTA port (`:8032`) using
 `tools/ota_flash.py`.
 
@@ -16,7 +16,7 @@ Usage:
   py tools/lan_debug_ui.py --list-commands        # no GUI; print the command table
   set GANTRY_TCP_PASSWORD=LTU_1932                # optional; prompted if required
 
-Wire protocol (src/gantry_net_console.cpp):
+Wire protocol (src/console/net/gantry_net_console.cpp):
   - Auth either replies "OK authenticated (recent IP)" or prompts "Password: "
     (no trailing newline), so framing must flush on prompts, not only on newlines.
   - Every command reply is followed by "\\r\\n> ".

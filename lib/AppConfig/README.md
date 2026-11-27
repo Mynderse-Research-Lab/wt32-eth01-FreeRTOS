@@ -26,7 +26,7 @@ defaults name.
 
 ## Consumers
 
-`bootInitConfig` in `src/main_init_io.cpp` calls `init`, and `init` calls
+`bootInitConfig` in `src/main/main_init_io.cpp` calls `init`, and `init` calls
 `load`. The console `cfg` command, the TFT editor and `bootInitMotion` read
 `data()`. `cfg save` is the path that asks the caller to pause Class 1 and then
 calls `saveSet`.

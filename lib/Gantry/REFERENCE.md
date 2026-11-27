@@ -127,20 +127,20 @@ read; the sequential flag and the calibration timeout are compile-time. G-F2.
 
 ## Console
 
-The test console in `src/gantry_console_*.cpp` is the command surface: `move`,
-`home`, `calibrate`, `grip`, `stop`, `alarmreset`. This component does not
-register those commands.
+The test console in `src/console/` is the command surface: `move`, `home`,
+`calibrate`, `grip`, `stop`, `alarmreset`. This component does not register
+those commands.
 
 ## Errors
 
 `moveTo`, the preload and retract calls and the homing calls return the
 `GantryError` above. `begin` returns false when the gantry cannot start, and
-`bootInitMotion` then stops the motion stage (`src/main_init_motion.cpp`).
+`bootInitMotion` then stops the motion stage (`src/main/main_init_motion.cpp`).
 
 ## Usage
 
 ```cpp
-// src/main_init_motion.cpp
+// src/main/main_init_motion.cpp
 static Gantry::Gantry gantry(std::move(xAxis), std::move(zAxis), std::move(thetaAxis), PIN_GRIPPER);
 gantry.setSafeZHeight(params.gantry_safe_z_height_mm);
 gantry.setRuntimeParams(gantryRuntimeParams(params));
@@ -223,11 +223,11 @@ derived from path direction:
 
 `v_i = V · |d_i| / L`, `a_i = A · |d_i| / L`, with `L = hypot(dx, dz)`.
 
-Helpers live in [`GantryPathProfile.h`](src/GantryPathProfile.h) (`decompose`,
-`planSegments`). Z cap: `armCurrentPathSegment` lowers each segment's path speed
-with `Path::zCappedPathSpeed` so the Z component stays under
-`AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` (ballscrew critical speed) and the
-segment stays straight. The pick budget uses the same helper.
+Helpers live in [`GantryPathProfile.h`](src/motion/GantryPathProfile.h)
+(`decompose`, `planSegments`). Z cap: `armCurrentPathSegment` lowers each
+segment's path speed with `Path::zCappedPathSpeed` so the Z component stays
+under `AXIS_Z_SPEED_CAP_FROM_CRITICAL_RPM_MM_PER_S` (ballscrew critical speed)
+and the segment stays straight. The pick budget uses the same helper.
 
 **Traverse clearance** (`GANTRY_SAFE_Z_HEIGHT_MM`; the stored value is the one
 in use, and the compile-time fallback is **48.4 mm**,
@@ -263,10 +263,10 @@ return are locked at **100 mm/s** and **2000 mm/s²** (not console
 ## Orchestration
 
 `MotionState` in [`GantryTypes.h`](src/GantryTypes.h), driven from
-[`GantryPath.cpp`](src/GantryPath.cpp),
-[`GantryPathTheta.cpp`](src/GantryPathTheta.cpp),
-[`GantrySequential.cpp`](src/GantrySequential.cpp) and
-[`GantryMotion.cpp`](src/GantryMotion.cpp):
+[`GantryPath.cpp`](src/motion/GantryPath.cpp),
+[`GantryPathTheta.cpp`](src/motion/GantryPathTheta.cpp),
+[`GantrySequential.cpp`](src/motion/GantrySequential.cpp) and
+[`GantryMotion.cpp`](src/motion/GantryMotion.cpp):
 
 | State | Role |
 |-------|------|
@@ -335,7 +335,8 @@ dynamic picks; CIP Motion / Motion Group.
 
 PC prove: [`tools/eip_position_abs.py`](/tools/eip_position_abs.py).
 
-Firmware SM: [`GantryEipLinearAxisPhases`](src/GantryEipLinearAxisPhases.cpp)
+Firmware SM:
+[`GantryEipLinearAxisPhases`](src/linear_axis/GantryEipLinearAxisPhases.cpp)
 (ticks @ **100 Hz**).
 
 ### ArmPhase (enable)

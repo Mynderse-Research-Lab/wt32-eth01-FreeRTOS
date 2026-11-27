@@ -10,11 +10,12 @@ explains how they work together and documents the application code in `src/`.
 
 ## 1. What runs on the controller
 
-The WT32-ETH01 runs one ESP-IDF application. The code in `src/` (boot, tasks,
-the test console and the pick scheduler) sits on thirteen libraries in `lib/`:
+The WT32-ETH01 runs one ESP-IDF application. The code in `src/` (boot and tasks
+in `main/`, the test console in `console/`, the pick scheduler in
+`pick_scheduler/`) sits on thirteen libraries in `lib/`:
 
 ```text
-src/   boot · tasks · test console · pick scheduler
+src/   main (boot, tasks) · console · pick_scheduler
  ├─ Gantry ─────────── motion API: paths, homing, gripper; Kinetix X/Z and HCS01 theta axes
  │   └─ EtherNetIP ─── Class 1 scanner, explicit messages ─── W5500 (SPI2) ─── drives
  ├─ CellNetL2 ──────── cell messages ─── EthernetLink (LAN8720) ─── cell switch
@@ -37,17 +38,18 @@ src/   boot · tasks · test console · pick scheduler
     EtherNet/IP, which meet ±1 mm at 200 mm/s. Host-side Speed plus StopMotion
     did not.
 
-The libraries, grouped by layer, are listed in [lib/README.md](lib/README.md).
+The libraries, grouped by layer, are listed in [lib/README.md](lib/README.md),
+and the application modules in [src/README.md](src/README.md).
 
 ## 2. Boot sequence
 
 With `CONFIG_EIP_SCANNER_ENABLED`:
 
-From [`src/main.cpp`](src/main.cpp), whose `app_main` calls the stages in
-[`src/main_init_io.cpp`](src/main_init_io.cpp),
-[`src/main_init_motion.cpp`](src/main_init_motion.cpp),
-[`src/main_tasks.cpp`](src/main_tasks.cpp) and
-[`src/main_init_net.cpp`](src/main_init_net.cpp):
+From [`src/main/main.cpp`](src/main/main.cpp), whose `app_main` calls the stages
+in [`src/main/main_init_io.cpp`](src/main/main_init_io.cpp),
+[`src/main/main_init_motion.cpp`](src/main/main_init_motion.cpp),
+[`src/main/main_tasks.cpp`](src/main/main_tasks.cpp) and
+[`src/main/main_init_net.cpp`](src/main/main_init_net.cpp):
 
 1.  **SPI3 + MCP** — bus init, Field/UI/TFT CS/W5500 RST; optional TFT stub.
 2.  **W5500** — `w5500.init(...)` with MCP-driven RST (static; must outlive the
@@ -77,13 +79,13 @@ From [`src/main.cpp`](src/main.cpp), whose `app_main` calls the stages in
 |------|---------:|-----:|------------|------|
 | `EipHoldKA`, `EipReopenKA`, `EipCloseKA` | 7 | 1 | EtherNetIP | Keep O→T flowing while a connection opens or closes |
 | `EipScannerM` | 6 | 1 | EtherNetIP | Class 1 exchange every RPI |
-| `PickStrike` | 6 | 1 | `src/pick_scheduler.cpp` | Fires the timed Z release and grip |
-| `GantryUpdate` | 5 | 1 | `src/main_tasks.cpp` | 100 Hz axis state machines and path sequencing |
-| `PickScheduler` | 5 | 0 | `src/main_tasks.cpp` | Vision queue, tracker, pre-position, bin drop |
-| `PickTrace`, `ThetaTrace` | 4 | 0 | `src/pick_scheduler.cpp`, ThetaTrace | Strike and theta traces (`ztrace`, `thtrace`) |
+| `PickStrike` | 6 | 1 | `src/pick_scheduler/pick_scheduler.cpp` | Fires the timed Z release and grip |
+| `GantryUpdate` | 5 | 1 | `src/main/main_tasks.cpp` | 100 Hz axis state machines and path sequencing |
+| `PickScheduler` | 5 | 0 | `src/main/main_tasks.cpp` | Vision queue, tracker, pre-position, bin drop |
+| `PickTrace`, `ThetaTrace` | 4 | 0 | `src/pick_scheduler/pick_scheduler.cpp`, ThetaTrace | Strike and theta traces (`ztrace`, `thtrace`) |
 | `gantry_ota_srv` | 4 | 0 | GantryOta | TCP OTA server |
-| `SerialCmd`, `NetConsole` | 3 | 0 | `src/main_tasks.cpp`, `src/gantry_net_console.cpp` | UART and TCP console |
-| `TftUiTask` | 2 | 0 | `src/main_tasks.cpp` | Encoder at 100 Hz, TFT at 15 Hz |
+| `SerialCmd`, `NetConsole` | 3 | 0 | `src/main/main_tasks.cpp`, `src/console/net/gantry_net_console.cpp` | UART and TCP console |
+| `TftUiTask` | 2 | 0 | `src/main/main_tasks.cpp` | Encoder at 100 Hz, TFT at 15 Hz |
 | `EipLog` | 2 | 0 | EtherNetIP | Prints the deferred Class 1 log |
 | `TestCycle`, `TestThetaPath`, `CalibrateTask`, `ZCalibrateTask` | 2 | 0 | test console | Long console commands |
 
@@ -115,12 +117,12 @@ motion; SPI3 work stays on core 0. The OTA-only boot mode runs its own two tasks
 ## 5. Console contract
 
 Shared command core: `gantryConsoleProcessLine()` in
-[`gantry_test_console.cpp`](src/gantry_test_console.cpp). Transports:
+[`gantry_test_console.cpp`](src/console/gantry_test_console.cpp). Transports:
 
 | Transport | Path | Notes |
 |-----------|------|-------|
 | **UART0** | `SerialCmd` / `getchar` | Flash + pre-link logs; always available |
-| **TCP :2323** | [`gantry_net_console.cpp`](src/gantry_net_console.cpp) on **LAN8720** | After plant ETH IP up; **not** on W5500/EIP |
+| **TCP :2323** | [`gantry_net_console.cpp`](src/console/net/gantry_net_console.cpp) on **LAN8720** | After plant ETH IP up; **not** on W5500/EIP |
 
 Config (idf.py menuconfig): **LAN8720 plant Ethernet** and **TCP gantry console
 (LAN8720)** — bridged by
@@ -189,7 +191,7 @@ Also present (see `help`): `limits`, `pins`, `gpio_drive`, `rangelimit`,
 | `thtrace arm` / `thtrace` / `thtrace raw <start> <count>` / `thtrace off` | 1 kHz trace of the next theta move from any source (`move`, picks): HCS01 actual angle, velocity and status word per sample, plus the move as commanded. Class 1 refreshes every 2 ms, so samples can repeat. Summary (ms from the move command): start edge, onset, profile start `t0` and latency, ideal trapezoid time, entry into and settling within ±0.1° (S-0-0057), overshoot, worst following error against the ideal trapezoid (aligned at 20 % of the accel distance, so a constant delay shows as latency), peak speed, final error, how the axis ended the move. Raw: at most 300 samples per call, 10 per line, 20 ms per line. `tools/theta_trace_fetch.py` saves a whole trace as CSV. Code: `lib/ThetaTrace` |
 
 The MCP diagnostic commands (`mcp_*`, `field_dout`, `field_din`) are built while
-`MCP_DEBUG_CMDS` is 1, the default (`src/gantry_console_internal.h`).
+`MCP_DEBUG_CMDS` is 1, the default (`src/console/gantry_console_internal.h`).
 
 ## 6. The pick path
 
@@ -594,10 +596,10 @@ belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rul
 -   **Provisional constants:** the 6 mm hover clearance, 2 mm entry margin, 5 ms
     guard, 8 ms retract lead and the 15 ms / 20 mm depth cap are not yet
     measured.
--   **Unused model:** `include/pick_intercept_strike.h` and
-    `include/pick_intercept_plan.h` hold an earlier EarlyZ/LateZ strike model
-    (`planPick`, `strikeLeads`, `retimePick`), still included through
-    `pick_intercept.h`. Only the host tests call it (G-C8).
+-   **Unused model:** `src/pick_scheduler/intercept/pick_intercept_strike.h` and
+    `src/pick_scheduler/intercept/pick_intercept_plan.h` hold an earlier
+    EarlyZ/LateZ strike model (`planPick`, `strikeLeads`, `retimePick`), still
+    included through `pick_intercept.h`. Only the host tests call it (G-C8).
 
 ### Bench ramp for the coordinated grasp
 
@@ -741,7 +743,8 @@ clock only stamps the stored set.
 ## See also
 
 -   **Down:** [lib/README.md](lib/README.md) lists the libraries by layer; each
-    has a README and a REFERENCE.
+    has a README and a REFERENCE. [src/README.md](src/README.md) lists the
+    application modules.
 -   **Up:** [Knowledge transfer](docs/KNOWLEDGE_TRANSFER.md), the cell and its
     subsystems.
 -   **Also:** [open items](docs/OPEN_ITEMS.md), [contributing](CONTRIBUTING.md).
