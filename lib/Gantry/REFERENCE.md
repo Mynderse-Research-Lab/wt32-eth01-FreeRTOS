@@ -48,6 +48,12 @@ Right-handed: X across the belt, Y along the belt with +Y downstream (no Y actua
 
 Limit warnings (`Gantry.h:450–451`): joint min is X A014 and Z A015; joint max is X A015 and Z A014.
 
+**Limit aborts during a move.** In the run phase a linear axis aborts the move when the drive reports a limit stop or a fault, or when an A014 or A015 warning trips (`GantryEipLinearAxisPhases.cpp:340–348`). A warning does not trip when:
+- it was already present when the move started (`ignore_a014_abort_` and `ignore_a015_abort_`, set at `GantryEipLinearAxis.cpp:269–271`, cleared once the warning goes away), or
+- the move heads away from that switch. `noteMoveDirection` (`GantryEipLinearAxis.cpp:230–242`) records this at each move start (`startAbsoluteMm`) and at each queued-move swap (`applyQueuedMove`). The joint end of each switch comes from `setJointMinWarningA015`.
+
+A switch ahead of the move still aborts it. The second rule lets a move leave a switch the drive flags only once the axis moves; the Kinetix 5100 allows motion away from an active limit (2198-UM004D ch. 15, DI functions 0x22/0x23). G-A13: the host tests pass, and the on-cell proof from that failing state is still open.
+
 ## Tick and phase times
 
 `GantryUpdate` is priority 5 on core 1 and calls `update` every `GANTRY_UPDATE_PERIOD_MS`, 10 ms (`include/gantry_app_constants.h:91–98`). Phase lengths in `GantryEipLinearAxisInternal.h` are ticks of that loop:
