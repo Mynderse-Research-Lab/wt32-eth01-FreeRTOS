@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › BootLogRing*
+
 # BootLogRing
+
+**Read this when** you need to know what BootLogRing does, where it sits and who uses it.
 
 Keeps the first log output after reset in RAM. The LAN console connects only after boot, so start-up logs would otherwise exist only on UART0.
 
@@ -21,3 +25,8 @@ Registered from `idf/CMakeLists.txt`. The main component lists `BootLogRing` in 
 ## Open items
 
 None.
+
+## Next
+
+- **Down:** [BootLogRing reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

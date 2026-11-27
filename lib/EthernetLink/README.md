@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › EthernetLink*
+
 # EthernetLink
+
+**Read this when** you need to know what EthernetLink does, where it sits and who uses it.
 
 Brings up the LAN8720 on the ESP32 EMAC: RMII, external 50 MHz clock into GPIO0, crystal enable on GPIO16. It applies a static IP or DHCP, and records link and IP events for the `boottime` console command.
 
@@ -23,3 +27,8 @@ Registered from `idf/CMakeLists.txt`. There is no host test.
 ## Open items
 
 G-E7, G-F2.
+
+## Next
+
+- **Down:** [EthernetLink reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

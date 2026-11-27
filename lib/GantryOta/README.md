@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › GantryOta*
+
 # GantryOta
+
+**Read this when** you need to know what GantryOta does, where it sits and who uses it.
 
 Writes a firmware image into the passive OTA slot, with the motors off. Two ways in: a TCP server on the LAN8720, and a reboot into CellNet OTA-only mode (N-2).
 
@@ -21,3 +25,8 @@ Registered from `idf/CMakeLists.txt`. The main component lists `GantryOta` in `R
 ## Open items
 
 N-2 (gantry side done). N-1 records gantry OTA as that item's done part. G-E7 is the link wait in `src/main_init_net.cpp` that decides whether the TCP server starts. C-2 is the conveyor.
+
+## Next
+
+- **Down:** [GantryOta reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

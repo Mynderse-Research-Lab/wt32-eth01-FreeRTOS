@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [SpiDisplay](README.md) › Reference*
+
 # SpiDisplay reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public headers are under `lib/SpiDisplay/src/`. `SpiDisplay.h` holds `SpiDisplayConfig` and class `SpiDisplay`. The UI types are `St7789Driver`, `UiInput`, `UiDashboard`, `UiMenu`, `UiEditor`, `UiRebootPrompt` and `UiManager`.
 
@@ -80,6 +84,24 @@ display::UiManager::instance().pollInput(port_b);
 display::UiManager::instance().update(port_b, telem);
 ```
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| D3 | bug | `St7789Driver.cpp:64-66, 85-87, 259-261, 348-349, 387-388, 164-167` | Every driver write discards its result. A dropped command or DC change makes the panel read data as commands, or the reverse. `init()` reports success even when commands failed | Confirmed |
+| D4 | bug | `UiManager.cpp:54-58, 213-219`; `UiDashboard.cpp:49-63`; `UiEditor.cpp:93-173`; `St7789Driver.cpp:314-327` | Portrait orientation is selectable, but the layouts assume a 320 px width; characters at the right edge fall into a per-pixel path costing about 6 SPI3 lock cycles per pixel | Confirmed (layout); cost Suggested |
+| D5 | bug, UX | `UiEditor.cpp:15-16, 217-224, 259, 303` | The string editor cannot change length (`10.42.0.100` cannot become `10.42.0.50`); an empty string makes the cursor advance forever; characters outside its set become `1` | Confirmed |
+| D7 | cleanup | `UiManager.cpp:34, 40, 44, 77-78` | LEDC calls unchecked; deprecated `ledc_channel_config_t::intr_type` at line 40 | Confirmed |
+| D8 | docs | `SpiDisplay.h:11-13`; `UiManager.cpp:142-143` | The header says the TFT chip select is an MCP pin (it is an ESP GPIO); the About screen hard-codes "ESP32-WROVER / Rev 3" and "v1.0.0 (Production)" | Confirmed; module name Suggested |
+
+**Dead code:** the `SpiDisplay` class (only its config struct is used), `UiManager::getDriver`, `UiEditor::getCurrentParamKey` and `getPasswordResult`, the MCP software-PWM backlight branch, and the two inverted orientations.
+
 ## Documents
 
 The task rates are in `tftUiTask` (`src/main_tasks.cpp`); the screens are `UiManager`, `UiMenu`, `UiEditor` and `UiRebootPrompt`. Open items: G-E6, G-E9, G-E10, G-F9 in `docs/OPEN_ITEMS.md`. Bus locking: `lib/Spi3Bus/REFERENCE.md`.
+
+## Next
+
+- **Up:** [SpiDisplay README](README.md), [Libraries](../README.md).

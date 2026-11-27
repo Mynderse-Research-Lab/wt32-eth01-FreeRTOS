@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › Spi3Bus*
+
 # Spi3Bus
+
+**Read this when** you need to know what Spi3Bus does, where it sits and who uses it.
 
 Owns SPI3. The MCP23S17 (chip select GPIO2) and the ST7789 (chip select GPIO32) share this bus. The W5500 is on SPI2 and does not use this component.
 
@@ -21,3 +25,8 @@ Registered from `idf/CMakeLists.txt`. Host test: `test_spi3_critical` (the criti
 ## Open items
 
 G-D3, G-D6.
+
+## Next
+
+- **Down:** [Spi3Bus reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

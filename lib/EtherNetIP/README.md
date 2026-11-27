@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › EtherNetIP*
+
 # EtherNetIP
+
+**Read this when** you need to know what EtherNetIP does, where it sits and who uses it.
 
 EtherNet/IP and CIP originator, in three layers:
 
@@ -27,3 +31,8 @@ Registered from `idf/CMakeLists.txt`. Host tests cover encoding, assemblies, the
 ## Open items
 
 G-A14 (the Kinetix speed unit), G-B5, G-B8, G-B9, G-B16, G-B17, G-B19.
+
+## Next
+
+- **Down:** [EtherNetIP reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

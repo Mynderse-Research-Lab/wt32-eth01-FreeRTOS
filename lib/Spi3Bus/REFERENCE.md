@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [Spi3Bus](README.md) › Reference*
+
 # Spi3Bus reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/Spi3Bus/src/Spi3Bus.h`. The nesting counter is `lib/Spi3Bus/src/Spi3BusCritical.h`.
 
@@ -68,6 +72,21 @@ spi3_class1_critical_enter();
 spi3_class1_critical_exit();
 ```
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| S3 | risk | `Spi3Bus.h` (`std::function` parameters) | Lambdas capturing three words probably exceed the `std::function` small-buffer size on Xtensa, so every TFT data write may allocate on core 0 | Suggested: check `sizeof(std::_Any_data)` on target, or trace the heap |
+| S4 | cleanup | `Spi3Bus.cpp:80, 91`; `CMakeLists.txt:6`, `Spi3Bus.cpp:4` | Failure logs are not rate-limited; the library includes an app header for pin numbers | Confirmed |
+
+**Dead code:** `mutex()` and `deinit()`.
+
 ## Documents
 
 Pin names are the block at `include/gantry_app_constants.h:40–71`. Open items: G-D3, G-D6 in `docs/OPEN_ITEMS.md`.
+
+## Next
+
+- **Up:** [Spi3Bus README](README.md), [Libraries](../README.md).

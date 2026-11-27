@@ -1,7 +1,7 @@
 // Host unit tests for the pure EtherNet/IP + CIP encoding layer
 // (lib/EtherNetIP). Every test pins exact bytes-on-the-wire and/or round-trips
 // an encode->decode so the framing is regression-locked before any live socket
-// transport is written. See LOW_LEVEL_GANTRY_CONTROL.md for the byte maps.
+// transport is written. See lib/EtherNetIP/REFERENCE.md for the byte maps.
 
 #include "unity.h"
 

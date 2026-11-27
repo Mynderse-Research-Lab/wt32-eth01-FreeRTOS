@@ -1,9 +1,13 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [CellNetL2](README.md) › Wire guide*
+
 # CellNet Layer-2 Communication Guide
+
+**Read this when** you implement or debug a node that talks CellNet L2.
 
 **Status:** Canonical wire specification for CellNet  
 **EtherType:** `0x88B5`  
 **Source of truth:** `include/cell_net_l2_protocol.h` (the supervisor vendors a copy)  
-**Companion Docs:** [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md), [LOW_LEVEL_GANTRY_CONTROL.md](../../LOW_LEVEL_GANTRY_CONTROL.md), [INDEX.md](../../docs/INDEX.md)
+**Companion Docs:** [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md), [GANTRY_FIRMWARE.md](../../GANTRY_FIRMWARE.md), [INDEX.md](../../docs/INDEX.md)
 
 ---
 
@@ -208,3 +212,7 @@ to one interface and to `0x88B5`). Callbacks run on its receive thread. Compile
 included), rejection of a wrong EtherType, a wrong version and truncated frames, padded
 frames, callback dispatch and sequence-loss counting. The OTA receiver has its own
 `test_cellnet_ota_receiver.cpp`. Run them with the repository testing gate (`CONTRIBUTING.md`).
+
+## Next
+
+- **Up:** [CellNetL2 README](README.md).

@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [CellNetL2](README.md) › Reference*
+
 # CellNetL2 reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public headers: `lib/CellNetL2/src/CellNetL2.h`, `CellNetL2Framing.h`, `IL2Transport.h`, `EspEthL2Transport.h`, `CellNetOtaReceiver.h`. On Linux also `CellNetOtaSender.h` and `LinuxRawSocketL2Transport.h`. Wire structs: `include/cell_net_l2_protocol.h`.
 
@@ -72,6 +76,23 @@ if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNet
 }
 ```
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| N1 | risk | `EspEthL2Transport.cpp:65, 73` | The receive hook and the undersized-frame register bit depend on the IDF version and may be lost if EthernetLink stops and restarts the driver | Suggested: check the hook and the bit after `esp_eth_stop`/`start` |
+| N2 | bug, diagnostic | `CellNetL2.cpp:219-225` | A duplicate or reordered frame adds 255 to `rx_sequence_drops` | Confirmed |
+| N3 | risk | `CellNetL2.cpp:79` and the other senders | `sequence_++` from several tasks can produce duplicate sequence numbers, which trigger N2 at the receiver | Confirmed |
+| N4 | risk | `CellNetL2.h:96-100`; `EspEthL2Transport.cpp:102-104` | Callback assignments race with dispatch in `emac_rx` if they happen after the hook is live; boot order keeps them apart today | Suggested |
+| N7 | test gap | `CellNetOtaSender.cpp`, `CellNetOtaSenderPhases.cpp`, `CellNetOtaSenderReport.cpp` | The sender has no host test and is not compiled in CI. A loopback test against `OtaReceiver` needs an interface for `Link` | Confirmed |
+| N8 | docs | `IL2Transport.h:48-50`; `cell_net_l2_protocol.h:5`; `CellNetL2.cpp:33-34` | `isLinkUp` claims link state but means only that a handle exists; an unmeasured "sub-50-microsecond" claim; a comment on undersized frames that contradicts the transport | Confirmed |
+
 ## Documents
 
 `lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md`, `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in `docs/OPEN_ITEMS.md`.
+
+## Next
+
+- **Up:** [CellNetL2 README](README.md), [Libraries](../README.md).

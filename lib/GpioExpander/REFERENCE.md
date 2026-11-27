@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [GpioExpander](README.md) › Reference*
+
 # GpioExpander reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/GpioExpander/src/gpio_expander.h`.
 
@@ -58,3 +62,7 @@ field_dout_set(0, true);
 ## Documents
 
 The chip driver is `lib/MCP23S17`. G-D3 and G-D6 in `docs/OPEN_ITEMS.md` are about that driver and Spi3Bus.
+
+## Next
+
+- **Up:** [GpioExpander README](README.md), [Libraries](../README.md).

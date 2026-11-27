@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [W5500](README.md) › Reference*
+
 # W5500 reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public headers under `lib/W5500/src/`: `W5500.h`, `W5500Hal.h`, `W5500SpiHal.h`, `W5500Socket.h`, `W5500BusMutex.h`, `W5500DeferredLog.h`, `W5500Diag.h`, `W5500Poll.h`.
 
@@ -95,6 +99,63 @@ if (w5500.init(cfg)) {
 }
 ```
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| W3 | bug, not in production | `W5500.cpp:198-291` | MACRAW writes the TX buffer and reads the RX buffer at address 0 without using `Sn_TX_WR`/`Sn_RX_RD`. `recvFrame` underflows on a length below 2. `sendFrame` and `waitForCommand` truncate `esp_timer_get_time()` to 32 bits (every wait expires at once after 71.6 min). Used only by `test/w5500_loopback`. Whether the chip requires the pointer offset is not checked against the datasheet | Confirmed (code) |
+| W7 | risk | `W5500.cpp:22`, `W5500Init.cpp:90` | With DMA on, `max_transfer_sz` is 1,539 while bursts go up to 2,048 bytes. A TCP receive of 1,537–2,048 bytes would exceed the bus limit. Only matters with `eip_spi_dma=1` | Confirmed (code); IDF behaviour Suggested |
+| W9 | bug | `W5500SocketTcp.cpp:415-421` | TCP `socketRecv` returns -1 on CLOSE_WAIT before reading `RX_RSR`, so a reply followed by FIN is lost | Confirmed |
+| W11 | docs | `W5500.h:164`, `W5500Socket.h:8-10, 32, 55-57, 91-95, 110-111` | Stale or wrong comments: "factory-burned MAC" (the code writes 02:00:00:00:00:01), "yield" polling, the "all functions lock" claim, the UDP ephemeral port, the -1 return, and "oversized datagrams stay queued" (they are truncated and consumed, unflagged) | Confirmed |
+| W12 | cleanup | `W5500.h:7-9`, `W5500Init.cpp:136-138`, `W5500.cpp:311`, `W5500SocketTcp.cpp:208` | `extern "C"` around C++; literal 0x002E instead of `REG_PHYCFGR`; `socketClose` indexes without `sock < 8`; a failed `init` leaks the device | Confirmed |
+
+**Dead code:** `socketListen`, `socketBind`, `socketIsOpen`, `socketStatus`, `nextEphemeralPort`, `MR_WOL`/`MR_PB`, and the MACRAW path (used only by `test/w5500_loopback`).
+
+**Not covered by host tests:** the 16-bit wrap (W1, W2); MISO stuck high on the receive paths; TCP `socketRecv`/`socketConnect`/`socketClose`; the 61-byte no-DMA chunking; all of `W5500.cpp`. `test_integration_macraw_send` encodes the MACRAW addressing at address 0.
+
+## SPI mode: VDM, not FDM
+
+The W5500 SPI frame is Address + Control + Data. Control bits `OM[1:0]` select:
+
+| Mode | OM | Data phase | SCSn |
+|------|-----|------------|------|
+| **VDM** (firmware today) | `00` | Arbitrary N bytes | **Must toggle per frame** (edges delimit start/end) |
+| FDM | `01` / `10` / `11` | Fixed **1 / 2 / 4** bytes only | May stay low |
+
+**CIP Class 1 sizes are not FDM sizes.** FDM’s 1/2/4-byte limit is the **SPI data phase to the chip**, not the UDP/CIP payload on the wire. Assemblies and CPF still ship at full size; FDM only **chunks** the SPI copy into many tiny transactions.
+
+| Traffic | Size | Fits in one FDM frame? |
+|---------|------|------------------------|
+| Kinetix O→T assy 104 | 40 B | No |
+| Kinetix T→O assy 154 | 52 B | No |
+| Class 1 O→T CPF UDP (~104 + seq + run/idle) | ~64 B | No |
+| Class 1 T→O CPF UDP (~154) | ~72 B | No |
+| HCS01 cmd / actual | 18 / 14 B | No |
+| Explicit CIP / Forward Open (TCP) | tens–hundreds B | No |
+| W5500 register R/W | 1–2 B (MAC 6, IP 4) | Yes (per SPI frame) |
+
+For buffer copies the largest useful FDM length is **4 bytes** (`OM=11`). Register writes still need **OM=1 or 2** — using a 4-byte data phase for a 1-byte register would overwrite adjacent registers.
+
+**Hardwiring SCSn low (sole SPI2 device) is invalid under VDM.** Symptom seen on bench: `VERSIONR=0xFF` (MISO idle-high / frames not delimited). FDM rewrite could free GPIO15, but:
+
+- Each ~64–80 B UDP payload becomes **⌈N/4⌉** SPI frames (~1.7× bit traffic plus far more `spi_device_transmit` calls).
+- Dual X+Z `exchangeOnce` SPI call count rises from ~O(10) to ~O(70+); driver overhead dominates bit time at 20 MHz.
+- Class 1 does **not** become more deterministic — more SPI calls increase FreeRTOS/IRQ jitter exposure and shrink RPI margin.
+
+| Setup | Practical RPI floor if FDM-4 were used |
+|-------|----------------------------------------|
+| Single axis | **≥ ~2 ms** (1 ms / 500 µs gate likely fails) |
+| Dual X+Z | **≥ ~4–5 ms** with SPI3 contention |
+| + Theta / TCP reconnect | **≥ ~5–10 ms** during FO / explicit |
+
+**Decision:** stay on **VDM + CS GPIO15**. Class 1 UDP SENDOK/CR waits must **busy-spin** (no `taskYIELD` on short polls) — at FreeRTOS 1000 Hz a yield costs ~1 ms and dual-axis O→T was measured at ~3 ms from yields alone. SPI uses **`spi_device_polling_transmit`** with the bus acquired for the whole exchange (ISR path was ~40–60 µs per register). O→T uses dest caching + burst DIPR/DPORT; exchange is **produce-then-drain** (no blocking wait for T→O phase). Target: exchange p99 **under RPI** (default **2 ms** with `CONFIG_EIP_X_RPI_US=2000`).
+
 ## Documents
 
-Class 1 use of these sockets is `LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-B5, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`; G-B15 is closed.
+Class 1 use of these sockets is the [Class 1 lifecycle](../EtherNetIP/REFERENCE.md#class-1-lifecycle). Open items: G-B5, G-B16, G-B17, G-B18 in `docs/OPEN_ITEMS.md`; G-B15 is closed.
+
+## Next
+
+- **Up:** [W5500 README](README.md), [Libraries](../README.md).

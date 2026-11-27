@@ -1,7 +1,11 @@
+*[README](../README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) › Gantry hardware*
+
 # Expected Electro-mechanical Assembly
 
+**Read this when** you work on the gantry's mechanics, drives, endstops, networks or wiring.
+
 **Status:** Canonical product-design document (EIP production architecture).  
-**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).  
+**Companion docs:** [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md).  
 **Vendor catalog:** [`driver_datasheets_and_calculations/INDEX.md`](../driver_datasheets_and_calculations/INDEX.md).
 
 This document describes the **expected** gantry electro-mechanical build for the
@@ -242,20 +246,7 @@ No conveyor-height sensor is used (G-A3).
 
 ## 5. Field 24 V I/O and SPI3 UI
 
-ESP SPI3 (shared): SCLK14 MOSI4 MISO36; **CS_MCP=2** (default client);
-**TFT CS = MCP PB2** (software CS); **BLK hardwired ON**; KO = **MCP PB6**.
-W5500 RST = **MCP PB7** (external pull-up).
-Free ESP ADC: **12, 32, 33, 39**. ETH REFCLK = GPIO0_IN (not CLK-out on 17).
-
-| Channel | MCP pin | Role |
-|---------|---------|------|
-| DOUT0–3 | PA0–PA3 | Field 24 V outs (DOUT0 = gripper; boot LOW) |
-| DIN0–3 | PA4–PA7 | Field 24 V ins (isolator → 3.3 V) |
-| TFT DC / RES | PB0 / PB1 | Display control |
-| TFT CS | PB2 | Idle HIGH; assert only during display update |
-| Encoder A/B/PUSH | PB3–PB5 | Amazon TFT module UI |
-| KO | PB6 | Module key input |
-| W5500 RSTn | PB7 | Active-low; MCP-driven (not hardwired) |
+The SPI3, MCP23S17 and TFT pins are the `SPI3_*`, `MCP_*` and `TFT_*` constants in [`include/gantry_app_constants.h`](../include/gantry_app_constants.h) (lines 40–71, one comment per pin). Field DOUT0–3 are PA0–PA3 (DOUT0 is the gripper; all boot LOW), DIN0–3 are PA4–PA7, and the W5500 reset is PB7, active low.
 
 IO0 = ETH REFCLK IN after boot. **Deployment:** programming harness (incl. IO0) unplugged at runtime so plant LAN works — accepted limitation, no carrier PCB change. Bench flash: RTS→EN / DTR policy per LOW_LEVEL; UART0 on GPIO1/3. W5500 MOSI on GPIO17.
 Class 1 (SPI2) has priority over SPI3 (task prio + SPI3 deferral during exchange).
@@ -265,7 +256,7 @@ See [`pinout.csv`](../pinout.csv).
 
 1. `mcp_dump a` / `mcp_dump b` — Port A DOUT outs / DIN ins; Port B TFT + encoder + RST.
 2. `field_dout 0 1` / `field_dout 0 0` — DOUT0 toggles; all DOUT boot LOW.
-3. `field_din` — DIN and encoder A/B/PUSH/KO respond; TFT_CS(PB2) high idle; W5500_RST high idle.
+3. `field_din` — DIN and encoder A/B/PUSH/KO respond; TFT CS (GPIO32) high idle; W5500_RST high idle.
 4. Confirm TFT CS not stuck low after display stub; W5500 Class 1 still healthy.
 5. UART0 console + IO0 boot unchanged.
 
@@ -273,8 +264,46 @@ See [`pinout.csv`](../pinout.csv).
 
 ## 6. Scaling (firmware-facing)
 
-See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and
-[LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).
+See [`include/axis_drivetrain_params.h`](../include/axis_drivetrain_params.h) and the
+[Gantry REFERENCE, Scaling](../lib/Gantry/REFERENCE.md#scaling).
 
 ---
 
+---
+
+## 7. Programming connector and boot pins
+
+Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII CLK-out).
+**Gotcha (2026-08-17):** USB-UART **DTR hard-wired to IO0** fights the 50 MHz REFCLK. Symptom: GPIO16 high but RJ45 LEDs dark + LAN8720 `power up timeout` / no MDIO.
+
+**DTR / RTS pin policy (no alternate ESP GPIO for DTR):**
+
+| Adapter signal | WT32 connection | Notes |
+|----------------|-----------------|--------|
+| TX | IO3 (RXD0) | Crossed |
+| RX | IO1 (TXD0) | Crossed |
+| GND | GND | |
+| **RTS** | **EN** via auto-reset transistor circuit (preferred) or reset button | Pulses reset for esptool |
+| **DTR** | **IO0** only via Espressif 2-transistor auto-reset circuit (idle = float) — **or leave DTR NC** | ROM bootloader samples **IO0 only**; cannot remap DTR to GPIO12/32/etc. |
+| BOOT (manual) | Momentary IO0→GND while EN reset | Use when DTR is NC |
+
+**Deployment (accepted limitation — no PCB change):** the field programming connector includes IO0. **Unplug that harness to run plant Ethernet** (TCP `:2323` and CellNet L2). Plug in only for flash/UART service. Do not permanently strap DTR→IO0.
+
+### Entering programming mode
+
+You will need a USB–TTL adapter (e.g. Waveshare USB to RS232/RS485/TTL).
+
+Pin names are the labels on the pinout below.
+
+1. Power: 5 V to `5V` (pin 12); ground to `GND` (pin 11).
+2. UART: adapter RX ↔ `TXD` (IO1); adapter TX ↔ `RXD` (IO3).
+3. Boot: jumper `IO0` (pin 24) to the `GND` beside it (pin 23).
+4. Reset: briefly ground `EN` (pin 1), then remove the IO0 jumper.
+5. Flash, then ground `EN` again to run normally.
+
+![WT32-ETH01 pinout](schematics/wt32_eth01_pinout.png)
+
+## Next
+
+- **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
+- **Also:** [Gantry firmware](../GANTRY_FIRMWARE.md), the software that drives this hardware.

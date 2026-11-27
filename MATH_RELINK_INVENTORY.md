@@ -129,12 +129,12 @@
 
 ## Other math text still in the repository
 
-- `docs/KNOWLEDGE_TRANSFER.md:196` onward: a model section "read from the code at `20e03eb`", with equations.
+- `GANTRY_FIRMWARE.md` §6, "Pick model": a model section "read from the code at `20e03eb`", with equations.
 - `tools/sim/SYSTEM_AND_MATHEMATICAL_MODELS.md` (ignored folder), a "digital twin … mathematical models" document: backed up and deleted 2026-11-19 with the others.
 
 ## Links to repoint once the document exists
 
 - Firmware: `include/pick_intercept.h:5`.
-- Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `LOW_LEVEL_GANTRY_CONTROL.md`, `docs/OPEN_ITEMS.md`, `PICK_BENCH_RAMP.md`.
+- Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `GANTRY_FIRMWARE.md`, `docs/OPEN_ITEMS.md`.
 - Tools: the scripts listed under topic 12.
 - CI: remove the three `--exclude` entries in `.github/workflows/firmware-ci.yml`, which keep the link check from failing on these links meanwhile.

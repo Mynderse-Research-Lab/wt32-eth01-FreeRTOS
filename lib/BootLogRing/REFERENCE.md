@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [BootLogRing](README.md) › Reference*
+
 # BootLogRing reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/BootLogRing/src/boot_log_ring.h`.
 
@@ -46,4 +50,8 @@ void app_main(void) {
 
 ## Documents
 
-The behaviour is the header comment in `boot_log_ring.h`. Dated history of the command is in `ISSUES_AND_RESOLUTIONS_2026-10-20.md`.
+The behaviour is the header comment in `boot_log_ring.h`.
+
+## Next
+
+- **Up:** [BootLogRing README](README.md), [Libraries](../README.md).

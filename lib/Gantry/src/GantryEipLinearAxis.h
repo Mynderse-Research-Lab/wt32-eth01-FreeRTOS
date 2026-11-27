@@ -3,7 +3,7 @@
  * @brief Linear axis backed by EtherNet/IP Kinetix 5100 assemblies 104/154.
  *
  * Production moves: OperatingMode=Position, TravelMode=2, Absolute
- * (drive-profiled PTP). See LOW_LEVEL_GANTRY_CONTROL.md.
+ * (drive-profiled PTP). See lib/Gantry/REFERENCE.md.
  */
 
 #ifndef GANTRY_EIP_LINEAR_AXIS_H

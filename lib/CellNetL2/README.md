@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › CellNetL2*
+
 # CellNetL2
+
+**Read this when** you need to know what CellNetL2 does, where it sits and who uses it.
 
 Raw Ethernet (EtherType `0x88B5`) framing, dispatch and transports for the cell nodes, plus the CellNet firmware-update receiver and the Linux sender. No domain logic.
 
@@ -32,3 +36,8 @@ N-1, N-2, C-3.
 
 - Wire specification: [lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md](CELL_NET_L2_COMMUNICATION_GUIDE.md)
 - Firmware update: [lib/CellNetL2/CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md)
+
+## Next
+
+- **Down:** [CellNetL2 reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [EthernetLink](README.md) › Reference*
+
 # EthernetLink reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/EthernetLink/src/EthernetLink.h`, namespace `Network`.
 
@@ -65,6 +69,19 @@ if (ethernetLink.start() && ethernetLink.waitForUp(ETH_IP_WAIT_TIMEOUT_MS)) {
 }
 ```
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| L4 | resource | `EthernetLink.cpp:306, 353-358, 382-392` | MAC and PHY objects leak on a failed driver install; a failed IP-handler registration leaves the Ethernet handler registered with `this` | Confirmed; low impact (one start per boot) |
+| L5 | docs | `EthernetLink.cpp:287-288, 428-432` | A "next step" comment for work the function already does; an error text that still mentions a broker PC | Confirmed |
+
 ## Documents
 
-Wiring and the plant subnet are in `LOW_LEVEL_GANTRY_CONTROL.md`. Open items: G-E7 and G-F2 in `docs/OPEN_ITEMS.md`.
+Wiring and the subnets are in `docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md` §3. Open items: G-E7 and G-F2 in `docs/OPEN_ITEMS.md`.
+
+## Next
+
+- **Up:** [EthernetLink README](README.md), [Libraries](../README.md).

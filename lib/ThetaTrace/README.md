@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › ThetaTrace*
+
 # ThetaTrace
+
+**Read this when** you need to know what ThetaTrace does, where it sits and who uses it.
 
 Records one HCS01 theta move at 1 kHz and summarises it for the console command `thtrace`. The drive profiles the move. The summary rebuilds the ideal trapezoid afterwards.
 
@@ -21,3 +25,8 @@ Registered from `idf/CMakeLists.txt`. The main component lists `ThetaTrace` in `
 ## Open items
 
 None. G-E1 names `thtrace raw` only to record that the dump is already paced. G-C17 cites one `thtrace` result as evidence about a pick, not as a change to this component.
+
+## Next
+
+- **Down:** [ThetaTrace reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

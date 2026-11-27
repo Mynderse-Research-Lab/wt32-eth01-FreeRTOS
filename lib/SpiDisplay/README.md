@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › SpiDisplay*
+
 # SpiDisplay
+
+**Read this when** you need to know what SpiDisplay does, where it sits and who uses it.
 
 ST7789 320×240 TFT on SPI3, and the UI drawn on it: dashboard, parameter menu, value and password editors, reboot prompt, and an About screen. Input is the encoder and two buttons on MCP23S17 port B.
 
@@ -23,3 +27,8 @@ Registered from `idf/CMakeLists.txt`. There is no host test.
 ## Open items
 
 G-E6, G-E9, G-E10, G-F9 (the menu's Factory Reset).
+
+## Next
+
+- **Down:** [SpiDisplay reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

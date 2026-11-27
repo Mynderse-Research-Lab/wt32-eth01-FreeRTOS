@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [ThetaTrace](README.md) › Reference*
+
 # ThetaTrace reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public headers: `lib/ThetaTrace/src/theta_trace.h` and `lib/ThetaTrace/src/theta_trace_analysis.h`.
 
@@ -79,4 +83,8 @@ if (!thetaTraceCommand(gantry, "arm", line, sizeof(line))) {
 
 ## Documents
 
-The command's fields are the `thtrace` row in `LOW_LEVEL_GANTRY_CONTROL.md`. The summary math is `theta_trace_analysis.h`, checked by `test_theta_trace_analysis`. The trapezoid is `lib/Gantry/src/GantryTrajectory.h`. G-E1 in `docs/OPEN_ITEMS.md` is why the raw dump is paced.
+The command's fields are the `thtrace` row in `GANTRY_FIRMWARE.md`. The summary math is `theta_trace_analysis.h`, checked by `test_theta_trace_analysis`. The trapezoid is `lib/Gantry/src/GantryTrajectory.h`. G-E1 in `docs/OPEN_ITEMS.md` is why the raw dump is paced.
+
+## Next
+
+- **Up:** [ThetaTrace README](README.md), [Libraries](../README.md).

@@ -1,10 +1,14 @@
+*[README](../README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) › Panel electrics*
+
 # HV and LV Schematics
+
+**Read this when** you work on the panel's power, voltage domains or connection schedule.
 
 **Status:** Canonical electrical design basis.  
 **Panel schematic:** [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).  
 **Logic-board schematic:** Pending addition.  
 **Mechanical / software companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
-[LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md).
+[GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md).
 
 > **PRELIMINARY — NOT FOR CONSTRUCTION.**  
 > This package documents the intended HV/LV architecture for review. It does
@@ -113,3 +117,8 @@ not replace or redraw the panel image.
 
 Until E1–E7 are closed, treat all schematics as **design intent for review**,
 not shop drawings.
+
+## Next
+
+- **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
+- **Also:** [Gantry firmware](../GANTRY_FIRMWARE.md), the software that drives this hardware.

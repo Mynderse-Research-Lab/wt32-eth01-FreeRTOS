@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › MCP23S17*
+
 # MCP23S17
+
+**Read this when** you need to know what MCP23S17 does, where it sits and who uses it.
 
 C driver for the MCP23S17 16-bit SPI GPIO expander on SPI3. It caches IODIR, GPPU and OLAT, and serialises register access with a per-handle mutex.
 
@@ -26,23 +30,11 @@ G-D3, G-D6.
 
 ## Pin map
 
-From `include/gantry_app_constants.h:40–71`. The header comment in `MCP23S17.h` does not restate this map.
-
-| Signal | Where |
-|---|---|
-| SCLK, MOSI, MISO | GPIO14, GPIO4, GPIO36 |
-| MCP chip select | GPIO2, idle high |
-| TFT chip select | GPIO32 (ESP GPIO, not an MCP pin) |
-| TFT backlight | GPIO17 |
-| PA0–PA3 | Field 24 V DOUT0–3. DOUT0 is the gripper |
-| PA4–PA7 | Field 24 V DIN0–3 |
-| PB0 | Module KO |
-| PB1 | Encoder push |
-| PB2 | Encoder B |
-| PB3 | Encoder A |
-| PB4 | `MCP_TFT_BLK`: still set as a TFT output and read by a console command, but the backlight is GPIO17 |
-| PB5 | TFT D/C |
-| PB6 | TFT RES |
-| PB7 | W5500 RSTn, active low |
+The pin map is the `SPI3_*`, `MCP_*` and `TFT_*` constants in `include/gantry_app_constants.h:40–71`, one comment per pin. DOUT0 (PA0) is the gripper valve and PB7 is the W5500 reset, active low.
 
 Hardware address is `MCP23S17_HW_ADDR` (0). A0, A1 and A2 are tied to ground.
+
+## Next
+
+- **Down:** [MCP23S17 reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

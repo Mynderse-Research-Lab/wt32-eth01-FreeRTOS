@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [CellNetL2](README.md) › OTA protocol*
+
 # CellNet OTA Protocol
+
+**Read this when** you change or debug a firmware update over CellNet.
 
 Firmware updates for the WT32 nodes over CellNet L2, sent by the supervisor ([N-2](../../docs/OPEN_ITEMS.md#cell-transport)). It is the default OTA transport; TCP port 8032 stays as the fallback (`POST /api/ota?transport=tcp`).
 
@@ -157,3 +161,7 @@ sequenceDiagram
     Note over N: wait 300 ms, esp_restart
     N-->>S: first frame from the new image (active_slot)
 ```
+
+## Next
+
+- **Up:** [CellNetL2 README](README.md).

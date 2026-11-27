@@ -426,7 +426,7 @@ int Gantry::calibrateX() {
     // axisX_->getCurrentMm(). The latter routes through the encoder
     // accumulator when enable_encoder_feedback=true, and the X-axis
     // encoder is currently not returning pulses (see
-    // LOW_LEVEL_GANTRY_CONTROL.md - wiring TODO). We measured the
+    // GANTRY_FIRMWARE.md - wiring TODO). We measured the
     // physical travel by commanding pulses from MIN to MAX, so the
     // pulse count between those two events is the authoritative travel
     // distance regardless of encoder availability.

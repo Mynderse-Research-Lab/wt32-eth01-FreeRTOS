@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › AppConfig*
+
 # AppConfig
+
+**Read this when** you need to know what AppConfig does, where it sits and who uses it.
 
 The stored runtime-parameter set. Values start from compile-time defaults, are overlaid from one NVS blob, and are edited in RAM. They are written back only by an explicit save.
 
@@ -21,3 +25,8 @@ Registered from `idf/CMakeLists.txt`. Host test: `test_app_config`.
 ## Open items
 
 G-F1, G-F2, G-F8, G-F9, G-B5.
+
+## Next
+
+- **Down:** [AppConfig reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).

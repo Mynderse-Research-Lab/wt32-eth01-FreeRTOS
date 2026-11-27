@@ -2,7 +2,7 @@
  * @file GantryEipLinearAxis.cpp
  * @brief Position Absolute PTP over Kinetix 5100 assemblies 104/154.
  *
- * See LOW_LEVEL_GANTRY_CONTROL.md and tools/eip_position_abs.py.
+ * See lib/Gantry/REFERENCE.md and tools/eip_position_abs.py.
  */
 
 #include "GantryEipLinearAxis.h"

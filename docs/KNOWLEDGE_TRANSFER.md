@@ -1,4 +1,8 @@
+*[README](../README.md) › Knowledge transfer*
+
 # Knowledge Transfer
+
+**Read this when** you are new to the cell, or need to know how its subsystems fit together before going into one of them.
 
 **Status:** Living template. Reviewed top to bottom against the code, live logs and project docs on 2026-11-05, at commit `8b59545`.
 **Audience:** Engineers continuing development on the battery sorting cell.
@@ -9,7 +13,7 @@ This page is the map, not the manual. It says what each subsystem is, how the pi
 ## How to use and maintain this page
 
 1. Read sections 1 to 4 on day one.
-2. Read the section for your subsystem, then its linked docs.
+2. Read the section for your subsystem, then follow its **Go deeper** links down to the code docs.
 3. Before starting work, read [Blockers and decisions](OPEN_ITEMS.md#blockers-and-decisions) and your subsystem's open items. Update them in the same commit as your change.
 4. When a fix teaches a lasting rule, add it to the [working rules](#machine-safety-and-working-rules).
 
@@ -84,9 +88,9 @@ Maths and timing are in [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS
 | Belt position | Conveyor → gantry, supervisor | CellNet L2 | `L2ConveyorSpeedPayload` | Picks held, stale belt |
 | Commands | Supervisor → gantry | CellNet L2 | `CELL_COMMAND` ids 1 to 6 | No response to START |
 | Status | Gantry → supervisor | CellNet L2 | `L2GantryStatusPayload` | `gantry1.online` is false in the supervisor's `/api/state` |
-| Console | Supervisor → gantry | TCP `:2323` | Console contract, [LOW_LEVEL §9](../LOW_LEVEL_GANTRY_CONTROL.md#9-console-contract) | Console `busy`; send `stop` |
+| Console | Supervisor → gantry | TCP `:2323` | Console contract, [GANTRY_FIRMWARE §5](../GANTRY_FIRMWARE.md#5-console-contract) | Console `busy`; send `stop` |
 | OTA | Supervisor → gantry | CellNet L2 by default ([CELLNET_OTA_PROTOCOL.md](../lib/CellNetL2/CELLNET_OTA_PROTOCOL.md)); TCP `:8032` with `?transport=tcp` | `OTA_*` messages, `CELL_COMMAND` 7 | `/api/ota/status` `message`; `emac_missed` must be 0 |
-| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [LOW_LEVEL §5](../LOW_LEVEL_GANTRY_CONTROL.md#5-class-1-io--wire-format-and-udp-lifecycle) | `E602`, `F4009`, `T->O stale` |
+| Motion | Gantry → drives | EtherNet/IP Class 1, 2 ms | Assemblies, [Class 1 lifecycle](../lib/EtherNetIP/REFERENCE.md#class-1-lifecycle) | `E602`, `F4009`, `T->O stale` |
 | Time | Supervisor → gantry, vision | NTP | `ntp_server` key | `cfg time` shows `no clock` |
 
 Wire format: [CELL_NET_L2_COMMUNICATION_GUIDE.md](../lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md). The header is `include/cell_net_l2_protocol.h`, and this repository is its source. The supervisor copies it into its `vendor/cellnet` with its `scripts/sync-cellnet.py`. The conveyor keeps a copy of its own, which has drifted (C-3).
@@ -112,8 +116,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 | Step | Command or place | Done means |
 |------|------------------|------------|
 | Reach the cell | A cable into the cell switch. The Pi's DHCP leases `10.42.0.50` to `.80`; a static address goes outside that range | Toolbox opens at `http://10.42.0.1/dev` |
-| Host tests | `cmake -S test/host -B build/host` then `cmake --build build/host` and `ctest --test-dir build/host --output-on-failure` | All 29 pass; both must pass before a change is final |
-| Firmware | `idf.py -C idf build`, target `esp32` | Image builds, from `sdkconfig.defaults` only |
+| Build and test | The quick start in [CONTRIBUTING.md](../CONTRIBUTING.md) | Host tests pass and the image builds |
 | Read the rules | [Working rules](#machine-safety-and-working-rules) below, and [CONTRIBUTING.md](../CONTRIBUTING.md) | You know what not to do |
 | Read the live log | Toolbox log view, or `/dev/log` | You can see `pick actual` lines |
 
@@ -136,6 +139,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 | No NVS writes at runtime except `cfg save` | A flash erase outlasts the 32 ms Class 1 timeout |
 | Sim gains are not facts | Timing comes from real drive configs or on-system measurement |
 | Ask before restarting `adsb-supervisor` | It drops the cell supervisor |
+| Keep the W5500 SPI bus without DMA (`eip_spi_dma` 0) | With DMA on, a bus capture of 2026-10-21 showed a SEND command going out with stale bytes from the previous DMA buffer, and Class 1 dropped; without DMA a 30 min loaded run was clean. Whether this is a documented ESP32 erratum has not been checked |
 | Keep the TFT enabled | TFT-off runs on 2026-10-20 already ruled SPI3 out as a Class 1 drop cause, so diagnostics work with the display on. GPIO17, the backlight, is not free: only `gripmark` and `vismark` borrow it, and they restore it |
 
 ---
@@ -144,7 +148,7 @@ Ask the project lead for credentials. **Do not put passwords in docs, scripts or
 
 Moves the end effector on X, Z and theta, intercepts cells, and drops them in the bin. **There is one gantry today, and more are planned** (see G-A1). Copy this section for each new gantry.
 
-**Read:** [LOW_LEVEL_GANTRY_CONTROL.md](../LOW_LEVEL_GANTRY_CONTROL.md), [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
+**Read:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md), `pinout.csv`.
 
 ### 5.1 Axes and mechanics
 
@@ -157,6 +161,8 @@ Moves the end effector on X, Z and theta, intercepts cells, and drops them in th
 Code: `lib/Gantry`, with drive limits and homing at the drive. Y has no actuator; the belt provides it.
 
 No conveyor-height sensor will be used. The conveyor region is set by parameters (`col_x_min_mm`, `col_z_min_mm`).
+
+**Go deeper:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md), the [Gantry library](../lib/Gantry/README.md).
 
 **Open items:** [G-A in OPEN_ITEMS.md](OPEN_ITEMS.md#g-a-axes-and-mechanics).
 
@@ -188,207 +194,27 @@ Both editions are old. Our Vol 1 predates our Vol 2 by seven years, and section 
 
 The other ODVA documents in the [vendor catalog](../driver_datasheets_and_calculations/INDEX.md) are overviews or recommendations, and PUB00213 says it does not replace the specification. The Vol 1 and Vol 2 references in `lib/EtherNetIP` comments have been checked against these editions.
 
+**Go deeper:** [GANTRY_FIRMWARE §4](../GANTRY_FIRMWARE.md#4-one-move-end-to-end), the [EtherNetIP](../lib/EtherNetIP/README.md) and [W5500](../lib/W5500/README.md) libraries.
+
 **Open items:** [G-B in OPEN_ITEMS.md](OPEN_ITEMS.md#g-b-motion-bus-w5500-ethernetip).
 
 ### 5.3 Pick scheduler
 
 Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them), `include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by default), applied at boot (`main_init_motion.cpp:163`).
 
-The model below was read from the code at `20e03eb` on 2026-11-05. Each equation names the function that implements it. [PICK_SCHEDULER_KINEMATICS.md](PICK_SCHEDULER_KINEMATICS.md) and [ON_THE_FLY_PICKUP.md](ON_THE_FLY_PICKUP.md) give the derivations and the simulation behind the strike plan. Where they disagree with the code, the code wins (X-2).
+The pick model, read from the code, is in [GANTRY_FIRMWARE §6](../GANTRY_FIRMWARE.md#pick-model-until-the-math-document) until the math document replaces it.
+
+**Go deeper:** [GANTRY_FIRMWARE §6](../GANTRY_FIRMWARE.md#6-the-pick-path).
 
 **Open items:** [G-C in OPEN_ITEMS.md](OPEN_ITEMS.md#g-c-pick-scheduler).
-
-#### 5.3.1 Frames and symbols
-
-- **Belt plane:** $+X$ across the belt, $+Y$ downstream. Joint Z points down, and $Z = 0$ is fully retracted.
-- **Belt:** $s$ is the belt odometer in mm along $+Y$, and $v$ the belt speed.
-- **Cell:** a rectangle of length $l$ (the long axis), width $w$ (the side the jaws close across, never larger than $l$) and height $h$ above the belt. Its angle $\theta$ is that of the long axis: $0^\circ$ across the belt, positive toward downstream.
-- **Time:** strike times are relative to **arrival**, $t = 0$ when the cell centre reaches the pick plane.
-- **Parameters** and their stored keys are in [5.3.10](#5310-parameters).
-
-#### 5.3.2 Belt clock
-
-The conveyor sends frame $k$ every 250 ms with its own timestamp $\tau_k$, displacement $d_k$ and speed $v_k$. The gantry receives it at $r_k$. The clock offset is the smallest delay over the last 8 frames, and the position is extrapolated linearly from the newest frame (`pushMinDelay`, `beltPositionMm`):
-
-$$\delta_k = \min_{j = k-7, \dots, k} (r_j - \tau_j) \tag{1}$$
-
-$$s(t) = d_k + v_k \, (t - \tau_k - \delta_k) \tag{2}$$
-
-- **Stale:** an armed strike aborts when the newest frame is over 500 ms old.
-- **Restart:** a sequence jump over 32, a displacement drop over 5 mm, or a timestamp 0.5 s back starts a new epoch. Parts and strikes from the old epoch are dropped.
-- **Flat displacement:** if $d$ stays flat for 3 frames while $v > 0$, the position is integrated from $v$, and a bias $b$ keeps it continuous (`anchorFrame`).
-- **Assumptions:** $v$ is constant between frames, and the transport delay has a stable minimum that at least one of 8 frames reaches.
-
-#### 5.3.3 From detection to arrival
-
-A `VISION_DETECT` gives $x$ across the belt, $y_{bat}$ from the camera centre, $\theta$, $w$, $l$, $h$ and the class. If $w > l$, the two swap and $\theta$ turns $90^\circ$ (`gripAcrossWidth`). The capture position, the belt position at which the cell reaches the pick plane, and the time left (`capturePositionMm`, `arriveBeltMm`, `secondsToPlane`):
-
-$$s_c = \begin{cases} 1000 \, d_{cap} + b & \text{the frame carries capture displacement} \\ s(r - \Delta_{vis}) & \text{otherwise} \end{cases} \tag{3}$$
-
-$$s_a = s_c + y_{pick} - (y_{cam} + y_{bat}) \tag{4}$$
-
-$$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
-
-- **Latency:** $\Delta_{vis}$ is `vis_lat_ms`. The contract comment says capture displacement is required, but any `vis_lat_ms` above 0 lets every frame use the second line of (3) (G-C13).
-- **Trigger stand-in (`vis_batt_x` = 1):** $x$ comes from `batt_x` through forward kinematics, and $y_{bat} = -130 - 6 = -136$ mm, from compile-time constants (G-C5). The frame has no capture displacement, so (3) back-dates the capture by $\Delta_{vis}$. With the compiled defaults, $s_a - s_c$ = 847 mm, which is 2.82 s at 300 mm/s.
-- **Gantry X:** the target is the inverse kinematics of $x$ + `vis_x_off_mm`.
-- **Repeats:** a detection of the same cell (same id, or within `vis_dedupe_mm` in both $x$ and $s_a$) updates $s_a$. An armed strike then moves only its arrival.
-- **Tracking:** up to 16 cells, while $-25 < s_a - s < 1500$ mm.
-
-#### 5.3.4 Grip geometry
-
-The pads run along the long axis and the jaws close across the width (`chooseSideJaw`):
-
-$$\theta_j = \operatorname{fold}(\theta) + \theta_{off} - 90^\circ + k \cdot {180^{\circ}} \tag{6}$$
-
-Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the vision angle (0° across the belt, 90° along it, positive about +Z up), $\theta_{off}$ is `jaw_off_deg` (0°; joint 0° holds the pads along +Y and a positive joint turns them counter-clockwise seen from above, so joint = pose − 90°), and $k$ picks the in-range joint angle nearest the current one. With $o$ the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface (`col_z_min_mm`):
-
-$$c = \tfrac{1}{2}(o - w) \tag{7}$$
-
-$$z_g = \begin{cases} z_b - 3 & h < 30 \text{ mm} \\ z_b - h + \min(h/2, \, 25.4) & \text{otherwise} \end{cases} \tag{8}$$
-
-$$z_h = \max\big(\min(z_b - h - 6, \; z_{safe}), \; z_{min}\big), \qquad z_{safe} = z_{min} + 48.4 \tag{9}$$
-
-- $c$ is the clearance on each side between the cell and an open pad, which is also each jaw's stroke to contact.
-- (8) is `zPlan`.
-- (9) is the hover from `StrikePlan::plan`: 6 mm above the cell top, but never lower than the safe-Z ceiling. For a 9V on a belt at Z 122 the ceiling wins, so the plunge starts at $z_{safe}$.
-
-#### 5.3.5 Strike plan
-
-`StrikePlan::plan` (`strike_plan.h`) places three events around arrival: release the plunge, fire the grip valve, start the retract. Move times use the time-optimal trapezoid, or a triangle when the move is too short to reach $v$ (`trapezoidSeconds`):
-
-$$T(D; v, a, d) = \begin{cases} \dfrac{v}{a} + \dfrac{v}{d} + \dfrac{D - D_r}{v} & D \ge D_r = \dfrac{v^2}{2}\left(\dfrac{1}{a} + \dfrac{1}{d}\right) \\[2ex] \hat{v}\left(\dfrac{1}{a} + \dfrac{1}{d}\right), \quad \hat{v} = \sqrt{\dfrac{2Dad}{a + d}} & D < D_r \end{cases} \tag{10}$$
-
-$$\tau_p = T(z_g - z_h; \, v_z, a_z, d_z), \qquad \tau_{band} = \tau_p - \sqrt{2 (z_b - h - z_h) / a_z} \tag{11}$$
-
-- $v_z$ = 0.95 × `z_crit_rpm`/60 × `z_lead_mm`: the ball-screw whip limit less 5 %, 950 mm/s. $a_z$ and $d_z$ are `acc_mm_s2` and `dec_mm_s2`.
-- $\tau_{band}$ is the part of the plunge below the cell top. The square root assumes the top is crossed while Z still accelerates; when the top lies past mid-plunge, $\tau_{band}$ comes out too long (G-C6).
-
-The jaw close is a first-order valve lag on a constant jaw speed (`jawStrokeSeconds`):
-
-$$q(t) = v_j \left( t - \tau_v \left(1 - e^{-t/\tau_v}\right) \right), \qquad \tau_{cl} = t_{valve} + q^{-1}(c) \tag{12}$$
-
-Here $v_j$ is `fin_spd_mm_s` (210 mm/s: SCHUNK KGG 100-80, 40 mm in 0.19 s at 6 bar), $\tau_v$ = 15 ms (a simulation constant), and $t_{valve}$ is `pk_von_ms`.
-
-The entry window: the fingertips may pass the cell top only once the cell is 2 mm inside the open gap, and Z must reach depth soon after arrival. $v_\times$ is the belt speed along the close axis:
-
-$$v_\times = v \, |\cos\theta|, \qquad t_{in} = \begin{cases} -(c - 2) / v_\times & v_\times > 1 \text{ mm/s} \\ -0.5 \text{ s} & \text{otherwise} \end{cases} \tag{13}$$
-
-$$t_d = \operatorname{clamp}\Big(\max(t_{in} + 5 \text{ ms}, \; -\tau_{band}) + \tau_{band}, \;\; 0, \;\; \min(15 \text{ ms}, \; 20 \text{ mm} / v)\Big) \tag{14}$$
-
-The events are the nominal times plus the operator offsets:
-
-$$t_z = t_d - \tau_p + \Delta_p, \qquad t_c = t_d - (\tau_{cl} - 8 \text{ ms}) + \Delta_c, \qquad t_r = t_d + \Delta_{r} \tag{15}$$
-
-- **Offsets:** $\Delta_p$, $\Delta_c$, $\Delta_r$ are `pk_off_plunge`, `pk_off_close` and `pk_off_retract`, in whole ms within ±100 ms. Each moves only its own event.
-- **Zero offsets:** the retract starts as the plunge ends (zero dwell), and the jaws meet the cell 8 ms after the retract starts.
-- **Invariants, applied after the offsets:** $t_r \ge t_z + \tau_p$, so Z never reverses before depth, and $t_z + 2 \text{ ms} \le t_c \le t_r - 2 \text{ ms}$. The dwell $t_r - (t_z + \tau_p)$ is logged with its sign; a negative dwell is not applied.
-
-#### 5.3.6 Feasibility
-
-`evaluate` accepts a strike only when all of these hold:
-
-- **Time:** the pre-position finishes before the plunge release.
-
-  $$\text{slack} = (t_a + t_z) - (T_{app} + 40 \text{ ms} + 30 \text{ ms}) \ge 0 \tag{16}$$
-
-  $T_{app}$ (`budgetPick`) is the move from the current pose to $(x, z_h, \theta_j)$, timed the way the Gantry plans it:
-  - X moves only while Z is inside the traverse band.
-  - Each segment is a trapezoid (10) plus 40 ms preload and 30 ms settle.
-  - A combined X+Z segment is slowed until its Z part stays under $v_z$.
-  - Theta runs alongside, starting with the in-band segment after up to 190 ms of start latency.
-
-  The 40 + 30 ms in (16) are the plunge's own preload and settle.
-- **Reach:** $z_{min} \le z_g \le \min(\text{Z stroke}, z_b)$, and neither the pick nor the hover pose lies inside the conveyor box, $x \ge$ `col_x_min_mm` with $z > z_b$.
-- **Neighbours:** no other tracked cell's bounding box may enter a finger rectangle (`fin_wid_mm` × `fin_len_mm`) from the release at $t_a + t_z$ until Z is back up, $T(z_g - z_h)$ + 70 ms after $t_a + t_r$ (`fingersFreeFromS`).
-- **Belt:** $v > 0$ and $t_a > 0$.
-
-#### 5.3.7 Execution and retiming
-
-`runPick` retracts into the band, moves X and theta to the hover pose, and re-evaluates after each move. With the jaw angle then frozen, it preloads the plunge to $z_g$, holds its StartMotion, and arms three one-shot timers at $t_a + t_z$, $t_a + t_c$ and $t_a + t_r$.
-
-Every conveyor frame, and once before each event, re-solves the arrival from (2) and (5). The event offsets stay fixed (`retimeArrival`):
-
-$$t_a \leftarrow t + \frac{s_a - s(t)}{v} \tag{17}$$
-
-- **Abort:** an armed strike aborts on a clock restart, stale frames or a stopped belt.
-- **Z event:** releases the preloaded plunge and queues the retract behind it.
-- **Grip event:** turns the valve on through the MCP23S17 (PA0).
-- **Retract event:** the edge for the queued retract. The drive reverses as the plunge completes.
-- **Dispatch:** an event fires when it is due within 1 ms.
-- **Log:** `pick actual` gives each event's error against its target and the deepest Z, and warns on a shortfall over 0.3 mm. The drive follows its command about 30–35 ms behind, so a zero-dwell strike reverses about 0.7 mm short of $z_g$ (0.68–0.70 mm on the bench, 5.3.9); that is accepted.
-
-#### 5.3.8 Cycle time and followers
-
-After a strike the gantry carries the cell to the bin. `classifyFollowers` times that cycle and decides how each later cell is approached:
-
-$$T_{cyc} = t_{close} + T_{up} + T_{app}(\text{bin}) + 2 \, T_{bin} + t_{open} \tag{18}$$
-
-$$\text{pace} = \begin{cases} \text{slow} & t_a + T_{cyc} + T_{app}^{slow} \le t_a' \\ \text{fast} & t_a + T_{cyc} + T_{app}^{fast} \le t_a' \\ \text{drop} & \text{otherwise} \end{cases} \tag{19}$$
-
-- $t_{close}$ and $t_{open}$ are `grp_close_ms` and `grp_open_ms` (190 ms each). $T_{up}$ is Z from $z_g$ up to $z_{safe}$; $T_{bin}$ is Z between $z_{safe}$ and the bin, down and back. Each Z move is (10) at $v_z$ plus 70 ms. The bin pose is `geom_cal_x_mm`, `geom_cal_z_mm`, `geom_cal_th_deg`.
-- $T_{app}^{slow}$ and $T_{app}^{fast}$ run at `spd_mm_s` and `ceil_spd_mm_s`, from the bin pose to the follower's X and jaw angle. $t_a'$ is the follower's arrival.
-- (19) has four known errors (G-C4).
-
-#### 5.3.9 Check against the bench
-
-On 2026-10-25, strikes 7101–7105 picked a 9V on its side with its length along the belt ($\theta = 90^\circ$, $w$ = 17.5, $h$ = 26.5). The inputs were: belt Z 122, so $z_g$ = 119.0; hover 35.7, that day's ceiling; $v_z$ = 950; $a_z = d_z$ = 3000; belt 150 mm/s; offsets 0. The current code, compiled with those inputs, gives:
-
-| Z release to… | Model | Measured ([STRIKE_TIMING](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md)) |
-|---|---|---|
-| Grip valve fires | +169.5 ms | +169.5 to +170.1 ms (7102–7105); +172.2 ms (7101, whose MCP write took 2.0 ms) |
-| Retract commanded | +333.3 ms ($\tau_p$, 83.3 mm triangle) | +333.8 ms (7101) |
-| Deepest Z | 119.0 commanded | 118.30–118.32 (the accepted lag) |
-
-At $\theta = 90^\circ$ the belt carries the cell along the pads, so $v_\times = 0$ and (14) gives $t_d = 0$: depth is reached exactly at arrival. Three results from the same code at today's compiled ceiling (48.4), 300 mm/s, 3000 mm/s²:
-
-- **Same cell:** it plunges 70.6 mm in 306.8 ms, and the grip fires 143.0 ms after the release. Computed, not yet measured.
-- **Turned across the belt ($\theta = 0^\circ$):** (14) hits its 15 ms cap. On the commanded profile the fingertips pass the cell top 110 ms before arrival, when the cell is still 1.8 mm short of the upstream pad face rather than 2 mm inside it. This holds for $\theta$ from 0° to 35°. The drive's 30–35 ms lag probably hides it on the machine (assumed, G-C11).
-- **$\tau_{band}$:** (11) overstates it by 4.4 ms for this cell (8.4 ms at the 35.7 ceiling). That changes the plan only for $\theta$ between 33° and 43° (G-C6).
-
-#### 5.3.10 Parameters
-
-Defaults are the compiled ones; the live stored set differs where noted.
-
-| Symbol | Meaning | Key | Default |
-|---|---|---|---|
-| $o$ | Open jaw gap | `fin_open_mm` | 80 mm |
-| — | Finger thickness and length | `fin_wid_mm`, `fin_len_mm` | 10, 50 mm |
-| $v_j$ | Jaw speed | `fin_spd_mm_s` | 210 mm/s |
-| $t_{valve}$ | Valve delay | `pk_von_ms` | 8 ms |
-| $\Delta_p, \Delta_c, \Delta_r$ | Operator offsets | `pk_off_plunge`, `pk_off_close`, `pk_off_retract` | 0 ms |
-| $\theta_{off}$ | Jaw angle offset | `jaw_off_deg` | 0° |
-| $z_b$ | Belt surface, joint Z | `col_z_min_mm` | 115 mm (122 live, G-F1) |
-| — | Conveyor box edge, X | `col_x_min_mm` | 95 mm |
-| $z_{safe} - z_{min}$ | Traverse ceiling | stored `geom_safe_z_mm`, applied at boot | 48.4 mm by default |
-| $v_z$ | Plunge speed | 0.95 × `z_crit_rpm`/60 × `z_lead_mm` | 950 mm/s |
-| $a_z, d_z$ | Accel, decel (all linear axes) | `acc_mm_s2`, `dec_mm_s2` | 3000 mm/s² (5000 in the 2026-10-30 runs, G-C2) |
-| — | Approach speed | `spd_mm_s` | 50 mm/s (750 live, G-C7) |
-| — | Fast approach speed | `ceil_spd_mm_s` | 2000 mm/s |
-| — | Theta speed, accel, decel | `th_spd_deg_s` (capped by `th_spd_max`), `th_acc_deg_s2`, `th_dec_deg_s2` | 30°/s, 180°/s², 180°/s² |
-| $\Delta_{vis}$ | Vision latency | `vis_lat_ms` | 40 ms |
-| $y_{cam}, y_{pick}$ | Camera centre, pick plane | `vis_cam_y_mm`, `cv_pick_y_mm` | −711, 0 mm |
-| — | Vision X to gantry X | `vis_x_off_mm` | 245 mm (307.5 live, G-F1) |
-| — | Duplicate radius | `vis_dedupe_mm` | 40 mm |
-| — | Bin pose | `geom_cal_x_mm`, `geom_cal_z_mm`, `geom_cal_th_deg` | 10 mm, 90.8 mm, 90° |
-| $t_{close}, t_{open}$ | Grip close and open dwell | `grp_close_ms`, `grp_open_ms` | 190 ms each |
-| — | Trigger stand-in | `vis_batt_x`, `batt_x` | 0, 382.5 mm |
-
-Compile-time constants: valve lag $\tau_v$ 15 ms, retract lead 8 ms, hover clearance 6 mm, entry margin 2 mm, entry guard 5 ms, depth cap 15 ms or 20 mm of belt, minimum event gap 2 ms, offset limit ±100 ms (`strike_plan.h`). Grasp rule 3 mm, 30 mm and 25.4 mm (`zPlan`). Frame period 250 ms, stale after 500 ms, 8-frame delay window (`pick_intercept_vision.h`). Trigger geometry −130 and 6 mm (`pick_belt.cpp:15,20`).
-
-#### 5.3.11 Limits of the model
-
-- **Bodies:** rigid rectangles at the reported pose, with no slip on the belt.
-- **Belt:** constant speed between 250 ms frames.
-- **Open loop:** the plunge is assumed to follow (10) exactly, and the jaw (12) with the simulation's 15 ms valve constant. The real drive lags 30–35 ms. Simulation gains are not facts; the three offsets absorb what the model misses.
-- **Provisional constants:** the 6 mm hover clearance, 2 mm entry margin, 5 ms guard, 8 ms retract lead and the 15 ms / 20 mm depth cap are not yet measured.
-- **Unused model:** `include/pick_intercept_strike.h` and `include/pick_intercept_plan.h` hold an earlier EarlyZ/LateZ strike model (`planPick`, `strikeLeads`, `retimePick`), still included through `pick_intercept.h`. Only the host tests call it (G-C8).
 
 ### 5.4 Gripper and field I/O
 
 SCHUNK KGG 100-80 pneumatic gripper, driven through an MCP23S17 output (PA0) and a relay-isolated 24 V valve, on SPI3 shared with the TFT. Air regulator at 6 bar. Code: `lib/MCP23S17`, `lib/Spi3Bus`, `GantryEndEffector`.
 
 Two locks guard SPI3: the MCP23S17 mutex, whose waiters give up after 8 ms, and the SPI3 bus mutex, 50 ms. The gripper write, the inputs and the MCP23S17 health check all take the MCP23S17 mutex.
+
+**Go deeper:** the [GpioExpander](../lib/GpioExpander/README.md) and [MCP23S17](../lib/MCP23S17/README.md) libraries, [HV_LV_SCHEMATICS.md](HV_LV_SCHEMATICS.md).
 
 **Open items:** [G-D in OPEN_ITEMS.md](OPEN_ITEMS.md#g-d-gripper-field-io-and-panel).
 
@@ -398,11 +224,15 @@ WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP
 
 **Class 1 diagnostics.** `gaptrace` prints the last Class 1 gap of 10 ms or more: where the time went (exchange, receive drain, pace) and the CPU milliseconds of every task, from FreeRTOS run-time stats. Do not trace with a FreeRTOS tick hook: one stalled boot whenever the LAN8720 came up.
 
+**Go deeper:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), the [EthernetLink](../lib/EthernetLink/README.md) and [CellNetL2](../lib/CellNetL2/README.md) libraries, [tools/README.md](../tools/README.md).
+
 **Open items:** [G-E in OPEN_ITEMS.md](OPEN_ITEMS.md#g-e-controller-cell-network-and-tools).
 
 ### 5.6 Runtime parameters
 
-One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference: [LOW_LEVEL §14](../LOW_LEVEL_GANTRY_CONTROL.md#14-runtime-parameters).
+One complete set in NVS, loaded at boot. `cfg <key> <value>` changes RAM only; `cfg save` writes NVS. `sdkconfig.defaults` supplies compile-time defaults, used only by keys the set lacks or `cfg factory`. Code: `lib/AppConfig`. Reference: [GANTRY_FIRMWARE §14](../GANTRY_FIRMWARE.md#7-runtime-parameters).
+
+**Go deeper:** [GANTRY_FIRMWARE §7](../GANTRY_FIRMWARE.md#7-runtime-parameters), the [AppConfig library](../lib/AppConfig/README.md).
 
 **Open items:** [G-F in OPEN_ITEMS.md](OPEN_ITEMS.md#g-f-runtime-parameters).
 
@@ -469,7 +299,7 @@ Static web files take effect without a restart. Build the service with `scripts/
 
 ## 9. Repository and documentation
 
-The doc index is [INDEX.md](INDEX.md), and the engineering rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The reading path runs from the [README](../README.md) through this page to [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), [lib/README.md](../lib/README.md) and each library's README and REFERENCE. The doc index is [INDEX.md](INDEX.md), and the engineering rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 **Open items:** [X in OPEN_ITEMS.md](OPEN_ITEMS.md#repository-and-documentation).
 
@@ -498,3 +328,9 @@ What it does, in one or two sentences.
 ```
 
 Then give the component an ID prefix and its own section in [OPEN_ITEMS.md](OPEN_ITEMS.md), and point the link above at it.
+
+## Next
+
+- **Down:** [GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md), how the gantry firmware works.
+- **Up:** [README](../README.md).
+- **Also:** [open items](OPEN_ITEMS.md), [contributing](../CONTRIBUTING.md), [doc index](INDEX.md).

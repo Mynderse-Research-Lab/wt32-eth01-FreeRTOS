@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [GantryOta](README.md) › Reference*
+
 # GantryOta reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/GantryOta/src/gantry_ota.h`.
 
@@ -84,6 +88,41 @@ if (gantryOtaCellNetModeRequested(&session)) {
 gantryOtaStartServer(gantry, 8032, "LTU_1932");
 ```
 
+## Partitions and flashing
+
+The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`10.42.0.100:8032`). Code: `lib/GantryOta`.
+
+### Partition Map (4 MB Flash)
+
+```
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   16 KB
+otadata,  data, ota,     0xd000,   8 KB
+phy_init, data, phy,     0xf000,   4 KB
+ota_0,    app,  ota_0,   0x10000,  1920 KB (1.875 MB)
+ota_1,    app,  ota_1,   0x1F0000, 1920 KB (1.875 MB)
+```
+
+- **Rollback Safety:** Bootloader automatic rollback (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`) cancels and switches back to the previous partition if a newly flashed firmware panics or fails to confirm valid boot via `gantryOtaConfirmBootValid()`.
+- **Motion Safety:** OTA flash requests are strictly rejected if the gantry is `ENABLED` or `BUSY`.
+
+### How to Flash Over Ethernet
+
+1. **Build firmware:**
+   ```powershell
+   idf.py -C idf build
+   ```
+2. **Execute OTA update**. On START the firmware disables enabled-but-idle motors itself, and again just before the reboot in case a supervisor START re-enabled them mid-upload. It still replies `ERR SAFETY` while a move, home or pick is running. Re-enable after the reboot:
+   - Diagnostics → Dual-OTA in `tools/lan_debug_ui.py` (same Host/Password as the console bar; port **8032**).
+   - CLI, PC on the cell switch: `py tools/ota_flash.py --destination 10.42.0.100 idf/build/wt32_eth01_gantry.bin`
+   - CLI, through the supervisor on the cell switch: `py tools/supervisor_ota.py idf/build/wt32_eth01_gantry.bin --host 10.42.0.1` (`ADSB_DEV_PASS`; CellNet L2 by default, `--transport tcp` for the TCP route).
+3. **Console commands:**
+   - `ota` - prints running slot (`ota_0` vs `ota_1`), next slot, compile timestamp, rollback status, and `Last Reset` (`esp_reset_reason`: `SW` after an OTA/restart, `PANIC` / `*_WDT` after a crash, `BROWNOUT` on a supply dip) with uptime. `status` prints the same reset reason and uptime, so an unexpected reboot is visible over the LAN console without the UART boot log.
+
 ## Documents
 
-TCP behaviour and the partition map are section 13 of `LOW_LEVEL_GANTRY_CONTROL.md`. CellNet OTA-only mode is `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. The receiver state machine is `lib/CellNetL2/src/CellNetOtaReceiver.h`.
+The partition map and the flashing steps are above. CellNet OTA-only mode is `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. The receiver state machine is `lib/CellNetL2/src/CellNetOtaReceiver.h`.
+
+## Next
+
+- **Up:** [GantryOta README](README.md), [Libraries](../README.md).

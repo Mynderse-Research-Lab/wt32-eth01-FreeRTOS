@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [MCP23S17](README.md) › Reference*
+
 # MCP23S17 reference
+
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
 
 Public header: `lib/MCP23S17/src/MCP23S17.h`.
 
@@ -69,6 +73,23 @@ mcp23s17_handle_t handle = mcp23s17_init(&config);
 
 Field and UI setup goes through `gpio_expander_init` in `lib/GpioExpander`.
 
+## Known issues
+
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+
+| # | Category | Location | Finding | Evidence |
+|---|---|---|---|---|
+| M7 | cleanup | `MCP23S17Bus.cpp:155-160` | Debug register writes bypass the caches, so writing IODIR or OLAT that way makes `verify_config` fail | Confirmed |
+| M8 | docs | `README.md`; `MCP23S17.h:51`; `Spi3Bus.h:13` | Stale channel map. The real map (`gantry_app_constants.h:44-71`): TFT CS on ESP GPIO32; PB0 KO, PB1 PUSH, PB2 ENC_B, PB3 ENC_A, PB4 BLK unused, PB5 DC, PB6 RES, PB7 W5500 RSTn. The header says the default clock is 10 MHz; the code uses 1 MHz. `set_pin_interrupt` is described as edge-triggered, but it sets INTCON (compare against DEFVAL) | Confirmed; interrupt semantics Suggested (MCP23S17 datasheet INTCON/DEFVAL) |
+
+**Dead code:** `mcp23s17_write_port`, `mcp23s17_set_pin_interrupt`, and the IPOL, INTF and INTCAP defines.
+
+**Not covered by host tests:** the whole driver. Testable with a stubbed SPI transmit: pin-to-register mapping, cache behaviour on failure, a `verify_config` mismatch, the lock retries.
+
 ## Documents
 
 The pin map is `include/gantry_app_constants.h:40–71`. Open items: G-D3, G-D6 in `docs/OPEN_ITEMS.md`.
+
+## Next
+
+- **Up:** [MCP23S17 README](README.md), [Libraries](../README.md).

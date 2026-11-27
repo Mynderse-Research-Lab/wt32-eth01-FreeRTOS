@@ -1,5 +1,5 @@
 // Host unit tests for HCS01 control/status words and positioning assemblies.
-// Byte maps from LOW_LEVEL_GANTRY_CONTROL.md / HCS01 sources.
+// Byte maps from lib/Gantry/REFERENCE.md / HCS01 sources.
 
 #include "unity.h"
 

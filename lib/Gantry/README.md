@@ -1,4 +1,8 @@
+*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › Gantry*
+
 # Gantry
+
+**Read this when** you need to know what Gantry does, where it sits and who uses it.
 
 The only motion API application code calls. X and Z are Kinetix 5100 axes and theta is an HCS01, all over EtherNet/IP. The class plans X-Z paths against the SAFE_Z band, runs home and calibrate, and drives the gripper.
 
@@ -28,7 +32,12 @@ Z has no brake: with the motors disabled it can fall to A014 (G-A12). Keep the s
 
 ## Documents
 
-- Motion and the drive profile: [LOW_LEVEL_GANTRY_CONTROL.md](../../LOW_LEVEL_GANTRY_CONTROL.md)
+- How the firmware uses this library: [GANTRY_FIRMWARE.md](../../GANTRY_FIRMWARE.md)
 - Mechanics: [docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](../../docs/EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md)
 
 Kinematics are `GantryKinematics.h`. This page does not restate them.
+
+## Next
+
+- **Down:** [Gantry reference](REFERENCE.md), the facts: API, timing, keys, errors.
+- **Up:** [Libraries](../README.md).
