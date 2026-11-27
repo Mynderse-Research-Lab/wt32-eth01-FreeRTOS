@@ -49,13 +49,14 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `9aa2af3` | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
 | `7fea7b5` | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
 | `eb833ce` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
-|  | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
+| `cf1efaf` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
+|  | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
 
 ## Planned splits
 
-3 files are over 500 lines. They are the host tests.
+2 files are over 500 lines. They are the host tests.
 
-### Host tests (3)
+### Host tests (2)
 
 Each test file splits by test group into several sources for the **same executable**. Gate: the Unity case count per executable is unchanged.
 
@@ -63,7 +64,6 @@ Each test file splits by test group into several sources for the **same executab
 |---|---:|
 | `test/host/test_eip_transport.cpp` | 1,891 |
 | `test/host/test_eip_axis.cpp` | 1,807 |
-| `test/host/test_pick_intercept.cpp` | 1,095 |
 ## Organizing matured features into `lib/` components
 
 A feature is **matured** when it runs on the gantry and has no open blocker or decision in [OPEN_ITEMS.md](OPEN_ITEMS.md). A matured feature moves out of `src/` into its own ESP-IDF component, `lib/<Feature>/`, containing:
@@ -415,7 +415,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `theta_trace.cpp` | 307 | under 500 |
 | `theta_trace.h` | 20 | under 500 |
 
-### `test/host/` (57 files, 13,680 lines)
+### `test/host/` (62 files, 13,787 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -451,18 +451,23 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
 | `test_eip_transport.cpp` | 1891 | **over 500: planned** |
-| `test_gantry_orchestration.cpp` | 159 | split done |
-| `test_gantry_orchestration_bringup.cpp` | 245 | split done |
-| `test_gantry_orchestration_fault.cpp` | 348 | split done |
-| `test_gantry_orchestration_internal.h` | 88 | split done |
-| `test_gantry_orchestration_move.cpp` | 362 | split done |
+| `test_gantry_orchestration.cpp` | 159 | split done (`cf1efaf`) |
+| `test_gantry_orchestration_bringup.cpp` | 245 | split done (`cf1efaf`) |
+| `test_gantry_orchestration_fault.cpp` | 348 | split done (`cf1efaf`) |
+| `test_gantry_orchestration_internal.h` | 88 | split done (`cf1efaf`) |
+| `test_gantry_orchestration_move.cpp` | 362 | split done (`cf1efaf`) |
 | `test_hcs01_assembly.cpp` | 193 | under 500 |
 | `test_hcs01_comws_client.cpp` | 143 | under 500 |
 | `test_k5100_param_access.cpp` | 77 | under 500 |
 | `test_kinematics.cpp` | 214 | under 500 |
 | `test_limit_switch_policy.cpp` | 109 | under 500 |
 | `test_path_profile.cpp` | 405 | under 500 |
-| `test_pick_intercept.cpp` | 1095 | **over 500: planned** |
+| `test_pick_intercept.cpp` | 117 | split done |
+| `test_pick_intercept_belt.cpp` | 120 | split done |
+| `test_pick_intercept_budget.cpp` | 242 | split done |
+| `test_pick_intercept_geometry.cpp` | 283 | split done |
+| `test_pick_intercept_internal.h` | 69 | split done |
+| `test_pick_intercept_tracker.cpp` | 371 | split done |
 | `test_spi3_critical.cpp` | 78 | under 500 |
 | `test_strike_plan.cpp` | 313 | under 500 |
 | `test_theta_trace_analysis.cpp` | 158 | under 500 |

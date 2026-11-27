@@ -298,7 +298,13 @@ target_include_directories(test_console_parse PRIVATE "${REPO_ROOT}/src")
 target_link_libraries(test_console_parse PRIVATE unity)
 add_test(NAME test_console_parse COMMAND test_console_parse)
 
-add_executable(test_pick_intercept "test_pick_intercept.cpp")
+add_executable(test_pick_intercept
+    "test_pick_intercept.cpp"
+    "test_pick_intercept_belt.cpp"
+    "test_pick_intercept_geometry.cpp"
+    "test_pick_intercept_budget.cpp"
+    "test_pick_intercept_tracker.cpp"
+)
 target_include_directories(test_pick_intercept PRIVATE
     "${REPO_ROOT}/include"
     "${REPO_ROOT}/lib/Gantry/src")
