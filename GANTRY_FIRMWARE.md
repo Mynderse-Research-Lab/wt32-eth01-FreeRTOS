@@ -214,7 +214,7 @@ one-shots, re-timed from the newest belt state on every conveyor frame.
     collision zone (G-C14).
 -   **Pick** when the cell's across-belt strip clears both fingers by ≥ 4 mm: Z
     goes to the grasp right after the pre-position, and only the grip is timed.
-    Grasp height is \(\min(h/2,\ 25.4\,\mathrm{mm})\) down from the object top.
+    Grasp height is $`\min(h/2,\ 25.4\,\mathrm{mm})`$ down from the object top.
     Width, length, and height-from-belt are required on every detection. A width
     of 80 mm has zero jaw travel; it is still a pick only when that across-belt
     strip misses the fingers. Width above 80 mm is skipped. A successful grip
@@ -238,8 +238,8 @@ one-shots, re-timed from the newest belt state on every conveyor frame.
 -   After the drop the gantry retracts at the bin, then goes to the next tracked
     cell, or waits at the staging pose (`pk_stage_x_mm`, SAFE_Z, theta 0).
     `pk_drop_any_th` skips the turn to `geom_cal_th_deg` at the bin.
--   Belt clock: gantry X is vision \(x\) plus `vis_x_off_mm` (default 245, the
-    95 mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is
+-   Belt clock: gantry X is vision $x$ plus `vis_x_off_mm` (default 245, the 95
+    mm collision edge plus half of the stored 300 mm belt). `cv_belt_w_mm` is
     not read by the intercept, so changing the width does not move the camera. A
     repeated conveyor sequence is ignored. The epoch restarts on a sequence jump
     above 32, a displacement step backward of more than 5 mm, or a conveyor-time
@@ -259,7 +259,7 @@ one-shots, re-timed from the newest belt state on every conveyor frame.
     `Gantry::traverseClearanceZMm()`; tick, preload, settle, and arrival values
     come from `GantryControlPeriod.h`, `GantryLinearPhases.h`,
     `GantryRotaryPhases.h`, and `GantryPathProfile.h`. `grp_valve_ms` and
-    `jaw_aaa_ms`…`jaw_32650_ms` (`0` derives \(g/v_j\)), `fin_spd_mm_s`, and
+    `jaw_aaa_ms`…`jaw_32650_ms` (`0` derives $g/v_j$), `fin_spd_mm_s`, and
     `pk_guard_ms` stay tunable.
 
 For real-time protocol specs, see
@@ -296,9 +296,13 @@ displacement $d_k$ and speed $v_k$. The gantry receives it at $r_k$. The clock
 offset is the smallest delay over the last 8 frames, and the position is
 extrapolated linearly from the newest frame (`pushMinDelay`, `beltPositionMm`):
 
-$$\delta_k = \min_{j = k-7, \dots, k} (r_j - \tau_j) \tag{1}$$
+```math
+\delta_k = \min_{j = k-7, \dots, k} (r_j - \tau_j) \tag{1}
+```
 
-$$s(t) = d_k + v_k \, (t - \tau_k - \delta_k) \tag{2}$$
+```math
+s(t) = d_k + v_k \, (t - \tau_k - \delta_k) \tag{2}
+```
 
 -   **Stale:** an armed strike aborts when the newest frame is over 500 ms old.
 -   **Restart:** a sequence jump over 32, a displacement drop over 5 mm, or a
@@ -318,11 +322,17 @@ turns $90^\circ$ (`gripAcrossWidth`). The capture position, the belt position at
 which the cell reaches the pick plane, and the time left (`capturePositionMm`,
 `arriveBeltMm`, `secondsToPlane`):
 
-$$s_c = \begin{cases} 1000 \, d_{cap} + b & \text{the frame carries capture displacement} \\ s(r - \Delta_{vis}) & \text{otherwise} \end{cases} \tag{3}$$
+```math
+s_c = \begin{cases} 1000 \, d_{cap} + b & \text{the frame carries capture displacement} \\ s(r - \Delta_{vis}) & \text{otherwise} \end{cases} \tag{3}
+```
 
-$$s_a = s_c + y_{pick} - (y_{cam} + y_{bat}) \tag{4}$$
+```math
+s_a = s_c + y_{pick} - (y_{cam} + y_{bat}) \tag{4}
+```
 
-$$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
+```math
+t_a = \frac{s_a - s(t)}{v} \tag{5}
+```
 
 -   **Latency:** $\Delta_{vis}$ is `vis_lat_ms`. The contract comment says
     capture displacement is required, but any `vis_lat_ms` above 0 lets every
@@ -336,28 +346,36 @@ $$t_a = \frac{s_a - s(t)}{v} \tag{5}$$
 -   **Repeats:** a detection of the same cell (same id, or within
     `vis_dedupe_mm` in both $x$ and $s_a$) updates $s_a$. An armed strike then
     moves only its arrival.
--   **Tracking:** up to 16 cells, while $-25 < s_a - s < 1500$ mm.
+-   **Tracking:** up to 16 cells, while $`-25 < s_a - s < 1500`$ mm.
 
 #### Grip geometry
 
 The pads run along the long axis and the jaws close across the width
 (`chooseSideJaw`):
 
-$$\theta_j = \operatorname{fold}(\theta) + \theta_{off} - 90^\circ + k \cdot {180^{\circ}} \tag{6}$$
+```math
+\theta_j = \mathrm{fold}(\theta) + \theta_{off} - 90^\circ + k \cdot {180^{\circ}} \tag{6}
+```
 
-Here $\operatorname{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$
-is the vision angle (0° across the belt, 90° along it, positive about +Z up),
+Here $\mathrm{fold}$ maps an angle into $[-90^\circ, 90^\circ)$, $\theta$ is the
+vision angle (0° across the belt, 90° along it, positive about +Z up),
 $\theta_{off}$ is `jaw_off_deg` (0°; joint 0° holds the pads along +Y and a
 positive joint turns them counter-clockwise seen from above, so joint = pose −
 90°), and $k$ picks the in-range joint angle nearest the current one. With $o$
 the open jaw gap (`fin_open_mm`) and $z_b$ the joint Z of the belt surface
 (`col_z_min_mm`):
 
-$$c = \tfrac{1}{2}(o - w) \tag{7}$$
+```math
+c = \tfrac{1}{2}(o - w) \tag{7}
+```
 
-$$z_g = \begin{cases} z_b - 3 & h < 30 \text{ mm} \\ z_b - h + \min(h/2, \, 25.4) & \text{otherwise} \end{cases} \tag{8}$$
+```math
+z_g = \begin{cases} z_b - 3 & h < 30 \text{ mm} \\ z_b - h + \min(h/2, \, 25.4) & \text{otherwise} \end{cases} \tag{8}
+```
 
-$$z_h = \max\big(\min(z_b - h - 6, \; z_{safe}), \; z_{min}\big), \qquad z_{safe} = z_{min} + 48.4 \tag{9}$$
+```math
+z_h = \max\big(\min(z_b - h - 6, \; z_{safe}), \; z_{min}\big), \qquad z_{safe} = z_{min} + 48.4 \tag{9}
+```
 
 -   $c$ is the clearance on each side between the cell and an open pad, which is
     also each jaw's stroke to contact.
@@ -373,9 +391,13 @@ the plunge, fire the grip valve, start the retract. Move times use the
 time-optimal trapezoid, or a triangle when the move is too short to reach $v$
 (`trapezoidSeconds`):
 
-$$T(D; v, a, d) = \begin{cases} \dfrac{v}{a} + \dfrac{v}{d} + \dfrac{D - D_r}{v} & D \ge D_r = \dfrac{v^2}{2}\left(\dfrac{1}{a} + \dfrac{1}{d}\right) \\[2ex] \hat{v}\left(\dfrac{1}{a} + \dfrac{1}{d}\right), \quad \hat{v} = \sqrt{\dfrac{2Dad}{a + d}} & D < D_r \end{cases} \tag{10}$$
+```math
+T(D; v, a, d) = \begin{cases} \dfrac{v}{a} + \dfrac{v}{d} + \dfrac{D - D_r}{v} & D \ge D_r = \dfrac{v^2}{2}\left(\dfrac{1}{a} + \dfrac{1}{d}\right) \\[2ex] \hat{v}\left(\dfrac{1}{a} + \dfrac{1}{d}\right), \quad \hat{v} = \sqrt{\dfrac{2Dad}{a + d}} & D < D_r \end{cases} \tag{10}
+```
 
-$$\tau_p = T(z_g - z_h; \, v_z, a_z, d_z), \qquad \tau_{band} = \tau_p - \sqrt{2 (z_b - h - z_h) / a_z} \tag{11}$$
+```math
+\tau_p = T(z_g - z_h; \, v_z, a_z, d_z), \qquad \tau_{band} = \tau_p - \sqrt{2 (z_b - h - z_h) / a_z} \tag{11}
+```
 
 -   $v_z$ = 0.95 × `z_crit_rpm`/60 × `z_lead_mm`: the ball-screw whip limit less
     5 %, 950 mm/s. $a_z$ and $d_z$ are `acc_mm_s2` and `dec_mm_s2`.
@@ -386,7 +408,9 @@ $$\tau_p = T(z_g - z_h; \, v_z, a_z, d_z), \qquad \tau_{band} = \tau_p - \sqrt{2
 The jaw close is a first-order valve lag on a constant jaw speed
 (`jawStrokeSeconds`):
 
-$$q(t) = v_j \left( t - \tau_v \left(1 - e^{-t/\tau_v}\right) \right), \qquad \tau_{cl} = t_{valve} + q^{-1}(c) \tag{12}$$
+```math
+q(t) = v_j \left( t - \tau_v \left(1 - e^{-t/\tau_v}\right) \right), \qquad \tau_{cl} = t_{valve} + q^{-1}(c) \tag{12}
+```
 
 Here $v_j$ is `fin_spd_mm_s` (210 mm/s: SCHUNK KGG 100-80, 40 mm in 0.19 s at 6
 bar), $\tau_v$ = 15 ms (a simulation constant), and $t_{valve}$ is `pk_von_ms`.
@@ -395,13 +419,19 @@ The entry window: the fingertips may pass the cell top only once the cell is 2
 mm inside the open gap, and Z must reach depth soon after arrival. $v_\times$ is
 the belt speed along the close axis:
 
-$$v_\times = v \, |\cos\theta|, \qquad t_{in} = \begin{cases} -(c - 2) / v_\times & v_\times > 1 \text{ mm/s} \\ -0.5 \text{ s} & \text{otherwise} \end{cases} \tag{13}$$
+```math
+v_\times = v \, |\cos\theta|, \qquad t_{in} = \begin{cases} -(c - 2) / v_\times & v_\times > 1 \text{ mm/s} \\ -0.5 \text{ s} & \text{otherwise} \end{cases} \tag{13}
+```
 
-$$t_d = \operatorname{clamp}\Big(\max(t_{in} + 5 \text{ ms}, \; -\tau_{band}) + \tau_{band}, \;\; 0, \;\; \min(15 \text{ ms}, \; 20 \text{ mm} / v)\Big) \tag{14}$$
+```math
+t_d = \mathrm{clamp}\Big(\max(t_{in} + 5 \text{ ms}, \; -\tau_{band}) + \tau_{band}, \;\; 0, \;\; \min(15 \text{ ms}, \; 20 \text{ mm} / v)\Big) \tag{14}
+```
 
 The events are the nominal times plus the operator offsets:
 
-$$t_z = t_d - \tau_p + \Delta_p, \qquad t_c = t_d - (\tau_{cl} - 8 \text{ ms}) + \Delta_c, \qquad t_r = t_d + \Delta_{r} \tag{15}$$
+```math
+t_z = t_d - \tau_p + \Delta_p, \qquad t_c = t_d - (\tau_{cl} - 8 \text{ ms}) + \Delta_c, \qquad t_r = t_d + \Delta_{r} \tag{15}
+```
 
 -   **Offsets:** $\Delta_p$, $\Delta_c$, $\Delta_r$ are `pk_off_plunge`,
     `pk_off_close` and `pk_off_retract`, in whole ms within ±100 ms. Each moves
@@ -420,7 +450,9 @@ $$t_z = t_d - \tau_p + \Delta_p, \qquad t_c = t_d - (\tau_{cl} - 8 \text{ ms}) +
 
 -   **Time:** the pre-position finishes before the plunge release.
 
-    $$\text{slack} = (t_a + t_z) - (T_{app} + 40 \text{ ms} + 30 \text{ ms}) \ge 0 \tag{16}$$
+    ```math
+    \text{slack} = (t_a + t_z) - (T_{app} + 40 \text{ ms} + 30 \text{ ms}) \ge 0 \tag{16}
+    ```
 
     $T_{app}$ (`budgetPick`) is the move from the current pose to
     $(x, z_h, \theta_j)$, timed the way the Gantry plans it:
@@ -450,7 +482,9 @@ $t_a + t_z$, $t_a + t_c$ and $t_a + t_r$.
 Every conveyor frame, and once before each event, re-solves the arrival from (2)
 and (5). The event offsets stay fixed (`retimeArrival`):
 
-$$t_a \leftarrow t + \frac{s_a - s(t)}{v} \tag{17}$$
+```math
+t_a \leftarrow t + \frac{s_a - s(t)}{v} \tag{17}
+```
 
 -   **Abort:** an armed strike aborts on a clock restart, stale frames or a
     stopped belt.
@@ -469,9 +503,13 @@ $$t_a \leftarrow t + \frac{s_a - s(t)}{v} \tag{17}$$
 After a strike the gantry carries the cell to the bin. `classifyFollowers` times
 that cycle and decides how each later cell is approached:
 
-$$T_{cyc} = t_{close} + T_{up} + T_{app}(\text{bin}) + 2 \, T_{bin} + t_{open} \tag{18}$$
+```math
+T_{cyc} = t_{close} + T_{up} + T_{app}(\text{bin}) + 2 \, T_{bin} + t_{open} \tag{18}
+```
 
-$$\text{pace} = \begin{cases} \text{slow} & t_a + T_{cyc} + T_{app}^{slow} \le t_a' \\ \text{fast} & t_a + T_{cyc} + T_{app}^{fast} \le t_a' \\ \text{drop} & \text{otherwise} \end{cases} \tag{19}$$
+```math
+\text{pace} = \begin{cases} \text{slow} & t_a + T_{cyc} + T_{app}^{slow} \le t_a' \\ \text{fast} & t_a + T_{cyc} + T_{app}^{fast} \le t_a' \\ \text{drop} & \text{otherwise} \end{cases} \tag{19}
+```
 
 -   $t_{close}$ and $t_{open}$ are `grp_close_ms` and `grp_open_ms` (190 ms
     each). $T_{up}$ is Z from $z_g$ up to $z_{safe}$; $T_{bin}$ is Z between

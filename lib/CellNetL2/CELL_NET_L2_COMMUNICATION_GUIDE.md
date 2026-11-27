@@ -118,38 +118,42 @@ adds `vis_cam_y_mm` to get world Y (+Y downstream).
 **Frames.** The vision frame is right-handed: +X across the belt, +Y downstream,
 +Z up, z = 0 on the belt. `theta_deg` is the cell long axis in that frame: 0°
 along +X, 90° along +Y, positive about +Z, in `[-180°, 180°)`. The gantry joint
-frame is rotated 180° about Y: \(X_g = -X_v\), \(Y_g = Y_v\), \(Z_g = -Z_v\)
-(down), and the belt surface is the calibrated joint \(z_{\max}\). The gantry
-pose frame (`GantryKinematics`) keeps the vision axes, so detections enter it
-with offsets only (`vis_x_off_mm`, `vis_cam_y_mm`).
+frame is rotated 180° about Y: $X_g = -X_v$, $Y_g = Y_v$, $Z_g = -Z_v$ (down),
+and the belt surface is the calibrated joint $z_{\max}$. The gantry pose frame
+(`GantryKinematics`) keeps the vision axes, so detections enter it with offsets
+only (`vis_x_off_mm`, `vis_cam_y_mm`).
 
 **Theta joint.** The joint holds the pads along +Y at 0°, and a positive joint
-turns them counter-clockwise seen from above, about \(+Z_v\) (checked on the Pi
+turns them counter-clockwise seen from above, about $+Z_v$ (checked on the Pi
 camera on 2026-11-16: at +45° the +X finger moved downstream). So
-\(\theta_{\mathrm{joint}} = \theta_{\mathrm{pose}} - 90^\circ\). For a side grip
-the pads run along the long axis, \(\theta_{\mathrm{pose}} =
-\mathrm{fold}(\theta) +\) `jaw_off_deg` (0° by default), which gives \[
-\theta_{\mathrm{joint}} = \mathrm{fold}(\theta) + \texttt{jaw\_off\_deg} -
-90^\circ + k \cdot 180^\circ , \] with \(k\) choosing the in-range joint with
-the least travel (`chooseSideJaw`). A cell along the belt (\(\theta =
-90^\circ\)) is gripped at joint 0°, one across the belt at ±90°. `item_id` is
-nonzero and stays the same across repeated observations of one object in a
-conveyor epoch. `battery_class` `1`–`10` is a pick: AAA, AA, D, C, 9V, CR123A,
-18650, 21700, 26650, 32650. `11`–`13` is a pack occupant that is tracked and not
-picked: laptop, Li-ion pack, power-tool. It selects the tunable jaw-time slot
-for a pick class and does not supply a size. `width_mm`, `length_mm`, and
-`height_from_belt_mm` are all required. Width is in `(0, 80]` mm. `reserved[0]`
-bit 0 must be set and `capture_displacement_m` is the conveyor displacement at
-exposure. A missing field is rejected. Pick envelopes, length × width × height
-above the belt: AAA `44.5 × 10.5 × 10.5`, AA `50.5 × 14.5 × 14.5`, D
-`61.5 × 34.2 × 34.2`, C `50 × 26.2 × 26.2`, 9V `48.5 × 17.5 × 26.5`, CR123A
-`34.5 × 17 × 17`, 18650 `65 × 18.3 × 18.3`, 21700 `70 × 21.2 × 21.2`, 26650
-`65 × 26.5 × 26.5`, 32650 `65 × 32 × 32`. Packs kept in view: laptop
-`205 × 50 × 22`, Li-ion pack `114 × 66 × 25`, power-tool `120 × 75 × 80`. Grasp
-height is \(\min(h/2, 25.4\,\mathrm{mm})\) down from the object top. The frame
-is 58 bytes, so a 60-byte padded frame still parses. Detections are handed to
-the pick task through a queue, so the Ethernet receive task never runs the
-planner.
+$\theta_{\mathrm{joint}} = \theta_{\mathrm{pose}} - 90^\circ$. For a side grip
+the pads run along the long axis,
+$\theta_{\mathrm{pose}} = \mathrm{fold}(\theta) +$ `jaw_off_deg` (0° by
+default), which gives
+
+```math
+\theta_{\mathrm{joint}} = \mathrm{fold}(\theta) + \texttt{jaw\_off\_deg} - 90^\circ + k \cdot 180^\circ ,
+```
+
+with $k$ choosing the in-range joint with the least travel (`chooseSideJaw`). A
+cell along the belt ($\theta = 90^\circ$) is gripped at joint 0°, one across the
+belt at ±90°. `item_id` is nonzero and stays the same across repeated
+observations of one object in a conveyor epoch. `battery_class` `1`–`10` is a
+pick: AAA, AA, D, C, 9V, CR123A, 18650, 21700, 26650, 32650. `11`–`13` is a pack
+occupant that is tracked and not picked: laptop, Li-ion pack, power-tool. It
+selects the tunable jaw-time slot for a pick class and does not supply a size.
+`width_mm`, `length_mm`, and `height_from_belt_mm` are all required. Width is in
+`(0, 80]` mm. `reserved[0]` bit 0 must be set and `capture_displacement_m` is
+the conveyor displacement at exposure. A missing field is rejected. Pick
+envelopes, length × width × height above the belt: AAA `44.5 × 10.5 × 10.5`, AA
+`50.5 × 14.5 × 14.5`, D `61.5 × 34.2 × 34.2`, C `50 × 26.2 × 26.2`, 9V
+`48.5 × 17.5 × 26.5`, CR123A `34.5 × 17 × 17`, 18650 `65 × 18.3 × 18.3`, 21700
+`70 × 21.2 × 21.2`, 26650 `65 × 26.5 × 26.5`, 32650 `65 × 32 × 32`. Packs kept
+in view: laptop `205 × 50 × 22`, Li-ion pack `114 × 66 × 25`, power-tool
+`120 × 75 × 80`. Grasp height is $`\min(h/2, 25.4\,\mathrm{mm})`$ down from the
+object top. The frame is 58 bytes, so a 60-byte padded frame still parses.
+Detections are handed to the pick task through a queue, so the Ethernet receive
+task never runs the planner.
 
 #### `CONVEYOR_SPEED` (0x02)
 ```cpp
