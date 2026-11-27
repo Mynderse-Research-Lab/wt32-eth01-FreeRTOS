@@ -11,7 +11,7 @@ This page records every source file, the plan to bring each one under 500 lines,
   - Function bodies are copied verbatim.
   - Every original line is used exactly once.
   - The only edits are to linkage: `static` added or dropped, shared declarations in a private header, default arguments moved to the declaration.
-  - A function that is itself too long is broken up in a separate commit afterwards. `5f8eb76` does this: `multiAxisTask` calls `multiAxisConnectAndRun`, which calls `multiAxisCyclic`, which calls `multiAxisRecover`.
+  - A function that is itself too long is broken up in a separate commit afterwards. `5ad34fb` does this: `multiAxisTask` calls `multiAxisConnectAndRun`, which calls `multiAxisCyclic`, which calls `multiAxisRecover`.
 - **Each split commit updates:**
   - the hand-kept source lists (`lib/*/CMakeLists.txt` SRCS, `idf/main/CMakeLists.txt` APP_SRCS, `test/host/CMakeLists.txt`)
   - every `file:line` reference in the docs, found by its code text
@@ -28,42 +28,42 @@ This page records every source file, the plan to bring each one under 500 lines,
 
 | Commit | File | Before | After |
 |---|---|---:|---|
-| `3ca7df4` | `lib/Gantry/src/Gantry.cpp` | 3,336 | 9 files, 240–498 lines |
-| `64040cb`, `5890c1a` | `src/gantry_test_console.cpp` | 4,422 | 17 files, 98–463 lines; `processCommand` became a command table |
-| `285825e` | `src/pick_scheduler.cpp` | 2,785 | 9 files, 252–403 lines; the strike path stays in `pick_strike.cpp` |
-| `6bcb0ab` | `lib/AppConfig/src/AppConfig.cpp` | 1,841 | 6 files, 176–398 lines; `loadDefaults()` calls two section functions |
-| `d114630` | `src/gantry_net_console.cpp` | 555 | 2 files, 182 and 396 lines; login and the recent-peer cache are in `gantry_net_console_auth.cpp` |
-| `8339673` | `src/gantry_ota.cpp` | 562 | 2 files, 270 and 316 lines; the TCP OTA server task and `gantryOtaStartServer` are in `gantry_ota_tcp.cpp` |
-| `e971af4`, `fcb89c8` | `src/main.cpp` | 615 | 6 files, 53–231 lines; `app_main` calls five stage functions (config, I/O, motion, tasks, network) in `main_init_*.cpp` and `main_tasks.cpp` |
-| `1db4520` | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
-| `28c3107` | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | 3 files, 53–465 lines; `update()` and the trace stamps are in `GantryEipRotaryAxisUpdate.cpp` |
-| `e1c549b` | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | 4 files, 50–457 lines; the arm and move phase machine is in `GantryEipLinearAxisPhases.cpp`, alarms and logging in `GantryEipLinearAxisAlarm.cpp` |
-| `e4761cb` | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
-| `7cc157d` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `6a97e0d` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisConnectAndRun` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
-| `bc18d32` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
-| `31c85c9` | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
-| `b32c42d` | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
-| `9aa2af3` | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
-| `7fea7b5` | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
-| `eb833ce` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
-| `cf1efaf` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
-| `3d57817` | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
-| `75c8298` | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
-| `9745207` | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
+| `9f4a5ed` | `lib/Gantry/src/Gantry.cpp` | 3,336 | 9 files, 240–498 lines |
+| `1df7ddf`, `7f043bf` | `src/gantry_test_console.cpp` | 4,422 | 17 files, 98–463 lines; `processCommand` became a command table |
+| `aefa261` | `src/pick_scheduler.cpp` | 2,785 | 9 files, 252–403 lines; the strike path stays in `pick_strike.cpp` |
+| `fedda97` | `lib/AppConfig/src/AppConfig.cpp` | 1,841 | 6 files, 176–398 lines; `loadDefaults()` calls two section functions |
+| `b36e01b` | `src/gantry_net_console.cpp` | 555 | 2 files, 182 and 396 lines; login and the recent-peer cache are in `gantry_net_console_auth.cpp` |
+| `b49b610` | `src/gantry_ota.cpp` | 562 | 2 files, 270 and 316 lines; the TCP OTA server task and `gantryOtaStartServer` are in `gantry_ota_tcp.cpp` |
+| `7bcdc06`, `f0e452e` | `src/main.cpp` | 615 | 6 files, 53–231 lines; `app_main` calls five stage functions (config, I/O, motion, tasks, network) in `main_init_*.cpp` and `main_tasks.cpp` |
+| `059196a` | `lib/MCP23S17/src/MCP23S17.cpp` | 546 | 3 files, 66–347 lines; lock, holder logging and register access are in `MCP23S17Bus.cpp` |
+| `1e0e06d` | `lib/Gantry/src/GantryEipRotaryAxis.cpp` | 768 | 3 files, 53–465 lines; `update()` and the trace stamps are in `GantryEipRotaryAxisUpdate.cpp` |
+| `658abdf` | `lib/Gantry/src/GantryEipLinearAxis.cpp` | 955 | 4 files, 50–457 lines; the arm and move phase machine is in `GantryEipLinearAxisPhases.cpp`, alarms and logging in `GantryEipLinearAxisAlarm.cpp` |
+| `ceba48a` | `lib/CellNetL2/src/CellNetOtaSender.cpp` | 1,209 | 4 files, 87–424 lines; `Link` and the sender class are in `CellNetOtaSenderInternal.h`, the phases in `CellNetOtaSenderPhases.cpp`, reporting in `CellNetOtaSenderReport.cpp` |
+| `a6f8940` | `lib/W5500/src/W5500.cpp` | 731 | 3 files, 16–436 lines; init, reset and recover are in `W5500Init.cpp`. Register, buffer and MACRAW access stay. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `3b9f331` | `lib/EtherNetIP/src/EipMultiScanner.cpp` | 829 | 3 files, 13–441 lines; forward open, forward close and reopen are in `EipMultiScannerConnect.cpp`. The exchange stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `ff91d82` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `43cb8e1`, `5ad34fb` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisConnectAndRun` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
+| `ffdd6e9` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
+| `904822e` | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
+| `524e72f` | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
+| `9941bd1` | `test/host/test_cell_net_l2.cpp` | 576 | 4 files, 57, 138, 162 and 279 lines, one executable. Framing, node dispatch and OTA framing are separate sources. 17 Unity cases |
+| `7fed695` | `test/host/test_app_config.cpp` | 680 | 5 files, 87–214 lines, one executable. The shared storage and boot helpers are inline in `test_app_config_internal.h` under `app_config_test`. 28 Unity cases |
+| `017d5c6` | `test/host/test_w5500_socket_fastpath.cpp` | 1,055 | 5 files, 58–360 lines, one executable. `CountingHal` is in `test_w5500_socket_fastpath_internal.h` under `w5500_fastpath_test`. Send, receive and TCP are separate sources. 38 Unity cases |
+| `27f3ce8` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
+| `7d5a8b6` | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
+| `28a36b3` | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
+| `f0eaf68` | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
 
 ## On-cell verification
 
-Image `9891df5`, flashed over CellNet on 2026-11-27 (slot `ota_0` to `ota_1`, 8.8 s, `emac_missed 0`).
+Image `c7770e5`, flashed over CellNet on 2026-11-27 (slot `ota_0` to `ota_1`, 8.8 s, `emac_missed 0`).
 
 | Run | Length | Result |
 |---|---|---|
 | Idle, motors off | 4 snapshots over 15 min, up to 28 min after boot | `eiptiming` GO every time, exchange p99 1,129–1,307 µs; `soft_miss`, `sendok_fail`, `chip_recover` and `reconnect` 0; `gaptrace`: no gap of 10 ms or more |
 | Motion | 15 min: 46 loops of `test_cycle`'s legs through `move` (414 moves, Z capped at 90 mm), 48 snapshots | every move reached its pose (X and Z within 1.5 mm, theta within 0.1°); GO every time, exchange p99 1,120–1,719 µs; the same counters 0; no gap |
 
-So the Class 1 splits (`7cc157d`, `6a97e0d`, `311d673`, `f62efb9`, `5f8eb76`) count as done. The boot log and console checks also covered the boot stages (`fcb89c8`), the console decoupling (`9bf8409`) and the component moves. `test_cycle` itself does not pass on this machine, for reasons that predate this work (OPEN_ITEMS G-E8). Z has no brake, so the `stop` that ends a run can let it fall to A014 (G-A12, G-A13).
+So the Class 1 splits (`a6f8940`, `3b9f331`, `ff91d82`, `43cb8e1`, `5ad34fb`) count as done. The boot log and console checks also covered the boot stages (`f0e452e`), the console decoupling (`4686dfe`) and the component moves. `test_cycle` itself does not pass on this machine, for reasons that predate this work (OPEN_ITEMS G-E8). Z has no brake, so the `stop` that ends a run can let it fall to A014 (G-A12, G-A13).
 
 ## Planned splits
 
@@ -127,34 +127,34 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `axis_pulse_motor_params.h` | 113 | under 500 |
 | `cell_net_l2_protocol.h` | 260 | under 500 |
 | `conveyor_intercept_params.h` | 44 | under 500 |
-| `coordinated_grasp.h` | 451 | split done (`b32c42d`) |
-| `coordinated_grasp_arm.h` | 69 | split done (`b32c42d`) |
+| `coordinated_grasp.h` | 451 | split done (`524e72f`) |
+| `coordinated_grasp_arm.h` | 69 | split done (`524e72f`) |
 | `ethernet_app_config.h` | 122 | under 500 |
 | `gantry_app_constants.h` | 127 | under 500 |
 | `gantry_kconfig.h` | 19 | under 500 |
 | `gantry_runtime_params.h` | 40 | under 500 |
-| `pick_intercept.h` | 27 | split done (`bc18d32`) |
-| `pick_intercept_belt.h` | 194 | split done (`bc18d32`) |
-| `pick_intercept_clearance.h` | 191 | split done (`bc18d32`) |
-| `pick_intercept_plan.h` | 230 | split done (`bc18d32`) |
-| `pick_intercept_strike.h` | 406 | split done (`bc18d32`) |
-| `pick_intercept_tracker.h` | 218 | split done (`bc18d32`) |
-| `pick_intercept_vision.h` | 357 | split done (`bc18d32`) |
+| `pick_intercept.h` | 27 | split done (`ffdd6e9`) |
+| `pick_intercept_belt.h` | 194 | split done (`ffdd6e9`) |
+| `pick_intercept_clearance.h` | 191 | split done (`ffdd6e9`) |
+| `pick_intercept_plan.h` | 230 | split done (`ffdd6e9`) |
+| `pick_intercept_strike.h` | 406 | split done (`ffdd6e9`) |
+| `pick_intercept_tracker.h` | 218 | split done (`ffdd6e9`) |
+| `pick_intercept_vision.h` | 357 | split done (`ffdd6e9`) |
 | `strike_plan.h` | 307 | under 500 |
 
 ### `lib/AppConfig/` (16 files, 3,209 lines)
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/AppConfig.cpp` | 249 | split done (`6bcb0ab`) |
-| `src/AppConfig.h` | 171 | split done (`6bcb0ab`) |
-| `src/AppConfigAccess.cpp` | 398 | split done (`6bcb0ab`) |
+| `src/AppConfig.cpp` | 249 | split done (`fedda97`) |
+| `src/AppConfig.h` | 171 | split done (`fedda97`) |
+| `src/AppConfigAccess.cpp` | 398 | split done (`fedda97`) |
 | `src/AppConfigData.h` | 189 | under 500 |
-| `src/AppConfigDefaultsCell.cpp` | 359 | split done (`6bcb0ab`) |
-| `src/AppConfigDefaultsMotion.cpp` | 353 | split done (`6bcb0ab`) |
-| `src/AppConfigInternal.h` | 32 | split done (`6bcb0ab`) |
-| `src/AppConfigParamIo.cpp` | 373 | split done (`6bcb0ab`) |
-| `src/AppConfigText.cpp` | 176 | split done (`6bcb0ab`) |
+| `src/AppConfigDefaultsCell.cpp` | 359 | split done (`fedda97`) |
+| `src/AppConfigDefaultsMotion.cpp` | 353 | split done (`fedda97`) |
+| `src/AppConfigInternal.h` | 32 | split done (`fedda97`) |
+| `src/AppConfigParamIo.cpp` | 373 | split done (`fedda97`) |
+| `src/AppConfigText.cpp` | 176 | split done (`fedda97`) |
 | `src/ConfigSchema.cpp` | 313 | under 500 |
 | `src/ConfigSchema.h` | 53 | under 500 |
 | `src/ConfigSet.h` | 200 | under 500 |
@@ -180,11 +180,11 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/CellNetL2Framing.h` | 138 | under 500 |
 | `src/CellNetOtaReceiver.cpp` | 208 | under 500 |
 | `src/CellNetOtaReceiver.h` | 122 | under 500 |
-| `src/CellNetOtaSender.cpp` | 418 | split done (`e4761cb`) |
+| `src/CellNetOtaSender.cpp` | 418 | split done (`ceba48a`) |
 | `src/CellNetOtaSender.h` | 95 | under 500 |
-| `src/CellNetOtaSenderInternal.h` | 360 | split done (`e4761cb`) |
-| `src/CellNetOtaSenderPhases.cpp` | 424 | split done (`e4761cb`) |
-| `src/CellNetOtaSenderReport.cpp` | 87 | split done (`e4761cb`) |
+| `src/CellNetOtaSenderInternal.h` | 360 | split done (`ceba48a`) |
+| `src/CellNetOtaSenderPhases.cpp` | 424 | split done (`ceba48a`) |
+| `src/CellNetOtaSenderReport.cpp` | 87 | split done (`ceba48a`) |
 | `src/EspEthL2Transport.cpp` | 108 | under 500 |
 | `src/EspEthL2Transport.h` | 48 | under 500 |
 | `src/IL2Transport.h` | 62 | under 500 |
@@ -213,10 +213,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EipEncapsulation.h` | 90 | under 500 |
 | `src/EipIoConnection.cpp` | 57 | under 500 |
 | `src/EipIoConnection.h` | 53 | under 500 |
-| `src/EipMultiScanner.cpp` | 441 | split done (`6a97e0d`) |
+| `src/EipMultiScanner.cpp` | 441 | split done (`3b9f331`) |
 | `src/EipMultiScanner.h` | 214 | under 500 |
-| `src/EipMultiScannerConnect.cpp` | 414 | split done (`6a97e0d`) |
-| `src/EipMultiScannerInternal.h` | 13 | split done (`6a97e0d`) |
+| `src/EipMultiScannerConnect.cpp` | 414 | split done (`3b9f331`) |
+| `src/EipMultiScannerInternal.h` | 13 | split done (`3b9f331`) |
 | `src/EipProcessImage.cpp` | 64 | under 500 |
 | `src/EipProcessImage.h` | 41 | under 500 |
 | `src/EipReliabilityStats.cpp` | 10 | under 500 |
@@ -225,12 +225,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/EipRunTimeTrace.h` | 59 | under 500 |
 | `src/EipScanner.cpp` | 346 | under 500 |
 | `src/EipScanner.h` | 102 | under 500 |
-| `src/EipScannerConfig.cpp` | 160 | split done (`f62efb9`) |
-| `src/EipScannerDiag.cpp` | 434 | split done (`f62efb9`) |
+| `src/EipScannerConfig.cpp` | 160 | split done (`43cb8e1`) |
+| `src/EipScannerDiag.cpp` | 434 | split done (`43cb8e1`) |
 | `src/EipScannerPolicy.h` | 128 | under 500 |
-| `src/EipScannerTask.cpp` | 499 | split done (`f62efb9`, `5f8eb76`) |
+| `src/EipScannerTask.cpp` | 499 | split done (`43cb8e1`, `5ad34fb`) |
 | `src/EipScannerTask.h` | 49 | under 500 |
-| `src/EipScannerTaskInternal.h` | 438 | split done (`f62efb9`) |
+| `src/EipScannerTaskInternal.h` | 438 | split done (`43cb8e1`) |
 | `src/EipSession.cpp` | 157 | under 500 |
 | `src/EipSession.h` | 46 | under 500 |
 | `src/EipSocketW5500.cpp` | 304 | under 500 |
@@ -262,30 +262,30 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/Gantry.cpp` | 472 | split done (`3ca7df4`) |
-| `src/Gantry.h` | 474 | split done (`31c85c9`) |
-| `src/GantryAxisState.cpp` | 427 | split done (`3ca7df4`) |
+| `src/Gantry.cpp` | 472 | split done (`9f4a5ed`) |
+| `src/Gantry.h` | 474 | split done (`904822e`) |
+| `src/GantryAxisState.cpp` | 427 | split done (`9f4a5ed`) |
 | `src/GantryConfig.cpp` | 14 | under 500 |
 | `src/GantryConfig.h` | 174 | under 500 |
 | `src/GantryControlPeriod.h` | 46 | under 500 |
 | `src/GantryDriveRef.h` | 24 | under 500 |
-| `src/GantryEipBringUp.cpp` | 498 | split done (`3ca7df4`) |
-| `src/GantryEipHomeCal.cpp` | 417 | split done (`3ca7df4`) |
+| `src/GantryEipBringUp.cpp` | 498 | split done (`9f4a5ed`) |
+| `src/GantryEipHomeCal.cpp` | 417 | split done (`9f4a5ed`) |
 | `src/GantryEipLimitSequence.h` | 103 | under 500 |
-| `src/GantryEipLinearAxis.cpp` | 457 | split done (`e1c549b`) |
+| `src/GantryEipLinearAxis.cpp` | 457 | split done (`658abdf`) |
 | `src/GantryEipLinearAxis.h` | 196 | under 500 |
-| `src/GantryEipLinearAxisAlarm.cpp` | 119 | split done (`e1c549b`) |
-| `src/GantryEipLinearAxisInternal.h` | 50 | split done (`e1c549b`) |
-| `src/GantryEipLinearAxisPhases.cpp` | 383 | split done (`e1c549b`) |
-| `src/GantryEipRotaryAxis.cpp` | 465 | split done (`28c3107`) |
+| `src/GantryEipLinearAxisAlarm.cpp` | 119 | split done (`658abdf`) |
+| `src/GantryEipLinearAxisInternal.h` | 50 | split done (`658abdf`) |
+| `src/GantryEipLinearAxisPhases.cpp` | 383 | split done (`658abdf`) |
+| `src/GantryEipRotaryAxis.cpp` | 465 | split done (`1e0e06d`) |
 | `src/GantryEipRotaryAxis.h` | 216 | under 500 |
-| `src/GantryEipRotaryAxisInternal.h` | 53 | split done (`28c3107`) |
-| `src/GantryEipRotaryAxisUpdate.cpp` | 285 | split done (`28c3107`) |
+| `src/GantryEipRotaryAxisInternal.h` | 53 | split done (`1e0e06d`) |
+| `src/GantryEipRotaryAxisUpdate.cpp` | 285 | split done (`1e0e06d`) |
 | `src/GantryEndEffector.cpp` | 91 | under 500 |
 | `src/GantryEndEffector.h` | 34 | under 500 |
 | `src/GantryEndEffectorPolicy.h` | 31 | under 500 |
-| `src/GantryHoming.cpp` | 463 | split done (`3ca7df4`) |
-| `src/GantryInternal.h` | 22 | split done (`3ca7df4`) |
+| `src/GantryHoming.cpp` | 463 | split done (`9f4a5ed`) |
+| `src/GantryInternal.h` | 22 | split done (`9f4a5ed`) |
 | `src/GantryKinematics.cpp` | 50 | under 500 |
 | `src/GantryKinematics.h` | 76 | under 500 |
 | `src/GantryLimitSwitch.cpp` | 125 | under 500 |
@@ -293,17 +293,17 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryLimitSwitchPolicy.h` | 76 | under 500 |
 | `src/GantryLinearAxis.h` | 131 | under 500 |
 | `src/GantryLinearPhases.h` | 27 | under 500 |
-| `src/GantryMotion.cpp` | 488 | split done (`3ca7df4`) |
-| `src/GantryPath.cpp` | 272 | split done (`3ca7df4`) |
+| `src/GantryMotion.cpp` | 488 | split done (`9f4a5ed`) |
+| `src/GantryPath.cpp` | 272 | split done (`9f4a5ed`) |
 | `src/GantryPathProfile.h` | 316 | under 500 |
-| `src/GantryPathTheta.cpp` | 259 | split done (`3ca7df4`) |
+| `src/GantryPathTheta.cpp` | 259 | split done (`9f4a5ed`) |
 | `src/GantryRotaryAxis.h` | 139 | under 500 |
 | `src/GantryRotaryPhases.h` | 26 | under 500 |
-| `src/GantrySequential.cpp` | 240 | split done (`3ca7df4`) |
+| `src/GantrySequential.cpp` | 240 | split done (`9f4a5ed`) |
 | `src/GantryThetaOrigin.h` | 71 | under 500 |
 | `src/GantryTrajectory.cpp` | 106 | under 500 |
 | `src/GantryTrajectory.h` | 103 | under 500 |
-| `src/GantryTypes.h` | 144 | split done (`31c85c9`) |
+| `src/GantryTypes.h` | 144 | split done (`904822e`) |
 | `src/GantryUtils.h` | 110 | under 500 |
 
 ### `lib/GantryOta/` (4 files, 1,119 lines)
@@ -326,10 +326,10 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/MCP23S17.cpp` | 347 | split done (`1db4520`) |
+| `src/MCP23S17.cpp` | 347 | split done (`059196a`) |
 | `src/MCP23S17.h` | 182 | under 500 |
-| `src/MCP23S17Bus.cpp` | 160 | split done (`1db4520`) |
-| `src/MCP23S17Internal.h` | 66 | split done (`1db4520`) |
+| `src/MCP23S17Bus.cpp` | 160 | split done (`059196a`) |
+| `src/MCP23S17Internal.h` | 66 | split done (`059196a`) |
 
 ### `lib/Spi3Bus/` (3 files, 293 lines)
 
@@ -374,7 +374,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 
 | File | Lines | Status |
 |---|---:|---|
-| `src/W5500.cpp` | 436 | split done (`7cc157d`) |
+| `src/W5500.cpp` | 436 | split done (`a6f8940`) |
 | `src/W5500.h` | 217 | under 500 |
 | `src/W5500BusMutex.cpp` | 84 | under 500 |
 | `src/W5500BusMutex.h` | 40 | under 500 |
@@ -383,13 +383,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500Diag.cpp` | 305 | under 500 |
 | `src/W5500Diag.h` | 149 | under 500 |
 | `src/W5500Hal.h` | 33 | under 500 |
-| `src/W5500Init.cpp` | 312 | split done (`7cc157d`) |
-| `src/W5500Internal.h` | 16 | split done (`7cc157d`) |
+| `src/W5500Init.cpp` | 312 | split done (`a6f8940`) |
+| `src/W5500Internal.h` | 16 | split done (`a6f8940`) |
 | `src/W5500Poll.h` | 115 | under 500 |
-| `src/W5500Socket.cpp` | 490 | split done (`311d673`) |
+| `src/W5500Socket.cpp` | 490 | split done (`ff91d82`) |
 | `src/W5500Socket.h` | 135 | under 500 |
-| `src/W5500SocketInternal.h` | 136 | split done (`311d673`) |
-| `src/W5500SocketTcp.cpp` | 466 | split done (`311d673`) |
+| `src/W5500SocketInternal.h` | 136 | split done (`ff91d82`) |
+| `src/W5500SocketTcp.cpp` | 466 | split done (`ff91d82`) |
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
@@ -399,28 +399,28 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 |---|---:|---|
 | `basic_tests.cpp` | 104 | under 500 |
 | `basic_tests.h` | 11 | under 500 |
-| `gantry_console_bringup.cpp` | 217 | split done (`64040cb`) |
-| `gantry_console_cfg.cpp` | 309 | split done (`64040cb`) |
-| `gantry_console_cip.cpp` | 241 | split done (`64040cb`) |
-| `gantry_console_cmd_motion.cpp` | 247 | split done (`5890c1a`) |
-| `gantry_console_cmd_pick.cpp` | 216 | split done (`5890c1a`) |
-| `gantry_console_cmd_profile.cpp` | 208 | split done (`5890c1a`) |
-| `gantry_console_commands.cpp` | 314 | split done (`64040cb`) |
-| `gantry_console_drive_diag.cpp` | 316 | split done (`64040cb`) |
-| `gantry_console_drv.cpp` | 463 | split done (`64040cb`) |
-| `gantry_console_homing.cpp` | 384 | split done (`64040cb`) |
-| `gantry_console_internal.h` | 212 | split done (`64040cb`) |
-| `gantry_console_io.cpp` | 255 | split done (`64040cb`) |
+| `gantry_console_bringup.cpp` | 217 | split done (`1df7ddf`) |
+| `gantry_console_cfg.cpp` | 309 | split done (`1df7ddf`) |
+| `gantry_console_cip.cpp` | 241 | split done (`1df7ddf`) |
+| `gantry_console_cmd_motion.cpp` | 247 | split done (`7f043bf`) |
+| `gantry_console_cmd_pick.cpp` | 216 | split done (`7f043bf`) |
+| `gantry_console_cmd_profile.cpp` | 208 | split done (`7f043bf`) |
+| `gantry_console_commands.cpp` | 314 | split done (`1df7ddf`) |
+| `gantry_console_drive_diag.cpp` | 316 | split done (`1df7ddf`) |
+| `gantry_console_drv.cpp` | 463 | split done (`1df7ddf`) |
+| `gantry_console_homing.cpp` | 384 | split done (`1df7ddf`) |
+| `gantry_console_internal.h` | 212 | split done (`1df7ddf`) |
+| `gantry_console_io.cpp` | 255 | split done (`1df7ddf`) |
 | `gantry_console_parse.h` | 193 | under 500 |
-| `gantry_console_session.cpp` | 365 | split done (`64040cb`) |
-| `gantry_console_status.cpp` | 378 | split done (`64040cb`) |
-| `gantry_console_testcycle.cpp` | 450 | split done (`64040cb`) |
-| `gantry_console_thetapath.cpp` | 98 | split done (`64040cb`) |
+| `gantry_console_session.cpp` | 365 | split done (`1df7ddf`) |
+| `gantry_console_status.cpp` | 378 | split done (`1df7ddf`) |
+| `gantry_console_testcycle.cpp` | 450 | split done (`1df7ddf`) |
+| `gantry_console_thetapath.cpp` | 98 | split done (`1df7ddf`) |
 | `gantry_net_console.cpp` | 396 | split done |
 | `gantry_net_console.h` | 23 | under 500 |
 | `gantry_net_console_auth.cpp` | 182 | split done |
 | `gantry_net_console_internal.h` | 29 | split done |
-| `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
+| `gantry_test_console.cpp` | 345 | split done (`1df7ddf`) |
 | `gantry_test_console.h` | 95 | under 500 |
 | `main.cpp` | 112 | split done |
 | `main_init_io.cpp` | 143 | split done |
@@ -428,17 +428,17 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `main_init_net.cpp` | 53 | split done |
 | `main_internal.h` | 56 | split done |
 | `main_tasks.cpp` | 169 | split done |
-| `pick_belt.cpp` | 381 | split done (`285825e`) |
-| `pick_bench.cpp` | 255 | split done (`285825e`) |
-| `pick_console.cpp` | 253 | split done (`285825e`) |
-| `pick_eval.cpp` | 403 | split done (`285825e`) |
-| `pick_motion.cpp` | 274 | split done (`285825e`) |
-| `pick_run.cpp` | 262 | split done (`285825e`) |
-| `pick_scheduler.cpp` | 386 | split done (`285825e`) |
+| `pick_belt.cpp` | 381 | split done (`aefa261`) |
+| `pick_bench.cpp` | 255 | split done (`aefa261`) |
+| `pick_console.cpp` | 253 | split done (`aefa261`) |
+| `pick_eval.cpp` | 403 | split done (`aefa261`) |
+| `pick_motion.cpp` | 274 | split done (`aefa261`) |
+| `pick_run.cpp` | 262 | split done (`aefa261`) |
+| `pick_scheduler.cpp` | 386 | split done (`aefa261`) |
 | `pick_scheduler.h` | 65 | under 500 |
-| `pick_scheduler_internal.h` | 239 | split done (`285825e`) |
-| `pick_strike.cpp` | 347 | split done (`285825e`) |
-| `pick_trace.cpp` | 252 | split done (`285825e`) |
+| `pick_scheduler_internal.h` | 239 | split done (`aefa261`) |
+| `pick_strike.cpp` | 347 | split done (`aefa261`) |
+| `pick_trace.cpp` | 252 | split done (`aefa261`) |
 
 ### `test/host/` (74 files, 14,068 lines)
 
@@ -455,56 +455,56 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `stubs/gpio_expander.h` | 50 | under 500 |
 | `stubs/host_test_clock.cpp` | 29 | under 500 |
 | `stubs/host_test_clock.h` | 17 | under 500 |
-| `test_app_config.cpp` | 87 | split done (`7fea7b5`) |
-| `test_app_config_internal.h` | 110 | split done (`7fea7b5`) |
-| `test_app_config_schema.cpp` | 144 | split done (`7fea7b5`) |
-| `test_app_config_store.cpp` | 214 | split done (`7fea7b5`) |
-| `test_app_config_values.cpp` | 211 | split done (`7fea7b5`) |
-| `test_cell_net_l2.cpp` | 57 | split done (`9aa2af3`) |
-| `test_cell_net_l2_framing.cpp` | 279 | split done (`9aa2af3`) |
-| `test_cell_net_l2_node.cpp` | 162 | split done (`9aa2af3`) |
-| `test_cell_net_l2_ota.cpp` | 138 | split done (`9aa2af3`) |
+| `test_app_config.cpp` | 87 | split done (`7fed695`) |
+| `test_app_config_internal.h` | 110 | split done (`7fed695`) |
+| `test_app_config_schema.cpp` | 144 | split done (`7fed695`) |
+| `test_app_config_store.cpp` | 214 | split done (`7fed695`) |
+| `test_app_config_values.cpp` | 211 | split done (`7fed695`) |
+| `test_cell_net_l2.cpp` | 57 | split done (`9941bd1`) |
+| `test_cell_net_l2_framing.cpp` | 279 | split done (`9941bd1`) |
+| `test_cell_net_l2_node.cpp` | 162 | split done (`9941bd1`) |
+| `test_cell_net_l2_ota.cpp` | 138 | split done (`9941bd1`) |
 | `test_cellnet_ota_receiver.cpp` | 403 | under 500 |
 | `test_cip_ethernet_link.cpp` | 95 | under 500 |
 | `test_console_parse.cpp` | 175 | under 500 |
 | `test_coordinated_grasp.cpp` | 150 | under 500 |
 | `test_drivetrain_params.cpp` | 80 | under 500 |
-| `test_eip_axis.cpp` | 141 | split done (`75c8298`) |
-| `test_eip_axis_alarm.cpp` | 454 | split done (`75c8298`) |
-| `test_eip_axis_internal.h` | 244 | split done (`75c8298`) |
-| `test_eip_axis_linear.cpp` | 438 | split done (`75c8298`) |
-| `test_eip_axis_rotary.cpp` | 373 | split done (`75c8298`) |
-| `test_eip_axis_units.cpp` | 287 | split done (`75c8298`) |
+| `test_eip_axis.cpp` | 141 | split done (`28a36b3`) |
+| `test_eip_axis_alarm.cpp` | 454 | split done (`28a36b3`) |
+| `test_eip_axis_internal.h` | 244 | split done (`28a36b3`) |
+| `test_eip_axis_linear.cpp` | 438 | split done (`28a36b3`) |
+| `test_eip_axis_rotary.cpp` | 373 | split done (`28a36b3`) |
+| `test_eip_axis_units.cpp` | 287 | split done (`28a36b3`) |
 | `test_eip_encoding.cpp` | 478 | under 500 |
 | `test_eip_limit_sequence.cpp` | 76 | under 500 |
 | `test_eip_run_time_trace.cpp` | 96 | under 500 |
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
-| `test_eip_transport.cpp` | 137 | split done (`9745207`) |
-| `test_eip_transport_close.cpp` | 449 | split done (`9745207`) |
-| `test_eip_transport_drain.cpp` | 212 | split done (`9745207`) |
-| `test_eip_transport_internal.h` | 300 | split done (`9745207`) |
-| `test_eip_transport_nop.cpp` | 53 | split done (`9745207`) |
-| `test_eip_transport_reopen.cpp` | 365 | split done (`9745207`) |
-| `test_eip_transport_rigs.h` | 236 | split done (`9745207`) |
-| `test_eip_transport_session.cpp` | 290 | split done (`9745207`) |
-| `test_gantry_orchestration.cpp` | 159 | split done (`cf1efaf`) |
-| `test_gantry_orchestration_bringup.cpp` | 245 | split done (`cf1efaf`) |
-| `test_gantry_orchestration_fault.cpp` | 348 | split done (`cf1efaf`) |
-| `test_gantry_orchestration_internal.h` | 88 | split done (`cf1efaf`) |
-| `test_gantry_orchestration_move.cpp` | 362 | split done (`cf1efaf`) |
+| `test_eip_transport.cpp` | 137 | split done (`f0eaf68`) |
+| `test_eip_transport_close.cpp` | 449 | split done (`f0eaf68`) |
+| `test_eip_transport_drain.cpp` | 212 | split done (`f0eaf68`) |
+| `test_eip_transport_internal.h` | 300 | split done (`f0eaf68`) |
+| `test_eip_transport_nop.cpp` | 53 | split done (`f0eaf68`) |
+| `test_eip_transport_reopen.cpp` | 365 | split done (`f0eaf68`) |
+| `test_eip_transport_rigs.h` | 236 | split done (`f0eaf68`) |
+| `test_eip_transport_session.cpp` | 290 | split done (`f0eaf68`) |
+| `test_gantry_orchestration.cpp` | 159 | split done (`27f3ce8`) |
+| `test_gantry_orchestration_bringup.cpp` | 245 | split done (`27f3ce8`) |
+| `test_gantry_orchestration_fault.cpp` | 348 | split done (`27f3ce8`) |
+| `test_gantry_orchestration_internal.h` | 88 | split done (`27f3ce8`) |
+| `test_gantry_orchestration_move.cpp` | 362 | split done (`27f3ce8`) |
 | `test_hcs01_assembly.cpp` | 193 | under 500 |
 | `test_hcs01_comws_client.cpp` | 143 | under 500 |
 | `test_k5100_param_access.cpp` | 77 | under 500 |
 | `test_kinematics.cpp` | 214 | under 500 |
 | `test_limit_switch_policy.cpp` | 109 | under 500 |
 | `test_path_profile.cpp` | 405 | under 500 |
-| `test_pick_intercept.cpp` | 117 | split done (`3d57817`) |
-| `test_pick_intercept_belt.cpp` | 120 | split done (`3d57817`) |
-| `test_pick_intercept_budget.cpp` | 242 | split done (`3d57817`) |
-| `test_pick_intercept_geometry.cpp` | 283 | split done (`3d57817`) |
-| `test_pick_intercept_internal.h` | 69 | split done (`3d57817`) |
-| `test_pick_intercept_tracker.cpp` | 371 | split done (`3d57817`) |
+| `test_pick_intercept.cpp` | 117 | split done (`7d5a8b6`) |
+| `test_pick_intercept_belt.cpp` | 120 | split done (`7d5a8b6`) |
+| `test_pick_intercept_budget.cpp` | 242 | split done (`7d5a8b6`) |
+| `test_pick_intercept_geometry.cpp` | 283 | split done (`7d5a8b6`) |
+| `test_pick_intercept_internal.h` | 69 | split done (`7d5a8b6`) |
+| `test_pick_intercept_tracker.cpp` | 371 | split done (`7d5a8b6`) |
 | `test_spi3_critical.cpp` | 78 | under 500 |
 | `test_strike_plan.cpp` | 313 | under 500 |
 | `test_theta_trace_analysis.cpp` | 158 | under 500 |
@@ -512,9 +512,9 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_w5500_deferred_log.cpp` | 76 | under 500 |
 | `test_w5500_diag.cpp` | 325 | under 500 |
 | `test_w5500_poll.cpp` | 129 | under 500 |
-| `test_w5500_socket_fastpath.cpp` | 100 | split done (`eb833ce`) |
-| `test_w5500_socket_fastpath_internal.h` | 302 | split done (`eb833ce`) |
-| `test_w5500_socket_fastpath_recv.cpp` | 318 | split done (`eb833ce`) |
-| `test_w5500_socket_fastpath_send.cpp` | 360 | split done (`eb833ce`) |
-| `test_w5500_socket_fastpath_tcp.cpp` | 58 | split done (`eb833ce`) |
+| `test_w5500_socket_fastpath.cpp` | 100 | split done (`017d5c6`) |
+| `test_w5500_socket_fastpath_internal.h` | 302 | split done (`017d5c6`) |
+| `test_w5500_socket_fastpath_recv.cpp` | 318 | split done (`017d5c6`) |
+| `test_w5500_socket_fastpath_send.cpp` | 360 | split done (`017d5c6`) |
+| `test_w5500_socket_fastpath_tcp.cpp` | 58 | split done (`017d5c6`) |
 | `test_w5500_spi.cpp` | 284 | under 500 |
