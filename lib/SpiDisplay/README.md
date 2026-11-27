@@ -11,9 +11,10 @@ ST7789 320×240 TFT on SPI3, and the UI drawn on it: dashboard, parameter menu,
 value and password editors, reboot prompt, and an About screen. Input is the
 encoder and two buttons on MCP23S17 port B.
 
-`bootInitIo` calls `UiManager::init` once at boot (`src/main_init_io.cpp`).
+`bootInitIo` calls `UiManager::init` once at boot (`src/main/main_init_io.cpp`).
 After that the panel is driven only from the `TftUiTask` task (function
-`tftUiTask`, core 0, priority 2, stack 4096), created in `src/main_tasks.cpp`.
+`tftUiTask`, core 0, priority 2, stack 4096), created in
+`src/main/main_tasks.cpp`.
 
 ## Maturity
 
@@ -28,8 +29,8 @@ Runs on the gantry. G-E6, G-E9, G-E10 and G-F9 are open and concern this UI.
 
 ## Consumers
 
-`src/main_tasks.cpp` owns the task. It polls input at 100 Hz and redraws at 15
-Hz. No other task calls `UiManager`.
+`src/main/main_tasks.cpp` owns the task. It polls input at 100 Hz and redraws at
+15 Hz. No other task calls `UiManager`.
 
 ## Build and test
 

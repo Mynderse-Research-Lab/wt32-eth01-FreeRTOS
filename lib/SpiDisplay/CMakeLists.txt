@@ -1,16 +1,19 @@
 idf_component_register(
     SRCS
         "src/SpiDisplay.cpp"
-        "src/St7789Driver.cpp"
-        "src/TftFont.cpp"
-        "src/UiInput.cpp"
-        "src/UiDashboard.cpp"
-        "src/UiMenu.cpp"
-        "src/UiEditor.cpp"
-        "src/UiRebootPrompt.cpp"
-        "src/UiManager.cpp"
+        "src/driver/St7789Driver.cpp"
+        "src/driver/TftFont.cpp"
+        "src/ui/UiInput.cpp"
+        "src/screens/UiDashboard.cpp"
+        "src/ui/UiMenu.cpp"
+        "src/screens/UiEditor.cpp"
+        "src/screens/UiRebootPrompt.cpp"
+        "src/ui/UiManager.cpp"
     INCLUDE_DIRS
         "src"
+        "src/driver"
+        "src/ui"
+        "src/screens"
         "${CMAKE_CURRENT_LIST_DIR}/../../include"
     REQUIRES
         AppConfig

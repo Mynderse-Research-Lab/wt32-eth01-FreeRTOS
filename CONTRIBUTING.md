@@ -32,8 +32,8 @@ CI runs both lanes and a Markdown link check on every push and pull request
 | Directory | Role |
 |-----------|------|
 | `idf/` | ESP-IDF project root (build here) |
-| `src/` | `app_main`, test console, pick scheduler |
-| `include/` | App-wide constants and headers |
+| `src/` | Application modules not yet matured into components: `main/` (`app_main`, boot), `console/`, `pick_scheduler/`; see [`src/README.md`](src/README.md) |
+| `include/` | App-wide constants and configuration headers |
 | `lib/` | The 13 ESP-IDF components, listed by layer in [`lib/README.md`](lib/README.md) |
 | `test/host/` | Native Unity tests (primary regression); see Testing policy below |
 | `docs/` | Hardware docs, schematics, the knowledge transfer page, open items and the doc index. Code docs live with the code: in `lib/<Name>/`, and at the repo root for `src/` |
@@ -115,7 +115,7 @@ This rebuilds with `--coverage -O0`, re-runs ctest and writes
 ### On-target selftest
 
 The console command `selftest` runs the kinematics, joint-limit and trajectory
-assertions on the gantry (`src/basic_tests.cpp`) and ends with
+assertions on the gantry (`src/console/system/basic_tests.cpp`) and ends with
 `Selftest complete: passed=<N> failed=0`. It is built while
 `CONFIG_GANTRY_SELFTEST=y`, the default; set it to `n` for production builds.
 
@@ -123,6 +123,13 @@ assertions on the gantry (`src/basic_tests.cpp`) and ends with
 
 -   **Source files stay under 500 lines.** A larger file is split by what its
     code does.
+-   **At most 8 source files per folder.** When a `src` folder (`src/` or a
+    library's `lib/<Name>/src/`) holds more than 8 `.c`, `.cpp` and `.h` files,
+    group them into subfolders by what the code does. The entry files (the
+    library header, the module's main `.cpp`) stay at the top, the same limit
+    applies to each subfolder, and every subfolder goes into the include
+    directories so includes keep bare file names. In `src/`, each module has its
+    own folder. `lib/CellNetL2/src/` waits for X-11 in `docs/OPEN_ITEMS.md`.
 -   **A split moves code; it does not change it.** Each split is its own commit:
     function bodies are copied verbatim, every original line is used exactly
     once, and the only edits are to linkage (`static`, shared declarations in a
@@ -141,17 +148,19 @@ assertions on the gantry (`src/basic_tests.cpp`) and ends with
     lines.
 -   **Matured features become components.** A feature is matured when it runs on
     the gantry and has no open blocker or decision in `docs/OPEN_ITEMS.md`. It
-    then moves out of `src/` into `lib/<Feature>/` with a `CMakeLists.txt`
-    (`idf_component_register` with explicit REQUIRES; app headers through
-    `${APP_ROOT}/include`), its code in `src/`, a `README.md` and a
-    `REFERENCE.md`. The test console is the next candidate, once G-C7 is decided
-    (OPEN_ITEMS X-7).
+    then moves as a folder, `src/<module>/` to `lib/<Feature>/src/` with its
+    subfolders, and gets a `CMakeLists.txt` (`idf_component_register` with
+    explicit REQUIRES; app headers through `${APP_ROOT}/include`), a `README.md`
+    and a `REFERENCE.md`. The test console is the next candidate, once G-C7 is
+    decided (OPEN_ITEMS X-7).
 
 ## Naming conventions
 
 -   Library folders: **PascalCase** (`Gantry`, `EtherNetIP`, `CellNetL2`)
 -   Gantry API: **`namespace Gantry`**
 -   App headers: **snake_case** (`pick_scheduler.h`)
+-   Module folders in `src/` and source subfolders: **snake_case**
+    (`pick_scheduler`, `linear_axis`)
 -   EtherNet/IP types: **`Eip*` / `Cip*` / `Kinetix5100*`**
 -   Per-axis constants: **`include/axis_*_params.h`**
 

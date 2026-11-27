@@ -61,7 +61,7 @@ ideal profile.
 `kMotionEpsDeg` is 0.01°. `kSettleBandDeg` is 0.10° (S-0-0057). `kAlignFrac` is
 0.2. The alignment method is the comment on `analyze` in
 `theta_trace_analysis.h`, not restated here. The trapezoid itself is
-`Gantry::TrajectoryPlanner` in `lib/Gantry/src/GantryTrajectory.h`.
+`Gantry::TrajectoryPlanner` in `lib/Gantry/src/motion/GantryTrajectory.h`.
 
 The recorder keeps 1,500 samples (`kCap`). It keeps recording for 300 ms after
 the axis ends the move (`kTailUs`) and disarms 120 s after `arm` if no move
@@ -103,8 +103,9 @@ not a trace was armed. `analyze` returns a zero `Result` when `t_us` or
 
 ## Console
 
-`thtrace` (prefix) is `cmdThTrace` in `src/gantry_console_cmd_pick.cpp`. This
-component does not register the command.
+`thtrace` (prefix) is `cmdThTrace` in
+`src/console/motion/gantry_console_cmd_pick.cpp`. This component does not
+register the command.
 
 ## Usage
 
@@ -119,8 +120,8 @@ if (!thetaTraceCommand(gantry, "arm", line, sizeof(line))) {
 
 The command's fields are the `thtrace` row in `GANTRY_FIRMWARE.md`. The summary
 math is `theta_trace_analysis.h`, checked by `test_theta_trace_analysis`. The
-trapezoid is `lib/Gantry/src/GantryTrajectory.h`. G-E1 in `docs/OPEN_ITEMS.md`
-is why the raw dump is paced.
+trapezoid is `lib/Gantry/src/motion/GantryTrajectory.h`. G-E1 in
+`docs/OPEN_ITEMS.md` is why the raw dump is paced.
 
 ## See also
 

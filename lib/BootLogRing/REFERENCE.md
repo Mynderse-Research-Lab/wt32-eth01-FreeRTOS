@@ -51,7 +51,7 @@ hook is already installed.
 ## Console
 
 `bootlog` (exact match) prints the captured byte count and each stored line. The
-command is `cmdBootLog` in `src/gantry_console_commands.cpp`.
+command is `cmdBootLog` in `src/console/gantry_console_commands.cpp`.
 
 ## Usage
 

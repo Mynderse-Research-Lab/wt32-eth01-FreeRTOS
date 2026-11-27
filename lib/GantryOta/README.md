@@ -28,10 +28,10 @@ mode. ESP-IDF `app_update`, `esp_app_format`, `esp_partition`, `esp_eth`,
 
 `app_main` calls `gantryOtaCellNetModeRequested` and, when set,
 `gantryOtaRunCellNetMode`, and later `gantryOtaConfirmBootValid`
-(`src/main.cpp`). `bootStartNetwork` in `src/main_init_net.cpp` calls
+(`src/main/main.cpp`). `bootStartNetwork` in `src/main/main_init_net.cpp` calls
 `gantryOtaStartServer`. The pick scheduler calls `gantryOtaRebootToCellNetMode`
-(`src/pick_scheduler.cpp`). The console calls `gantryOtaPrintStatus`,
-`gantryOtaFlashStallTest` and `gantryResetReasonName`.
+(`src/pick_scheduler/pick_scheduler.cpp`). The console calls
+`gantryOtaPrintStatus`, `gantryOtaFlashStallTest` and `gantryResetReasonName`.
 
 ## Build and test
 
@@ -42,8 +42,8 @@ Registered from `idf/CMakeLists.txt`. The main component lists `GantryOta` in
 ## Open items
 
 N-2 (gantry side done). N-1 records gantry OTA as that item's done part. G-E7 is
-the link wait in `src/main_init_net.cpp` that decides whether the TCP server
-starts. C-2 is the conveyor.
+the link wait in `src/main/main_init_net.cpp` that decides whether the TCP
+server starts. C-2 is the conveyor.
 
 ## See also
 

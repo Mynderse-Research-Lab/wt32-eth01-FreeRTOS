@@ -25,9 +25,9 @@ ESP-IDF `esp_driver_spi`, `esp_driver_gpio`, `esp_timer`, `log` and `freertos`.
 
 ## Consumers
 
-`bootInitMotion` in `src/main_init_motion.cpp` constructs the chip and applies
-the stored keys `eip_spi_khz`, `eip_spi_dma` and `eip_txwr_split` before `init`.
-`EtherNetIP` is the socket and Class 1 caller. Reset is MCP PB7
+`bootInitMotion` in `src/main/main_init_motion.cpp` constructs the chip and
+applies the stored keys `eip_spi_khz`, `eip_spi_dma` and `eip_txwr_split` before
+`init`. `EtherNetIP` is the socket and Class 1 caller. Reset is MCP PB7
 (`W5500_RST_GPIO` is passed as -1).
 
 ## Build and test

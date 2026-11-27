@@ -59,7 +59,7 @@ CLASSES = [["nine_volt_flatface", 1, 47.7, 26.6, 17.3],
            ["power_tool_diehard_lenface", 4, 136.2, 56.4, 77.4],
            ["power_tool_diehard_shortface", 4, 77.4, 56.4, 136.2]]
 
-# Sim class id -> firmware battery_class (include/pick_intercept.h kDevProfiles).
+# Sim class id -> firmware battery_class (src/pick_scheduler/intercept/pick_intercept.h kDevProfiles).
 FIRMWARE_CLASS = {1: 5, 2: 12, 3: 11, 4: 13}
 
 # Camera FOV: 14.5 in by 10.875 in; x is parallel to the gantry beam (across

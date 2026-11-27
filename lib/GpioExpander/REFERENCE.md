@@ -64,7 +64,7 @@ None.
 ## Console
 
 This component registers no command. The `mcp_*` console commands in
-`src/gantry_console_io.cpp` call these functions.
+`src/console/system/gantry_console_io.cpp` call these functions.
 
 ## Usage
 

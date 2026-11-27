@@ -1,5 +1,5 @@
 // Host unit tests for Gantry forward/inverse kinematics and joint-limit
-// validation. Promoted from the on-target selftest in src/basic_tests.cpp so
+// validation. Promoted from the on-target selftest in src/console/system/basic_tests.cpp so
 // the core math is regression-tested in CI without hardware.
 
 #include "unity.h"

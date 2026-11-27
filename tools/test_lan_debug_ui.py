@@ -7,7 +7,7 @@ is run by hand rather than by CI or the commit hook.
     py tools/test_lan_debug_ui.py
 
 The byte sequences below are the real thing - they were captured from
-`src/gantry_net_console.cpp` and confirmed against a live WT32 at
+`src/console/net/gantry_net_console.cpp` and confirmed against a live WT32 at
 192.168.1.100:2323. The framing cases matter because the firmware's `Password: `
 and `> ` prompts arrive with **no trailing newline**, so a purely line-based
 reader would stall on both.

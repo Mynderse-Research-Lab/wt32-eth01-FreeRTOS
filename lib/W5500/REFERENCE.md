@@ -107,7 +107,7 @@ exchange.
 ## Console
 
 None in this component. `gaptrace` and `eiptiming` print snapshots this driver
-captured; the commands live in `src/gantry_console_commands.cpp`.
+captured; the commands live in `src/console/gantry_console_commands.cpp`.
 
 ## AppConfig
 
@@ -125,7 +125,7 @@ negative value on failure, and the `bool` ones false.
 ## Usage
 
 ```cpp
-// src/main_init_motion.cpp
+// src/main/main_init_motion.cpp
 static W5500 w5500;
 W5500Config cfg = {};
 cfg.spi_host = W5500_SPI_HOST;

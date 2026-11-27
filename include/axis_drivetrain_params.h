@@ -438,7 +438,7 @@
  * --------------------------------------------------------------------------- */
 /* The reminder is emitted only when AXIS_DRIVETRAIN_PARAMS_EMIT_WARNINGS is
  * defined by the including TU. Exactly one TU - the application entry point
- * src/main.cpp - defines it before including this header, which keeps the
+ * src/main/main.cpp - defines it before including this header, which keeps the
  * build log from carrying a copy of the warning for every source file that
  * transitively pulls axis_drivetrain_params.h in. */
 #if !defined(GANTRY_GEOMETRY_FROZEN) && \

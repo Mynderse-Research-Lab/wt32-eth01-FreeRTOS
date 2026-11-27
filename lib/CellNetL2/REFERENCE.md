@@ -90,10 +90,10 @@ None registered by this component.
 ## Usage
 
 ```cpp
-// src/main.cpp
+// src/main/main.cpp
 static CellNet::EspEthL2Transport l2Transport;
 static CellNet::CellNetL2Node l2Node(l2Transport, CellNodeId::GANTRY);
-// src/main_init_net.cpp, after the LAN8720 link is up
+// src/main/main_init_net.cpp, after the LAN8720 link is up
 if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNetif()) == ESP_OK &&
     l2Node.begin()) {
     // node active

@@ -268,11 +268,12 @@ libraries.
 
 ### 5.3 Pick scheduler
 
-Turns detections into timed strikes. Code: `src/pick_scheduler.cpp` and the
-other `src/pick_*.cpp` files (`pick_scheduler_internal.h` lists them),
-`include/pick_intercept.h`, `include/strike_plan.h`. Bin drop and traverse run
-at the safe-Z ceiling: $z_{min}$ plus the stored `geom_safe_z_mm` (48.4 mm by
-default), applied at boot (`main_init_motion.cpp:163`).
+Turns detections into timed strikes. Code: `src/pick_scheduler/`
+(`pick_scheduler_internal.h` lists its files), with the intercept model in
+`intercept/pick_intercept.h` and the strike plan in `strike/strike_plan.h`. Bin
+drop and traverse run at the safe-Z ceiling: $z_{min}$ plus the stored
+`geom_safe_z_mm` (48.4 mm by default), applied at boot
+(`main_init_motion.cpp:163`).
 
 The pick model, read from the code, is in
 [GANTRY_FIRMWARE §6](/GANTRY_FIRMWARE.md#pick-model-until-the-math-document)
@@ -302,8 +303,8 @@ check all take the MCP23S17 mutex.
 ### 5.5 Controller, cell network and tools
 
 WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP
-console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`,
-`src/gantry_test_console.cpp`, `lib/GantryOta`. Flash with
+console and OTA. Code: `src/main/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`,
+`src/console/gantry_test_console.cpp`, `lib/GantryOta`. Flash with
 `python tools/supervisor_ota.py --host 10.42.0.1`, which goes over CellNet L2 by
 default; add `--transport tcp` for the TCP route.
 

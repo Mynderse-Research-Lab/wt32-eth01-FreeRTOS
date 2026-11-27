@@ -97,7 +97,7 @@ the previous image. The filter rules are section 5.1 of the protocol document.
 | `ota_hb` | 0 | 3 | 3072 | OTA-only mode |
 
 `bootStartNetwork` passes port 8032 and `CONSOLE_TCP_PASSWORD`
-(`src/main_init_net.cpp`).
+(`src/main/main_init_net.cpp`).
 
 The TCP task allows 1 s for the `AUTH` line and 1 s for the `START` line, then 2
 s of silence on the binary stream. The stream buffer is 4,096 bytes. After
@@ -128,8 +128,9 @@ The `esp_err_t` values above. The TCP replies are `ERR TIMEOUT`, `ERR AUTH`,
 ## Console
 
 `ota` (prefix) calls `gantryOtaPrintStatus`. `flashstall` (prefix) calls
-`gantryOtaFlashStallTest`. Both are in `src/gantry_console_commands.cpp`.
-`status` prints `gantryResetReasonName` from `src/gantry_console_status.cpp`.
+`gantryOtaFlashStallTest`. Both are in
+`src/console/gantry_console_commands.cpp`. `status` prints
+`gantryResetReasonName` from `src/console/system/gantry_console_status.cpp`.
 This component registers no command.
 
 ## Usage

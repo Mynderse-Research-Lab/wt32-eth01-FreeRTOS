@@ -29,10 +29,11 @@ private. Addresses come from `include/ethernet_app_config.h`.
 
 ## Consumers
 
-`bootInitIo` in `src/main_init_io.cpp` calls `enablePhyOscillator`.
-`bootStartNetwork` in `src/main_init_net.cpp` calls `start` and `waitForUp`. The
-TCP console, TCP OTA server and CellNet node start only after that wait.
-`boottime` reads `ethernetBootTimes()` from `src/gantry_console_commands.cpp`.
+`bootInitIo` in `src/main/main_init_io.cpp` calls `enablePhyOscillator`.
+`bootStartNetwork` in `src/main/main_init_net.cpp` calls `start` and
+`waitForUp`. The TCP console, TCP OTA server and CellNet node start only after
+that wait. `boottime` reads `ethernetBootTimes()` from
+`src/console/gantry_console_commands.cpp`.
 
 ## Build and test
 
