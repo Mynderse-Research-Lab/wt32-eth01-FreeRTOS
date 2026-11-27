@@ -1,6 +1,6 @@
 # Library Review
 
-**Status:** Review of every library in `lib/`, 2026-11-26, read from `refac/code_encapsulation` at `93928b2`.
+**Status:** Review of every library in `lib/`, 2026-11-26, read from `refac/code_encapsulation` at `a6abb73`.
 
 Every source and header file of each library was read in full, together with the callers and tests that the claims depend on. Each finding carries an evidence label, as in [OPEN_ITEMS.md](OPEN_ITEMS.md):
 
