@@ -29,6 +29,7 @@ reading path from the [README](/README.md).
 | Document | Covers |
 |----------|--------|
 | [Strike timing, 2026-10-25](/STRIKE_TIMING_MEASUREMENTS_2026-10-25.md) | The Z strike measured against the plan |
+| [Captures](captures/) | Theta traces of 2026-11-19 (G-C15); the Kinetix 5100 EDS file `tools/eip_test.py` loads |
 | [Contributing](/CONTRIBUTING.md) | Build, tests, engineering rules |
 | [Tools](/tools/README.md) | Helper scripts |
 | [Vendor catalog](/driver_datasheets_and_calculations/INDEX.md) | Vendor manuals and drive parameter sets |
