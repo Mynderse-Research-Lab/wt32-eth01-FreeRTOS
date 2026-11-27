@@ -1,70 +1,48 @@
-# MCP23S17 SPI GPIO Expander Library
+# MCP23S17
 
-ESP-IDF driver for MCP23S17 16-bit SPI GPIO expander.
+C driver for the MCP23S17 16-bit SPI GPIO expander on SPI3. It caches IODIR, GPPU and OLAT, and serialises register access with a per-handle mutex.
 
-On WT32-ETH01 this part shares **SPI3** with the Amazon SPI TFT. Prefer
-`skip_bus_init=true` after `spi3::init()` so the bus is owned by `lib/Spi3Bus`.
+On this board the bus is owned by `Spi3Bus`. Callers pass `skip_bus_init = true` after `spi3::init()`.
 
-## WT32 pin map (SPI3)
+## Maturity
 
-| Signal | GPIO | Notes |
-|--------|------|--------|
-| SCLK | 14 | Shared with TFT |
-| MOSI | 4 | Shared with TFT |
-| MISO | 36 | MCP readback; TFT ignore |
-| CS_MCP | 2 | Idle HIGH; default SPI3 client |
-| TFT CS | MCP PB2 | Software CS (not ESP GPIO) |
-| KO | MCP PB6 | Module key input |
-| W5500 RST | MCP PB7 | Active-low; external pull-up |
+Runs on the gantry. G-D3 and G-D6 are open and concern this driver.
 
-Do **not** use GPIO 18/19/23 — those are LAN8720 RMII.
+## Dependencies
 
-## Channel map (`device_address=0`, A0–A2=GND → 0x20)
+ESP-IDF `esp_driver_spi`, `esp_driver_gpio`, `esp_common`, `log`, `freertos`, and `Spi3Bus`.
 
-| MCP | Function |
-|-----|----------|
-| PA0–PA3 | Field 24 V DOUT0–3 (DOUT0 = gripper) |
+## Consumers
+
+`GpioExpander` is the field and UI wrapper (`gpio_expander_init`). `Gantry` drives the gripper through that wrapper. `SpiDisplay` reads port B for the encoder and buttons and writes DC and RES.
+
+## Build and test
+
+Registered from `idf/CMakeLists.txt`. There is no host test.
+
+## Open items
+
+G-D3, G-D6.
+
+## Pin map
+
+From `include/gantry_app_constants.h:40–71`. The header comment in `MCP23S17.h` does not restate this map.
+
+| Signal | Where |
+|---|---|
+| SCLK, MOSI, MISO | GPIO14, GPIO4, GPIO36 |
+| MCP chip select | GPIO2, idle high |
+| TFT chip select | GPIO32 (ESP GPIO, not an MCP pin) |
+| TFT backlight | GPIO17 |
+| PA0–PA3 | Field 24 V DOUT0–3. DOUT0 is the gripper |
 | PA4–PA7 | Field 24 V DIN0–3 |
-| PB0 / PB1 | TFT DC / RES |
-| PB2 | TFT CS (software CS on SPI3; idle HIGH) |
-| PB3–PB5 | Encoder A / B / PUSH |
-| PB6 | KO (module key input) |
-| PB7 | W5500 RSTn (active-low; external pull-up) |
+| PB0 | Module KO |
+| PB1 | Encoder push |
+| PB2 | Encoder B |
+| PB3 | Encoder A |
+| PB4 | Unused (backlight moved to GPIO17) |
+| PB5 | TFT D/C |
+| PB6 | TFT RES |
+| PB7 | W5500 RSTn, active low |
 
-TFT BLK is hardwired ON (+5V); not MCP-driven.
-
-## Usage (shared SPI3)
-
-```c
-#include "Spi3Bus.h"
-#include "MCP23S17.h"
-#include "gpio_expander.h"
-#include "gantry_app_constants.h"
-
-spi3::init();
-
-mcp23s17_config_t config = {};
-config.spi_host = spi3::host();
-config.cs_pin = (gpio_num_t)SPI3_CS_MCP_GPIO;
-config.device_address = MCP23S17_HW_ADDR;
-config.clock_speed_hz = SPI3_MCP_CLOCK_HZ;
-config.skip_bus_init = true;
-
-gpio_expander_init(&config);
-gpio_expander_configure_field_and_ui();
-field_dout_set(0, true);
-bool din0 = field_din_get(0);
-```
-
-## Hardware Connections
-
-| MCP23S17 Pin | ESP32 Pin | Description |
-|--------------|-----------|-------------|
-| VDD | 3.3V | Power supply |
-| VSS | GND | Ground |
-| RESET | 3.3V | Reset (tie high) |
-| CS | GPIO 2 | Chip select |
-| SCK | GPIO 14 | SPI clock |
-| SI (MOSI) | GPIO 4 | SPI data in |
-| SO (MISO) | GPIO 36 | SPI data out |
-| A0, A1, A2 | GND | Address 0x20 |
+Hardware address is `MCP23S17_HW_ADDR` (0). A0, A1 and A2 are tied to ground.
