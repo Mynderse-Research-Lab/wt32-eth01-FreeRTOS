@@ -161,8 +161,8 @@ document. The figure and PDF generators for the deleted documents
 ## Links to repoint once the document exists
 
 -   Firmware: `include/pick_intercept.h:5`.
--   Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `GANTRY_FIRMWARE.md`,
-    `docs/OPEN_ITEMS.md`.
+-   Docs: `docs/KNOWLEDGE_TRANSFER.md`, `GANTRY_FIRMWARE.md`,
+    `docs/OPEN_ITEMS.md`; add the document to `docs/INDEX.md`.
 -   Tools: the scripts listed under topic 12.
 -   CI: remove the three `--exclude` entries in
     `.github/workflows/firmware-ci.yml`, which keep the link check from failing
