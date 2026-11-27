@@ -79,7 +79,7 @@
 | `include/pick_intercept_strike.h:59` `beltContactLeadS`, `:73` `strikeLeads` | Lead times from belt contact geometry | `test_pick_intercept` | none |
 | `include/pick_intercept_plan.h:37` `planPick`, `:101` `retimePick`, `:138` `retimeArrival`, `:186` `retimeStrikeEvents`, `:223` `isPlungeOverdue` | Strike schedule and re-timing from the belt clock (`planPick`/`retimePick` are host-only, G-C8) | `test_pick_intercept` | none |
 | `src/pick_eval.cpp:120` `strikePlan`, `:205` `strikeTiming`, `:233` `evaluate`, `src/pick_strike.cpp:145` `armStrike`, `:202` `retimeArmed` | Live strike planning, arming and re-timing | — | none |
-| `include/coordinated_grasp.h:72` `jawA`, `:157` `makePlant`, `:467` `armPair`, `:482` `fireDue` | Jaw opening over time, grasp plant, firing | `test_coordinated_grasp` | none |
+| `include/coordinated_grasp.h:72` `jawA`, `:157` `makePlant`, `include/coordinated_grasp_arm.h:32` `armPair`, `:47` `fireDue` | Jaw opening over time, grasp plant, firing | `test_coordinated_grasp` | none |
 
 ## 8. Multi-part scheduling
 

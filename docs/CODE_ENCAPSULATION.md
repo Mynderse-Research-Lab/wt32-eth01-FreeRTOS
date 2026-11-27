@@ -44,17 +44,12 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `311d673` | `lib/W5500/src/W5500Socket.cpp` | 990 | 3 files, 136–490 lines; the TCP path is in `W5500SocketTcp.cpp`. The UDP fast path stays. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `f62efb9`, `5f8eb76` | `lib/EtherNetIP/src/EipScannerTask.cpp` | 1,329 | 4 files, 160–499 lines; diagnostics are in `EipScannerDiag.cpp`, configuration is in `EipScannerConfig.cpp`. `multiAxisSetup` calls `multiAxisCyclic`, which calls `multiAxisRecover`. The cyclic helpers stay inline in `EipScannerTaskInternal.h`. Waits for an on-cell `eiptiming` and `gaptrace` soak |
 | `bc18d32` | `include/pick_intercept.h` | 1,531 | 7 files, 27–406 lines. The umbrella include is unchanged for callers. Vision, the belt clock, clearance, strike leads, the schedule and the part tracker are the themed headers |
-|  | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
+| `31c85c9` | `lib/Gantry/src/Gantry.h` | 597 | 2 files, 144 and 474 lines. Error, status, motion state, bring-up phase and the waypoint queue are in `GantryTypes.h`. `RuntimeParams` was already in `GantryUtils.h`; `RotaryTraceSample` was already in `GantryRotaryAxis.h` |
+|  | `include/coordinated_grasp.h` | 504 | 2 files, 69 and 451 lines. The header has no reference-fixture loader. The bench arm (`Arm`, `armPair`, `fireDue`) is in `coordinated_grasp_arm.h`, included from the model header |
 
 ## Planned splits
 
-8 files are over 500 lines. The headers come first, then the host tests.
-
-### Headers (1)
-
-| File | Lines | Planned split |
-|---|---:|---|
-| `include/coordinated_grasp.h` | 504 | The reference-fixture loader apart from the model |
+7 files are over 500 lines. They are the host tests.
 
 ### Host tests (7)
 
@@ -120,7 +115,7 @@ The existing libraries that lack a `README.md` or `REFERENCE.md` get them from t
 
 Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host/`, with its line count on 2026-11-26.
 
-### `include/` (19 files, 3,847 lines)
+### `include/` (20 files, 3,863 lines)
 
 | File | Lines | Status |
 |---|---:|---|
@@ -128,7 +123,8 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `axis_pulse_motor_params.h` | 113 | under 500 |
 | `cell_net_l2_protocol.h` | 260 | under 500 |
 | `conveyor_intercept_params.h` | 44 | under 500 |
-| `coordinated_grasp.h` | 504 | **over 500: planned** |
+| `coordinated_grasp.h` | 451 | split done |
+| `coordinated_grasp_arm.h` | 69 | split done |
 | `ethernet_app_config.h` | 122 | under 500 |
 | `gantry_app_constants.h` | 127 | under 500 |
 | `gantry_kconfig.h` | 19 | under 500 |
@@ -258,7 +254,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | File | Lines | Status |
 |---|---:|---|
 | `src/Gantry.cpp` | 472 | split done (`3ca7df4`) |
-| `src/Gantry.h` | 474 | split done |
+| `src/Gantry.h` | 474 | split done (`31c85c9`) |
 | `src/GantryAxisState.cpp` | 427 | split done (`3ca7df4`) |
 | `src/GantryConfig.cpp` | 14 | under 500 |
 | `src/GantryConfig.h` | 174 | under 500 |
@@ -298,7 +294,7 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryThetaOrigin.h` | 71 | under 500 |
 | `src/GantryTrajectory.cpp` | 106 | under 500 |
 | `src/GantryTrajectory.h` | 103 | under 500 |
-| `src/GantryTypes.h` | 144 | split done |
+| `src/GantryTypes.h` | 144 | split done (`31c85c9`) |
 | `src/GantryUtils.h` | 110 | under 500 |
 
 ### `lib/MCP23S17/` (4 files, 755 lines)
