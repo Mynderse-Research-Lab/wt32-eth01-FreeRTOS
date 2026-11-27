@@ -43,7 +43,6 @@ set(APP_SRCS
     "${APP_ROOT}/src/gantry_ota.cpp"
     "${APP_ROOT}/src/gantry_ota_tcp.cpp"
     "${APP_ROOT}/src/gpio_expander.c"
-    "${APP_ROOT}/src/boot_log_ring.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -68,6 +67,7 @@ idf_component_register(
         Spi3Bus
         SpiDisplay
         AppConfig
+        BootLogRing
         nvs_flash
         esp_driver_spi
         esp_driver_gpio

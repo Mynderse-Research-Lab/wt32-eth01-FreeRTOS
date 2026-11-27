@@ -18,6 +18,7 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../lib/Spi3Bus"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/SpiDisplay"
     "${CMAKE_CURRENT_LIST_DIR}/../lib/AppConfig"
+    "${CMAKE_CURRENT_LIST_DIR}/../lib/BootLogRing"
 )
 
 # Compile-time defaults come from sdkconfig.defaults alone. The generated

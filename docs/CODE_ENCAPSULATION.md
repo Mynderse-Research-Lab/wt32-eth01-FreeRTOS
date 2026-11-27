@@ -52,7 +52,7 @@ This page records every source file, the plan to bring each one under 500 lines,
 | `cf1efaf` | `test/host/test_gantry_orchestration.cpp` | 1,082 | 5 files, 88–362 lines, both executables. The harness is inline in `test_gantry_orchestration_internal.h` under `gantry_orch_test`. 55 Unity cases, and 42 with `CONFIG_GANTRY_THETA_SEQUENTIAL` |
 | `3d57817` | `test/host/test_pick_intercept.cpp` | 1,095 | 6 files, 69–371 lines, one executable. Cell and frame helpers are inline in `test_pick_intercept_internal.h` under `pick_intercept_test`. Belt, geometry, budget and tracker are separate sources. 49 Unity cases |
 | `75c8298` | `test/host/test_eip_axis.cpp` | 1,807 | 6 files, 141–454 lines, one executable. Fakes and frame helpers are inline in `test_eip_axis_internal.h` under `eip_axis_test`. Linear, alarm, rotary and units are separate sources. 50 Unity cases |
-|  | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
+| `9745207` | `test/host/test_eip_transport.cpp` | 1,891 | 8 files, 53–449 lines, one executable. Session fakes are inline in `test_eip_transport_internal.h` and the multi-axis rigs in `test_eip_transport_rigs.h`, both under `eip_transport_test`. 50 Unity cases |
 
 ## Planned splits
 
@@ -75,7 +75,7 @@ A feature is **matured** when it runs on the gantry and has no open blocker or d
 
 | Feature (today in `src/`) | Status | Component |
 |---|---|---|
-| `boot_log_ring.*` | Matured | `lib/BootLogRing` |
+| `boot_log_ring.*` | Moved to `lib/BootLogRing` | `lib/BootLogRing` |
 | `gpio_expander.*` | Matured; G-D3 concerns `MCP23S17` and `Spi3Bus`, not this wrapper (to be confirmed at the move) | `lib/GpioExpander` |
 | `theta_trace.*` with `include/theta_trace_analysis.h` | Matured | `lib/ThetaTrace` |
 | `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Matured (N-2 done) | `lib/GantryOta` |
@@ -153,6 +153,13 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/MemoryStorage.h` | 113 | under 500 |
 | `src/NvsStorage.cpp` | 150 | under 500 |
 | `src/NvsStorage.h` | 36 | under 500 |
+
+### `lib/BootLogRing/` (2 files, 95 lines)
+
+| File | Lines | Status |
+|---|---:|---|
+| `src/boot_log_ring.cpp` | 79 | under 500 |
+| `src/boot_log_ring.h` | 16 | under 500 |
 
 ### `lib/CellNetL2/` (15 files, 2,935 lines)
 
@@ -353,14 +360,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (51 files, 11,604 lines)
+### `src/` (49 files, 11,509 lines)
 
 | File | Lines | Status |
 |---|---:|---|
 | `basic_tests.cpp` | 81 | under 500 |
 | `basic_tests.h` | 11 | under 500 |
-| `boot_log_ring.cpp` | 79 | under 500 |
-| `boot_log_ring.h` | 16 | under 500 |
 | `gantry_cellnet_ota.cpp` | 402 | under 500 |
 | `gantry_console_bringup.cpp` | 217 | split done (`64040cb`) |
 | `gantry_console_cfg.cpp` | 309 | split done (`64040cb`) |
@@ -449,14 +454,14 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `test_eip_run_time_trace.cpp` | 96 | under 500 |
 | `test_eip_scanner_policy.cpp` | 118 | under 500 |
 | `test_eip_socket_w5500.cpp` | 295 | under 500 |
-| `test_eip_transport.cpp` | 137 | split done |
-| `test_eip_transport_close.cpp` | 449 | split done |
-| `test_eip_transport_drain.cpp` | 212 | split done |
-| `test_eip_transport_internal.h` | 300 | split done |
-| `test_eip_transport_nop.cpp` | 53 | split done |
-| `test_eip_transport_reopen.cpp` | 365 | split done |
-| `test_eip_transport_rigs.h` | 236 | split done |
-| `test_eip_transport_session.cpp` | 290 | split done |
+| `test_eip_transport.cpp` | 137 | split done (`9745207`) |
+| `test_eip_transport_close.cpp` | 449 | split done (`9745207`) |
+| `test_eip_transport_drain.cpp` | 212 | split done (`9745207`) |
+| `test_eip_transport_internal.h` | 300 | split done (`9745207`) |
+| `test_eip_transport_nop.cpp` | 53 | split done (`9745207`) |
+| `test_eip_transport_reopen.cpp` | 365 | split done (`9745207`) |
+| `test_eip_transport_rigs.h` | 236 | split done (`9745207`) |
+| `test_eip_transport_session.cpp` | 290 | split done (`9745207`) |
 | `test_gantry_orchestration.cpp` | 159 | split done (`cf1efaf`) |
 | `test_gantry_orchestration_bringup.cpp` | 245 | split done (`cf1efaf`) |
 | `test_gantry_orchestration_fault.cpp` | 348 | split done (`cf1efaf`) |
