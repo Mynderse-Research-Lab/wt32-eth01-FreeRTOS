@@ -10,6 +10,15 @@ uses it.
 Keeps the first log output after reset in RAM. The LAN console connects only
 after boot, so start-up logs would otherwise exist only on UART0.
 
+## Role
+
+Diagnostic support library. Only the `bootlog` console command reads it; motion,
+picks and the Class 1 scanner do not depend on it. It is installed first in
+`app_main` and stays in the log path for the whole uptime; the cost is in
+[Task and timing](REFERENCE.md#task-and-timing). Removing it means deleting
+`bootLogRingInstall` from `app_main`, the `bootlog` command, its help line and
+include, and `BootLogRing` from both CMake lists.
+
 ## Maturity
 
 Matured. No open item in `docs/OPEN_ITEMS.md` concerns this component.

@@ -11,6 +11,15 @@ Records one HCS01 theta move at 1 kHz and summarises it for the console command
 `thtrace`. The drive profiles the move. The summary rebuilds the ideal trapezoid
 afterwards.
 
+## Role
+
+Diagnostic support library. Only the `thtrace` console command reaches it;
+motion, picks and the Class 1 scanner do not call it. It reads theta feedback,
+sends no commands and does nothing until the first `thtrace arm`; the cost is in
+[Task and timing](REFERENCE.md#task-and-timing). Removing it means deleting the
+`thtrace` command, its help line and include, `ThetaTrace` from both CMake
+lists, and the host test `test_theta_trace_analysis`.
+
 ## Maturity
 
 Matured. It runs on the gantry. No open item in `docs/OPEN_ITEMS.md` is a
