@@ -1,9 +1,15 @@
-# Math Relink Inventory
+# Math relink inventory
 
 **Status:** working list, 2026-11-19, read from the code at `c9a88b3`.
-**Purpose:** every piece of code that implements system mathematics, grouped by topic, so each can be linked to a section of the new canonical mathematical foundation document. This list names *what* the code computes; it contains no derivations or equations.
+**Purpose:** every piece of code that implements system mathematics, grouped by
+topic, so each can be linked to a section of the new canonical mathematical
+foundation document. This list names *what* the code computes; it contains no
+derivations or equations.
 
-**How to use it:** give each topic a section with a stable anchor in the new document, then add one comment per function, for example `// Math: <doc>#belt-odometer`. The "Doc link today" column shows what has to be repointed.
+**How to use it:** give each topic a section with a stable anchor in the new
+document, then add one comment per function, for example
+`// Math: <doc>#belt-odometer`. The "Doc link today" column shows what has to be
+repointed.
 
 ---
 
@@ -42,7 +48,9 @@
 
 ## 4. Point-to-point motion profiles (trapezoid / triangle)
 
-**Five implementations of the same profile** (already tracked as OPEN_ITEMS G-C8). One document section should cover all of them; consolidating the code is a separate decision.
+**Five implementations of the same profile** (already tracked as OPEN_ITEMS
+G-C8). One document section should cover all of them; consolidating the code is
+a separate decision.
 
 | Code | Host test |
 |------|-----------|
@@ -117,24 +125,45 @@
 
 ## 12. Outside the firmware (tools and simulation)
 
-`tools/simulate_coordinated_grasp.py`, `tools/sim/gantry_twin.py` and the rest of `tools/sim/` re-implement parts of topics 2–7. `simulate_coordinated_grasp.py:687` still writes its report to a deleted document. The figure and PDF generators for the deleted documents (`generate_grasp_timing_pdfs.py`, `render_grasp_math_figures.py`, `render_pickup_figures.py` and `test_pdf_loader.py`) were removed on 2026-11-27.
+`tools/simulate_coordinated_grasp.py`, `tools/sim/gantry_twin.py` and the rest
+of `tools/sim/` re-implement parts of topics 2–7.
+`simulate_coordinated_grasp.py:687` still writes its report to a deleted
+document. The figure and PDF generators for the deleted documents
+(`generate_grasp_timing_pdfs.py`, `render_grasp_math_figures.py`,
+`render_pickup_figures.py` and `test_pdf_loader.py`) were removed on 2026-11-27.
 
 ---
 
 ## Things the new document will have to decide
 
-1. **Duplicated models.** The trapezoid (topic 4) exists five times, the strike model twice (`strike_plan.h` live, `pick_intercept.h` `planPick` host-only), and grasp depth twice (`zPlan` and `coordinated_grasp.h`). Which one is canonical per topic.
-2. **Compile-time constants inside the math.** `coordinated_grasp.h:16`–`:35` (for example `kBeltZMm` 115, `kSafeZMm` 35.7 against the live 48.4), `strike_plan.h:22`–`:46` and `pick_intercept_vision.h:34`–`:49` fix model parameters at compile time, against the stored-parameter rule. The document can name which of them are physical constants and which must become stored keys.
-3. **Measured vs. modelled values.** Phase times (topic 9) and dead times are measured on the cell; the document should say which numbers come from measurement and how they are re-measured.
+1.  **Duplicated models.** The trapezoid (topic 4) exists five times, the strike
+    model twice (`strike_plan.h` live, `pick_intercept.h` `planPick` host-only),
+    and grasp depth twice (`zPlan` and `coordinated_grasp.h`). Which one is
+    canonical per topic.
+2.  **Compile-time constants inside the math.** `coordinated_grasp.h:16`–`:35`
+    (for example `kBeltZMm` 115, `kSafeZMm` 35.7 against the live 48.4),
+    `strike_plan.h:22`–`:46` and `pick_intercept_vision.h:34`–`:49` fix model
+    parameters at compile time, against the stored-parameter rule. The document
+    can name which of them are physical constants and which must become stored
+    keys.
+3.  **Measured vs. modelled values.** Phase times (topic 9) and dead times are
+    measured on the cell; the document should say which numbers come from
+    measurement and how they are re-measured.
 
 ## Other math text still in the repository
 
-- `GANTRY_FIRMWARE.md` §6, "Pick model": a model section "read from the code at `20e03eb`", with equations.
-- `tools/sim/SYSTEM_AND_MATHEMATICAL_MODELS.md` (ignored folder), a "digital twin … mathematical models" document: backed up and deleted 2026-11-19 with the others.
+-   `GANTRY_FIRMWARE.md` §6, "Pick model": a model section "read from the code
+    at `20e03eb`", with equations.
+-   `tools/sim/SYSTEM_AND_MATHEMATICAL_MODELS.md` (ignored folder), a "digital
+    twin … mathematical models" document: backed up and deleted 2026-11-19 with
+    the others.
 
 ## Links to repoint once the document exists
 
-- Firmware: `include/pick_intercept.h:5`.
-- Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `GANTRY_FIRMWARE.md`, `docs/OPEN_ITEMS.md`.
-- Tools: the scripts listed under topic 12.
-- CI: remove the three `--exclude` entries in `.github/workflows/firmware-ci.yml`, which keep the link check from failing on these links meanwhile.
+-   Firmware: `include/pick_intercept.h:5`.
+-   Docs: `docs/INDEX.md`, `docs/KNOWLEDGE_TRANSFER.md`, `GANTRY_FIRMWARE.md`,
+    `docs/OPEN_ITEMS.md`.
+-   Tools: the scripts listed under topic 12.
+-   CI: remove the three `--exclude` entries in
+    `.github/workflows/firmware-ci.yml`, which keep the link check from failing
+    on these links meanwhile.

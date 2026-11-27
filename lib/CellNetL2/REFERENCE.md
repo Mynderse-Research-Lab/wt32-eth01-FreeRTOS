@@ -1,12 +1,19 @@
-*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [CellNetL2](README.md) › Reference*
-
 # CellNetL2 reference
 
-**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
+*[README](/README.md) › [Knowledge transfer](/docs/KNOWLEDGE_TRANSFER.md) ›
+[Gantry firmware](/GANTRY_FIRMWARE.md) › [Libraries](/lib/README.md) ›
+[CellNetL2](README.md) › Reference*
 
-Public headers: `lib/CellNetL2/src/CellNetL2.h`, `CellNetL2Framing.h`, `IL2Transport.h`, `EspEthL2Transport.h`, `CellNetOtaReceiver.h`. On Linux also `CellNetOtaSender.h` and `LinuxRawSocketL2Transport.h`. Wire structs: `include/cell_net_l2_protocol.h`.
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key
+or a return value.
 
-The byte layout, message IDs and the OTA exchange are the two documents linked from the README. This page does not restate them.
+Public headers: `lib/CellNetL2/src/CellNetL2.h`, `CellNetL2Framing.h`,
+`IL2Transport.h`, `EspEthL2Transport.h`, `CellNetOtaReceiver.h`. On Linux also
+`CellNetOtaSender.h` and `LinuxRawSocketL2Transport.h`. Wire structs:
+`include/cell_net_l2_protocol.h`.
+
+The byte layout, message IDs and the OTA exchange are the two documents linked
+from the README. This page does not restate them.
 
 ## Node API
 
@@ -24,15 +31,23 @@ bool processIncomingFrame(const uint8_t* buffer, size_t length);
 CellNetStats getStats() const;
 ```
 
-`CellNetStats` is `tx_frames`, `rx_frames`, `rx_invalid_frames`, `rx_sequence_drops`.
+`CellNetStats` is `tx_frames`, `rx_frames`, `rx_invalid_frames`,
+`rx_sequence_drops`.
 
-Callbacks (`onHeartbeat`, `onVisionDetect`, `onConveyorSpeed`, `onGantryStatus`, `onCellCommand`) are invoked from `processIncomingFrame`. On the gantry that runs inside `EspEthL2Transport::rxHook`, installed with `esp_eth_update_input_path` (`EspEthL2Transport.cpp:65`), on the `emac_rx` task. A callback that blocks or logs holds that task.
+Callbacks (`onHeartbeat`, `onVisionDetect`, `onConveyorSpeed`, `onGantryStatus`,
+`onCellCommand`) are invoked from `processIncomingFrame`. On the gantry that
+runs inside `EspEthL2Transport::rxHook`, installed with
+`esp_eth_update_input_path` (`EspEthL2Transport.cpp:65`), on the `emac_rx` task.
+A callback that blocks or logs holds that task.
 
-`sequence_` is a plain `uint8_t` (`CellNetL2.h`). Sends from more than one task can duplicate it.
+`sequence_` is a plain `uint8_t` (`CellNetL2.h`). Sends from more than one task
+can duplicate it.
 
 ## Time
 
-`L2CellHeader::timestamp_us_low` is a `uint32_t` (`include/cell_net_l2_protocol.h:72`). It wraps every 2^32 microseconds, about 71.6 minutes. There is no time-of-day message. N-1.
+`L2CellHeader::timestamp_us_low` is a `uint32_t`
+(`include/cell_net_l2_protocol.h:72`). It wraps every 2^32 microseconds, about
+71.6 minutes. There is no time-of-day message. N-1.
 
 ## OTA receiver
 
@@ -43,17 +58,26 @@ Callbacks (`onHeartbeat`, `onVisionDetect`, `onConveyorSpeed`, `onGantryStatus`,
 | `kBeginDeadlineMs` | 30,000 ms from boot to a valid `OTA_BEGIN` |
 | `kProgressTimeoutMs` | 2,000 ms without a completed block or `OTA_END` |
 
-`expired(now_ms)` is those two deadlines. The gantry task that calls it is `lib/GantryOta`, not this component. The protocol document is the state machine.
+`expired(now_ms)` is those two deadlines. The gantry task that calls it is
+`lib/GantryOta`, not this component. The protocol document is the state machine.
 
 ## Linux sender
 
-`runOtaSender` (`CellNetOtaSender.h:87`) blocks until the update ends. `SenderResult::code` is 0 ok, 1 setup, 2 protocol, 3 no result, 4 `emac_missed != 0`, 5 reboot not confirmed (`CellNetOtaSender.h:61`). Phases reported to the progress callback: `discover`, `reboot`, `begin`, `blocks`, `end`, `confirm`.
+`runOtaSender` (`CellNetOtaSender.h:87`) blocks until the update ends.
+`SenderResult::code` is 0 ok, 1 setup, 2 protocol, 3 no result, 4
+`emac_missed != 0`, 5 reboot not confirmed (`CellNetOtaSender.h:61`). Phases
+reported to the progress callback: `discover`, `reboot`, `begin`, `blocks`,
+`end`, `confirm`.
 
-The Linux transport receives its own outgoing frames, and its destructor closes the socket before joining the receive thread. N-2.
+The Linux transport receives its own outgoing frames, and its destructor closes
+the socket before joining the receive thread. N-2.
 
 ## Errors
 
-The `send*` calls return false before `begin` and when the transport does not send the frame. `processIncomingFrame` returns false for a frame that does not parse and counts it in `rx_invalid_frames`. `isReady` is false until `begin` and while the transport reports the link down.
+The `send*` calls return false before `begin` and when the transport does not
+send the frame. `processIncomingFrame` returns false for a frame that does not
+parse and counts it in `rx_invalid_frames`. `isReady` is false until `begin` and
+while the transport reports the link down.
 
 ## AppConfig
 
@@ -78,7 +102,8 @@ if (l2Transport.attachEthHandle(ethernetLink.getEthHandle(), ethernetLink.getNet
 
 ## Known issues
 
-Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
+items. Not re-checked since; confirm against the code before acting.
 
 | # | Category | Location | Finding | Evidence |
 |---|---|---|---|---|
@@ -91,8 +116,10 @@ Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
 
 ## Documents
 
-`lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md`, `lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in `docs/OPEN_ITEMS.md`.
+`lib/CellNetL2/CELL_NET_L2_COMMUNICATION_GUIDE.md`,
+`lib/CellNetL2/CELLNET_OTA_PROTOCOL.md`. Open items: N-1, N-2, C-3 in
+`docs/OPEN_ITEMS.md`.
 
-## Next
+## See also
 
-- **Up:** [CellNetL2 README](README.md), [Libraries](../README.md).
+-   **Up:** [CellNetL2 README](README.md), [Libraries](/lib/README.md).

@@ -1,16 +1,24 @@
-*[README](../README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) › Panel electrics*
+# HV and LV schematics
 
-# HV and LV Schematics
+*[README](/README.md) › [Knowledge transfer](KNOWLEDGE_TRANSFER.md) ›
+Panel electrics*
 
-**Read this when** you work on the panel's power, voltage domains or connection schedule.
+**Read this when** you work on the panel's power, voltage domains or connection
+schedule.
 
-**Status:** Canonical electrical design basis.  
-**Panel schematic:** [`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).  
-**Logic-board schematic:** Pending addition.  
-**Mechanical / software companions:** [EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
-[GANTRY_FIRMWARE.md](../GANTRY_FIRMWARE.md).
+**Status:** Canonical electrical design basis.
 
-> **PRELIMINARY — NOT FOR CONSTRUCTION.**  
+**Panel schematic:**
+[`schematics/Gantry panel.drawio (7).png`](<schematics/Gantry panel.drawio (7).png>).
+
+**Logic-board schematic:** Pending addition.
+
+**Mechanical / software companions:**
+[EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md](EXPECTED_ELECTROMECHANICAL_ASSEMBLY.md),
+[GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md).
+
+> **PRELIMINARY — NOT FOR CONSTRUCTION.**
+>
 > This package documents the intended HV/LV architecture for review. It does
 > **not** constitute a finished safety-validated panel design. Do not build or
 > energize from these drawings until the electrical-review register below is
@@ -31,34 +39,34 @@
 | Networks | W5500 EIP daisy-chain **separate** from the LAN8720 cell network (CellNet L2) |
 
 Authoritative BOM / wire sizes: regenerate from
-[`tools/generate_bom.py`](../tools/generate_bom.py) and
-[`tools/generate_wire_size_selection.py`](../tools/generate_wire_size_selection.py).
+[`tools/generate_bom.py`](/tools/generate_bom.py) and
+[`tools/generate_wire_size_selection.py`](/tools/generate_wire_size_selection.py).
 
 Vendor install references: Rockwell 2198-IN003 / UM004, Rexroth HCS01
-commissioning + project planning (listed in the [vendor catalog](../driver_datasheets_and_calculations/INDEX.md)).
+commissioning + project planning (listed in the
+[vendor catalog](/driver_datasheets_and_calculations/INDEX.md)).
 
 ---
 
 ## 2. Panel schematic reference
 
-The complete panel-level diagram is maintained as the supplied image below.
-The project will **not** recreate the panel layout in KiCad or another CAD
-package.
+The complete panel-level diagram is maintained as the supplied image below. The
+project will **not** recreate the panel layout in KiCad or another CAD package.
 
 ![Complete gantry panel schematic](<schematics/Gantry panel.drawio (7).png>)
 
 The image covers:
 
-- 240 VAC three-phase entry, CB0 and AC distribution;
-- X, Z, and theta breaker / contactor / line-filter / drive branches;
-- 24 VDC and 5 VDC control supplies;
-- motors, feedback and limit-switch field connections;
-- WT32-ETH01 / WIZ850io control sub-panel and EIP links;
-- gripper relay and E-stop stations.
+-   240 VAC three-phase entry, CB0 and AC distribution;
+-   X, Z, and theta breaker / contactor / line-filter / drive branches;
+-   24 VDC and 5 VDC control supplies;
+-   motors, feedback and limit-switch field connections;
+-   WT32-ETH01 / WIZ850io control sub-panel and EIP links;
+-   gripper relay and E-stop stations.
 
-The PNG is the panel overview, not a netlist-bearing construction drawing.
-Part numbers, conductor sizes and unresolved safety details remain governed by
-the generated BOM / wire schedule and the electrical-review register below.
+The PNG is the panel overview, not a netlist-bearing construction drawing. Part
+numbers, conductor sizes and unresolved safety details remain governed by the
+generated BOM / wire schedule and the electrical-review register below.
 
 ---
 
@@ -97,9 +105,9 @@ Full AWG / length / inventory: `WIRE_SIZE_SELECTION.xlsx`.
 ## 5. Logic-board schematic
 
 A separate logic-board schematic will be added when available. It should cover
-the WT32-ETH01, WIZ850io/W5500 SPI interface, power conditioning, MCP Field DOUT0 gripper
-interface and board-level connectors. That schematic may use KiCad; it does
-not replace or redraw the panel image.
+the WT32-ETH01, WIZ850io/W5500 SPI interface, power conditioning, MCP Field
+DOUT0 gripper interface and board-level connectors. That schematic may use
+KiCad; it does not replace or redraw the panel image.
 
 ---
 
@@ -118,7 +126,8 @@ not replace or redraw the panel image.
 Until E1–E7 are closed, treat all schematics as **design intent for review**,
 not shop drawings.
 
-## Next
+## See also
 
-- **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
-- **Also:** [Gantry firmware](../GANTRY_FIRMWARE.md), the software that drives this hardware.
+-   **Up:** [Knowledge transfer](KNOWLEDGE_TRANSFER.md).
+-   **Also:** [Gantry firmware](/GANTRY_FIRMWARE.md), the software that drives
+    this hardware.

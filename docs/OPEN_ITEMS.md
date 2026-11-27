@@ -1,18 +1,27 @@
-# Open Items and Blockers
+# Open items and blockers
 
-**Status:** Live list. Reviewed against the code at `8b59545`, and checked on the cell from the Pi, on 2026-11-05.
-**Companion:** [KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) says what each subsystem is and how the pieces connect. This page tracks what is unfinished.
+**Status:** Live list. Reviewed against the code at `8b59545`, and checked on
+the cell from the Pi, on 2026-11-05. **Companion:**
+[KNOWLEDGE_TRANSFER.md](KNOWLEDGE_TRANSFER.md) says what each subsystem is and
+how the pieces connect. This page tracks what is unfinished.
 
 ## How to keep this list live
 
-1. Change an item in the same commit as the work that changes it: new evidence, a decision, a fix.
-2. Give a new item the next free ID in its group. IDs are never reused, so old references stay valid.
-3. To close an item, move it to [Closed items](#closed-items) with the date, the commit and the evidence. Do not delete it.
-4. Keep [Blockers and decisions](#blockers-and-decisions) in step with the rows below it.
-5. If closing an item teaches a lasting rule, add the rule to the [working rules](KNOWLEDGE_TRANSFER.md#machine-safety-and-working-rules) in the Knowledge Transfer page.
-6. After checking the whole list against the code, update the status line.
+1.  Change an item in the same commit as the work that changes it: new evidence,
+    a decision, a fix.
+2.  Give a new item the next free ID in its group. IDs are never reused, so old
+    references stay valid.
+3.  To close an item, move it to [Closed items](#closed-items) with the date,
+    the commit and the evidence. Do not delete it.
+4.  Keep [Blockers and decisions](#blockers-and-decisions) in step with the rows
+    below it.
+5.  If closing an item teaches a lasting rule, add the rule to the
+    [working rules](KNOWLEDGE_TRANSFER.md#machine-safety-and-working-rules) in
+    the Knowledge Transfer page.
+6.  After checking the whole list against the code, update the status line.
 
-Every item carries an evidence label. **Do not treat a label lower than Confirmed as fact.**
+Every item carries an evidence label. **Do not treat a label lower than
+Confirmed as fact.**
 
 | Label | Meaning |
 |-------|---------|
@@ -24,7 +33,8 @@ Every item carries an evidence label. **Do not treat a label lower than Confirme
 
 ## Blockers and decisions
 
-These items stop other work, or need a call before anyone starts. The full rows are in the sections below.
+These items stop other work, or need a call before anyone starts. The full rows
+are in the sections below.
 
 | ID | Waiting on | Holds up |
 |----|------------|----------|
@@ -63,7 +73,8 @@ These items stop other work, or need a call before anyone starts. The full rows 
 
 ### G-B Motion bus (W5500, EtherNet/IP)
 
-Background for these items, with the specification references, is in [§5.2 of the Knowledge Transfer page](KNOWLEDGE_TRANSFER.md#52-motion-bus-w5500-ethernetip).
+Background for these items, with the specification references, is in
+[§5.2 of the Knowledge Transfer page](KNOWLEDGE_TRANSFER.md#52-motion-bus-w5500-ethernetip).
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
@@ -104,7 +115,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | G-C16 | HCS01 motor temperature monitoring off (`P-0-0512` = 0, `S-0-0383` 0.0 °C); thresholds `S-0-0201` 85 °C / `S-0-0204` 90 °C are set | Rechecked 2026-11-19 with `drv hcs get`. SCHUNK sources disagree on the value: the ERD 04 IndraDrive data sheet gives 3 (KTY84-130); SCHUNK's `ERD04-104-60-68-01-3-1-xx-IDR-EC-NNN-xx-V01.par` gives 100 (custom curve in `P-0-0513`). `P-0-0512` is editable in parameter mode only (Parameters Reference Book R911328651, §4.4.9). `drv hcs get P-0-0513` fails (list parameter). `drv hcs set P-0-0512 3` with the motors off (drive Ab, operating mode) was refused 2026-11-19: CIP 0x10 Device state conflict (Vol 1 Table B-1.1), value stayed 0, no fault. Entering parameter mode (`S-0-0420` C0400) deletes the axis position reference (R911328651 `S-0-0420`). Then C0400 → `P-0-0512` = 3 (read back 3) → C0200: the drive returned to operating mode with **F2021 Motor temperature monitor defective** and `S-0-0383` −39.9 °C, i.e. at the −40 °C floor that Functions manual R911338673 §5.2.2 Tab. 5-1 lists as "temperature sensor possibly not connected". Reverted the same day (C0400, `P-0-0512` = 0, C0200, `arst`): no F2021 60 s later, drive A0012, Class 1 live. C0200 left the theta T→O stale for about 20 ms (X/Z stayed up) | Find where the ERD 04 KTY is wired (motor cable vs encoder cable) and which HCS01 input reads it; ask SCHUNK whether 3, 13 (KTY via digital encoder interface) or 100 applies |
 | G-C17 | Dead-reckoned grip at high belt speed. **Target: 5 ft/s (1.524 m/s).** The strike is open loop from the detection: belt clock extrapolation plus fixed dead times (`pk_z_dead_ms`, `pk_von_ms`, valve and jaw times). Every 1 ms of timing error moves the grip 1.52 mm along the belt at 1.524 m/s (0.30 mm at 0.3 m/s); the trigger chain jitter of about ±10 ms (V-7) is ±15 mm there | Confirmed 2026-11-19 (user observation): with X/Z at 45 % and theta 1980 °/s, 15000 °/s², picks succeeded with none skipped, and the scheduler accepted picks up to about 1.25 m/s. Last strike (`ztrace` item 590, belt 1219 mm/s, `az` 4500): plunge start 32.2 ms after Z fire, grip command 87.9 ms, retract command 278.8 ms, peak 118.61 mm against grasp 119.00. Pick theta turn (`thtrace` move 123, 0 → −45°): within ±0.1° 248 ms after the command, no overshoot. Whether the grip lands on the cell reliably at these speeds is **not measured**. Jaw timing filmed (slow motion, [frame_and_geometry_measurements.md](captures/frame_and_geometry_measurements.md)): valve LED → jaws moving about 70 ms, → fully closed 118 ms, against the planner's 8 ms valve allowance and the datasheet's 0.19 s closing time. **Decision** (project lead): encoder-based timing (each detection stamped with the belt encoder position at capture, the grip fired at a belt position, not a time) and a worst-case error budget over every cell angle φ from −90° to 90° | Measure grip placement error against belt speed (0.8, 1.25, 1.52 m/s), for example from camera frames at jaw contact or the cell offset in the jaws. Build a timing-error budget (detection timestamp, belt clock, 2 ms Class 1 cycle, valve, jaw) and decide whether dead reckoning is enough or a late correction near the pick is needed |
 | G-C18 | Unverified lead: a drive alarm may not stop the pick scheduler from taking new detections. The status frame carries the alarm (`pick_motion.cpp:46`), but no alarm check was found in `src/pick_*.cpp`; whether `Gantry::moveTo` refuses a move during an alarm was not checked | Unverified lead 2026-11-27, carried over from §5.4 of the deleted development roadmap | With an alarm active, send a detection and see whether a pick starts. If it does, skip detections until the alarm clears |
-| G-C19 | The coordinated grasp (`include/coordinated_grasp.h`) is host-tested but the pick path does not call it, and the firmware has no bench switch or close-trigger trim | Confirmed in code 2026-11-27 | Build the bench switch, then run the bench ramp in [GANTRY_FIRMWARE §6](../GANTRY_FIRMWARE.md#bench-ramp-for-the-coordinated-grasp) |
+| G-C19 | The coordinated grasp (`include/coordinated_grasp.h`) is host-tested but the pick path does not call it, and the firmware has no bench switch or close-trigger trim | Confirmed in code 2026-11-27 | Build the bench switch, then run the bench ramp in [GANTRY_FIRMWARE §6](/GANTRY_FIRMWARE.md#bench-ramp-for-the-coordinated-grasp) |
 | G-C20 | The belt clock takes position from `displacement_m` (a 32-bit float in metres, C-9), not from `raw_encoder_cnt` (`noteConveyor`, `include/pick_intercept_belt.h`). Under the worst-case budget (G-C17) the float's growing step is a position error after a few hours of running | Confirmed in code | Compute belt position from `raw_encoder_cnt` × the calibrated scale (C-4), unwrapped |
 | G-C21 | The across-jaw offset allowance e_max is set large on purpose (50 mm) and must be tuned lower by iteration. For the 9V the open fingers allow only 40.05 mm a side ((97.6 − 17.5) / 2), and with the lift 3 ms after first contact, offsets above about 20 mm let the first pad rise more than the ±1.0 mm Z allowance before the second pad arrives (at ≈833 mm/s jaw speed and 4500 mm/s² Z). Each millimetre of offset is also a millimetre of sideways drag | **Decision** (project lead): 50 mm for now, iterate lower. The limits are derived from the finger and jaw-timing measurements in [frame_and_geometry_measurements.md](captures/frame_and_geometry_measurements.md) | Run grip iterations at the design speed (1.2 m/s), lowering e_max each round; record success, drag and pad height on the cell |
 | G-C22 | Every cell angle φ from −90° to 90° (from along the belt) must be picked, but zero drag before the clamp holds only while the belt's speed along the closing direction stays below the jaw speed: \|φ\| ≤ about 44° at 1.2 m/s (33.7° at 1.5 m/s) with the ≈833 mm/s average jaw speed. Beyond that the cell reaches the downstream finger first and slides on the belt until the second pad arrives | **Decision** (project lead): full φ range required; up to 50 mm of drag allowed for now, to be reduced by iteration. Limit derived from the filmed jaw timing in [frame_and_geometry_measurements.md](captures/frame_and_geometry_measurements.md); the jaw speed at contact is not measured yet | Measure the jaw speed near the end of the stroke. Iterate the plunge and valve timing to reduce drag below 50 mm (alongside G-C21); check that a dragged cell slides rather than tips or turns |
@@ -125,7 +136,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
-| G-E1 | LAN side can go silent while Class 1 keeps running, seen during `ztrace raw 500 250` | Confirmed incident: [STRIKE_TIMING](../STRIKE_TIMING_MEASUREMENTS_2026-10-25.md). The plan's TBUS mechanism is Suggested | Avoid large dumps; root-cause the EMAC TX path. `ztrace raw` is not paced in the firmware (checked 2026-11-19); `thtrace raw` paces 20 ms per line, 300 samples per call |
+| G-E1 | LAN side can go silent while Class 1 keeps running, seen during `ztrace raw 500 250` | Confirmed incident: [STRIKE_TIMING](/STRIKE_TIMING_MEASUREMENTS_2026-10-25.md). The plan's TBUS mechanism is Suggested | Avoid large dumps; root-cause the EMAC TX path. `ztrace raw` is not paced in the firmware (checked 2026-11-19); `thtrace raw` paces 20 ms per line, 300 samples per call |
 | G-E2 | `ntp_server` pointer is kept by SNTP | Suggested. Key is reboot-only, so low risk | Copy to a static buffer |
 | G-E3 | The `ota` "Compiled" stamp does not change on incremental builds, and the version string can read `-dirty` | Confirmed | Do not identify a build from it alone |
 | G-E4 | Programming harness on IO0 fights the Ethernet clock | Confirmed, accepted | Unplug the harness to run plant Ethernet |
@@ -187,7 +198,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | ID | Item | Evidence | Next step |
 |----|------|----------|-----------|
 | N-1 | CellNet L2 is the transport between cell nodes: gantry OTA, conveyor OTA and time (NTP) move onto it. The supervisor web application and the gantry console (TCP `:2323`) stay on IP | Decided 2026-11-05. Console kept on TCP 2026-11-15: a CellNet console would rebuild TCP for no measured gain, and the gantry keeps lwIP anyway | Gantry OTA done (N-2). Left: conveyor OTA (C-2) and time, which has no CellNet message yet |
-| N-2 | Gantry OTA over CellNet L2 | Done 2026-11-14 and the default transport; spec in [CELLNET_OTA_PROTOCOL.md](../lib/CellNetL2/CELLNET_OTA_PROTOCOL.md). Every run since: 8.3–8.8 s from command to result, no resends, EMAC missed 0. `?transport=tcp` keeps the TCP route | Push the supervisor branch `feat/cellnet-ota` (user's call). Supervisor review notes: its node counts its own outgoing OTA frames; a refused `REBOOT_TO_OTA` shows only as a 30 s heartbeat timeout; stopping the service mid-update can crash it at exit. TCP route: a full 1,920 KB slot would erase for about 6.7 s, near the supervisor's 8 s wait |
+| N-2 | Gantry OTA over CellNet L2 | Done 2026-11-14 and the default transport; spec in [CELLNET_OTA_PROTOCOL.md](/lib/CellNetL2/CELLNET_OTA_PROTOCOL.md). Every run since: 8.3–8.8 s from command to result, no resends, EMAC missed 0. `?transport=tcp` keeps the TCP route | Push the supervisor branch `feat/cellnet-ota` (user's call). Supervisor review notes: its node counts its own outgoing OTA frames; a refused `REBOOT_TO_OTA` shows only as a 30 s heartbeat timeout; stopping the service mid-update can crash it at exit. TCP route: a full 1,920 KB slot would erase for about 6.7 s, near the supervisor's 8 s wait |
 
 ## Repository and documentation
 
@@ -197,7 +208,7 @@ Background for these items, with the specification references, is in [§5.2 of t
 | X-2 | **Uncommitted doc edits describe fixes that are not in the code.** `DEV_TRACKER.md` lists `pk_app_spd_mm_s`, `cv_trig_y_mm` and the follower fixes as done. Four more docs carry uncommitted edits (kinematics, pickup, protocol, firmware review), and some of these describe a theta mapping at ingestion. `DEV_TRACKER.md` itself has never been committed, yet `INDEX.md` lists it | Confirmed 2026-11-05: none of those keys are in `src`, `lib`, `include` or `sdkconfig.defaults`, and git has no history for the tracker. 2026-11-27: no doc carries uncommitted edits any more, and `INDEX.md` no longer lists the tracker | Review before committing. Trust the code. Then commit the tracker and list it in `INDEX.md` again |
 | X-5 | Scratch files and logs clutter the repo root, some tracked | Confirmed 2026-11-05: `fix_math.py` to `fix_math3.py`, `pktmon.txt` and a screenshot are tracked at the root, and `lib/CellNetL2/Untitled` is untracked | Remove from tracking and ignore. 2026-11-27: `fix_math.py` to `fix_math3.py` and `scratch/rewrite_pick_scheduler.py` are removed from the history, and the untracked one-off edit and debug scripts in the root, `scratch/` and `tools/sim/` are archived locally. Then `pktmon.txt` and `autotune_cmd.cpp` were deleted, and the screenshot, a WT32-ETH01 pinout that `README.md` shows, moved to `docs/schematics/wt32_eth01_pinout.png`. Left: `lib/CellNetL2/Untitled`, which is untracked |
 | X-7 | 21 source files are over 500 lines (11 production `.cpp`, 3 headers, 7 host tests), and matured features still sit in `src/` without a README or programming reference | Confirmed 2026-11-26 from a line-count inventory of every source file (kept in git history); `Gantry.cpp`, the test console, `pick_scheduler.cpp` and `AppConfig.cpp` are already split | 2026-11-27: every source file is under 500 lines; `BootLogRing`, `GpioExpander`, `ThetaTrace` and `GantryOta` are components, and all thirteen libraries have a README and a REFERENCE. The Class 1 splits passed the on-cell soak on `3b57f83`. Left: move the console to `lib/GantryConsole` once G-C7 is decided, then close this row |
-| X-8 | The vendor manuals and their text extracts moved out of the repository to a shared folder on 2026-11-27, with the same paths they had under `driver_datasheets_and_calculations/`. The catalog does not link that folder yet, and earlier commits still hold the files | Confirmed 2026-11-27 | Add the shared-folder link to [the catalog](../driver_datasheets_and_calculations/INDEX.md). Taking the files out of the history would need a rewrite of every branch |
+| X-8 | The vendor manuals and their text extracts moved out of the repository to a shared folder on 2026-11-27, with the same paths they had under `driver_datasheets_and_calculations/`. The catalog does not link that folder yet, and earlier commits still hold the files | Confirmed 2026-11-27 | Add the shared-folder link to [the catalog](/driver_datasheets_and_calculations/INDEX.md). Taking the files out of the history would need a rewrite of every branch |
 | X-10 | Switches and probes from the October 2026 dropout campaign remain: `eip_txwr_split`, `eip_scope_gpio`, the destination check, the loop-gap and bus-mutex probes | Listed as follow-ups on 2026-10-21 | Decide per item: remove, or keep as a documented diagnostic |
 
 ## Closed items

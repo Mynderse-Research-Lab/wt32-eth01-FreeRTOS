@@ -1,10 +1,11 @@
 # driver_datasheets_and_calculations
 
-Drive parameter sets, Kinetix reference data and generated panel files for the gantry.
+Drive parameter sets, Kinetix reference data and generated panel files for the
+gantry.
 
 **The vendor manuals are kept outside this repository.** The PDFs and their text
-extracts moved to a shared folder on 2026-11-27, with the same paths they had here.
-**Shared folder:** link to be added (OPEN_ITEMS X-8).
+extracts moved to a shared folder on 2026-11-27, with the same paths they had
+here. **Shared folder:** link to be added (OPEN_ITEMS X-8).
 
 Docs and code cite the manuals by name or publication number, for example in
 `include/axis_drivetrain_params.h`. Production motion is **EtherNet/IP** (see

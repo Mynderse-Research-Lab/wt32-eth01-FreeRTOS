@@ -1,10 +1,14 @@
-*[README](../../README.md) › [Knowledge transfer](../../docs/KNOWLEDGE_TRANSFER.md) › [Gantry firmware](../../GANTRY_FIRMWARE.md) › [Libraries](../README.md) › [EtherNetIP](README.md) › Reference*
-
 # EtherNetIP reference
 
-**Read this when** you need an exact fact: a signature, a unit, a timeout, a key or a return value.
+*[README](/README.md) › [Knowledge transfer](/docs/KNOWLEDGE_TRANSFER.md) ›
+[Gantry firmware](/GANTRY_FIRMWARE.md) › [Libraries](/lib/README.md) ›
+[EtherNetIP](README.md) › Reference*
 
-Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in those headers. The motion math is not on this page.
+**Read this when** you need an exact fact: a signature, a unit, a timeout, a key
+or a return value.
+
+Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in
+those headers. The motion math is not on this page.
 
 ## Layers
 
@@ -18,7 +22,8 @@ Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in thos
 | `EipClass1Timing.h` | Pace, stale policy, `ExchangeStatus` |
 | `EipScannerTask.h` | `startScannerTask`, `pauseClass1`, `resumeClass1`, `dumpClass1TimingStats`, `printLastClass1GapReport` |
 
-`multiAxisTask` calls `multiAxisConnectAndRun`, which calls `multiAxisCyclic`, which calls `multiAxisRecover` (`EipScannerTask.cpp`).
+`multiAxisTask` calls `multiAxisConnectAndRun`, which calls `multiAxisCyclic`,
+which calls `multiAxisRecover` (`EipScannerTask.cpp`).
 
 ## Tasks
 
@@ -28,7 +33,8 @@ Public headers are under `lib/EtherNetIP/src/`. Units below are the ones in thos
 | `EipHoldKA`, `EipReopenKA`, `EipCloseKA` | 1 | 7 | 4,096 | `kKeepalivePriority`, `kKeepaliveStack` |
 | `EipLog` | 0 | 2 | 4,096 | `kLogTaskCore`, `kLogTaskPriority`, `kLogTaskStack` |
 
-Hold keepalive period is 5 ms. Reopen keepalive is `kReopenKeepalivePeriodMs` = 2 (`EipScannerTaskInternal.h:105`).
+Hold keepalive period is 5 ms. Reopen keepalive is `kReopenKeepalivePeriodMs` =
+2 (`EipScannerTaskInternal.h:105`).
 
 ## Timing the code uses
 
@@ -45,17 +51,26 @@ Hold keepalive period is 5 ms. Reopen keepalive is `kReopenKeepalivePeriodMs` = 
 | chip-recover backoff | start 1,000 ms, double, cap 5,000 ms | `EipScannerPolicy.h:13–14` |
 | overrun yield | every 8 consecutive overruns | `EipClass1Timing.h:50` |
 
-After `kMaxChipRecovers`, `escalateChipRecover` waits 10 s, clears the streak and retries (`EipScannerTaskInternal.h:347–353`). It does not call `esp_restart`. The comment at `EipScannerTask.h:7` still says `esp_restart`.
+After `kMaxChipRecovers`, `escalateChipRecover` waits 10 s, clears the streak
+and retries (`EipScannerTaskInternal.h:347–353`). It does not call
+`esp_restart`. The comment at `EipScannerTask.h:7` still says `esp_restart`.
 
-`ExchangeStatus` (`EipClass1Timing.h:119–123`): `kOk`, `kOutputSendFailed` (chip recover), `kInputMiss` (soft retry).
+`ExchangeStatus` (`EipClass1Timing.h:119–123`): `kOk`, `kOutputSendFailed` (chip
+recover), `kInputMiss` (soft retry).
 
 ## Locks the Class 1 path takes
 
-The W5500 bus mutex, the SPI3 Class 1 critical section (`spi3_class1_critical_enter` in `EipScannerTask.cpp`), and the process-image mutex inside `sendAxisOutput` / `applyFeedback`. The process-image mutex is also taken from `Gantry` on other tasks. G-B17. Socket logs inside `exchangeOnce` are G-B16.
+The W5500 bus mutex, the SPI3 Class 1 critical section
+(`spi3_class1_critical_enter` in `EipScannerTask.cpp`), and the process-image
+mutex inside `sendAxisOutput` / `applyFeedback`. The process-image mutex is also
+taken from `Gantry` on other tasks. G-B17. Socket logs inside `exchangeOnce` are
+G-B16.
 
 ## AppConfig
 
-This component does not read the stored target IP, RPI or PUU keys. `hcs01_eng_ip` is not read; COMWS uses `kDefaultEngIp` (`Hcs01ComwsClient.h`). G-B5.
+This component does not read the stored target IP, RPI or PUU keys.
+`hcs01_eng_ip` is not read; COMWS uses `kDefaultEngIp` (`Hcs01ComwsClient.h`).
+G-B5.
 
 ## Console
 
@@ -65,11 +80,15 @@ This component does not read the stored target IP, RPI or PUU keys. `hcs01_eng_i
 | `gaptrace` | `printLastClass1GapReport` |
 | `cfg save` | `pauseClass1` (`src/gantry_console_cfg.cpp:97`) |
 
-`ethlink` and `drv` are console commands in `src/gantry_console_commands.cpp` whose handlers use this library.
+`ethlink` and `drv` are console commands in `src/gantry_console_commands.cpp`
+whose handlers use this library.
 
 ## Errors
 
-`ExchangeStatus` above is the result of one Class 1 exchange. `pauseClass1` returns false when Class 1 does not close within its timeout, and `cfg save` then does not save (`src/gantry_console_cfg.cpp:97`). `startScannerTask` returns nothing.
+`ExchangeStatus` above is the result of one Class 1 exchange. `pauseClass1`
+returns false when Class 1 does not close within its timeout, and `cfg save`
+then does not save (`src/gantry_console_cfg.cpp:97`). `startScannerTask` returns
+nothing.
 
 ## Usage
 
@@ -80,7 +99,8 @@ eip::startScannerTask(w5500, w5500Hal, w5500LinkStatus, &eipImageX, &eipImageZ, 
 
 ## Known issues
 
-Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open items. Not re-checked since; confirm against the code before acting.
+Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
+items. Not re-checked since; confirm against the code before acting.
 
 | # | Category | Location | Finding | Evidence |
 |---|---|---|---|---|
@@ -97,20 +117,22 @@ Found in the library review of 2026-11-26 (at `1caa98c`) and not tracked as open
 | E16 | cleanup | `EipClass1TimingStats`, `EipMultiScanner.cpp:167`, `KinetixFaultCodes.h:110-115` | Unsynchronised diagnostic counters; a static shared across scanner instances; a latent index past `tmp` on `snprintf` truncation | Confirmed |
 
 **Dead code:**
-- unused API: `buildListIdentityRequest`, `encodeSendUnitDataPayload`, `kOutputInstance106`, `udpBound`, the `EtherNetIP.h` umbrella header
-- production-dead: `EipScanner` and `singleAxisTask`, theta-only builds
-- unread Kconfig options: `EIP_TARGET_IP`, `EIP_INCLUDE_RUN_IDLE_HEADER`
-- four unused parameter IDs
-- the stray root-level `autotune_cmd.cpp` (X-5, deleted 2026-11-27)
+-   unused API: `buildListIdentityRequest`, `encodeSendUnitDataPayload`,
+    `kOutputInstance106`, `udpBound`, the `EtherNetIP.h` umbrella header
+-   production-dead: `EipScanner` and `singleAxisTask`, theta-only builds
+-   unread Kconfig options: `EIP_TARGET_IP`, `EIP_INCLUDE_RUN_IDLE_HEADER`
+-   four unused parameter IDs
+-   the stray root-level `autotune_cmd.cpp` (X-5, deleted 2026-11-27)
 
 **Not covered by host tests:**
-- the `multiAxisTask` state machine, pause and resume, reopen and planned close
-- `Kinetix5100TuningClient`
-- COMWS `runCommand`, `runAutotune` and HTTP errors
-- `formatDriveTripSummary`
-- a split or late explicit reply
-- multicast
-- two frames per axis in one cycle
+-   the `multiAxisTask` state machine, pause and resume, reopen and planned
+    close
+-   `Kinetix5100TuningClient`
+-   COMWS `runCommand`, `runAutotune` and HTTP errors
+-   `formatDriveTripSummary`
+-   a split or late explicit reply
+-   multicast
+-   two frames per axis in one cycle
 
 ## Class 1 lifecycle
 
@@ -125,38 +147,48 @@ This section is the normative explanation of cyclic EtherNet/IP on this project.
 
 Session + FO live in [`EipSession`](src/EipSession.cpp) /
 [`EipConnectionManager`](src/EipConnectionManager.cpp) /
-[`EipScanner`](src/EipScanner.cpp).  
+[`EipScanner`](src/EipScanner.cpp).
+
 Cyclic frames live in [`EipIoConnection`](src/EipIoConnection.cpp) /
 [`EipCpf`](src/EipCpf.cpp).
 
-ForwardOpen path (Kinetix X/Z): config assembly **191 (0xBF)** + O→T **104** + T→O **154**
-(`buildAssemblyConnectionPath`; EDS-style path `20 04 24 BF 2C 68 2C 9A`).
-Transport class/trigger = Class 1 cyclic (`0x01`). Granted API (`ot_api_us` /
-`to_api_us`) drives RPI pacing and recv timeout (`API_ms * 8 + 50`).
+ForwardOpen path (Kinetix X/Z): config assembly **191 (0xBF)** + O→T **104** +
+T→O **154** (`buildAssemblyConnectionPath`; EDS-style path
+`20 04 24 BF 2C 68 2C 9A`). Transport class/trigger = Class 1 cyclic (`0x01`).
+Granted API (`ot_api_us` / `to_api_us`) drives RPI pacing and recv timeout
+(`API_ms * 8 + 50`).
 
-Firmware FO overrides in `makeKinetixConfig` ([`EipScannerConfig.cpp`](src/EipScannerConfig.cpp)):
+Firmware FO overrides in `makeKinetixConfig`
+([`EipScannerConfig.cpp`](src/EipScannerConfig.cpp)):
 
-- CTM = **2**: connection timeout = RPI × 4 << 2 = 16 × RPI, 32 ms at 2 ms (`kClass1ConnectionTimeoutMultiplier`, `EipScannerPolicy.h`)
-- P2P T→O by default
-- O→T CID seeds `0x10000001` (X) / `0x10000002` (Z)
-- T→O CID `0x20000000 | serial`
-- Run/Idle **bytes** on the wire; **bit 8 in network params left clear** (Kinetix quirk)
+-   CTM = **2**: connection timeout = RPI × 4 << 2 = 16 × RPI, 32 ms at 2 ms
+    (`kClass1ConnectionTimeoutMultiplier`, `EipScannerPolicy.h`)
+-   P2P T→O by default
+-   O→T CID seeds `0x10000001` (X) / `0x10000002` (Z)
+-   T→O CID `0x20000000 | serial`
+-   Run/Idle **bytes** on the wire; **bit 8 in network params left clear**
+    (Kinetix quirk)
 
 ### CPF frame shape
 
 Datagram = CPF only:
 
-1. Sequenced address item type **`0x8002`** — connection ID + 32-bit encap sequence.
-2. Connected data item type **`0x00B1`** — CIP sequence (u16) + optional Run/Idle (u32, typically `0x1`) + assembly payload.
+1.  Sequenced address item type **`0x8002`** — connection ID + 32-bit encap
+    sequence.
+2.  Connected data item type **`0x00B1`** — CIP sequence (u16) + optional
+    Run/Idle (u32, typically `0x1`) + assembly payload.
 
 | Direction | Builder / parser | Demux key |
 |-----------|------------------|-----------|
 | O→T (originator → target) | `buildOutputFrame` → `buildClass1OutputCpf` | Sent to drive IP:2222 with O→T CID |
 | T→O (target → originator) | `parseInputFrame` / `parseClass1InputCpf` | Sequenced-address CID (usually T→O CID) |
 
-Kinetix T→O typically has **no** Run/Idle strip on parse (`to_include_run_idle_header` false for input). Sequence counters reset on reconnect.
+Kinetix T→O typically has **no** Run/Idle strip on parse
+(`to_include_run_idle_header` false for input). Sequence counters reset on
+reconnect.
 
-O→T connected size on wire when Run/Idle enabled = 40 (assy 104) + 2 (CIP seq) + 4 (Run/Idle) = **46**.
+O→T connected size on wire when Run/Idle enabled = 40 (assy 104) + 2 (CIP seq) +
+4 (Run/Idle) = **46**.
 
 ### Persistent UDP invariant (do not regress)
 
@@ -173,35 +205,69 @@ sequenceDiagram
   Note over Scan: re-send O_T on API while waiting peers
 ```
 
-**Correct pattern:** bind UDP **2222 once** for the Class 1 lifetime → loop send O→T / recv T→O → only close on ForwardClose / teardown.
+**Correct pattern:** bind UDP **2222 once** for the Class 1 lifetime → loop send
+O→T / recv T→O → only close on ForwardClose / teardown.
 
 **Wrong pattern:** bind → send → recv → **close** → bind again next frame.
 
 Why wrong fails:
 
-1. In the gap after close, the drive’s T→O unicast hits a closed port.
-2. The host stack replies **ICMP port unreachable**.
-3. The drive tears down Class 1 and **releases torque with no keypad fault**.
+1.  In the gap after close, the drive’s T→O unicast hits a closed port.
+2.  The host stack replies **ICMP port unreachable**.
+3.  The drive tears down Class 1 and **releases torque with no keypad fault**.
 
-PC harness history (same invariant): [`tools/eip_test.py`](../../tools/eip_test.py) module docstring — fixed with `exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent `io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and opens one TX socket per dest IP so DIPR stays cached ([`EipSocketW5500Udp`](src/EipSocketW5500.cpp)).
+PC harness history (same invariant): [`tools/eip_test.py`](/tools/eip_test.py)
+module docstring — fixed with
+`exchange_io_frame(..., reuse_socket=True, drain=True)` and a persistent
+`io_sock`. Firmware P2P keeps T→O on one W5500 UDP socket bound to **2222** and
+opens one TX socket per dest IP so DIPR stays cached
+([`EipSocketW5500Udp`](src/EipSocketW5500.cpp)).
 
-A Class 1 connection only holds torque while O→T keeps arriving within the connection timeout. Stalling longer than that timeout silently drops the connection.
+A Class 1 connection only holds torque while O→T keeps arriving within the
+connection timeout. Stalling longer than that timeout silently drops the
+connection.
 
 ### Dual-axis scanner loop
 
-[`EipMultiScanner`](src/EipMultiScanner.cpp) + task in [`EipScannerTask.cpp`](src/EipScannerTask.cpp):
+[`EipMultiScanner`](src/EipMultiScanner.cpp) + task in
+[`EipScannerTask.cpp`](src/EipScannerTask.cpp):
 
-1. `openAxis(0)` (TCP FO on X).
-2. `bindSharedUdp()` — one socket on 2222 for both axes.
-3. Spawn **`EipHoldKA`** (~5 ms) so X keeps receiving O→T while Z’s FO runs.
-4. `openAxis(1)` (Z); then `openAxis(2)` (HCS01 theta, non-fatal if FO fails).
-5. HoldKA **drains T→O** so the shared UDP RX cannot overflow. After FO, a short prime loop sends O→T to every dest (ARP / DIPR) and drains again.
-6. Cyclic `exchangeOnce`:
-   - Send O→T for all axes starting at a **rotating** index (fairness). P2P O→T uses **one W5500 UDP socket per dest** so DIPR/DPORT stay cached. Cached-dest SEND returns without polling SENDOK; the next send on that socket confirms it (TIMEOUT/DISCON still escalates `kOutputSendFailed`, one cycle late). Dest-change SENDOK wait is **10 ms** so the first packet to a new IP is not aborted mid-ARP. TCP `socketSend` stays blocking.
-   - Drain T→O in **one RX burst** (settled Sn_RX_RSR+Sn_RX_RD, one payload read, one `Sn_RX_RD` advance + `RECV`). Iterate datagram views until each connected axis has one datagram this cycle (or RX empty / `kMaxDrainPerCycle`). First packet per axis wins (`last_got_[]`). Surplus frames in the burst are consumed so they cannot stale-feed the next cycle.
-   - Demux by connection ID (`matchAxisByConnectionId`; fallback O→T CID).
-   - Track **per-axis** T→O miss streaks. Kinetix stale still tears down. **HCS01-only stale does not chip-recover X/Z.**
-7. Pace with `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at RPI 2000 µs). Cutting serialized SENDOK/RECV waits targets exchange p99 near **1000 µs**, which is meant to leave ~1 ms of slack so on-time cycles always block on the 2-tick grid. Live 2026-08-18 image `0x9c6c0` (n=128, 6 s settle): exchange p99 **938 GO**, cycle min/p50/p99 **1342/1999/2659**, ot_send p99 **452**, drain p99 **421**, `pace overrun=23 yield=2`, `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one tick every 8 consecutive overruns ([`EipClass1Timing.h`](src/EipClass1Timing.h) `class1OverrunAction`) as the TWDT safety net. `eiptiming` prints a `drain` line and `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns dominate.
+1.  `openAxis(0)` (TCP FO on X).
+2.  `bindSharedUdp()` — one socket on 2222 for both axes.
+3.  Spawn **`EipHoldKA`** (~5 ms) so X keeps receiving O→T while Z’s FO runs.
+4.  `openAxis(1)` (Z); then `openAxis(2)` (HCS01 theta, non-fatal if FO fails).
+5.  HoldKA **drains T→O** so the shared UDP RX cannot overflow. After FO, a
+    short prime loop sends O→T to every dest (ARP / DIPR) and drains again.
+6.  Cyclic `exchangeOnce`:
+    -   Send O→T for all axes starting at a **rotating** index (fairness). P2P
+        O→T uses **one W5500 UDP socket per dest** so DIPR/DPORT stay cached.
+        Cached-dest SEND returns without polling SENDOK; the next send on that
+        socket confirms it (TIMEOUT/DISCON still escalates `kOutputSendFailed`,
+        one cycle late). Dest-change SENDOK wait is **10 ms** so the first
+        packet to a new IP is not aborted mid-ARP. TCP `socketSend` stays
+        blocking.
+    -   Drain T→O in **one RX burst** (settled Sn_RX_RSR+Sn_RX_RD, one payload
+        read, one `Sn_RX_RD` advance + `RECV`). Iterate datagram views until
+        each connected axis has one datagram this cycle (or RX empty /
+        `kMaxDrainPerCycle`). First packet per axis wins (`last_got_[]`).
+        Surplus frames in the burst are consumed so they cannot stale-feed the
+        next cycle.
+    -   Demux by connection ID (`matchAxisByConnectionId`; fallback O→T CID).
+    -   Track **per-axis** T→O miss streaks. Kinetix stale still tears down.
+        **HCS01-only stale does not chip-recover X/Z.**
+7.  Pace with `xTaskDelayUntil` at `class1PaceTicks(granted_api)` (2 ticks at
+    RPI 2000 µs). Cutting serialized SENDOK/RECV waits targets exchange p99 near
+    **1000 µs**, which is meant to leave ~1 ms of slack so on-time cycles always
+    block on the 2-tick grid. Live 2026-08-18 image `0x9c6c0` (n=128, 6 s
+    settle): exchange p99 **938 GO**, cycle min/p50/p99 **1342/1999/2659**,
+    ot_send p99 **452**, drain p99 **421**, `pace overrun=23 yield=2`,
+    `soft_miss=0`. The 1.4 ms zero-block lobe is gone; cycle did not collapse
+    onto 2000 µs. On overrun, catch up without reseeding `last_wake`; yield one
+    tick every 8 consecutive overruns
+    ([`EipClass1Timing.h`](src/EipClass1Timing.h) `class1OverrunAction`) as the
+    TWDT safety net. `eiptiming` prints a `drain` line and
+    `pace overrun=N yield=M`. Do not switch to `esp_timer` unless overruns
+    dominate.
 
 Exchange outcomes:
 
@@ -222,7 +288,8 @@ Exchange outcomes:
 | **Ownership 0x0106** | FO reject after home/move | Competing TCP while hold still owns Class 1; ForwardClose never sent | Pause hold + settle before new FO (`eip_test.py` handoff rules) |
 | **PHY early LNK** | FO/ARP fail after cable recover | PHYCFGR LNK before autoneg done | `kLinkSettleMs` before connect |
 
-Distinguish **silent drop** (no keypad fault) from **latched E602**. Same software invariant on PC and ESP: **never leave 2222 unbound between frames**.
+Distinguish **silent drop** (no keypad fault) from **latched E602**. Same
+software invariant on PC and ESP: **never leave 2222 unbound between frames**.
 
 ### Connection constants
 
@@ -239,11 +306,15 @@ Distinguish **silent drop** (no keypad fault) from **latched E602**. Same softwa
 | E602 / A603 | `0x0602` / `0x0603` | `KinetixFaultCodes.h` |
 | CPF item types | `0x8002`, `0x00B1` | `CpfItemType` |
 
-Transport interfaces ([`EipTransport.h`](src/EipTransport.h)) allow host fakes; production uses [`EipSocketW5500`](src/EipSocketW5500.cpp). SPI register access stays inside [`W5500Socket`](../W5500/src/W5500Socket.cpp) (mutex must not be held across recv wait so O→T can proceed).
+Transport interfaces ([`EipTransport.h`](src/EipTransport.h)) allow host fakes;
+production uses [`EipSocketW5500`](src/EipSocketW5500.cpp). SPI register access
+stays inside [`W5500Socket`](/lib/W5500/src/W5500Socket.cpp) (mutex must not be
+held across recv wait so O→T can proceed).
 
 ## Process image mailbox
 
-[`EipProcessImage`](src/EipProcessImage.h) is the **only** coupling between Gantry axes and the scanner task.
+[`EipProcessImage`](src/EipProcessImage.h) is the **only** coupling between
+Gantry axes and the scanner task.
 
 | API | Writer | Reader | Meaning |
 |-----|--------|--------|---------|
@@ -252,26 +323,30 @@ Transport interfaces ([`EipTransport.h`](src/EipTransport.h)) allow host fakes; 
 | `feedbackFresh` / `consumeFeedbackFresh` | Scanner sets | Axis consumes | One-shot “new T→O applied” |
 | `setOnline` / `isOnline` | Scanner | Axis / app | Cleared on disconnect |
 
-- One `std::mutex` guards all fields (scanner task ↔ `GantryUpdate`).
-- **Opaque `Bytes`** — no assembly knowledge in the mailbox; Kinetix 104/154 (or HCS01 101/102) live in the adapters.
-- Missing / invalid command → scanner sends **idle output** (servo-off idle for Kinetix).
-- Motion must gate on `isOnline()`; offline image rejects moves.
+-   One `std::mutex` guards all fields (scanner task ↔ `GantryUpdate`).
+-   **Opaque `Bytes`** — no assembly knowledge in the mailbox; Kinetix 104/154
+    (or HCS01 101/102) live in the adapters.
+-   Missing / invalid command → scanner sends **idle output** (servo-off idle
+    for Kinetix).
+-   Motion must gate on `isOnline()`; offline image rejects moves.
 
 ## Kinetix assemblies 104 and 154
 
 Full maps: [`Kinetix5100Assembly.h`](src/Kinetix5100Assembly.h).
 
-**Output 104:** OM @0, control bits @1 (ServoOn / StopMotion / StartMotion / FaultReset / …),
-HomingMethod @3, Speed/Accel/Decel refs @4/8/12 (0.1 RPM / 0.1 RPM/s),
-PositionReference @16, HomeReturnSpeed @20, NonCyclicMoveType @24, TravelMode @26.
+**Output 104:** OM @0, control bits @1 (ServoOn / StopMotion / StartMotion /
+FaultReset / …), HomingMethod @3, Speed/Accel/Decel refs @4/8/12 (0.1 RPM / 0.1
+RPM/s), PositionReference @16, HomeReturnSpeed @20, NonCyclicMoveType @24,
+TravelMode @26.
 
 **Input 154:** status @9 (Active / Ready / CIP / Homed / Stopped / AtReference),
 Fault/Warning codes @20/22, ActualPosition @24.
 
 ## Documents
 
-How the libraries work together: [GANTRY_FIRMWARE.md](../../GANTRY_FIRMWARE.md). Open items: G-A14, G-B5, G-B8, G-B9, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.
+How the libraries work together: [GANTRY_FIRMWARE.md](/GANTRY_FIRMWARE.md). Open
+items: G-A14, G-B5, G-B8, G-B9, G-B16, G-B17, G-B19 in `docs/OPEN_ITEMS.md`.
 
-## Next
+## See also
 
-- **Up:** [EtherNetIP README](README.md), [Libraries](../README.md).
+-   **Up:** [EtherNetIP README](README.md), [Libraries](/lib/README.md).

@@ -1,7 +1,7 @@
-# wt32-eth01-base tools
+# Tools
 
-Firmware / documentation helpers for this repo. Host MQTT/serial lab scripts live
-in the sibling **ADSB-PI-base** project.
+Firmware / documentation helpers for this repo. Host MQTT/serial lab scripts
+live in the sibling **ADSB-PI-base** project.
 
 ## Scripts kept here
 
@@ -43,7 +43,7 @@ in the sibling **ADSB-PI-base** project.
 | `schematic_reference/` | KiCad reference sheets: drives and motors, controller I/O |
 | `requirements.txt` | Python packages for the generators |
 
-Canonical design docs: [`docs/INDEX.md`](../docs/INDEX.md).
+Canonical design docs: [`docs/INDEX.md`](/docs/INDEX.md).
 
 ```powershell
 pip install -r tools/requirements.txt
