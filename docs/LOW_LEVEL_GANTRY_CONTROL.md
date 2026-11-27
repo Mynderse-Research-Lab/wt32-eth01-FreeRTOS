@@ -886,7 +886,7 @@ Known note: ETH uses REFCLK **input** on GPIO0; GPIO17 is W5500 MOSI (not RMII C
 
 ## 13. Dual-OTA & Ethernet Firmware Flashing
 
-The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`10.42.0.100:8032`).
+The WT32-ETH01 firmware supports redundant A/B partition flashing over the LAN8720 Ethernet interface (`10.42.0.100:8032`). Code: `lib/GantryOta`.
 
 ### 13.1 Partition Map (4 MB Flash)
 

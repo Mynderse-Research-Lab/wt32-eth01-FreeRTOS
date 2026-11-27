@@ -20,7 +20,6 @@ set(APP_SRCS
     "${APP_ROOT}/src/pick_run.cpp"
     "${APP_ROOT}/src/pick_strike.cpp"
     "${APP_ROOT}/src/pick_trace.cpp"
-    "${APP_ROOT}/src/gantry_cellnet_ota.cpp"
     "${APP_ROOT}/src/gantry_test_console.cpp"
     "${APP_ROOT}/src/gantry_console_bringup.cpp"
     "${APP_ROOT}/src/gantry_console_cfg.cpp"
@@ -39,8 +38,6 @@ set(APP_SRCS
     "${APP_ROOT}/src/gantry_console_thetapath.cpp"
     "${APP_ROOT}/src/gantry_net_console.cpp"
     "${APP_ROOT}/src/gantry_net_console_auth.cpp"
-    "${APP_ROOT}/src/gantry_ota.cpp"
-    "${APP_ROOT}/src/gantry_ota_tcp.cpp"
 )
 
 # basic_tests.cpp backs the on-target "selftest" console command. The same
@@ -68,6 +65,7 @@ idf_component_register(
         AppConfig
         BootLogRing
         ThetaTrace
+        GantryOta
         nvs_flash
         esp_driver_spi
         esp_driver_gpio

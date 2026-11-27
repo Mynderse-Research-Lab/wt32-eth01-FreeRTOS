@@ -66,7 +66,7 @@ size are ignored. Anything else counts as `rx_invalid_frames`.
 | `OTA_BEGIN` … `OTA_RESULT` | `0x05`–`0x09` | Supervisor ↔ node in OTA mode | see [CELLNET_OTA_PROTOCOL.md](CELLNET_OTA_PROTOCOL.md) |
 
 `CellNetL2Node` dispatches types `0x00`–`0x04`. The OTA types are parsed by the same framing
-code but handled by the OTA-mode receive path (`src/gantry_cellnet_ota.cpp` with
+code but handled by the OTA-mode receive path (`lib/GantryOta/src/gantry_cellnet_ota.cpp` with
 `CellNetOtaReceiver`) and by `CellNetOtaSender` on the supervisor.
 
 ### Payloads

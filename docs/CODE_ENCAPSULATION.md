@@ -78,7 +78,7 @@ A feature is **matured** when it runs on the gantry and has no open blocker or d
 | `boot_log_ring.*` | Moved to `lib/BootLogRing` | `lib/BootLogRing` |
 | `gpio_expander.*` | Moved to `lib/GpioExpander`. G-D3 and G-D6 concern `MCP23S17` and `Spi3Bus`, not this wrapper | `lib/GpioExpander` |
 | `theta_trace.*` and `theta_trace_analysis.h` | Moved to `lib/ThetaTrace` | `lib/ThetaTrace` |
-| `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Matured (N-2 done) | `lib/GantryOta` |
+| `gantry_ota.*`, `gantry_cellnet_ota.cpp` | Moved to `lib/GantryOta` (N-2 done) | `lib/GantryOta` |
 | Test console (17 files) with `gantry_net_console.*` | **Not yet.** G-C7 (the `move` speed decision) is open, and the console includes `pick_scheduler.h` | `lib/GantryConsole`, after decoupling |
 | Pick scheduler (9 files) | **Not matured.** G-C1, G-C2, G-C11, G-C13 and G-C17 are open | Stays in `src/` |
 
@@ -295,6 +295,15 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/GantryTypes.h` | 144 | split done (`31c85c9`) |
 | `src/GantryUtils.h` | 110 | under 500 |
 
+### `lib/GantryOta/` (4 files, 1,119 lines)
+
+| File | Lines | Status |
+|---|---:|---|
+| `src/gantry_cellnet_ota.cpp` | 402 | under 500 |
+| `src/gantry_ota.cpp` | 316 | split done |
+| `src/gantry_ota.h` | 131 | under 500 |
+| `src/gantry_ota_tcp.cpp` | 270 | split done |
+
 ### `lib/GpioExpander/` (2 files, 256 lines)
 
 | File | Lines | Status |
@@ -373,13 +382,12 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `src/W5500SpiHal.cpp` | 30 | under 500 |
 | `src/W5500SpiHal.h` | 35 | under 500 |
 
-### `src/` (46 files, 10,976 lines)
+### `src/` (42 files, 9,857 lines)
 
 | File | Lines | Status |
 |---|---:|---|
 | `basic_tests.cpp` | 81 | under 500 |
 | `basic_tests.h` | 11 | under 500 |
-| `gantry_cellnet_ota.cpp` | 402 | under 500 |
 | `gantry_console_bringup.cpp` | 217 | split done (`64040cb`) |
 | `gantry_console_cfg.cpp` | 309 | split done (`64040cb`) |
 | `gantry_console_cip.cpp` | 241 | split done (`64040cb`) |
@@ -401,9 +409,6 @@ Every tracked C and C++ source file in `src/`, `include/`, `lib/` and `test/host
 | `gantry_net_console.h` | 23 | under 500 |
 | `gantry_net_console_auth.cpp` | 182 | split done |
 | `gantry_net_console_internal.h` | 29 | split done |
-| `gantry_ota.cpp` | 316 | split done |
-| `gantry_ota.h` | 131 | under 500 |
-| `gantry_ota_tcp.cpp` | 270 | split done |
 | `gantry_test_console.cpp` | 345 | split done (`64040cb`) |
 | `gantry_test_console.h` | 67 | under 500 |
 | `main.cpp` | 105 | split done |

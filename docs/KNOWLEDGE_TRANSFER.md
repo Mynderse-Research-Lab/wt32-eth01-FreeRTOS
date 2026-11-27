@@ -393,7 +393,7 @@ Two locks guard SPI3: the MCP23S17 mutex, whose waiters give up after 8 ms, and 
 
 ### 5.5 Controller, cell network and tools
 
-WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`, `src/gantry_test_console.cpp`, `src/gantry_ota.cpp`. Flash with `python tools/supervisor_ota.py --host 10.42.0.1`, which goes over CellNet L2 by default; add `--transport tcp` for the TCP route.
+WT32-ETH01 (ESP32) running FreeRTOS at 1000 Hz. LAN8720 carries CellNet, the TCP console and OTA. Code: `src/main.cpp`, `lib/CellNetL2`, `lib/EthernetLink`, `src/gantry_test_console.cpp`, `lib/GantryOta`. Flash with `python tools/supervisor_ota.py --host 10.42.0.1`, which goes over CellNet L2 by default; add `--transport tcp` for the TCP route.
 
 **Class 1 diagnostics.** `gaptrace` prints the last Class 1 gap of 10 ms or more: where the time went (exchange, receive drain, pace) and the CPU milliseconds of every task, from FreeRTOS run-time stats. Do not trace with a FreeRTOS tick hook: one stalled boot whenever the LAN8720 came up.
 
