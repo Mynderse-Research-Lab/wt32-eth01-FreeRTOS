@@ -205,6 +205,9 @@ add_test(NAME test_w5500_spi COMMAND test_w5500_spi)
 # W5500 Class 1 UDP send fast-path (dest cache / transaction diet)
 add_executable(test_w5500_socket_fastpath
     "test_w5500_socket_fastpath.cpp"
+    "test_w5500_socket_fastpath_send.cpp"
+    "test_w5500_socket_fastpath_recv.cpp"
+    "test_w5500_socket_fastpath_tcp.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Socket.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500SocketTcp.cpp"
     "${REPO_ROOT}/lib/W5500/src/W5500Diag.cpp"
