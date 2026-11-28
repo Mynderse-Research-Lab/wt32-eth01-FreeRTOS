@@ -584,6 +584,30 @@ target_include_directories(test_cellnet_ota_receiver PRIVATE
 target_link_libraries(test_cellnet_ota_receiver PRIVATE unity)
 add_test(NAME test_cellnet_ota_receiver COMMAND test_cellnet_ota_receiver)
 
+# The Linux OTA sender (lib/CellNetL2/src/ota/CellNetOtaSender*.cpp) is in
+# neither the firmware nor a Unity test. Build it with its CLI the way
+# tools/cellnet_ota_send.cpp documents (-O2), with warnings as errors, and run
+# the CLI once: without arguments it prints its usage. Linux only; on other
+# hosts the sender sources compile to nothing.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(cellnet_ota_send
+        "${REPO_ROOT}/tools/cellnet_ota_send.cpp"
+        "${REPO_ROOT}/lib/CellNetL2/src/ota/CellNetOtaSender.cpp"
+        "${REPO_ROOT}/lib/CellNetL2/src/ota/CellNetOtaSenderPhases.cpp"
+        "${REPO_ROOT}/lib/CellNetL2/src/ota/CellNetOtaSenderReport.cpp"
+        "${REPO_ROOT}/lib/CellNetL2/src/CellNetL2Framing.cpp"
+    )
+    target_include_directories(cellnet_ota_send PRIVATE
+        "${REPO_ROOT}/lib/CellNetL2/src"
+        "${REPO_ROOT}/lib/CellNetL2/src/ota"
+        "${REPO_ROOT}/lib/CellNetL2/src/transport"
+        "${REPO_ROOT}/include"
+    )
+    target_compile_options(cellnet_ota_send PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME test_cellnet_ota_send_build COMMAND cellnet_ota_send)
+    set_tests_properties(test_cellnet_ota_send_build PROPERTIES PASS_REGULAR_EXPRESSION "usage: ")
+endif()
+
 
 # Optional gcovr report: cmake -S test/host -B build/host -DGANTRY_HOST_COVERAGE=ON
 # then cmake --build build/host --target coverage

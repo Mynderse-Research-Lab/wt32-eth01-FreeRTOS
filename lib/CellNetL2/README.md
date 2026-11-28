@@ -42,7 +42,9 @@ link is up. The OTA-only boot path uses `CellNetOtaReceiver` from
 ## Build and test
 
 Registered from `idf/CMakeLists.txt`. Host tests: `test_cell_net_l2` and
-`test_cellnet_ota_receiver`. The sender has no host test.
+`test_cellnet_ota_receiver`. On Linux the host build also compiles the sender
+with its CLI, `tools/cellnet_ota_send.cpp`, at `-O2` with warnings as errors,
+and `test_cellnet_ota_send_build` runs the CLI once.
 
 ## Open items
 
