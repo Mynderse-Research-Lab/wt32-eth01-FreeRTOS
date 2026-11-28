@@ -588,7 +588,10 @@ add_test(NAME test_cellnet_ota_receiver COMMAND test_cellnet_ota_receiver)
 # neither the firmware nor a Unity test. Build it with its CLI the way
 # tools/cellnet_ota_send.cpp documents (-O2), with warnings as errors, and run
 # the CLI once: without arguments it prints its usage. Linux only; on other
-# hosts the sender sources compile to nothing.
+# hosts the sender sources compile to nothing. -Warray-bounds stays a
+# warning: GCC 15 reports a false one in std::vector::insert inlined into
+# CellNetL2Framing::buildOtaDataFrame (a run under ASan and UBSan of every
+# data length, 0 to 478, found no out-of-bounds access).
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(cellnet_ota_send
         "${REPO_ROOT}/tools/cellnet_ota_send.cpp"
@@ -603,7 +606,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "${REPO_ROOT}/lib/CellNetL2/src/transport"
         "${REPO_ROOT}/include"
     )
-    target_compile_options(cellnet_ota_send PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(cellnet_ota_send PRIVATE
+        -O2 -Wall -Wextra -Wpedantic -Werror -Wno-error=array-bounds)
     add_test(NAME test_cellnet_ota_send_build COMMAND cellnet_ota_send)
     set_tests_properties(test_cellnet_ota_send_build PROPERTIES PASS_REGULAR_EXPRESSION "usage: ")
 endif()
